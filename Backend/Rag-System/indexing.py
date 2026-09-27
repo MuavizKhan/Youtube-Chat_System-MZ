@@ -966,7 +966,7 @@ if __name__ == "__main__":
     # Development test video.
     #
     # Later FastAPI will provide this dynamically.
-    video_id = "Gfr50f6ZBvo"
+    video_id = "MdeQMVBuGgY"
 
     index_video(
         video_id=video_id,
