@@ -1,11 +1,16 @@
 console.log("YouTube AI Chat loaded");
 
+
 function getVideoId() {
+
     const urlParams = new URLSearchParams(window.location.search);
+
     return urlParams.get("v");
 }
 
+
 function createChatSidebar() {
+
     if (document.getElementById("youtube-ai-chat")) {
         return;
     }
@@ -24,12 +29,17 @@ function createChatSidebar() {
         </div>
 
         <div class="chat-input-area">
+
             <input
                 type="text"
                 id="chat-input"
                 placeholder="Ask a question..."
             />
-            <button id="chat-send">Send</button>
+
+            <button id="chat-send">
+                Send
+            </button>
+
         </div>
     `;
 
@@ -38,11 +48,13 @@ function createChatSidebar() {
     setupChat();
 }
 
+
 function setupChat() {
 
     const input = document.getElementById("chat-input");
     const sendButton = document.getElementById("chat-send");
     const chatBody = document.getElementById("chat-body");
+
 
     function sendMessage() {
 
@@ -52,41 +64,127 @@ function setupChat() {
             return;
         }
 
+        const videoId = getVideoId();
+
+
+        // -----------------------------------
         // Display user's message
+        // -----------------------------------
+
         const userMessage = document.createElement("div");
 
         userMessage.className = "user-message";
+
         userMessage.textContent = question;
 
         chatBody.appendChild(userMessage);
 
+
         // Clear input
+
         input.value = "";
 
-        // Temporary AI response
+
+        // -----------------------------------
+        // Display loading message
+        // -----------------------------------
+
         const aiMessage = document.createElement("div");
 
         aiMessage.className = "ai-message";
-        aiMessage.textContent =
-            "This is a temporary AI response. The backend will be connected later.";
+
+        aiMessage.textContent = "Thinking...";
 
         chatBody.appendChild(aiMessage);
 
-        // Automatically scroll to latest message
-        chatBody.scrollTop = chatBody.scrollHeight;
+
+        // -----------------------------------
+        // Send message to background script
+        // -----------------------------------
+
+        chrome.runtime.sendMessage(
+            {
+                type: "chat",
+                video_id: videoId,
+                question: question
+            },
+
+            function(response) {
+
+                if (chrome.runtime.lastError) {
+
+                    console.error(
+                        "Extension error:",
+                        chrome.runtime.lastError.message
+                    );
+
+                    aiMessage.textContent =
+                        "Unable to communicate with the extension.";
+
+                    return;
+                }
+
+
+                if (!response || !response.success) {
+
+                    aiMessage.textContent =
+                        "Sorry, I couldn't connect to the backend.";
+
+                    console.error(
+                        "Backend error:",
+                        response?.error
+                    );
+
+                    return;
+                }
+
+
+                // -----------------------------------
+                // Display backend response
+                // -----------------------------------
+
+                aiMessage.textContent = response.answer;
+
+                chatBody.scrollTop =
+                    chatBody.scrollHeight;
+            }
+        );
     }
 
-    sendButton.addEventListener("click", sendMessage);
 
-    input.addEventListener("keydown", function(event) {
+    // -----------------------------------
+    // Send button
+    // -----------------------------------
 
-        if (event.key === "Enter") {
-            sendMessage();
+    sendButton.addEventListener(
+        "click",
+        sendMessage
+    );
+
+
+    // -----------------------------------
+    // Enter key
+    // -----------------------------------
+
+    input.addEventListener(
+        "keydown",
+        function(event) {
+
+            if (event.key === "Enter") {
+
+                sendMessage();
+
+            }
+
         }
-
-    });
+    );
 }
 
-console.log("Current video ID:", getVideoId());
+
+console.log(
+    "Current video ID:",
+    getVideoId()
+);
+
 
 createChatSidebar();
