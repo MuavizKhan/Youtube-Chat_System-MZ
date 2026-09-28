@@ -1,7 +1,7 @@
 """
 app.py
 
-FastAPI backend for the YouTube RAG chatbot.
+FastAPI entry point for the YouTube Video ChatSystem.
 
 Flow:
 
@@ -11,84 +11,52 @@ POST /chat
         ↓
 FastAPI
         ↓
-generation.generate_answer()
+RAG chain
         ↓
-MMR Retrieval
+MMR retrieval
         ↓
-Augmentation
+Prompt
         ↓
-Hugging Face LLM
+Hugging Face
         ↓
-JSON Response
+Answer + Sources
 """
 
-
-# ============================================================
-# IMPORTS
-# ============================================================
-
-from pathlib import Path
-import sys
+import logging
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from Backend.rag_system.chain import answer_question
 
 
 # ============================================================
-# MAKE RAG MODULES IMPORTABLE
+# LOGGING
 # ============================================================
 
-# Current project structure uses:
-#
-# Backend/
-# ├── app.py
-# └── rag-system/
-#     ├── generation.py
-#     ├── retriever.py
-#     └── augmentation.py
-#
-# Because "rag-system" contains a hyphen, it cannot be imported
-# as a normal Python package name.
-#
-# Therefore we add the directory to sys.path.
+logging.basicConfig(
+    level=logging.INFO,
+)
 
-RAG_DIR = (
-    Path(__file__).resolve().parent
-    / "rag-system"
+logger = logging.getLogger(
+    __name__
 )
 
 
-if not RAG_DIR.exists():
-
-    raise RuntimeError(
-        f"RAG directory was not found:\n{RAG_DIR}"
-    )
-
-
-if str(RAG_DIR) not in sys.path:
-
-    sys.path.insert(
-        0,
-        str(RAG_DIR)
-    )
-
-
-from importlib import import_module
-
-generate_answer = import_module("generation").generate_answer
-
-
 # ============================================================
-# CREATE FASTAPI APPLICATION
+# APPLICATION
 # ============================================================
 
 app = FastAPI(
+
     title="YouTube Video AI Chat",
+
     description=(
         "RAG-powered backend for chatting "
         "with YouTube videos."
     ),
+
     version="1.0.0",
 )
 
@@ -97,13 +65,8 @@ app = FastAPI(
 # CORS
 # ============================================================
 
-# Useful during local Chrome-extension development.
-#
-# The Chrome extension already has host permissions for the
-# local FastAPI server, but keeping CORS enabled makes the
-# backend easier to test from browser-based clients as well.
-
 app.add_middleware(
+
     CORSMiddleware,
 
     allow_origins=["*"],
@@ -117,14 +80,60 @@ app.add_middleware(
 
 
 # ============================================================
-# REQUEST MODEL
+# REQUEST MODELS
 # ============================================================
 
 class ChatRequest(BaseModel):
 
+    video_id: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "YouTube video ID or YouTube URL."
+        ),
+    )
+
+    question: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Question about the YouTube video."
+        ),
+    )
+
+
+class SourceResponse(BaseModel):
+
+    source_id: int
+    
+    chunk_id: int | None
+
+    video_id: str | None
+
+    start: float
+
+    end: float
+
+    duration: float
+
+    distance: float
+
+
+class ChatResponse(BaseModel):
+
+    answer: str
+
     video_id: str
 
-    question: str
+    sources: list[SourceResponse]
+
+    retrieved_chunks: int
+
+    model: str
+
+    retrieval_method: str
+
+    retrieval_config: dict[str, int | float]
 
 
 # ============================================================
@@ -135,68 +144,71 @@ class ChatRequest(BaseModel):
 def root():
 
     return {
-        "status": "ok",
-        "service": "YouTube Video AI Chat",
-        "message": "FastAPI backend is running.",
+
+        "status":
+            "ok",
+
+        "service":
+            "YouTube Video AI Chat",
+
+        "message":
+            "FastAPI backend is running.",
     }
 
 
 # ============================================================
-# CHAT ENDPOINT
+# CHAT
 # ============================================================
 
-@app.post("/chat")
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+)
 def chat(
-    request: ChatRequest
+    request: ChatRequest,
 ):
 
-    # --------------------------------------------------------
-    # Validate video ID
-    # --------------------------------------------------------
-
     video_id = request.video_id.strip()
+
+    question = request.question.strip()
+
 
     if not video_id:
 
         raise HTTPException(
+
             status_code=400,
-            detail="video_id cannot be empty.",
+
+            detail=(
+                "video_id cannot be empty."
+            ),
         )
 
-
-    # --------------------------------------------------------
-    # Validate question
-    # --------------------------------------------------------
-
-    question = request.question.strip()
 
     if not question:
 
         raise HTTPException(
+
             status_code=400,
-            detail="question cannot be empty.",
+
+            detail=(
+                "question cannot be empty."
+            ),
         )
 
 
-    # --------------------------------------------------------
-    # Run complete RAG pipeline
-    # --------------------------------------------------------
-
     try:
 
-        result = generate_answer(
+        result = answer_question(
 
             video_reference=video_id,
 
             question=question,
         )
 
+
         return result
 
-
-    # --------------------------------------------------------
-    # Vector store / indexing problem
-    # --------------------------------------------------------
 
     except FileNotFoundError as error:
 
@@ -205,12 +217,9 @@ def chat(
             status_code=404,
 
             detail=str(error),
+
         ) from error
 
-
-    # --------------------------------------------------------
-    # Invalid input
-    # --------------------------------------------------------
 
     except ValueError as error:
 
@@ -219,12 +228,9 @@ def chat(
             status_code=400,
 
             detail=str(error),
+
         ) from error
 
-
-    # --------------------------------------------------------
-    # Hugging Face / external model error
-    # --------------------------------------------------------
 
     except RuntimeError as error:
 
@@ -233,22 +239,16 @@ def chat(
             status_code=502,
 
             detail=str(error),
+
         ) from error
 
 
-    # --------------------------------------------------------
-    # Unexpected backend error
-    # --------------------------------------------------------
-
     except Exception as error:
 
-        print(
-            "\nUnexpected /chat error:"
+        logger.exception(
+            "Unexpected /chat error."
         )
 
-        print(
-            repr(error)
-        )
 
         raise HTTPException(
 
@@ -258,4 +258,5 @@ def chat(
                 "An unexpected error occurred "
                 "while processing the request."
             ),
+
         ) from error

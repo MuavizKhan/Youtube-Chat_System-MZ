@@ -4,4 +4,4 @@ __pycache__/
 .env
 *.pdf
 
-Backend/rag-system/vector_stores/
+Backend/rag_system/vector_stores/

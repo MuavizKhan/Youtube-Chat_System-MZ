@@ -1,72 +1,42 @@
 """
-retriever.py
+retrieval.py
 
-RAG - Retrieval Stage
+Retrieval layer for the YouTube RAG system.
 
-Pipeline:
+Responsibilities
+----------------
+1. Extract YouTube video IDs.
+2. Create the embedding model.
+3. Load cached FAISS vector stores.
+4. Retrieve candidates from FAISS.
+5. Apply distance filtering.
+6. Select final chunks using MMR.
 
-YouTube URL / Video ID
-        ↓
-Extract Video ID
-        ↓
-Load FAISS Vector Store
-        ↓
-Embed User Query
-        ↓
-Candidate Search
-        ↓
-MMR Selection
-        ↓
-Distance Filtering
-        ↓
-Relevant Documents
+This file does NOT:
+- fetch YouTube transcripts
+- create vector stores
+- build prompts
+- call the generation model
+- handle FastAPI
 """
 
-
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-EMBEDDING_MODEL = (
-    "sentence-transformers/all-MiniLM-L6-v2"
+from .config import (
+    EMBEDDING_MODEL,
+    MAX_DISTANCE,
+    MMR_FETCH_K,
+    MMR_LAMBDA,
+    TOP_K,
+    VECTOR_STORE_ROOT,
 )
-
-VECTOR_STORE_ROOT = (
-    Path(__file__).resolve().parent
-    / "vector_stores"
-)
-
-# Number of final chunks returned by retrieval.
-DEFAULT_K = 4
-
-# Number of candidate chunks considered before MMR
-# selects the final results.
-DEFAULT_MMR_FETCH_K = 10
-
-# MMR relevance/diversity balance.
-#
-# 1.0 = prioritize relevance
-# 0.0 = prioritize diversity
-#
-# 0.5 = balanced starting point.
-DEFAULT_MMR_LAMBDA = 0.5
-
-# Experimental distance threshold for the current setup.
-#
-# FAISS returns raw distances:
-# lower = more similar
-#
-# This is NOT a universal semantic relevance score.
-MAX_DISTANCE = 1.30
 
 
 # ============================================================
@@ -74,22 +44,36 @@ MAX_DISTANCE = 1.30
 # ============================================================
 
 def extract_video_id(
-    video_reference: str
+    video_reference: str,
 ) -> str:
+    """
+    Accept either a YouTube video ID or common YouTube URL
+    formats and return the video ID.
+    """
 
     if not video_reference:
+
         raise ValueError(
             "Video reference cannot be empty."
         )
 
     video_reference = video_reference.strip()
 
+    if not video_reference:
+
+        raise ValueError(
+            "Video reference cannot be empty."
+        )
+
+
     # --------------------------------------------------------
     # Raw video ID
     # --------------------------------------------------------
 
     if "://" not in video_reference:
+
         return video_reference
+
 
     # --------------------------------------------------------
     # Parse URL
@@ -103,6 +87,7 @@ def extract_video_id(
         parsed_url.hostname or ""
     ).lower()
 
+
     # --------------------------------------------------------
     # youtube.com/watch?v=...
     # --------------------------------------------------------
@@ -113,14 +98,18 @@ def extract_video_id(
         "m.youtube.com",
     }:
 
-        params = parse_qs(
+        query_parameters = parse_qs(
             parsed_url.query
         )
 
-        video_ids = params.get("v")
+        video_ids = query_parameters.get(
+            "v"
+        )
 
         if video_ids:
+
             return video_ids[0]
+
 
     # --------------------------------------------------------
     # youtube.com/shorts/...
@@ -150,6 +139,7 @@ def extract_video_id(
 
                 return path_parts[1]
 
+
     # --------------------------------------------------------
     # youtu.be/...
     # --------------------------------------------------------
@@ -166,10 +156,12 @@ def extract_video_id(
         ]
 
         if path_parts:
+
             return path_parts[0]
 
+
     raise ValueError(
-        f"Could not extract YouTube video ID from:\n"
+        "Could not extract a YouTube video ID from:\n"
         f"{video_reference}"
     )
 
@@ -178,6 +170,7 @@ def extract_video_id(
 # 2. CREATE EMBEDDING MODEL
 # ============================================================
 
+@lru_cache(maxsize=1)
 def create_embedding_model():
 
     return HuggingFaceEmbeddings(
@@ -185,12 +178,12 @@ def create_embedding_model():
         model_name=EMBEDDING_MODEL,
 
         model_kwargs={
-            "device": "cpu"
+            "device": "cpu",
         },
 
         encode_kwargs={
-            "normalize_embeddings": True
-        }
+            "normalize_embeddings": True,
+        },
     )
 
 
@@ -198,15 +191,27 @@ def create_embedding_model():
 # 3. LOAD VECTOR STORE
 # ============================================================
 
+@lru_cache(maxsize=8)
 def load_vector_store(
     video_id: str,
-    embeddings
 ):
+    """
+    Load one video's FAISS vector store.
+
+    The result is cached so repeated questions for the same
+    video do not repeatedly load the same FAISS index.
+    """
+
+    if not video_id:
+
+        raise ValueError(
+            "video_id cannot be empty."
+        )
 
     vector_store_path = (
-        VECTOR_STORE_ROOT
-        / video_id
+        VECTOR_STORE_ROOT / video_id
     )
+
 
     if not vector_store_path.exists():
 
@@ -215,8 +220,12 @@ def load_vector_store(
             f"{video_id}\n\n"
             "Expected location:\n"
             f"{vector_store_path}\n\n"
-            "Run indexing.py first."
+            "Run the indexing pipeline first."
         )
+
+
+    embeddings = create_embedding_model()
+
 
     return FAISS.load_local(
 
@@ -224,231 +233,51 @@ def load_vector_store(
 
         embeddings,
 
-        allow_dangerous_deserialization=True
+        # Required by the current local FAISS persistence
+        # mechanism. Only load indexes created by this project
+        # or another trusted source.
+        allow_dangerous_deserialization=True,
     )
 
 
 # ============================================================
-# 4. RAW SIMILARITY SEARCH
-# ============================================================
-
-def similarity_search(
-    vector_store,
-    query: str,
-    k: int = DEFAULT_K
-):
-    """
-    Return top-k chunks together with their raw FAISS
-    query-document distances.
-    """
-
-    if not query.strip():
-        raise ValueError(
-            "Query cannot be empty."
-        )
-
-    return (
-        vector_store
-        .similarity_search_with_score(
-            query,
-            k=k
-        )
-    )
-
-
-# ============================================================
-# 5. DISTANCE FILTER
-# ============================================================
-
-def filter_by_distance(
-    results,
-    max_distance: float = MAX_DISTANCE
-):
-    """
-    Keep only documents whose FAISS distance is <=
-    max_distance.
-
-    Lower distance = more similar.
-
-    IMPORTANT:
-    This is an experimental threshold, not a universal
-    semantic relevance score.
-    """
-
-    filtered_results = [
-
-        (
-            document,
-            float(distance)
-        )
-
-        for document, distance in results
-
-        if float(distance) <= max_distance
-    ]
-
-    return filtered_results
-
-
-# ============================================================
-# 6. DISPLAY RESULTS
-# ============================================================
-
-def display_results(
-    results,
-    max_distance: float
-):
-
-    print(
-        "\n"
-        + "=" * 70
-    )
-
-    print(
-        "FILTERED RETRIEVAL RESULTS"
-    )
-
-    print(
-        "=" * 70
-    )
-
-    if not results:
-
-        print(
-            "\nNo sufficiently similar chunks were found."
-        )
-
-        print(
-            f"Maximum allowed distance: "
-            f"{max_distance:.3f}"
-        )
-
-        return
-
-    for rank, (
-        document,
-        distance
-    ) in enumerate(
-        results,
-        start=1
-    ):
-
-        metadata = (
-            document.metadata
-        )
-
-        print(
-            f"\n--- Result {rank} ---"
-        )
-
-        print(
-            f"Distance: {distance:.6f}"
-        )
-
-        print(
-            f"Chunk ID: "
-            f"{metadata.get('chunk_id')}"
-        )
-
-        print(
-            f"Timestamp: "
-            f"{metadata.get('start', 0):.2f}s"
-            f" → "
-            f"{metadata.get('end', 0):.2f}s"
-        )
-
-        print(
-            f"Duration: "
-            f"{metadata.get('duration', 0):.2f}s"
-        )
-
-        print(
-            "\nText:\n"
-            f"{document.page_content}"
-        )
-
-
-# ============================================================
-# 7. STANDARD RETRIEVAL PIPELINE
-# ============================================================
-
-def retrieve(
-    vector_store,
-    query: str,
-    k: int = DEFAULT_K,
-    max_distance: float = MAX_DISTANCE
-):
-    """
-    Standard similarity-based retrieval followed by
-    distance filtering.
-    """
-
-    raw_results = similarity_search(
-        vector_store,
-        query,
-        k=k
-    )
-
-    filtered_results = filter_by_distance(
-        raw_results,
-        max_distance=max_distance
-    )
-
-    return filtered_results
-
-
-# ============================================================
-# 8. MMR RETRIEVAL
+# 4. RETRIEVE WITH MMR
 # ============================================================
 
 def retrieve_mmr(
     vector_store,
     query: str,
-    k: int = DEFAULT_K,
-    fetch_k: int = DEFAULT_MMR_FETCH_K,
-    lambda_mult: float = DEFAULT_MMR_LAMBDA,
+    k: int = TOP_K,
+    fetch_k: int = MMR_FETCH_K,
+    lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
 ):
     """
-    Retrieve documents using Maximum Marginal Relevance.
+    Retrieve relevant transcript chunks using MMR.
 
-    MMR balances:
+    Returns:
 
-        relevance to the query
-                  +
-        diversity between retrieved chunks
+        [
+            (Document, distance),
+            ...
+        ]
 
-    Process:
-
-        Query
-          ↓
-        Query embedding
-          ↓
-        Fetch candidate chunks
-          ↓
-        Distance threshold
-          ↓
-        MMR selection
-          ↓
-        Final documents
-
-    This implementation is intentionally independent of
-    LangChain's optional MMR-with-score method because the
-    installed FAISS wrapper does not expose that method.
+    Lower FAISS distance means greater similarity.
     """
 
     # --------------------------------------------------------
     # Validate query
     # --------------------------------------------------------
 
-    if not query.strip():
+    if not query or not query.strip():
 
         raise ValueError(
             "Query cannot be empty."
         )
 
+
     # --------------------------------------------------------
-    # Validate MMR parameters
+    # Validate MMR configuration
     # --------------------------------------------------------
 
     if k <= 0:
@@ -457,11 +286,13 @@ def retrieve_mmr(
             "k must be greater than 0."
         )
 
+
     if fetch_k <= 0:
 
         raise ValueError(
             "fetch_k must be greater than 0."
         )
+
 
     if k > fetch_k:
 
@@ -469,17 +300,20 @@ def retrieve_mmr(
             "k cannot be greater than fetch_k."
         )
 
+
     if not 0.0 <= lambda_mult <= 1.0:
 
         raise ValueError(
             "lambda_mult must be between 0.0 and 1.0."
         )
 
+
     if max_distance < 0:
 
         raise ValueError(
             "max_distance cannot be negative."
         )
+
 
     # --------------------------------------------------------
     # 1. Create query embedding
@@ -488,64 +322,68 @@ def retrieve_mmr(
     query_embedding = (
         vector_store
         .embedding_function
-        .embed_query(query)
+        .embed_query(
+            query.strip()
+        )
     )
+
 
     query_vector = np.asarray(
         query_embedding,
-        dtype=np.float32
-    ).reshape(1, -1)
+        dtype=np.float32,
+    ).reshape(
+        1,
+        -1,
+    )
+
 
     # --------------------------------------------------------
-    # 2. Determine candidate count
-    #
-    #    Don't request more vectors than actually exist.
+    # 2. Determine how many vectors exist
     # --------------------------------------------------------
 
     total_vectors = (
         vector_store.index.ntotal
     )
 
+
     if total_vectors == 0:
 
         return []
 
+
     candidate_k = min(
         fetch_k,
-        total_vectors
+        total_vectors,
     )
 
+
     # --------------------------------------------------------
-    # 3. Search FAISS for candidate chunks
-    #
-    #    FAISS requires a NumPy array with shape:
-    #
-    #        (number_of_queries, embedding_dimension)
+    # 3. Search FAISS
     # --------------------------------------------------------
 
     distances, indices = (
         vector_store.index.search(
+
             np.ascontiguousarray(
                 query_vector
             ),
-            candidate_k
+
+            candidate_k,
         )
     )
 
-    candidate_indices = (
-        indices[0]
-    )
 
-    candidate_distances = (
-        distances[0]
-    )
+    candidate_indices = indices[0]
+
+    candidate_distances = distances[0]
+
 
     # --------------------------------------------------------
-    # 4. Keep only candidates inside our validated
-    #    distance threshold.
+    # 4. Apply distance threshold
     # --------------------------------------------------------
 
     eligible_positions = []
+
 
     for position, distance in enumerate(
         candidate_distances
@@ -555,8 +393,10 @@ def retrieve_mmr(
             candidate_indices[position]
         )
 
+
         if index_id < 0:
             continue
+
 
         if float(distance) <= max_distance:
 
@@ -564,37 +404,37 @@ def retrieve_mmr(
                 position
             )
 
-    # --------------------------------------------------------
-    # No candidates passed the threshold.
-    # --------------------------------------------------------
 
     if not eligible_positions:
 
         return []
 
+
     # --------------------------------------------------------
     # 5. Reconstruct candidate embeddings
-    #
-    #    These are the actual vectors stored in FAISS.
     # --------------------------------------------------------
 
-    faiss_candidate_ids = (
-        [
-            int(candidate_indices[position])
-            for position in eligible_positions
-        ]
-    )
+    faiss_candidate_ids = [
+
+        int(
+            candidate_indices[position]
+        )
+
+        for position in eligible_positions
+    ]
+
 
     if hasattr(
         vector_store.index,
-        "reconstruct_batch"
+        "reconstruct_batch",
     ):
 
         candidate_embeddings = (
             vector_store.index.reconstruct_batch(
+
                 np.asarray(
                     faiss_candidate_ids,
-                    dtype=np.int64
+                    dtype=np.int64,
                 )
             )
         )
@@ -606,102 +446,95 @@ def retrieve_mmr(
                 vector_store.index.reconstruct(
                     vector_id
                 )
-
-                for vector_id
-                in faiss_candidate_ids
+                for vector_id in faiss_candidate_ids
             ]
         )
 
+
     candidate_embeddings = np.asarray(
         candidate_embeddings,
-        dtype=np.float32
+        dtype=np.float32,
     )
 
+
     # --------------------------------------------------------
-    # 6. Normalize embeddings for cosine similarity
-    #
-    #    Our indexing pipeline already normalizes embeddings,
-    #    but doing it again here makes the MMR calculation
-    #    explicit and robust.
+    # 6. Normalize query and candidates
     # --------------------------------------------------------
 
     query_norm = np.linalg.norm(
         query_vector,
         axis=1,
-        keepdims=True
+        keepdims=True,
     )
 
     query_norm = np.maximum(
         query_norm,
-        1e-12
+        1e-12,
     )
 
+
     query_normalized = (
-        query_vector
-        / query_norm
+        query_vector / query_norm
     )
+
 
     candidate_norms = np.linalg.norm(
         candidate_embeddings,
         axis=1,
-        keepdims=True
+        keepdims=True,
     )
 
     candidate_norms = np.maximum(
         candidate_norms,
-        1e-12
+        1e-12,
     )
+
 
     candidate_normalized = (
-        candidate_embeddings
-        / candidate_norms
+        candidate_embeddings / candidate_norms
     )
 
+
     # --------------------------------------------------------
-    # 7. Calculate query-to-candidate similarity
+    # 7. Query-to-document similarity
     # --------------------------------------------------------
 
     query_similarities = (
+
         candidate_normalized
         @ query_normalized.T
+
     ).reshape(-1)
+
 
     # --------------------------------------------------------
     # 8. MMR selection
-    #
-    #    MMR(candidate) =
-    #
-    #        lambda * relevance
-    #
-    #        -
-    #
-    #        (1 - lambda) * redundancy
     # --------------------------------------------------------
 
     number_to_select = min(
         k,
-        len(
-            eligible_positions
-        )
+        len(eligible_positions),
     )
+
 
     selected_positions = []
 
     remaining_positions = list(
         range(
-            len(
-                eligible_positions
-            )
+            len(eligible_positions)
         )
     )
 
+
     # First document:
     # choose the most relevant candidate.
+
     first_position = int(
         np.argmax(
             query_similarities
         )
     )
+
 
     selected_positions.append(
         first_position
@@ -711,21 +544,29 @@ def retrieve_mmr(
         first_position
     )
 
-    # Remaining selections:
+
+    # Remaining documents:
+    # maximize relevance while reducing redundancy.
+
     while (
+
         remaining_positions
+
         and len(selected_positions)
         < number_to_select
+
     ):
 
         best_position = None
         best_score = -np.inf
+
 
         selected_embeddings = (
             candidate_normalized[
                 selected_positions
             ]
         )
+
 
         for candidate_position in (
             remaining_positions
@@ -737,36 +578,52 @@ def retrieve_mmr(
                 ]
             )
 
+
             candidate_embedding = (
                 candidate_normalized[
                     candidate_position
                 ]
             )
 
-            # Similarity to the most similar
-            # already-selected document.
+
             redundancy = float(
+
                 np.max(
+
                     selected_embeddings
                     @ candidate_embedding
+
                 )
             )
 
+
             mmr_score = (
+
                 lambda_mult * relevance
+
                 -
+
                 (
                     1.0 - lambda_mult
                 )
                 * redundancy
+
             )
+
 
             if mmr_score > best_score:
 
                 best_score = mmr_score
+
                 best_position = (
                     candidate_position
                 )
+
+
+        if best_position is None:
+
+            break
+
 
         selected_positions.append(
             best_position
@@ -776,11 +633,13 @@ def retrieve_mmr(
             best_position
         )
 
+
     # --------------------------------------------------------
-    # 9. Convert selected FAISS vectors back to Documents
+    # 9. Convert FAISS IDs back into Documents
     # --------------------------------------------------------
 
     results = []
+
 
     for selected_position in (
         selected_positions
@@ -792,17 +651,22 @@ def retrieve_mmr(
             ]
         )
 
+
         vector_id = int(
+
             candidate_indices[
                 original_position
             ]
         )
 
+
         distance = float(
+
             candidate_distances[
                 original_position
             ]
         )
+
 
         docstore_id = (
             vector_store
@@ -810,121 +674,30 @@ def retrieve_mmr(
             .get(vector_id)
         )
 
+
         if docstore_id is None:
             continue
+
 
         document = (
             vector_store
             .docstore
-            .search(docstore_id)
+            .search(
+                docstore_id
+            )
         )
+
 
         if document is None:
             continue
 
+
         results.append(
             (
                 document,
-                distance
+                distance,
             )
         )
 
+
     return results
-
-
-# ============================================================
-# 9. MAIN TEST
-# ============================================================
-
-if __name__ == "__main__":
-
-    video = "Gfr50f6ZBvo"
-
-    questions = [
-
-        "What does Demis Hassabis think about the Turing test?",
-
-        "What is DeepMind?",
-
-        "What is AlphaFold?",
-
-        "How does Demis Hassabis describe artificial intelligence?",
-
-        "What is the capital of Australia?"
-    ]
-
-    # --------------------------------------------------------
-    # Load embedding model ONCE
-    # --------------------------------------------------------
-
-    print(
-        "\nLoading embedding model..."
-    )
-
-    embeddings = (
-        create_embedding_model()
-    )
-
-    # --------------------------------------------------------
-    # Extract video ID ONCE
-    # --------------------------------------------------------
-
-    video_id = extract_video_id(
-        video
-    )
-
-    # --------------------------------------------------------
-    # Load FAISS ONCE
-    # --------------------------------------------------------
-
-    print(
-        "Loading FAISS vector store..."
-    )
-
-    vector_store = (
-        load_vector_store(
-            video_id,
-            embeddings
-        )
-    )
-
-    # --------------------------------------------------------
-    # Process questions
-    # --------------------------------------------------------
-
-    for question in questions:
-
-        print(
-            "\n"
-            + "#"
-            * 80
-        )
-
-        print(
-            f"QUESTION: {question}"
-        )
-
-        print(
-            "#"
-            * 80
-        )
-
-        results = retrieve_mmr(
-
-            vector_store=vector_store,
-
-            query=question,
-
-            k=DEFAULT_K,
-
-            fetch_k=DEFAULT_MMR_FETCH_K,
-
-            lambda_mult=DEFAULT_MMR_LAMBDA,
-
-            max_distance=MAX_DISTANCE
-        )
-
-        display_results(
-            results,
-            MAX_DISTANCE
-        )
