@@ -139,6 +139,26 @@ MAX_DISTANCE = _get_float(
 
 
 # ============================================================
+# SOURCE SEGMENTATION
+# ============================================================
+
+# Retrieval chunks can overlap because chunk_overlap is used
+# during indexing. For UI/source display, overlapping chunks
+# are merged into one chronological evidence segment.
+
+SOURCE_MERGE_GAP_SECONDS = _get_float(
+    "RAG_SOURCE_MERGE_GAP_SECONDS",
+    0.0,
+)
+
+# Validation
+if SOURCE_MERGE_GAP_SECONDS < 0:
+
+    raise RuntimeError(
+        "RAG_SOURCE_MERGE_GAP_SECONDS cannot be negative."
+    )
+
+# ============================================================
 # HUGGING FACE GENERATION
 # ============================================================
 

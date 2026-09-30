@@ -1,32 +1,280 @@
-console.log("YouTube AI Chat loaded");
+/**
+ * content.js
+ *
+ * YouTube page integration.
+ *
+ * Responsibilities:
+ * 1. Detect the current YouTube video.
+ * 2. Keep the chat closed by default.
+ * 3. Open/close the chat panel.
+ * 4. Send user questions to the background service worker.
+ * 5. Display the RAG answer.
+ * 6. Display clickable source timestamps.
+ */
 
+
+// ============================================================
+// STATE
+// ============================================================
+
+let sidebar = null;
+
+let launcher = null;
+
+let chatBody = null;
+
+let chatInput = null;
+
+let sendButton = null;
+
+let sourcesContainer = null;
+
+let isRequestInProgress = false;
+
+let lastVideoId = null;
+
+
+// ============================================================
+// 1. YOUTUBE VIDEO ID
+// ============================================================
 
 function getVideoId() {
 
-    const urlParams = new URLSearchParams(window.location.search);
+    const url = new URL(
+        window.location.href
+    );
 
-    return urlParams.get("v");
+
+    // Standard watch URL:
+    // youtube.com/watch?v=VIDEO_ID
+
+    const watchVideoId =
+        url.searchParams.get("v");
+
+
+    if (watchVideoId) {
+
+        return watchVideoId;
+    }
+
+
+    // Supported path formats:
+    //
+    // /shorts/VIDEO_ID
+    // /embed/VIDEO_ID
+    // /live/VIDEO_ID
+
+    const pathParts =
+        url.pathname
+            .split("/")
+            .filter(Boolean);
+
+
+    if (
+        pathParts.length >= 2 &&
+        (
+            pathParts[0] === "shorts" ||
+            pathParts[0] === "embed" ||
+            pathParts[0] === "live"
+        )
+    ) {
+
+        return pathParts[1];
+    }
+
+
+    return null;
 }
 
 
-function createChatSidebar() {
+// ============================================================
+// 2. PAGE VALIDATION
+// ============================================================
 
-    if (document.getElementById("youtube-ai-chat")) {
+function isVideoPage() {
+
+    return Boolean(
+        getVideoId()
+    );
+}
+
+
+// ============================================================
+// 3. TIMESTAMP FORMAT
+// ============================================================
+
+function formatTimestamp(
+    seconds
+) {
+
+    const totalSeconds =
+        Math.max(
+            0,
+            Math.floor(
+                Number(seconds) || 0
+            )
+        );
+
+
+    const hours =
+        Math.floor(
+            totalSeconds / 3600
+        );
+
+
+    const minutes =
+        Math.floor(
+            (totalSeconds % 3600) / 60
+        );
+
+
+    const remainingSeconds =
+        totalSeconds % 60;
+
+
+    if (hours > 0) {
+
+        return (
+            `${String(hours).padStart(2, "0")}:` +
+            `${String(minutes).padStart(2, "0")}:` +
+            `${String(remainingSeconds).padStart(2, "0")}`
+        );
+    }
+
+
+    return (
+        `${String(minutes).padStart(2, "0")}:` +
+        `${String(remainingSeconds).padStart(2, "0")}`
+    );
+}
+
+
+// ============================================================
+// 4. CREATE LAUNCHER
+// ============================================================
+
+function createLauncher() {
+
+    if (launcher) {
         return;
     }
 
-    const sidebar = document.createElement("div");
 
-    sidebar.id = "youtube-ai-chat";
+    launcher =
+        document.createElement("button");
+
+
+    launcher.id =
+        "youtube-ai-chat-launcher";
+
+
+    launcher.type =
+        "button";
+
+
+    launcher.textContent =
+        "🤖";
+
+
+    launcher.title =
+        "Open YouTube AI Chat";
+
+
+    launcher.setAttribute(
+        "aria-label",
+        "Open YouTube AI Chat"
+    );
+
+
+    launcher.addEventListener(
+        "click",
+        openChat
+    );
+
+
+    document.body.appendChild(
+        launcher
+    );
+}
+
+
+// ============================================================
+// 5. CREATE SIDEBAR
+// ============================================================
+
+function createSidebar() {
+
+    if (sidebar) {
+        return;
+    }
+
+
+    sidebar =
+        document.createElement("aside");
+
+
+    sidebar.id =
+        "youtube-ai-chat";
+
+
+    sidebar.setAttribute(
+        "aria-label",
+        "YouTube AI Chat"
+    );
+
+
+    sidebar.hidden = true;
+
 
     sidebar.innerHTML = `
+
         <div class="chat-header">
-            🤖 YouTube AI
+
+            <div class="chat-title">
+                <span>🤖</span>
+                <span>YouTube AI</span>
+            </div>
+
+            <button
+                type="button"
+                id="chat-close"
+                class="chat-close"
+                aria-label="Close chat"
+                title="Close"
+            >
+                ×
+            </button>
+
         </div>
 
-        <div class="chat-body" id="chat-body">
-            <p>Ask anything about this video.</p>
+
+        <div
+            class="chat-body"
+            id="chat-body"
+        >
+
+            <div class="welcome-message">
+
+                <strong>
+                    Ask anything about this video.
+                </strong>
+
+                <span>
+                    Answers are generated from the
+                    video's transcript.
+                </span>
+
+            </div>
+
         </div>
+
+
+        <div
+            id="chat-sources"
+            class="chat-sources"
+            hidden
+        ></div>
+
 
         <div class="chat-input-area">
 
@@ -34,127 +282,69 @@ function createChatSidebar() {
                 type="text"
                 id="chat-input"
                 placeholder="Ask a question..."
+                autocomplete="off"
+                maxlength="1000"
             />
 
-            <button id="chat-send">
+            <button
+                type="button"
+                id="chat-send"
+            >
                 Send
             </button>
 
         </div>
     `;
 
-    document.body.appendChild(sidebar);
 
-    setupChat();
-}
-
-
-function setupChat() {
-
-    const input = document.getElementById("chat-input");
-    const sendButton = document.getElementById("chat-send");
-    const chatBody = document.getElementById("chat-body");
+    document.body.appendChild(
+        sidebar
+    );
 
 
-    function sendMessage() {
-
-        const question = input.value.trim();
-
-        if (question === "") {
-            return;
-        }
-
-        const videoId = getVideoId();
-
-
-        // -----------------------------------
-        // Display user's message
-        // -----------------------------------
-
-        const userMessage = document.createElement("div");
-
-        userMessage.className = "user-message";
-
-        userMessage.textContent = question;
-
-        chatBody.appendChild(userMessage);
-
-
-        // Clear input
-
-        input.value = "";
-
-
-        // -----------------------------------
-        // Display loading message
-        // -----------------------------------
-
-        const aiMessage = document.createElement("div");
-
-        aiMessage.className = "ai-message";
-
-        aiMessage.textContent = "Thinking...";
-
-        chatBody.appendChild(aiMessage);
-
-
-        // -----------------------------------
-        // Send message to background script
-        // -----------------------------------
-
-        chrome.runtime.sendMessage(
-            {
-                type: "chat",
-                video_id: videoId,
-                question: question
-            },
-
-            function(response) {
-
-                if (chrome.runtime.lastError) {
-
-                    console.error(
-                        "Extension error:",
-                        chrome.runtime.lastError.message
-                    );
-
-                    aiMessage.textContent =
-                        "Unable to communicate with the extension.";
-
-                    return;
-                }
-
-
-                if (!response || !response.success) {
-
-                    aiMessage.textContent =
-                        "Sorry, I couldn't connect to the backend.";
-
-                    console.error(
-                        "Backend error:",
-                        response?.error
-                    );
-
-                    return;
-                }
-
-
-                // -----------------------------------
-                // Display backend response
-                // -----------------------------------
-
-                aiMessage.textContent = response.answer;
-
-                chatBody.scrollTop =
-                    chatBody.scrollHeight;
-            }
+    chatBody =
+        sidebar.querySelector(
+            "#chat-body"
         );
-    }
 
 
-    // -----------------------------------
+    chatInput =
+        sidebar.querySelector(
+            "#chat-input"
+        );
+
+
+    sendButton =
+        sidebar.querySelector(
+            "#chat-send"
+        );
+
+
+    sourcesContainer =
+        sidebar.querySelector(
+            "#chat-sources"
+        );
+
+
+    const closeButton =
+        sidebar.querySelector(
+            "#chat-close"
+        );
+
+
+    // --------------------------------------------------------
+    // Close button
+    // --------------------------------------------------------
+
+    closeButton.addEventListener(
+        "click",
+        closeChat
+    );
+
+
+    // --------------------------------------------------------
     // Send button
-    // -----------------------------------
+    // --------------------------------------------------------
 
     sendButton.addEventListener(
         "click",
@@ -162,29 +352,707 @@ function setupChat() {
     );
 
 
-    // -----------------------------------
+    // --------------------------------------------------------
     // Enter key
-    // -----------------------------------
+    // --------------------------------------------------------
 
-    input.addEventListener(
+    chatInput.addEventListener(
         "keydown",
-        function(event) {
+        (event) => {
 
-            if (event.key === "Enter") {
+            if (
+                event.key === "Enter" &&
+                !event.shiftKey
+            ) {
+
+                event.preventDefault();
 
                 sendMessage();
-
             }
+        }
+    );
 
+
+    // --------------------------------------------------------
+    // Escape closes the chat
+    // --------------------------------------------------------
+
+    document.addEventListener(
+        "keydown",
+        (event) => {
+
+            if (
+                event.key === "Escape" &&
+                !sidebar.hidden
+            ) {
+
+                closeChat();
+            }
         }
     );
 }
 
 
-console.log(
-    "Current video ID:",
-    getVideoId()
+// ============================================================
+// 6. OPEN CHAT
+// ============================================================
+
+function openChat() {
+
+    if (!isVideoPage()) {
+
+        showTemporaryLauncherMessage(
+            "Open a YouTube video first."
+        );
+
+        return;
+    }
+
+
+    createSidebar();
+
+
+    sidebar.hidden = false;
+
+    launcher.hidden = true;
+
+
+    // Capture the current video ID.
+    lastVideoId =
+        getVideoId();
+
+
+    setTimeout(
+        () => {
+
+            if (chatInput) {
+
+                chatInput.focus();
+            }
+
+        },
+        0
+    );
+}
+
+
+// ============================================================
+// 7. CLOSE CHAT
+// ============================================================
+
+function closeChat() {
+
+    if (!sidebar) {
+        return;
+    }
+
+
+    sidebar.hidden = true;
+
+
+    if (launcher) {
+
+        launcher.hidden = false;
+    }
+}
+
+
+// ============================================================
+// 8. TOGGLE CHAT
+// ============================================================
+
+function toggleChat() {
+
+    if (!sidebar) {
+
+        openChat();
+
+        return;
+    }
+
+
+    if (sidebar.hidden) {
+
+        openChat();
+
+    } else {
+
+        closeChat();
+    }
+}
+
+
+// ============================================================
+// 9. TEMPORARY LAUNCHER MESSAGE
+// ============================================================
+
+function showTemporaryLauncherMessage(
+    message
+) {
+
+    if (!launcher) {
+        return;
+    }
+
+
+    const originalText =
+        launcher.textContent;
+
+
+    launcher.textContent =
+        "⚠";
+
+
+    launcher.title =
+        message;
+
+
+    setTimeout(
+        () => {
+
+            if (launcher) {
+
+                launcher.textContent =
+                    originalText;
+
+                launcher.title =
+                    "Open YouTube AI Chat";
+            }
+
+        },
+        1800
+    );
+}
+
+
+// ============================================================
+// 10. APPEND MESSAGE
+// ============================================================
+
+function appendMessage(
+    type,
+    text
+) {
+
+    const message =
+        document.createElement("div");
+
+
+    message.className =
+        `chat-message ${type}`;
+
+
+    message.textContent =
+        text;
+
+
+    chatBody.appendChild(
+        message
+    );
+
+
+    chatBody.scrollTop =
+        chatBody.scrollHeight;
+
+
+    return message;
+}
+
+
+// ============================================================
+// 11. CLEAR SOURCES
+// ============================================================
+
+function clearSources() {
+
+    if (!sourcesContainer) {
+        return;
+    }
+
+
+    sourcesContainer.innerHTML =
+        "";
+
+
+    sourcesContainer.hidden =
+        true;
+}
+
+
+// ============================================================
+// 12. RENDER SOURCES
+// ============================================================
+
+function renderSources(
+    sources
+) {
+
+    clearSources();
+
+
+    if (
+        !Array.isArray(sources) ||
+        sources.length === 0
+    ) {
+
+        return;
+    }
+
+
+    const title =
+        document.createElement(
+            "div"
+        );
+
+
+    title.className =
+        "sources-title";
+
+
+    title.textContent =
+        "Video sources";
+
+
+    sourcesContainer.appendChild(
+        title
+    );
+
+
+    const list =
+        document.createElement(
+            "div"
+        );
+
+
+    list.className =
+        "sources-list";
+
+
+    sources.forEach(
+        (source) => {
+
+            const sourceButton =
+                document.createElement(
+                    "button"
+                );
+
+
+            sourceButton.type =
+                "button";
+
+
+            sourceButton.className =
+                "source-button";
+
+
+            const start =
+                Number(
+                    source.start
+                ) || 0;
+
+
+            const end =
+                Number(
+                    source.end
+                ) || start;
+
+
+            sourceButton.textContent =
+                `${formatTimestamp(start)} → ` +
+                `${formatTimestamp(end)}`;
+
+
+            sourceButton.title =
+                "Jump to this part of the video";
+
+
+            sourceButton.addEventListener(
+                "click",
+                () => {
+
+                    seekToTimestamp(
+                        start
+                    );
+                }
+            );
+
+
+            list.appendChild(
+                sourceButton
+            );
+        }
+    );
+
+
+    sourcesContainer.appendChild(
+        list
+    );
+
+
+    sourcesContainer.hidden =
+        false;
+}
+
+
+// ============================================================
+// 13. SEEK YOUTUBE VIDEO
+// ============================================================
+
+function seekToTimestamp(
+    seconds
+) {
+
+    const video =
+        document.querySelector(
+            "video"
+        );
+
+
+    if (!video) {
+
+        appendMessage(
+            "system",
+            "YouTube's video player could not be found."
+        );
+
+        return;
+    }
+
+
+    const timestamp =
+        Number(seconds);
+
+
+    if (
+        !Number.isFinite(timestamp) ||
+        timestamp < 0
+    ) {
+
+        return;
+    }
+
+
+    video.currentTime =
+        timestamp;
+
+
+    video.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+    });
+}
+
+
+// ============================================================
+// 14. SEND MESSAGE
+// ============================================================
+
+function sendMessage() {
+
+    if (isRequestInProgress) {
+        return;
+    }
+
+
+    const question =
+        chatInput.value.trim();
+
+
+    if (!question) {
+        return;
+    }
+
+
+    const videoId =
+        getVideoId();
+
+
+    if (!videoId) {
+
+        appendMessage(
+            "system",
+            "Please open a YouTube video before asking a question."
+        );
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // User message
+    // --------------------------------------------------------
+
+    appendMessage(
+        "user",
+        question
+    );
+
+
+    chatInput.value =
+        "";
+
+
+    clearSources();
+
+
+    // --------------------------------------------------------
+    // Loading message
+    // --------------------------------------------------------
+
+    const aiMessage =
+        appendMessage(
+            "assistant",
+            "Thinking..."
+        );
+
+
+    isRequestInProgress =
+        true;
+
+
+    sendButton.disabled =
+        true;
+
+
+    chatInput.disabled =
+        true;
+
+
+    sendButton.textContent =
+        "...";
+
+
+    // --------------------------------------------------------
+    // Send to background service worker
+    // --------------------------------------------------------
+
+    chrome.runtime.sendMessage(
+
+        {
+            type:
+                "chat",
+
+            video_id:
+                videoId,
+
+            question:
+                question
+        },
+
+        (response) => {
+
+            isRequestInProgress =
+                false;
+
+
+            sendButton.disabled =
+                false;
+
+
+            chatInput.disabled =
+                false;
+
+
+            sendButton.textContent =
+                "Send";
+
+
+            if (
+                chrome.runtime.lastError
+            ) {
+
+                aiMessage.textContent =
+                    "The extension could not contact its background service.";
+
+
+                console.error(
+                    chrome.runtime.lastError.message
+                );
+
+
+                return;
+            }
+
+
+            if (
+                !response ||
+                !response.success
+            ) {
+
+                aiMessage.textContent =
+                    response?.error ||
+                    "The backend could not process the request.";
+
+
+                return;
+            }
+
+
+            // ------------------------------------------------
+            // Display answer
+            // ------------------------------------------------
+
+            aiMessage.textContent =
+                response.answer ||
+                "No answer was returned.";
+
+
+            // ------------------------------------------------
+            // Display source timestamps
+            // ------------------------------------------------
+
+            renderSources(
+                response.sources || []
+            );
+
+
+            chatBody.scrollTop =
+                chatBody.scrollHeight;
+        }
+    );
+}
+
+
+// ============================================================
+// 15. HANDLE YOUTUBE SPA NAVIGATION
+// ============================================================
+
+function handleVideoNavigation() {
+
+    const currentVideoId =
+        getVideoId();
+
+
+    if (
+        currentVideoId !==
+        lastVideoId
+    ) {
+
+        lastVideoId =
+            currentVideoId;
+
+
+        clearSources();
+
+
+        if (
+            chatBody &&
+            currentVideoId
+        ) {
+
+            chatBody.innerHTML = `
+
+                <div class="welcome-message">
+
+                    <strong>
+                        New video detected.
+                    </strong>
+
+                    <span>
+                        Ask anything about this video.
+                    </span>
+
+                </div>
+            `;
+        }
+    }
+
+
+    if (!currentVideoId) {
+
+        if (sidebar) {
+
+            closeChat();
+        }
+
+
+        if (launcher) {
+
+            launcher.hidden =
+                true;
+        }
+
+        return;
+    }
+
+
+    if (launcher) {
+
+        launcher.hidden =
+            sidebar
+                ? !sidebar.hidden
+                : false;
+    }
+}
+
+
+// ============================================================
+// 16. RECEIVE MESSAGES FROM SERVICE WORKER
+// ============================================================
+
+chrome.runtime.onMessage.addListener(
+    (message) => {
+
+        if (
+            !message ||
+            message.type !== "toggle_chat"
+        ) {
+
+            return;
+        }
+
+
+        toggleChat();
+    }
 );
 
 
-createChatSidebar();
+// ============================================================
+// 17. INITIALIZE
+// ============================================================
+
+function initialize() {
+
+    if (!isVideoPage()) {
+        return;
+    }
+
+
+    lastVideoId =
+        getVideoId();
+
+
+    createLauncher();
+
+
+    // Chat intentionally remains closed.
+}
+
+
+// ============================================================
+// YOUTUBE SPA NAVIGATION EVENTS
+// ============================================================
+
+document.addEventListener(
+    "yt-navigate-finish",
+    () => {
+
+        handleVideoNavigation();
+    }
+);
+
+
+window.addEventListener(
+    "popstate",
+    () => {
+
+        handleVideoNavigation();
+    }
+);
+
+
+// ============================================================
+// START
+// ============================================================
+
+initialize();

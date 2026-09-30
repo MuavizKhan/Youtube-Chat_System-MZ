@@ -105,8 +105,8 @@ class ChatRequest(BaseModel):
 class SourceResponse(BaseModel):
 
     source_id: int
-    
-    chunk_id: int | None
+
+    chunk_ids: list[int]
 
     video_id: str | None
 
@@ -130,6 +130,8 @@ class ChatResponse(BaseModel):
     retrieved_chunks: int
 
     model: str
+
+    source_segments: int
 
     retrieval_method: str
 

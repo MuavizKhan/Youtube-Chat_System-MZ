@@ -28,6 +28,7 @@ import numpy as np
 
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
+import re
 
 from .config import (
     EMBEDDING_MODEL,
@@ -701,3 +702,558 @@ def retrieve_mmr(
 
 
     return results
+
+# ============================================================
+# 9. QUESTION-AWARE RETRIEVAL
+# ============================================================
+
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "about",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "did",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "their",
+    "them",
+    "they",
+    "this",
+    "to",
+    "was",
+    "what",
+    "when",
+    "where",
+    "who",
+    "why",
+    "with",
+    "you",
+}
+
+
+OVERVIEW_PATTERNS = (
+    r"\bwhat is this video about\b",
+    r"\bwhat's this video about\b",
+    r"\bwhat are they talking about\b",
+    r"\bwhat are they discussing\b",
+    r"\bwhat is being discussed\b",
+    r"\bwhat is discussed in this video\b",
+    r"\bgive me an overview\b",
+    r"\boverview of this video\b",
+    r"\bsummarize this video\b",
+    r"\bsummarise this video\b",
+    r"\bsummarize the video\b",
+    r"\bsummarise the video\b",
+    r"\bwhat are the main topics\b",
+    r"\bwhat topics are covered\b",
+)
+
+
+def is_overview_question(
+    query: str,
+) -> bool:
+    """
+    Detect questions that ask for the overall topic
+    or summary of the video.
+    """
+
+    normalized_query = (
+        query.strip()
+        .lower()
+    )
+
+    return any(
+        re.search(
+            pattern,
+            normalized_query,
+        )
+        for pattern in OVERVIEW_PATTERNS
+    )
+
+
+def extract_query_terms(
+    query: str,
+) -> set[str]:
+    """
+    Extract meaningful terms from the user's question.
+
+    Stopwords are removed so that entity/name questions such as:
+
+        "Who is Demis Hassabis?"
+
+    become approximately:
+
+        {"demis", "hassabis"}
+    """
+
+    words = re.findall(
+        r"[a-zA-Z0-9]+",
+        query.lower(),
+    )
+
+    return {
+        word
+        for word in words
+        if (
+            len(word) >= 2
+            and word not in STOPWORDS
+        )
+    }
+
+
+def get_all_documents(
+    vector_store,
+) -> list:
+    """
+    Read the documents stored inside the FAISS docstore.
+
+    This is used only for lightweight lexical fallback
+    retrieval. It does not rebuild the vector database.
+    """
+
+    documents = []
+
+    seen_docstore_ids = set()
+
+    for docstore_id in (
+        vector_store
+        .index_to_docstore_id
+        .values()
+    ):
+
+        if docstore_id in seen_docstore_ids:
+            continue
+
+        seen_docstore_ids.add(
+            docstore_id
+        )
+
+        document = (
+            vector_store
+            .docstore
+            .search(docstore_id)
+        )
+
+        if document is not None:
+
+            documents.append(
+                document
+            )
+
+    return documents
+
+
+def lexical_search(
+    vector_store,
+    query: str,
+    limit: int = 4,
+):
+    """
+    Search transcript chunks using actual words from
+    the user's question.
+
+    This is especially useful for:
+
+        - names
+        - organizations
+        - products
+        - technical terms
+        - exact phrases
+
+    Returns:
+
+        [(Document, score), ...]
+
+    The second value is a lexical relevance score,
+    not a FAISS distance.
+    """
+
+    query_terms = (
+        extract_query_terms(
+            query
+        )
+    )
+
+    if not query_terms:
+
+        return []
+
+    normalized_query = (
+        " ".join(
+            query.lower()
+            .split()
+        )
+    )
+
+    documents = (
+        get_all_documents(
+            vector_store
+        )
+    )
+
+    scored_documents = []
+
+    for document in documents:
+
+        text = (
+            document.page_content
+            .lower()
+        )
+
+        matched_terms = sum(
+            1
+            for term in query_terms
+            if re.search(
+            rf"\b{re.escape(term)}\b",
+                text,
+            )
+        )
+
+        # ----------------------------------------------------
+        # Exact phrase match
+        # ----------------------------------------------------
+
+        exact_phrase_match = (
+            normalized_query in text
+            and len(query_terms) >= 2
+        )
+
+        # ----------------------------------------------------
+        # Evidence rule
+        #
+        # For a multi-term query, require at least two
+        # meaningful query terms to appear in the same chunk.
+        #
+        # This is especially important for names such as:
+        #
+        #     "Who is Demis Hassabis?"
+        #
+        # A chunk containing both "demis" and "hassabis"
+        # is strong lexical evidence.
+        # ----------------------------------------------------
+
+        if exact_phrase_match:
+
+            score = 1.0
+
+        elif len(query_terms) == 1:
+
+            if matched_terms != 1:
+                continue
+
+            score = 1.0
+
+        else:
+
+            if matched_terms < 2:
+                continue
+
+            score = (
+                matched_terms
+                /
+                len(query_terms)
+            )
+
+        scored_documents.append(
+            (
+                document,
+                float(score),
+            )
+        )
+
+    scored_documents.sort(
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    return scored_documents[:limit]
+
+
+def retrieve_overview(
+    vector_store,
+    number_of_chunks: int = 6,
+):
+    """
+    Retrieve representative transcript sections across
+    the entire video.
+
+    This is used for broad questions such as:
+
+        "What are they talking about?"
+        "What is this video about?"
+
+    It deliberately samples the video chronologically
+    instead of relying on semantic similarity to a vague
+    question.
+    """
+
+    documents = (
+        get_all_documents(
+            vector_store
+        )
+    )
+
+    if not documents:
+
+        return []
+
+    documents.sort(
+        key=lambda document: float(
+            document.metadata.get(
+                "start",
+                0.0,
+            )
+        )
+    )
+
+    if len(documents) <= number_of_chunks:
+
+        selected_documents = (
+            documents
+        )
+
+    else:
+
+        selected_indices = []
+
+        for i in range(
+            number_of_chunks
+        ):
+
+            position = round(
+                i
+                *
+                (
+                    (
+                        len(documents)
+                        - 1
+                    )
+                    /
+                    (
+                        number_of_chunks
+                        - 1
+                    )
+                )
+            )
+
+            selected_indices.append(
+                position
+            )
+
+        selected_documents = [
+            documents[index]
+            for index in selected_indices
+        ]
+
+    # Overview retrieval does not use a meaningful
+    # semantic distance, so we use MAX_DISTANCE as
+    # a neutral API value.
+    return [
+        (
+            document,
+            float(MAX_DISTANCE),
+        )
+        for document in selected_documents
+    ]
+
+
+def retrieve_question_context(
+    vector_store,
+    query: str,
+    k: int = TOP_K,
+    fetch_k: int = MMR_FETCH_K,
+    lambda_mult: float = MMR_LAMBDA,
+    max_distance: float = MAX_DISTANCE,
+):
+    """
+    Main question-aware retrieval entry point.
+
+    Strategy:
+
+        Overview question
+            ↓
+        representative video sections
+
+        Otherwise
+            ↓
+        MMR semantic retrieval
+            +
+        lexical/name retrieval
+
+        If neither gives sufficient evidence:
+            ↓
+        return []
+    """
+
+    # --------------------------------------------------------
+    # 1. Broad overview question
+    # --------------------------------------------------------
+
+    if is_overview_question(
+        query
+    ):
+
+        return retrieve_overview(
+            vector_store
+        )
+
+    # --------------------------------------------------------
+    # 2. Semantic retrieval
+    # --------------------------------------------------------
+
+    semantic_results = retrieve_mmr(
+        vector_store=vector_store,
+        query=query,
+        k=k,
+        fetch_k=fetch_k,
+        lambda_mult=lambda_mult,
+        max_distance=max_distance,
+    )
+
+    # --------------------------------------------------------
+    # 3. Lexical retrieval
+    # --------------------------------------------------------
+
+    lexical_results = lexical_search(
+        vector_store=vector_store,
+        query=query,
+        limit=k,
+    )
+
+    # --------------------------------------------------------
+    # 4. Merge semantic + lexical results
+    # --------------------------------------------------------
+
+    combined_results = []
+
+    seen_chunk_ids = set()
+
+    def add_result(
+        document,
+        distance,
+    ):
+
+        chunk_id = (
+            document
+            .metadata
+            .get("chunk_id")
+        )
+
+        identity = (
+            chunk_id
+            if chunk_id is not None
+            else (
+                document
+                .metadata
+                .get("start"),
+                document
+                .metadata
+                .get("end"),
+            )
+        )
+
+        if identity in seen_chunk_ids:
+
+            return
+
+        seen_chunk_ids.add(
+            identity
+        )
+
+        combined_results.append(
+            (
+                document,
+                float(distance),
+            )
+        )
+
+    # Semantic results first.
+    for (
+        document,
+        distance,
+    ) in semantic_results:
+
+        add_result(
+            document,
+            distance,
+        )
+
+    # Lexical results next.
+    #
+    # We use max_distance as a neutral value for these
+    # because lexical score is not a FAISS distance.
+    for (
+        document,
+        lexical_score,
+    ) in lexical_results:
+
+        add_result(
+            document,
+            max_distance,
+        )
+
+    # --------------------------------------------------------
+    # 5. Evidence gate
+    # --------------------------------------------------------
+
+    if not combined_results:
+
+        return []
+
+    has_lexical_evidence = (
+        len(lexical_results) > 0
+    )
+
+    if has_lexical_evidence:
+
+        return combined_results[:k + 2]
+
+    # No lexical evidence.
+    # Require stronger semantic evidence before allowing
+    # the LLM to answer.
+    semantic_distances = [
+        distance
+        for (
+            _document,
+            distance,
+        )
+        in semantic_results
+    ]
+
+    if not semantic_distances:
+
+        return []
+
+    best_distance = min(
+        semantic_distances
+    )
+
+    strict_semantic_limit = (
+        max_distance * 0.92
+    )
+
+    if (
+        best_distance
+        > strict_semantic_limit
+    ):
+
+        return []
+
+    return combined_results[:k]

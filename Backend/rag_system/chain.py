@@ -45,13 +45,14 @@ from .config import (
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
+    SOURCE_MERGE_GAP_SECONDS,
     TOP_K,
 )
 
 from .retrieval import (
     extract_video_id,
     load_vector_store,
-    retrieve_mmr,
+    retrieve_question_context,
 )
 
 
@@ -60,8 +61,8 @@ from .retrieval import (
 # ============================================================
 
 FALLBACK_ANSWER = (
-    "I couldn't find enough information "
-    "about that in the video."
+    "I couldn't find enough information about that "
+    "in the video. It may not be covered by this video."
 )
 
 
@@ -85,10 +86,13 @@ Follow these rules:
 3. Do not invent facts, names, events, explanations,
    timestamps, or conclusions.
 
-4. If the provided context does not contain enough information
-   to answer the question, clearly say:
+4. If the provided context does not contain enough
+   information to answer the question, say:
 
-   "I couldn't find enough information about that in the video."
+   "I couldn't find enough information about that
+   in the video. It may not be covered by this video."
+
+   Do not answer from general knowledge.
 
 5. The transcript may contain speech-recognition errors,
    incomplete sentences, repetitions, or informal language.
@@ -116,6 +120,23 @@ Follow these rules:
 12. Do not combine separate transcript passages into a single
     event or claim unless the transcript context supports that
     connection.
+
+13. Each SOURCE block represents one chronological evidence
+    segment. A SOURCE may contain multiple retrieval chunks
+    that overlap in time.
+
+14. When mentioning timestamps, refer to the timestamp range
+    of the SOURCE block rather than separately mentioning the
+    timestamps of individual retrieval chunks.
+
+15. Before answering, determine whether the retrieved
+    context actually addresses the user's question.
+    The mere presence of transcript context is not
+    sufficient evidence.
+
+16. If the context only contains loosely related words
+    but does not support the answer, use the fallback
+    response instead of guessing.
 """
 
 
@@ -199,47 +220,251 @@ def format_timestamp(
         f"{remaining_seconds:02d}"
     )
 
+def merge_overlapping_results(
+    retrieved_results,
+    merge_gap_seconds: float = SOURCE_MERGE_GAP_SECONDS,
+) -> list[dict]:
+    """
+    Convert retrieval chunks into chronological source segments.
+
+    Retrieval chunks may overlap because the indexing pipeline
+    intentionally uses chunk overlap.
+
+    Example:
+
+        Chunk A: 10s -> 50s
+        Chunk B: 40s -> 80s
+        Chunk C: 70s -> 100s
+
+    becomes:
+
+        Source 1: 10s -> 100s
+
+    Separate regions remain separate:
+
+        Chunk A: 10s -> 50s
+        Chunk B: 80s -> 120s
+
+    becomes:
+
+        Source 1: 10s -> 50s
+        Source 2: 80s -> 120s
+    """
+
+    if not retrieved_results:
+        return []
+
+
+    # --------------------------------------------------------
+    # Convert raw retrieval results into sortable records
+    # --------------------------------------------------------
+
+    candidates = []
+
+
+    for document, distance in retrieved_results:
+
+        metadata = document.metadata
+
+
+        start = float(
+            metadata.get(
+                "start",
+                0.0,
+            )
+        )
+
+
+        end = float(
+            metadata.get(
+                "end",
+                start,
+            )
+        )
+
+
+        if end < start:
+
+            start, end = end, start
+
+
+        candidates.append(
+            {
+                "documents": [
+                    document
+                ],
+
+                "start": start,
+
+                "end": end,
+
+                # Keep the strongest/lowest distance for the group.
+                "distance": float(distance),
+            }
+        )
+
+
+    # --------------------------------------------------------
+    # Sort chronologically
+    # --------------------------------------------------------
+
+    candidates.sort(
+        key=lambda item: (
+            item["start"],
+            item["end"],
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # Merge overlapping intervals
+    # --------------------------------------------------------
+
+    groups = []
+
+
+    for candidate in candidates:
+
+        if not groups:
+
+            groups.append(
+                candidate
+            )
+
+            continue
+
+
+        current = groups[-1]
+
+
+        # Overlap or permitted small gap.
+        overlaps_or_is_close = (
+            candidate["start"]
+            <=
+            current["end"]
+            +
+            merge_gap_seconds
+        )
+
+
+        if overlaps_or_is_close:
+
+            current["documents"].extend(
+                candidate["documents"]
+            )
+
+
+            current["start"] = min(
+                current["start"],
+                candidate["start"],
+            )
+
+
+            current["end"] = max(
+                current["end"],
+                candidate["end"],
+            )
+
+
+            current["distance"] = min(
+                current["distance"],
+                candidate["distance"],
+            )
+
+
+        else:
+
+            groups.append(
+                candidate
+            )
+
+
+    return groups
+
 
 # ============================================================
 # 4. FORMAT ONE DOCUMENT
 # ============================================================
 
-def format_document(
-    document: Document,
+def format_source_group(
+    source_group: dict,
     source_number: int,
 ) -> str:
     """
-    Convert one retrieved Document into structured context.
+    Convert one merged source segment into LLM context.
+
+    A source segment may contain multiple retrieval chunks
+    that overlap in time.
     """
 
-    metadata = document.metadata
+    documents = (
+        source_group["documents"]
+    )
 
 
-    video_id = metadata.get(
-        "video_id",
-        "unknown",
+    video_id = (
+        documents[0]
+        .metadata
+        .get(
+            "video_id",
+            "unknown",
+        )
     )
 
 
     start = float(
-        metadata.get(
-            "start",
-            0.0,
-        )
+        source_group["start"]
     )
 
 
     end = float(
-        metadata.get(
-            "end",
-            start,
-        )
+        source_group["end"]
     )
 
 
-    text = (
-        document.page_content
-        .strip()
+    # --------------------------------------------------------
+    # Combine transcript text while avoiding duplicate
+    # chunk entries.
+    # --------------------------------------------------------
+
+    transcript_parts = []
+
+    seen_chunk_ids = set()
+
+
+    for document in documents:
+
+        chunk_id = document.metadata.get(
+            "chunk_id"
+        )
+
+
+        if chunk_id in seen_chunk_ids:
+            continue
+
+
+        seen_chunk_ids.add(
+            chunk_id
+        )
+
+
+        text = (
+            document.page_content
+            .strip()
+        )
+
+
+        if text:
+
+            transcript_parts.append(
+                text
+            )
+
+
+    transcript_text = (
+        "\n\n".join(
+            transcript_parts
+        )
     )
 
 
@@ -250,7 +475,7 @@ def format_document(
         f"{format_timestamp(start)} - "
         f"{format_timestamp(end)}\n"
         f"Transcript:\n"
-        f"{text}"
+        f"{transcript_text}"
     )
 
 
@@ -259,43 +484,38 @@ def format_document(
 # ============================================================
 
 def build_context(
-    retrieved_documents: list[Document],
+    source_groups: list[dict],
 ) -> str:
     """
-    Convert retrieved documents into one context block.
+    Convert merged source segments into one structured
+    context block for the generation model.
     """
 
-    if not retrieved_documents:
+    if not source_groups:
 
         return (
             "No relevant transcript context was retrieved."
         )
 
 
-    formatted_documents = []
+    formatted_sources = []
 
 
-    for index, document in enumerate(
-
-        retrieved_documents,
-
+    for source_number, source_group in enumerate(
+        source_groups,
         start=1,
-
     ):
 
-        formatted_documents.append(
-
-            format_document(
-
-                document,
-
-                source_number=index,
+        formatted_sources.append(
+            format_source_group(
+                source_group=source_group,
+                source_number=source_number,
             )
         )
 
 
     return "\n\n".join(
-        formatted_documents
+        formatted_sources
     )
 
 
@@ -509,72 +729,103 @@ def generate_with_huggingface(
 # ============================================================
 
 def format_sources(
-    retrieved_results,
+    source_groups: list[dict],
 ) -> list[dict[str, Any]]:
     """
-    Convert retrieved results into API-friendly source metadata.
+    Convert merged source segments into API-friendly
+    metadata.
 
-    source_id is the stable citation identifier used by the
-    LLM context and preserved in the API response.
-
-    The returned list may be sorted chronologically without
-    changing source_id.
+    source_id corresponds to the SOURCE number given to
+    the LLM.
     """
 
     sources = []
 
-    for source_id, (
-        document,
-        distance,
-    ) in enumerate(
-        retrieved_results,
+
+    for source_id, source_group in enumerate(
+        source_groups,
         start=1,
     ):
-        metadata = document.metadata
+
+        documents = (
+            source_group["documents"]
+        )
+
+
+        video_id = (
+            documents[0]
+            .metadata
+            .get(
+                "video_id"
+            )
+        )
+
+
+        chunk_ids = []
+
+
+        for document in documents:
+
+            chunk_id = (
+                document.metadata.get(
+                    "chunk_id"
+                )
+            )
+
+
+            if (
+                chunk_id is not None
+                and
+                chunk_id not in chunk_ids
+            ):
+
+                chunk_ids.append(
+                    chunk_id
+                )
+
+
+        start = float(
+            source_group["start"]
+        )
+
+
+        end = float(
+            source_group["end"]
+        )
+
 
         sources.append(
             {
-                "source_id": source_id,
+                "source_id":
+                    source_id,
 
-                "chunk_id": metadata.get(
-                    "chunk_id"
-                ),
+                "chunk_ids":
+                    chunk_ids,
 
-                "video_id": metadata.get(
-                    "video_id"
-                ),
+                "video_id":
+                    video_id,
 
-                "start": float(
-                    metadata.get(
-                        "start",
+                "start":
+                    start,
+
+                "end":
+                    end,
+
+                "duration":
+                    max(
                         0.0,
-                    )
-                ),
+                        end - start,
+                    ),
 
-                "end": float(
-                    metadata.get(
-                        "end",
-                        0.0,
-                    )
-                ),
-
-                "duration": float(
-                    metadata.get(
-                        "duration",
-                        0.0,
-                    )
-                ),
-
-                "distance": float(
-                    distance
-                ),
+                "distance":
+                    float(
+                        source_group["distance"]
+                    ),
             }
         )
 
-    return sorted(
-        sources,
-        key=lambda source: source["start"],
-    )
+
+    return sources
 
 # ============================================================
 # 10. BUILD THE LANGCHAIN RAG CHAIN
@@ -585,89 +836,84 @@ def build_rag_chain(
     llm_client: InferenceClient,
 ):
     """
-    Build the executable LangChain pipeline.
+    Build the executable LangChain RAG pipeline.
 
-    Input:
+    Flow:
 
-        {
-            "question": str,
-            "video_id": str,
-        }
-
-    Internal flow:
-
-        input
-          ↓
-        MMR retrieval
-          ↓
-        retrieved_results
-          ↓
-        context
-          ↓
-        prompt
-          ↓
-        Hugging Face
-          ↓
-        StrOutputParser
-          ↓
-        answer
+    Input
+        ↓
+    MMR retrieval
+        ↓
+    Retrieved chunks
+        ↓
+    Merge overlapping chunks into source segments
+        ↓
+    Build context
+        ↓
+    Prompt
+        ↓
+    Hugging Face
+        ↓
+    Parsed answer
     """
 
     # --------------------------------------------------------
-    # Retrieval Runnable
+    # 1. Retrieval
     # --------------------------------------------------------
 
     retrieval_runnable = RunnableLambda(
+    lambda inputs: retrieve_question_context(
+        vector_store=vector_store,
+        query=inputs["question"],
+        k=TOP_K,
+        fetch_k=MMR_FETCH_K,
+        lambda_mult=MMR_LAMBDA,
+        max_distance=MAX_DISTANCE,
+    )
+)
 
-        lambda inputs: retrieve_mmr(
 
-            vector_store=vector_store,
+    # --------------------------------------------------------
+    # 2. Group overlapping retrieval chunks
+    # --------------------------------------------------------
 
-            query=inputs["question"],
-
-            k=TOP_K,
-
-            fetch_k=MMR_FETCH_K,
-
-            lambda_mult=MMR_LAMBDA,
-
-            max_distance=MAX_DISTANCE,
+    source_group_runnable = RunnableLambda(
+        lambda inputs: merge_overlapping_results(
+            inputs["retrieved_results"]
         )
     )
 
 
     # --------------------------------------------------------
-    # Context Runnable
+    # 3. Build context from source groups
     # --------------------------------------------------------
 
     context_runnable = RunnableLambda(
-
         lambda inputs: build_context(
-
-            [
-                document
-                for document, distance
-                in inputs["retrieved_results"]
-            ]
+            inputs["source_groups"]
         )
     )
 
 
     # --------------------------------------------------------
-    # Prepare retrieval + context
+    # 4. Prepare chain inputs
     # --------------------------------------------------------
 
     prepared_chain = (
 
         RunnablePassthrough
-        .assign(
 
+        .assign(
             retrieved_results=
                 retrieval_runnable
         )
 
         .assign(
+            source_groups=
+                source_group_runnable
+        )
 
+        .assign(
             context=
                 context_runnable
         )
@@ -675,7 +921,7 @@ def build_rag_chain(
 
 
     # --------------------------------------------------------
-    # Generation chain
+    # 5. Generation chain
     # --------------------------------------------------------
 
     generation_chain = (
@@ -685,13 +931,9 @@ def build_rag_chain(
         |
 
         RunnableLambda(
-
             lambda prompt_value:
-
                 generate_with_huggingface(
-
                     client=llm_client,
-
                     prompt_value=prompt_value,
                 )
         )
@@ -703,16 +945,14 @@ def build_rag_chain(
 
 
     # --------------------------------------------------------
-    # Answer branch
+    # 6. Answer branch
     # --------------------------------------------------------
 
     def generate_or_fallback(
         inputs,
     ) -> str:
 
-        if not inputs[
-            "retrieved_results"
-        ]:
+        if not inputs["retrieved_results"]:
 
             return FALLBACK_ANSWER
 
@@ -723,7 +963,7 @@ def build_rag_chain(
 
 
     # --------------------------------------------------------
-    # Final chain
+    # 7. Final chain
     # --------------------------------------------------------
 
     final_chain = (
@@ -744,6 +984,14 @@ def build_rag_chain(
                     lambda inputs:
                         inputs[
                             "retrieved_results"
+                        ]
+                ),
+
+            source_groups=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs[
+                            "source_groups"
                         ]
                 ),
         )
@@ -858,55 +1106,55 @@ def answer_question(
         "retrieved_results"
     ]
 
-
-    # --------------------------------------------------------
-    # Sources
-    # --------------------------------------------------------
+    source_groups = result[
+    "source_groups"
+    ]
 
     sources = format_sources(
-        retrieved_results
+    source_groups
     )
-
 
     # --------------------------------------------------------
     # Final response
     # --------------------------------------------------------
 
     return {
+    "answer":
+        result["answer"],
 
-        "answer":
-            result["answer"],
+    "video_id":
+        video_id,
 
-        "video_id":
-            video_id,
+    "sources":
+        sources,
 
-        "sources":
-            sources,
+    "retrieved_chunks":
+        len(retrieved_results),
 
-        "retrieved_chunks":
-            len(retrieved_results),
+    "source_segments":
+        len(source_groups),
 
-        "model":
-            HF_MODEL_ID,
+    "model":
+        HF_MODEL_ID,
 
-        "retrieval_method":
-            "mmr",
+    "retrieval_method":
+        "mmr",
 
-        "retrieval_config":
-            {
-                "top_k":
-                    TOP_K,
+    "retrieval_config":
+        {
+            "top_k":
+                TOP_K,
 
-                "fetch_k":
-                    MMR_FETCH_K,
+            "fetch_k":
+                MMR_FETCH_K,
 
-                "lambda_mult":
-                    MMR_LAMBDA,
+            "lambda_mult":
+                MMR_LAMBDA,
 
-                "max_distance":
-                    MAX_DISTANCE,
-            },
-    }
+            "max_distance":
+                MAX_DISTANCE,
+        },
+}
 
 
 # ============================================================
@@ -974,11 +1222,11 @@ def main():
     for source in result["sources"]:
 
         print(
-
-            f"- Chunk {source['chunk_id']}: "
+            f"- Source {source['source_id']}: "
             f"{format_timestamp(source['start'])}"
             f" → "
-            f"{format_timestamp(source['end'])}"
+            f"{format_timestamp(source['end'])} "
+            f"(chunks: {source['chunk_ids']})"
         )
 
 
