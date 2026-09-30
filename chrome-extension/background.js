@@ -7,8 +7,21 @@
  * 1. Toggle the YouTube AI chat panel when the extension icon
  *    is clicked.
  * 2. Forward chat requests from content.js to FastAPI.
- * 3. Return the complete RAG response, including sources.
+ * 3. Validate requests and video identity.
+ * 4. Handle backend/network errors.
+ * 5. Return the complete RAG response, including sources.
  */
+
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
+const BACKEND_URL =
+    "http://127.0.0.1:8000/chat";
+
+const REQUEST_TIMEOUT_MS =
+    120000;
 
 
 // ============================================================
@@ -18,27 +31,29 @@
 chrome.action.onClicked.addListener(
     async (tab) => {
 
-        if (!tab.id) {
+        const tabId =
+            tab?.id;
+
+        if (
+            typeof tabId !== "number"
+        ) {
             return;
         }
 
+        const tabUrl =
+            tab?.url || "";
 
         // Only operate on YouTube pages.
         if (
-            !tab.url ||
-            !tab.url.startsWith(
-                "https://www.youtube.com/"
-            )
+            !isYouTubeUrl(tabUrl)
         ) {
-
             return;
         }
-
 
         try {
 
             await chrome.tabs.sendMessage(
-                tab.id,
+                tabId,
                 {
                     type: "toggle_chat"
                 }
@@ -70,31 +85,51 @@ chrome.runtime.onMessage.addListener(
             !message ||
             message.type !== "chat"
         ) {
+            return;
+        }
+
+        const videoId =
+            normalizeString(
+                message.video_id
+            );
+
+        const question =
+            normalizeString(
+                message.question
+            );
+
+        // ----------------------------------------------------
+        // Sender information
+        // ----------------------------------------------------
+
+        const senderUrl =
+            sender?.tab?.url || "";
+
+        // ----------------------------------------------------
+        // Validate sender
+        // ----------------------------------------------------
+
+        if (
+            !isYouTubeUrl(senderUrl)
+        ) {
+
+            sendResponse({
+                success: false,
+                error:
+                    "Chat requests must originate from a YouTube page."
+            });
 
             return;
         }
 
-
-        const videoId = (
-            message.video_id || ""
-        ).trim();
-
-
-        const question = (
-            message.question || ""
-        ).trim();
-
-
         // ----------------------------------------------------
-        // Validate extension request
+        // Validate request
         // ----------------------------------------------------
 
         if (!videoId) {
 
             sendResponse({
-
                 success: false,
-
                 error:
                     "No YouTube video ID was found."
             });
@@ -102,13 +137,10 @@ chrome.runtime.onMessage.addListener(
             return;
         }
 
-
         if (!question) {
 
             sendResponse({
-
                 success: false,
-
                 error:
                     "Question cannot be empty."
             });
@@ -116,125 +148,425 @@ chrome.runtime.onMessage.addListener(
             return;
         }
 
+        // ----------------------------------------------------
+        // Verify the video has not changed
+        // ----------------------------------------------------
+
+        const pageVideoId =
+            extractVideoIdFromUrl(
+                senderUrl
+            );
+
+        if (
+            pageVideoId &&
+            pageVideoId !== videoId
+        ) {
+
+            sendResponse({
+                success: false,
+                error:
+                    "The video changed before the request was processed."
+            });
+
+            return;
+        }
 
         // ----------------------------------------------------
-        // Call FastAPI
+        // Run async backend request
         // ----------------------------------------------------
 
-        fetch(
-            "http://127.0.0.1:8000/chat",
+        handleChatRequest(
             {
-                method: "POST",
-
-                headers: {
-                    "Content-Type":
-                        "application/json",
-
-                    "Accept":
-                        "application/json"
-                },
-
-                body: JSON.stringify({
-
-                    video_id:
-                        videoId,
-
-                    question:
-                        question
-                })
-            }
-        )
-
-        .then(
-            async (response) => {
-
-                // ------------------------------------------------
-                // Backend returned an HTTP error
-                // ------------------------------------------------
-
-                if (!response.ok) {
-
-                    let errorMessage =
-                        `Backend returned status ${response.status}.`;
-
-
-                    try {
-
-                        const errorData =
-                            await response.json();
-
-
-                        if (
-                            errorData &&
-                            errorData.detail
-                        ) {
-
-                            errorMessage =
-                                errorData.detail;
-                        }
-
-                    } catch {
-
-                        // Keep the generic HTTP error.
-                    }
-
-
-                    throw new Error(
-                        errorMessage
-                    );
-                }
-
-
-                return response.json();
-            }
-        )
-
-        .then(
-            (data) => {
-
-                sendResponse({
-
-                    success: true,
-
-                    answer:
-                        data.answer || "",
-
-                    video_id:
-                        data.video_id || videoId,
-
-                    sources:
-                        Array.isArray(data.sources)
-                            ? data.sources
-                            : [],
-
-                    retrieved_chunks:
-                        data.retrieved_chunks || 0
-                });
-            }
-        )
-
-        .catch(
-            (error) => {
-
-                console.error(
-                    "Backend error:",
-                    error
-                );
-
-
-                sendResponse({
-
-                    success: false,
-
-                    error:
-                        error.message ||
-                        "Unable to contact the backend."
-                });
-            }
+                videoId,
+                question
+            },
+            sendResponse
         );
 
-
-        // Keep the message channel open while fetch runs.
+        // Important:
+        // Keep the message channel open while the async
+        // FastAPI request is running.
         return true;
     }
 );
+
+
+// ============================================================
+// 3. HANDLE CHAT REQUEST
+// ============================================================
+
+async function handleChatRequest(
+    {
+        videoId,
+        question
+    },
+    sendResponse
+) {
+
+    const controller =
+        new AbortController();
+
+    const timeoutId =
+        setTimeout(
+            () => {
+                controller.abort();
+            },
+            REQUEST_TIMEOUT_MS
+        );
+
+    try {
+
+        const response =
+            await fetch(
+                BACKEND_URL,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json",
+
+                        "Accept":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        video_id:
+                            videoId,
+
+                        question:
+                            question
+                    }),
+
+                    signal:
+                        controller.signal
+                }
+            );
+
+        // ----------------------------------------------------
+        // Parse response
+        // ----------------------------------------------------
+
+        const data =
+            await parseResponse(
+                response
+            );
+
+        // ----------------------------------------------------
+        // HTTP error
+        // ----------------------------------------------------
+
+        if (!response.ok) {
+
+            throw new Error(
+                extractBackendError(data) ||
+                `Backend returned status ${response.status}.`
+            );
+        }
+
+        // ----------------------------------------------------
+        // Validate backend response
+        // ----------------------------------------------------
+
+        if (
+            !data ||
+            typeof data !== "object"
+        ) {
+
+            throw new Error(
+                "The backend returned an invalid response."
+            );
+        }
+
+        const answer =
+            typeof data.answer === "string"
+                ? data.answer.trim()
+                : "";
+
+        if (!answer) {
+
+            throw new Error(
+                "The backend returned an empty answer."
+            );
+        }
+
+        // ----------------------------------------------------
+        // Return complete RAG response
+        // ----------------------------------------------------
+
+        sendResponse({
+
+            success:
+                true,
+
+            answer:
+                answer,
+
+            video_id:
+                typeof data.video_id === "string"
+                    ? data.video_id
+                    : videoId,
+
+            sources:
+                Array.isArray(data.sources)
+                    ? data.sources
+                    : [],
+
+            retrieved_chunks:
+                normalizeNumber(
+                    data.retrieved_chunks
+                ),
+
+            source_segments:
+                normalizeNumber(
+                    data.source_segments
+                ),
+
+            model:
+                typeof data.model === "string"
+                    ? data.model
+                    : "",
+
+            retrieval_method:
+                typeof data.retrieval_method === "string"
+                    ? data.retrieval_method
+                    : "",
+
+            retrieval_config:
+                data.retrieval_config &&
+                typeof data.retrieval_config === "object"
+                    ? data.retrieval_config
+                    : {}
+        });
+
+    } catch (error) {
+
+        console.error(
+            "YouTube AI backend request failed:",
+            error
+        );
+
+        let errorMessage =
+            "Unable to contact the backend.";
+
+        if (
+            error?.name === "AbortError"
+        ) {
+
+            errorMessage =
+                "The backend request timed out. Please try again.";
+
+        } else if (
+            error instanceof Error &&
+            error.message
+        ) {
+
+            errorMessage =
+                error.message;
+        }
+
+        sendResponse({
+
+            success:
+                false,
+
+            error:
+                errorMessage
+        });
+
+    } finally {
+
+        clearTimeout(
+            timeoutId
+        );
+    }
+}
+
+
+// ============================================================
+// 4. RESPONSE HELPERS
+// ============================================================
+
+async function parseResponse(
+    response
+) {
+
+    const contentType =
+        response.headers.get(
+            "content-type"
+        ) || "";
+
+    if (
+        contentType.includes(
+            "application/json"
+        )
+    ) {
+
+        return response.json();
+    }
+
+    const text =
+        await response.text();
+
+    if (!text.trim()) {
+        return null;
+    }
+
+    return {
+        detail:
+            text.trim()
+    };
+}
+
+
+function extractBackendError(
+    data
+) {
+
+    if (
+        !data ||
+        typeof data !== "object"
+    ) {
+        return "";
+    }
+
+    if (
+        typeof data.detail === "string"
+    ) {
+
+        return data.detail;
+    }
+
+    if (
+        typeof data.error === "string"
+    ) {
+
+        return data.error;
+    }
+
+    return "";
+}
+
+
+// ============================================================
+// 5. VALIDATION HELPERS
+// ============================================================
+
+function normalizeString(
+    value
+) {
+
+    if (
+        typeof value !== "string"
+    ) {
+        return "";
+    }
+
+    return value.trim();
+}
+
+
+function normalizeNumber(
+    value
+) {
+
+    const number =
+        Number(value);
+
+    return Number.isFinite(number)
+        ? number
+        : 0;
+}
+
+
+function isYouTubeUrl(
+    value
+) {
+
+    if (
+        typeof value !== "string" ||
+        !value
+    ) {
+        return false;
+    }
+
+    try {
+
+        const url =
+            new URL(value);
+
+        return (
+            url.protocol === "https:" &&
+            (
+                url.hostname ===
+                    "www.youtube.com" ||
+                url.hostname ===
+                    "youtube.com"
+            )
+        );
+
+    } catch {
+
+        return false;
+    }
+}
+
+
+function extractVideoIdFromUrl(
+    value
+) {
+
+    if (
+        !isYouTubeUrl(value)
+    ) {
+        return null;
+    }
+
+    try {
+
+        const url =
+            new URL(value);
+
+        // Standard watch URL:
+        // /watch?v=VIDEO_ID
+
+        const watchVideoId =
+            url.searchParams.get("v");
+
+        if (watchVideoId) {
+
+            return watchVideoId;
+        }
+
+        // Supported paths:
+        // /shorts/VIDEO_ID
+        // /embed/VIDEO_ID
+        // /live/VIDEO_ID
+
+        const pathParts =
+            url.pathname
+                .split("/")
+                .filter(Boolean);
+
+        if (
+            pathParts.length >= 2 &&
+            (
+                pathParts[0] ===
+                    "shorts" ||
+                pathParts[0] ===
+                    "embed" ||
+                pathParts[0] ===
+                    "live"
+            )
+        ) {
+
+            return pathParts[1];
+        }
+
+        return null;
+
+    } catch {
+
+        return null;
+    }
+}

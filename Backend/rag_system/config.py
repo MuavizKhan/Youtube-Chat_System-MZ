@@ -176,9 +176,11 @@ HF_PROVIDER = os.getenv(
     "auto",
 )
 
-HF_MAX_TOKENS = _get_int(
-    "HF_MAX_TOKENS",
-    500,
+HF_MAX_TOKENS = int(
+    os.getenv(
+        "HF_MAX_TOKENS",
+        "800"
+    )
 )
 
 HF_TEMPERATURE = _get_float(
