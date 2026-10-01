@@ -27,7 +27,6 @@ from typing import Any
 
 from huggingface_hub import InferenceClient
 
-from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import (
@@ -397,6 +396,86 @@ def merge_overlapping_results(
     return groups
 
 
+# Add overlap-aware text reconstruction
+def merge_overlapping_text(
+    texts: list[str],
+    min_overlap_chars: int = 40,
+    max_overlap_chars: int = 400,
+) -> str:
+    """
+    Reconstruct transcript text from overlapping chunks.
+
+    The indexing pipeline uses overlapping text chunks.
+    This function removes duplicated boundary text while
+    preserving the original chronological content.
+
+    Example:
+
+        Chunk A:
+            "...AlphaGo used reinforcement learning..."
+
+        Chunk B:
+            "reinforcement learning...self-play..."
+
+    becomes:
+
+        "...AlphaGo used reinforcement learning...self-play..."
+    """
+
+    if not texts:
+        return ""
+
+    merged = texts[0].strip()
+
+    for text in texts[1:]:
+
+        current = text.strip()
+
+        if not current:
+            continue
+
+        # ----------------------------------------------------
+        # Exact suffix/prefix overlap detection
+        # ----------------------------------------------------
+
+        max_possible_overlap = min(
+            len(merged),
+            len(current),
+            max_overlap_chars,
+        )
+
+        overlap_found = 0
+
+        for overlap_size in range(
+            max_possible_overlap,
+            min_overlap_chars - 1,
+            -1,
+        ):
+
+            if (
+                merged[-overlap_size:]
+                ==
+                current[:overlap_size]
+            ):
+
+                overlap_found = overlap_size
+                break
+
+        # ----------------------------------------------------
+        # Merge
+        # ----------------------------------------------------
+
+        if overlap_found > 0:
+
+            merged += current[overlap_found:]
+
+        else:
+
+            merged += "\n\n" + current
+
+    return merged
+
+
 # ============================================================
 # 4. FORMAT ONE DOCUMENT
 # ============================================================
@@ -484,84 +563,7 @@ def format_source_group(
         f"{transcript_text}"
     )
 
-# Add overlap-aware text reconstruction
-def merge_overlapping_text(
-    texts: list[str],
-    min_overlap_chars: int = 40,
-    max_overlap_chars: int = 400,
-) -> str:
-    """
-    Reconstruct transcript text from overlapping chunks.
 
-    The indexing pipeline uses overlapping text chunks.
-    This function removes duplicated boundary text while
-    preserving the original chronological content.
-
-    Example:
-
-        Chunk A:
-            "...AlphaGo used reinforcement learning..."
-
-        Chunk B:
-            "reinforcement learning...self-play..."
-
-    becomes:
-
-        "...AlphaGo used reinforcement learning...self-play..."
-    """
-
-    if not texts:
-        return ""
-
-    merged = texts[0].strip()
-
-    for text in texts[1:]:
-
-        current = text.strip()
-
-        if not current:
-            continue
-
-        # ----------------------------------------------------
-        # Exact suffix/prefix overlap detection
-        # ----------------------------------------------------
-
-        max_possible_overlap = min(
-            len(merged),
-            len(current),
-            max_overlap_chars,
-        )
-
-        overlap_found = 0
-
-        for overlap_size in range(
-            max_possible_overlap,
-            min_overlap_chars - 1,
-            -1,
-        ):
-
-            if (
-                merged[-overlap_size:]
-                ==
-                current[:overlap_size]
-            ):
-
-                overlap_found = overlap_size
-                break
-
-        # ----------------------------------------------------
-        # Merge
-        # ----------------------------------------------------
-
-        if overlap_found > 0:
-
-            merged += current[overlap_found:]
-
-        else:
-
-            merged += "\n\n" + current
-
-    return merged
 
 # ============================================================
 # 5. BUILD CONTEXT
@@ -1221,8 +1223,8 @@ def answer_question(
     "model":
         HF_MODEL_ID,
 
-    "retrieval_method":
-        "mmr",
+    "retrieval_method": 
+        "question_aware_mmr_lexical",
 
     "retrieval_config":
         {

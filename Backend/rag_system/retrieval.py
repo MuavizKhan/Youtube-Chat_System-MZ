@@ -19,7 +19,7 @@ This file does NOT:
 - call the generation model
 - handle FastAPI
 """
-
+import re
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -28,7 +28,7 @@ import numpy as np
 
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-import re
+
 
 from .config import (
     EMBEDDING_MODEL,

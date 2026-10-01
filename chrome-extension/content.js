@@ -534,7 +534,7 @@ function appendMessage(text, type) {
     const message = document.createElement("div");
 
     message.className =
-        `youtube-ai-message ${type}`;
+        `chat-message ${type}`;
 
     if (type === "assistant") {
 

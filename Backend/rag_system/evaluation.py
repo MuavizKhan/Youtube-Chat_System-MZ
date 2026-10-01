@@ -10,6 +10,8 @@ It does NOT call the generation model.
 For each test question it reports:
 
 - retrieved chunk count
+- expected retrieval behavior
+- retrieval pass/fail status
 - FAISS distance
 - chunk ID
 - timestamp
@@ -29,7 +31,7 @@ from .config import (
 from .retrieval import (
     extract_video_id,
     load_vector_store,
-    retrieve_mmr,
+    retrieve_question_context,
 )
 
 
@@ -155,6 +157,19 @@ TEST_QUESTIONS = [
     },
 ]
 
+# ============================================================
+# EXPECTED RETRIEVAL BEHAVIOR
+# ============================================================
+
+EXPECTED_RETRIEVAL = {
+    **{
+        f"Q{i:02d}": "must_retrieve"
+        for i in range(1, 12)
+    },
+
+    "Q12": "may_retrieve",
+    "Q13": "must_not_retrieve",
+}
 
 # ============================================================
 # DISPLAY HELPERS
@@ -222,6 +237,58 @@ def display_results(
         )
 
 
+
+# ============================================================
+# RETRIEVAL RESULT CHECK
+# ============================================================
+
+def evaluate_retrieval_result(
+    question_id: str,
+    retrieved_count: int,
+) -> tuple[bool, str]:
+    """
+    Determine whether the retrieval result matches
+    the expected behavior for the test question.
+    """
+
+    expected = EXPECTED_RETRIEVAL[question_id]
+
+    if expected == "must_retrieve":
+
+        passed = retrieved_count > 0
+
+        message = (
+            "Relevant retrieval found."
+            if passed
+            else "Expected retrieval, but nothing was retrieved."
+        )
+
+        return passed, message
+
+    if expected == "may_retrieve":
+
+        return True, (
+            "Retrieval may return context; "
+            "answerability is validated by generation."
+        )
+
+    if expected == "must_not_retrieve":
+
+        passed = retrieved_count == 0
+
+        message = (
+            "Correctly rejected as unrelated."
+            if passed
+            else "Unexpected context retrieved."
+        )
+
+        return passed, message
+
+    raise ValueError(
+        f"Unknown retrieval expectation: {expected}"
+    )
+
+
 # ============================================================
 # EVALUATION
 # ============================================================
@@ -243,7 +310,7 @@ def evaluate_video(
     )
 
     print(
-        "RAG RETRIEVAL EVALUATION"
+        "RAG RETRIEVAL REGRESSION EVALUATION"
     )
 
     print(
@@ -257,7 +324,11 @@ def evaluate_video(
 
 
     print(
-        f"\nConfiguration:"
+        f"\nRetrieval Configuration:"
+    )
+    
+    print(
+        "  strategy    = question-aware retrieval"
     )
 
     print(
@@ -293,67 +364,64 @@ def evaluate_video(
     for test_case in TEST_QUESTIONS:
 
         question_id = test_case["id"]
-
         question_type = test_case["type"]
-
         question = test_case["question"]
-
 
         print(
             "\n" + "#" * 80
         )
 
-
         print(
             f"{question_id} | {question_type}"
         )
-
 
         print(
             f"QUESTION: {question}"
         )
 
-
         print(
             "#" * 80
         )
 
-
-        results = retrieve_mmr(
-
+        results = retrieve_question_context(
             vector_store=vector_store,
-
             query=question,
-
-            k=TOP_K,
-
-            fetch_k=MMR_FETCH_K,
-
-            lambda_mult=MMR_LAMBDA,
-
-            max_distance=MAX_DISTANCE,
         )
-
-
+        
         display_results(
             results
         )
+        retrieved_count = len(results)
 
+        passed, evaluation_message = (
+            evaluate_retrieval_result(
+                question_id=question_id,
+                retrieved_count=retrieved_count,
+            )
+        )
+
+        print(
+            f"\nExpected: "
+            f"{EXPECTED_RETRIEVAL[question_id]}"
+        )
+
+        print(
+            f"Result: "
+            f"{'PASS' if passed else 'FAIL'}"
+        )
+
+        print(
+            f"Evaluation: "
+            f"{evaluation_message}"
+        )
 
         evaluation_results.append(
-
             {
-                "id":
-                    question_id,
-
-                "type":
-                    question_type,
-
-                "question":
-                    question,
-
-                "retrieved":
-                    len(results),
+                "id": question_id,
+                "type": question_type,
+                "question": question,
+                "retrieved": retrieved_count,
+                "passed": passed,
             }
         )
 
@@ -375,15 +443,36 @@ def evaluate_video(
     )
 
 
+    passed_count = sum(
+        result["passed"]
+        for result in evaluation_results
+    )
+
+    total_count = len(
+        evaluation_results
+    )
+
     for result in evaluation_results:
 
         print(
-
             f"\n{result['id']} | "
             f"{result['type']} | "
-            f"Retrieved: "
-            f"{result['retrieved']}"
+            f"Retrieved: {result['retrieved']} | "
+            f"{'PASS' if result['passed'] else 'FAIL'}"
         )
+
+    print(
+        "\n" + "-" * 80
+    )
+
+    print(
+        f"Evaluation Result: "
+        f"{passed_count}/{total_count} tests passed"
+    )
+
+    print(
+        "-" * 80
+    )
 
 
 # ============================================================

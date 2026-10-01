@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
-.env
+.env.example
 *.pdf
 
 Backend/rag_system/vector_stores/
