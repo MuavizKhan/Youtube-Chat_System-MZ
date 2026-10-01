@@ -334,11 +334,22 @@ def chat(
 
         return result
 
+
     except FileNotFoundError as error:
+
+        logger.warning(
+            "Vector store not found. "
+            "request_id=%s video_id=%s",
+            http_request.state.request_id,
+            canonical_video_id,
+        )
 
         raise HTTPException(
             status_code=404,
-            detail=str(error),
+            detail=(
+                "No indexed transcript is available "
+                "for this video."
+            ),
         ) from error
 
     except ValueError as error:
@@ -350,9 +361,19 @@ def chat(
 
     except RuntimeError as error:
 
+        logger.exception(
+            "Upstream RAG/Hugging Face error. "
+            "request_id=%s video_id=%s",
+            http_request.state.request_id,
+            canonical_video_id,
+        )
+
         raise HTTPException(
             status_code=502,
-            detail=str(error),
+            detail=(
+                "The AI service could not process "
+                "the request."
+            ),
         ) from error
 
     except Exception as error:
