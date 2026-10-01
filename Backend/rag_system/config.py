@@ -86,6 +86,76 @@ def _get_float(
         ) from error
 
 
+def _get_list(
+    name: str,
+    default: list[str],
+) -> list[str]:
+    """
+    Read a comma-separated environment variable
+    and return a cleaned list of values.
+    """
+
+    value = os.getenv(name)
+
+    if value is None or not value.strip():
+        return default.copy()
+
+    return [
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    ]
+
+
+# ============================================================
+# APPLICATION
+# ============================================================
+
+APP_ENV = os.getenv(
+    "APP_ENV",
+    "development",
+).strip().lower()
+
+
+if APP_ENV not in {
+    "development",
+    "production",
+    "test",
+}:
+
+    raise RuntimeError(
+        "APP_ENV must be one of: "
+        "development, production, test."
+    )
+
+
+CORS_ALLOW_ORIGINS = _get_list(
+    "CORS_ALLOW_ORIGINS",
+    ["*"] if APP_ENV == "development" else [],
+)
+
+
+if "*" in CORS_ALLOW_ORIGINS and len(
+    CORS_ALLOW_ORIGINS
+) > 1:
+
+    raise RuntimeError(
+        "CORS_ALLOW_ORIGINS cannot combine "
+        "'*' with explicit origins."
+    )
+
+
+if (
+    APP_ENV == "production"
+    and not CORS_ALLOW_ORIGINS
+):
+
+    raise RuntimeError(
+        "CORS_ALLOW_ORIGINS must be configured "
+        "when APP_ENV=production."
+    )
+
+
 # ============================================================
 # YOUTUBE / INDEXING
 # ============================================================
@@ -176,11 +246,9 @@ HF_PROVIDER = os.getenv(
     "auto",
 )
 
-HF_MAX_TOKENS = int(
-    os.getenv(
-        "HF_MAX_TOKENS",
-        "800"
-    )
+HF_MAX_TOKENS = _get_int(
+    "HF_MAX_TOKENS",
+    800,
 )
 
 HF_TEMPERATURE = _get_float(

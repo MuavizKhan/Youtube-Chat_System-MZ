@@ -41,6 +41,37 @@ from .config import (
 
 
 # ============================================================
+# YOUTUBE VIDEO ID VALIDATION
+# ============================================================
+
+YOUTUBE_VIDEO_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9_-]{11}$"
+)
+
+
+def validate_video_id(
+    video_id: str,
+) -> str:
+    """
+    Validate and return a canonical YouTube video ID.
+
+    YouTube video IDs are expected to contain exactly
+    11 characters using letters, digits, underscore, or hyphen.
+    """
+
+    video_id = video_id.strip()
+
+    if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(video_id):
+
+        raise ValueError(
+            "Invalid YouTube video ID."
+        )
+
+    return video_id
+
+
+
+# ============================================================
 # 1. EXTRACT VIDEO ID
 # ============================================================
 
@@ -73,7 +104,9 @@ def extract_video_id(
 
     if "://" not in video_reference:
 
-        return video_reference
+        return validate_video_id(
+            video_reference
+        )
 
 
     # --------------------------------------------------------
@@ -109,7 +142,9 @@ def extract_video_id(
 
         if video_ids:
 
-            return video_ids[0]
+            return validate_video_id(
+                video_ids[0]
+            )
 
 
     # --------------------------------------------------------
@@ -138,7 +173,9 @@ def extract_video_id(
                 "live",
             }:
 
-                return path_parts[1]
+                return validate_video_id(
+                    path_parts[1]
+                )
 
 
     # --------------------------------------------------------
@@ -158,7 +195,9 @@ def extract_video_id(
 
         if path_parts:
 
-            return path_parts[0]
+            return validate_video_id(
+                path_parts[0]
+            )
 
 
     raise ValueError(
