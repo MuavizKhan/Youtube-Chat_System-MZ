@@ -22,6 +22,7 @@ StrOutputParser
 Final Answer + Sources
 """
 
+import time
 import argparse
 from typing import Any
 
@@ -46,6 +47,8 @@ from .config import (
     MMR_LAMBDA,
     SOURCE_MERGE_GAP_SECONDS,
     TOP_K,
+    HF_MAX_RETRIES,
+    HF_RETRY_DELAY_SECONDS,
 )
 
 from .retrieval import (
@@ -697,118 +700,103 @@ def generate_with_huggingface(
     """
     Send the LangChain prompt to Hugging Face and return
     the generated text.
+
+    Empty model responses are retried because the inference
+    provider can occasionally return an empty content field.
+    Configuration/request errors are translated and raised
+    immediately.
     """
 
-    messages = prompt_to_messages(
-        prompt_value
-    )
+    messages = prompt_to_messages(prompt_value)
 
+    for attempt in range(HF_MAX_RETRIES + 1):
 
-    try:
+        try:
 
-        response = (
-
-            client
-            .chat
-            .completions
-            .create(
-
-                model=HF_MODEL_ID,
-
-                messages=messages,
-
-                max_tokens=HF_MAX_TOKENS,
-
-                temperature=HF_TEMPERATURE,
+            response = (
+                client
+                .chat
+                .completions
+                .create(
+                    model=HF_MODEL_ID,
+                    messages=messages,
+                    max_tokens=HF_MAX_TOKENS,
+                    temperature=HF_TEMPERATURE,
+                )
             )
-        )
 
+        except Exception as error:
 
-    except Exception as error:
+            error_text = str(error).lower()
 
-        error_text = str(
-            error
-        ).lower()
+            if "model_not_supported" in error_text:
 
+                raise RuntimeError(
+                    "Hugging Face could not find an enabled "
+                    "Inference Provider for the selected model.\n\n"
+                    f"Model: {HF_MODEL_ID}\n"
+                    f"Provider policy: {HF_PROVIDER}\n\n"
+                    "Check the selected model/provider in Hugging Face."
+                ) from error
 
-        if (
-            "model_not_supported"
-            in error_text
-        ):
+            if (
+                "401" in error_text
+                or "unauthorized" in error_text
+            ):
 
-            raise RuntimeError(
-                "Hugging Face could not find an enabled "
-                "Inference Provider for the selected model.\n\n"
-                f"Model: {HF_MODEL_ID}\n"
-                f"Provider policy: {HF_PROVIDER}\n\n"
-                "Check the selected model/provider in Hugging Face."
-            ) from error
+                raise RuntimeError(
+                    "Hugging Face authentication failed.\n\n"
+                    "Check HF_TOKEN in .env."
+                ) from error
 
+            if (
+                "403" in error_text
+                or "forbidden" in error_text
+            ):
 
-        if (
-            "401" in error_text
-            or "unauthorized" in error_text
-        ):
-
-            raise RuntimeError(
-                "Hugging Face authentication failed.\n\n"
-                "Check HF_TOKEN in .env."
-            ) from error
-
-
-        if (
-            "403" in error_text
-            or "forbidden" in error_text
-        ):
+                raise RuntimeError(
+                    "Hugging Face rejected the inference request.\n\n"
+                    "Check token permissions and the selected "
+                    "model/provider."
+                ) from error
 
             raise RuntimeError(
-                "Hugging Face rejected the inference request.\n\n"
-                "Check token permissions and the selected "
-                "model/provider."
+                f"Hugging Face generation failed: {error}"
             ) from error
 
+        try:
+
+            answer = (
+                response
+                .choices[0]
+                .message
+                .content
+            )
+
+        except (
+            AttributeError,
+            IndexError,
+            TypeError,
+        ) as error:
+
+            raise RuntimeError(
+                "Could not extract the generated answer "
+                "from the Hugging Face response."
+            ) from error
+
+        if answer and str(answer).strip():
+
+            return str(answer).strip()
+
+        if attempt < HF_MAX_RETRIES:
+
+            time.sleep(HF_RETRY_DELAY_SECONDS)
+            continue
 
         raise RuntimeError(
-            f"Hugging Face generation failed: {error}"
-        ) from error
-
-
-    # --------------------------------------------------------
-    # Extract answer
-    # --------------------------------------------------------
-
-    try:
-
-        answer = (
-            response
-            .choices[0]
-            .message
-            .content
+            "The Hugging Face model returned an empty answer "
+            f"after {HF_MAX_RETRIES + 1} attempts."
         )
-
-    except (
-        AttributeError,
-        IndexError,
-        TypeError,
-    ) as error:
-
-        raise RuntimeError(
-            "Could not extract the generated answer "
-            "from the Hugging Face response."
-        ) from error
-
-
-    if not answer:
-
-        raise RuntimeError(
-            "The Hugging Face model returned an empty answer."
-        )
-
-
-    return str(
-        answer
-    ).strip()
-
 
 # ============================================================
 # 9. FORMAT SOURCES

@@ -299,6 +299,29 @@ HF_TEMPERATURE = _get_float(
     0.1,
 )
 
+HF_MAX_RETRIES = _get_int(
+    "HF_MAX_RETRIES",
+    2,
+)
+
+HF_RETRY_DELAY_SECONDS = _get_float(
+    "HF_RETRY_DELAY_SECONDS",
+    1.0,
+)
+
+if HF_MAX_RETRIES < 0:
+
+    raise RuntimeError(
+        "HF_MAX_RETRIES cannot be negative."
+    )
+
+
+if HF_RETRY_DELAY_SECONDS < 0:
+
+    raise RuntimeError(
+        "HF_RETRY_DELAY_SECONDS cannot be negative."
+    )
+
 
 # ============================================================
 # VALIDATION

@@ -68,11 +68,19 @@ def test_prompt_role_mapping():
 
 
 class FakeCompletions:
-    def __init__(self,response=None,error=None):
-        self.response=response; self.error=error; self.kwargs=None
-    def create(self,**kwargs):
-        self.kwargs=kwargs
-        if self.error is not None: raise self.error
+    def __init__(self, response=None, error=None):
+        self.response = response
+        self.error = error
+        self.kwargs = None
+        self.call_count = 0
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        self.call_count += 1
+
+        if self.error is not None:
+            raise self.error
+
         return self.response
 
 
@@ -113,11 +121,217 @@ def test_generation_rejects_malformed_response():
 
 
 @pytest.mark.unit
-def test_generation_rejects_empty_answer():
-    fake,_=client(response=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))]))
-    prompt=chain.RAG_PROMPT.invoke({"context":"X","question":"Q"})
-    with pytest.raises(RuntimeError,match="empty answer"):
-        chain.generate_with_huggingface(fake,prompt)
+def test_generation_rejects_empty_answer(monkeypatch):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 0)
+
+    fake, completions = client(
+        response=SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="")
+                )
+            ]
+        )
+    )
+
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="empty answer",
+    ):
+        chain.generate_with_huggingface(
+            fake,
+            prompt,
+        )
+
+    assert completions.call_count == 1
+
+@pytest.mark.unit
+def test_generation_retries_empty_answer_then_succeeds(monkeypatch):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "HF_RETRY_DELAY_SECONDS", 0)
+
+    responses = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="")
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="grounded answer"
+                    )
+                )
+            ]
+        ),
+    ]
+
+    class SequenceCompletions:
+        def __init__(self):
+            self.call_count = 0
+            self.kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            response = responses[
+                min(
+                    self.call_count,
+                    len(responses) - 1,
+                )
+            ]
+            self.call_count += 1
+            return response
+
+    completions = SequenceCompletions()
+
+    fake = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=completions
+        )
+    )
+
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    assert (
+        chain.generate_with_huggingface(
+            fake,
+            prompt,
+        )
+        == "grounded answer"
+    )
+
+    assert completions.call_count == 2
+
+
+@pytest.mark.unit
+def test_generation_retries_multiple_empty_answers_then_succeeds(
+    monkeypatch,
+):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "HF_RETRY_DELAY_SECONDS", 0)
+
+    responses = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="")
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="   ")
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="grounded answer"
+                    )
+                )
+            ]
+        ),
+    ]
+
+    class SequenceCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            response = responses[self.call_count]
+            self.call_count += 1
+            return response
+
+    completions = SequenceCompletions()
+
+    fake = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=completions
+        )
+    )
+
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    assert (
+        chain.generate_with_huggingface(
+            fake,
+            prompt,
+        )
+        == "grounded answer"
+    )
+
+    assert completions.call_count == 3
+
+
+@pytest.mark.unit
+def test_generation_exhausts_empty_answer_retries(monkeypatch):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "HF_RETRY_DELAY_SECONDS", 0)
+
+    empty_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="")
+            )
+        ]
+    )
+
+    class EmptyCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            return empty_response
+
+    completions = EmptyCompletions()
+
+    fake = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=completions
+        )
+    )
+
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="empty answer after 3 attempts",
+    ):
+        chain.generate_with_huggingface(
+            fake,
+            prompt,
+        )
+
+    assert completions.call_count == 3
 
 
 @pytest.mark.unit
