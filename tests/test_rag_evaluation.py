@@ -1,10 +1,8 @@
 import pytest
 
 from Backend.rag_system.chain import FALLBACK_ANSWER
-from Backend.rag_system.rag_evaluation import (
-    EVALUATION_CASES,
-    evaluate_response_contract,
-)
+from Backend.rag_system.rag_evaluation import EVALUATION_CASES
+from Backend.rag_system.metrics import evaluate_response_contract
 
 
 @pytest.mark.regression

@@ -25,10 +25,10 @@ class DeterministicQualityResult:
 
 
 _INTERNAL_SOURCE_PATTERNS = (
-    re.compile(r"[SOURCEs+d+]", re.IGNORECASE),
-    re.compile(r"sources+d+", re.IGNORECASE),
-    re.compile(r"videos+ids*:", re.IGNORECASE),
-    re.compile(r"timestamps*:", re.IGNORECASE),
+    re.compile(r"\[SOURCE\s+\d+\]", re.IGNORECASE),
+    re.compile(r"\bSource\s+\d+\b", re.IGNORECASE),
+    re.compile(r"\bVideo\s+ID\s*:", re.IGNORECASE),
+    re.compile(r"\bTimestamp\s*:", re.IGNORECASE),
 )
 
 
