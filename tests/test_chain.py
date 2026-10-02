@@ -51,7 +51,8 @@ def test_format_source_group_deduplicates_chunks():
     },1)
     assert "[SOURCE 1]" in formatted
     assert "00:10 - 01:20" in formatted
-    assert "Alpha" in formatted and "Beta" in formatted
+    assert "Alpha" in formatted
+    assert "Beta" not in formatted
 
 
 @pytest.mark.unit
