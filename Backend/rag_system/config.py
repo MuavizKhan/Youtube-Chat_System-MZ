@@ -291,13 +291,31 @@ HF_PROVIDER = os.getenv(
 
 HF_MAX_TOKENS = _get_int(
     "HF_MAX_TOKENS",
-    800,
+    1200,
 )
 
 HF_TEMPERATURE = _get_float(
     "HF_TEMPERATURE",
     0.1,
 )
+
+HF_REASONING_EFFORT = os.getenv(
+    "HF_REASONING_EFFORT",
+    "low",
+).strip().lower()
+
+if HF_REASONING_EFFORT not in {
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+}:
+    raise RuntimeError(
+        "HF_REASONING_EFFORT must be one of: "
+        "none, minimal, low, medium, high, xhigh."
+    )
 
 HF_MAX_RETRIES = _get_int(
     "HF_MAX_RETRIES",

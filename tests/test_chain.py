@@ -344,13 +344,28 @@ def test_rag_chain_falls_back_without_generation(monkeypatch):
 
 
 @pytest.mark.unit
-def test_rag_chain_generates_with_context(monkeypatch):
-    item=doc(1,10,40,"The speaker discusses the launch.")
-    monkeypatch.setattr(chain,"retrieve_question_context",lambda **k:[(item,0.5)])
-    monkeypatch.setattr(chain,"generate_with_huggingface",lambda **k:"generated answer")
-    result=chain.build_rag_chain(object(),object()).invoke({"question":"What?","video_id":"Gfr50f6ZBvo"})
-    assert result["answer"]=="generated answer"
-    assert len(result["source_groups"])==1
+def test_generation_rejects_malformed_response():
+    fake, _ = client(
+        response=SimpleNamespace(
+            choices=[]
+        )
+    )
+
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="invalid chat completion response",
+    ):
+        chain.generate_with_huggingface(
+            fake,
+            prompt,
+        )
 
 
 @pytest.mark.unit

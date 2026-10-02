@@ -22,6 +22,7 @@ StrOutputParser
 Final Answer + Sources
 """
 
+
 import time
 import argparse
 from typing import Any
@@ -40,6 +41,7 @@ from .config import (
     HF_MAX_TOKENS,
     HF_MODEL_ID,
     HF_PROVIDER,
+    HF_REASONING_EFFORT,
     HF_TEMPERATURE,
     HF_TOKEN,
     MAX_DISTANCE,
@@ -655,13 +657,21 @@ def prompt_to_messages(
         role = message.type
 
 
-        if role == "human":
+        ROLE_MAP = {
+            "system": "system",
+            "human": "user",
+            "ai": "assistant",
+        }
 
-            role = "user"
+        try:
+            role = ROLE_MAP[message.type]
 
-        elif role == "ai":
+        except KeyError as error:
 
-            role = "assistant"
+            raise RuntimeError(
+                "Unsupported LangChain message role: "
+                f"{message.type!r}"
+            ) from error
 
 
         content = message.content
@@ -687,6 +697,98 @@ def prompt_to_messages(
 
 
     return messages
+
+# response extractor
+def extract_huggingface_answer(response) -> str:
+    """
+    Extract the user-visible answer from a Hugging Face
+    Chat Completions response.
+
+    Raises RuntimeError when the response structure is invalid
+    or contains no visible answer.
+    """
+
+    try:
+        choice = response.choices[0]
+        message = choice.message
+    except (
+        AttributeError,
+        IndexError,
+        TypeError,
+    ) as error:
+
+        raise RuntimeError(
+            "Hugging Face returned an invalid chat completion response."
+        ) from error
+
+    content = getattr(
+        message,
+        "content",
+        None,
+    )
+
+    if content is None:
+        return ""
+
+    if not isinstance(content, str):
+        content = str(content)
+
+    return content.strip()
+
+# capture response diagnostics
+def get_huggingface_response_diagnostics(
+    response,
+) -> dict[str, object]:
+    """
+    Extract safe diagnostic metadata from a Hugging Face
+    Chat Completions response.
+
+    This function intentionally excludes prompt content,
+    transcript content, reasoning content, and credentials.
+    """
+
+    try:
+        choice = response.choices[0]
+        message = choice.message
+
+    except (
+        AttributeError,
+        IndexError,
+        TypeError,
+    ):
+
+        return {
+            "finish_reason": None,
+            "content_length": 0,
+            "reasoning_length": 0,
+        }
+
+    content = getattr(
+        message,
+        "content",
+        None,
+    )
+
+    reasoning = getattr(
+        message,
+        "reasoning",
+        None,
+    )
+
+    return {
+        "finish_reason":
+            getattr(
+                choice,
+                "finish_reason",
+                None,
+            ),
+
+        "content_length":
+            len(content or ""),
+
+        "reasoning_length":
+            len(reasoning or ""),
+    }
 
 
 # ============================================================
@@ -722,6 +824,9 @@ def generate_with_huggingface(
                     messages=messages,
                     max_tokens=HF_MAX_TOKENS,
                     temperature=HF_TEMPERATURE,
+                    extra_body={
+                        "reasoning_effort": HF_REASONING_EFFORT,
+                    },
                 )
             )
 
@@ -764,38 +869,43 @@ def generate_with_huggingface(
                 f"Hugging Face generation failed: {error}"
             ) from error
 
-        try:
+        # --------------------------------------------------------
+        # Extract visible model answer
+        # --------------------------------------------------------
 
-            answer = (
-                response
-                .choices[0]
-                .message
-                .content
-            )
+        answer = extract_huggingface_answer(response)
 
-        except (
-            AttributeError,
-            IndexError,
-            TypeError,
-        ) as error:
+        if answer:
+            return answer
 
-            raise RuntimeError(
-                "Could not extract the generated answer "
-                "from the Hugging Face response."
-            ) from error
+        # --------------------------------------------------------
+        # Empty response diagnostics
+        # --------------------------------------------------------
 
-        if answer and str(answer).strip():
+        diagnostics = get_huggingface_response_diagnostics(
+            response
+        )
 
-            return str(answer).strip()
+        # --------------------------------------------------------
+        # Retry if attempts remain
+        # --------------------------------------------------------
 
         if attempt < HF_MAX_RETRIES:
 
-            time.sleep(HF_RETRY_DELAY_SECONDS)
+            time.sleep(
+                HF_RETRY_DELAY_SECONDS
+            )
+
             continue
+
+        # --------------------------------------------------------
+        # All attempts exhausted
+        # --------------------------------------------------------
 
         raise RuntimeError(
             "The Hugging Face model returned an empty answer "
-            f"after {HF_MAX_RETRIES + 1} attempts."
+            f"after {HF_MAX_RETRIES + 1} attempts. "
+            f"Diagnostics: {diagnostics}"
         )
 
 # ============================================================
