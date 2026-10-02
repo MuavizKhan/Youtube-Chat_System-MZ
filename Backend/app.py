@@ -26,7 +26,7 @@ import logging
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,7 +39,13 @@ from Backend.rag_system.config import (
     CORS_ALLOW_ORIGINS,
     HF_MODEL_ID,
     HF_TOKEN,
+    RATE_LIMIT,
+    RATE_LIMIT_STORAGE_URI,
 )
+
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # ============================================================
 # LOGGING
@@ -75,6 +81,18 @@ app = FastAPI(
 
     version="1.0.0",
 )
+
+# ============================================================
+# RATE LIMITING
+# ============================================================
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=RATE_LIMIT_STORAGE_URI,
+    headers_enabled=True,
+)
+
+app.state.limiter = limiter
 
 
 # ============================================================
@@ -241,6 +259,43 @@ async def http_exception_handler(
     return response
 
 
+# ============================================================
+# RATE LIMIT ERROR HANDLER
+# ============================================================
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(
+    request: Request,
+    exception: RateLimitExceeded,
+):
+
+    request_id = getattr(
+        request.state,
+        "request_id",
+        "unknown",
+    )
+
+    logger.warning(
+        "Rate limit exceeded "
+        "request_id=%s path=%s",
+        request_id,
+        request.url.path,
+    )
+
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "rate_limit_exceeded",
+            "message": (
+                "Too many requests. "
+                "Please try again later."
+            ),
+            "request_id": request_id,
+        },
+    )
+
+
+
 # Validation error handler for request body validation errors
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(
@@ -367,11 +422,8 @@ class ChatResponse(BaseModel):
 # ============================================================
 
 class ErrorResponse(BaseModel):
-
     error: str
-
     message: str
-
     request_id: str
 
 
@@ -455,13 +507,15 @@ def readiness():
     "/chat",
     response_model=ChatResponse,
 )
+@limiter.limit(RATE_LIMIT)
 def chat(
-    request: ChatRequest,
-    http_request: Request,
+    chat_request: ChatRequest,
+    request: Request,
+    response: Response,
 ):
 
-    video_id = request.video_id.strip()
-    question = request.question.strip()
+    video_id = chat_request.video_id.strip()
+    question = chat_request.question.strip()
 
     if not video_id:
 
@@ -505,13 +559,12 @@ def chat(
 
         return result
 
-
     except FileNotFoundError as error:
 
         logger.warning(
             "Vector store not found. "
             "request_id=%s video_id=%s",
-            http_request.state.request_id,
+            request.state.request_id,
             canonical_video_id,
         )
 
@@ -543,7 +596,7 @@ def chat(
         logger.exception(
             "Upstream RAG/Hugging Face error. "
             "request_id=%s video_id=%s",
-            http_request.state.request_id,
+            request.state.request_id,
             canonical_video_id,
         )
 

@@ -155,6 +155,49 @@ if (
         "when APP_ENV=production."
     )
 
+# ============================================================
+# RATE LIMITING
+# ============================================================
+
+RATE_LIMIT = os.getenv(
+    "RATELIMIT_LIMIT",
+    "20/minute",
+).strip()
+
+
+RATE_LIMIT_STORAGE_URI = os.getenv(
+    "RATELIMIT_STORAGE_URI",
+    "memory://",
+).strip()
+
+
+if not RATE_LIMIT:
+
+    raise RuntimeError(
+        "RATELIMIT_LIMIT cannot be empty."
+    )
+
+
+if not RATE_LIMIT_STORAGE_URI:
+
+    raise RuntimeError(
+        "RATELIMIT_STORAGE_URI cannot be empty."
+    )
+
+
+if (
+    APP_ENV == "production"
+    and RATE_LIMIT_STORAGE_URI == "memory://"
+):
+
+    raise RuntimeError(
+        "Production rate limiting requires "
+        "shared storage. Configure "
+        "RATELIMIT_STORAGE_URI for Redis "
+        "or another shared backend."
+    )
+
+
 
 # ============================================================
 # YOUTUBE / INDEXING
