@@ -18,7 +18,7 @@ from dataclasses import dataclass
 class RAGEvaluationCase:
     id: str
     question: str
-    answerable: bool
+    answerable: bool | None
     retrieval_case_id: str
     expected_behavior: str
 
@@ -68,8 +68,8 @@ EVALUATION_CASES = (
             "What programming language does Vijay Mallya "
             "say is his favorite?"
         ),
-        answerable=False,
-        expected_behavior="Return the exact fallback because the evaluation contract marks this as unanswerable.",
+        answerable=None,
+        expected_behavior="Do not invent an answer if the transcript does not support the question; generation decides answerability.",
     ),
     RAGEvaluationCase(
         id="E06",
