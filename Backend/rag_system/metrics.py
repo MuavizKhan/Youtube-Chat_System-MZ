@@ -48,14 +48,16 @@ def evaluate_response_contract(
     if not checks["non_empty"]:
         failures.append("answer_empty")
 
-    if answerable:
+    if answerable is True:
         checks["not_fallback"] = normalized != FALLBACK_ANSWER
         if not checks["not_fallback"]:
             failures.append("answerable_case_returned_fallback")
-    else:
+    elif answerable is False:
         checks["exact_fallback"] = normalized == FALLBACK_ANSWER
         if not checks["exact_fallback"]:
             failures.append("unanswerable_case_did_not_return_exact_fallback")
+    else:
+        checks["answerability_deferred"] = True
 
     contains_internal_metadata = any(
         pattern.search(normalized)
