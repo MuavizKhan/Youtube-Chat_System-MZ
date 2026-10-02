@@ -114,6 +114,10 @@ app.add_middleware(
     ],
     expose_headers=[
         "X-Request-ID",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "Retry-After",
     ],
 )
 
