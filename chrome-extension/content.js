@@ -35,6 +35,12 @@ let activeRequestId = 0;
 
 let lastVideoId = null;
 
+let indexStatus = "unknown";
+
+let indexStatusVideoId = null;
+
+let indexPreparationInProgressFor = null;
+
 // ============================================================
 // 1. YOUTUBE VIDEO ID
 // ============================================================
@@ -266,6 +272,15 @@ function createSidebar() {
 
 </div>
 
+            <div
+                id="index-status"
+                class="index-status"
+                role="status"
+                aria-live="polite"
+            >
+                Preparing this video...
+            </div>
+
         </div>
 
 
@@ -397,6 +412,86 @@ function createSidebar() {
 // 6. OPEN CHAT
 // ============================================================
 
+function updateIndexStatus(videoId, status, message = "") {
+    if (videoId !== getVideoId()) {
+        return;
+    }
+
+    indexStatusVideoId = videoId;
+    indexStatus = status;
+
+    const statusElement = sidebar?.querySelector("#index-status");
+    if (!statusElement) {
+        return;
+    }
+
+    const messages = {
+        unknown: "Checking video readiness...",
+        preparing: "Preparing this video. This may take a moment...",
+        ready: "Video ready — ask anything about it.",
+        failed: message || "Could not prepare this video. Reopen the chat to retry."
+    };
+
+    statusElement.textContent = messages[status] || messages.unknown;
+    statusElement.dataset.state = status;
+}
+
+
+function requestIndexPreparation(videoId) {
+    if (!videoId || videoId !== getVideoId()) {
+        return;
+    }
+
+    if (
+        indexPreparationInProgressFor === videoId ||
+        (indexStatusVideoId === videoId && indexStatus === "ready")
+    ) {
+        return;
+    }
+
+    indexPreparationInProgressFor = videoId;
+    updateIndexStatus(videoId, "preparing");
+
+    chrome.runtime.sendMessage(
+        {
+            type: "prepare_index",
+            video_id: videoId
+        },
+        (response) => {
+            const runtimeError = chrome.runtime.lastError;
+
+            if (indexPreparationInProgressFor === videoId) {
+                indexPreparationInProgressFor = null;
+            }
+
+            if (videoId !== getVideoId()) {
+                return;
+            }
+
+            if (runtimeError) {
+                updateIndexStatus(
+                    videoId,
+                    "failed",
+                    "The extension could not contact the backend. Reopen the chat to retry."
+                );
+                return;
+            }
+
+            if (!response || response.success !== true || response.ready !== true) {
+                updateIndexStatus(
+                    videoId,
+                    "failed",
+                    response?.error || "Could not prepare this video. Reopen the chat to retry."
+                );
+                return;
+            }
+
+            updateIndexStatus(videoId, "ready");
+        }
+    );
+}
+
+
 function openChat() {
 
     if (!isVideoPage()) {
@@ -417,10 +512,14 @@ function openChat() {
     launcher.hidden = true;
 
 
-    // Capture the current video ID.
-    lastVideoId =
-        getVideoId();
+    // Capture the current video ID and retry preparation if needed.
+    lastVideoId = getVideoId();
 
+    if (indexStatusVideoId !== lastVideoId || indexStatus === "failed" || indexStatus === "unknown") {
+        requestIndexPreparation(lastVideoId);
+    } else {
+        updateIndexStatus(lastVideoId, indexStatus);
+    }
 
     setTimeout(
         () => {
@@ -999,6 +1098,7 @@ function handleVideoNavigation() {
 
         if (currentVideoId) {
             createLauncher();
+            requestIndexPreparation(currentVideoId);
 
             if (chatBody) {
                 chatBody.innerHTML = `
@@ -1075,14 +1175,12 @@ function initialize() {
     }
 
 
-    lastVideoId =
-        getVideoId();
-
+    lastVideoId = getVideoId();
 
     createLauncher();
 
-
-    // Chat intentionally remains closed.
+    // Prepare the transcript/index while keeping the chat closed.
+    requestIndexPreparation(lastVideoId);
 }
 
 

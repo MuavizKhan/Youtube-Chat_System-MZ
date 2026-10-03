@@ -39,5 +39,10 @@ jobs:
       - name: Compile Python source
         run: python -m compileall -q Backend tests
 
+      - name: Validate Chrome extension JavaScript syntax
+        run: |
+          node --check chrome-extension/background.js
+          node --check chrome-extension/content.js
+
       - name: Run automated tests
         run: python -m pytest
