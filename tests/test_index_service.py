@@ -61,15 +61,15 @@ def test_prepare_index_delegates_lifecycle(
         lambda video_id: current_state["value"],
     )
 
-    def fake_ensure_index(video_id, languages=None):
+    def fake_ensure_index_with_action(video_id, languages=None):
         ensure_calls.append((video_id, languages))
         current_state["value"] = IndexState.VALID
-        return object()
+        return object(), expected_action
 
     monkeypatch.setattr(
         index_service,
-        "ensure_index",
-        fake_ensure_index,
+        "ensure_index_with_action",
+        fake_ensure_index_with_action,
     )
 
     result = index_service.prepare_index(
@@ -94,8 +94,8 @@ def test_prepare_index_reuses_valid_index(monkeypatch):
 
     monkeypatch.setattr(
         index_service,
-        "ensure_index",
-        lambda *args, **kwargs: object(),
+        "ensure_index_with_action",
+        lambda *args, **kwargs: (object(), IndexAction.REUSE),
     )
 
     result = index_service.prepare_index(VIDEO_ID)
