@@ -91,6 +91,37 @@ def test_job_store_recovers_expired_building_job(tmp_path):
 
 
 @pytest.mark.unit
+def test_job_store_renews_active_lease(tmp_path):
+    store = IndexJobStore(
+        tmp_path / "jobs.sqlite3",
+        lease_seconds=60,
+    )
+    store.enqueue(
+        VIDEO_ID,
+        action="create",
+    )
+
+    claimed = store.claim(
+        VIDEO_ID,
+        "worker-a",
+    )
+    assert claimed is not None
+
+    before = store.get(VIDEO_ID).lease_until
+
+    assert store.renew_lease(
+        claimed.job_id,
+        "worker-a",
+    ) is True
+
+    after = store.get(VIDEO_ID).lease_until
+
+    assert after > before
+    assert store.get(VIDEO_ID).worker_id == "worker-a"
+    assert store.get(VIDEO_ID).status == JOB_BUILDING
+
+
+@pytest.mark.unit
 def test_job_store_records_ready_and_failed_states(tmp_path):
     store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
 
