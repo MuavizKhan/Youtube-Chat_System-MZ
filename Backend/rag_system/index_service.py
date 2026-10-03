@@ -3,21 +3,28 @@ index_service.py
 
 Application-level service for video index preparation and readiness.
 
-Responsibilities
-----------------
-1. Expose the index lifecycle as application-friendly operations.
-2. Keep /chat independent from index creation.
-3. Report persisted index readiness.
-4. Prevent chat from using stale, invalid, or missing indexes.
+Phase 6 responsibilities
+------------------------
+1. Expose index preparation as an asynchronous, idempotent operation.
+2. Persist job state so queued/building/failed state survives requests
+   and can be coordinated by multiple API processes on one shared store.
+3. Keep /chat independent from index creation.
+4. Prevent chat from using missing, invalid, or stale indexes.
 """
 
-from dataclasses import dataclass
-import threading
+from __future__ import annotations
 
+from dataclasses import dataclass
+
+from .index_jobs import (
+    enqueue_index_job,
+    get_active_job,
+    get_latest_job,
+    ensure_worker_started,
+)
 from .indexing import (
     IndexAction,
     IndexState,
-    ensure_index_with_action,
     get_index_action,
     get_index_state,
 )
@@ -33,115 +40,138 @@ from .retrieval import (
 
 @dataclass(frozen=True)
 class IndexStatus:
-    """Public service representation of persisted index state."""
+    """Public service representation of index/job state."""
 
     video_id: str
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 @dataclass(frozen=True)
 class IndexPreparationResult:
-    """Result returned after a successful preparation request."""
+    """Result returned after a preparation request is accepted."""
 
     video_id: str
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 class IndexNotReadyError(FileNotFoundError):
     """
     Raised when chat is requested before a usable index exists.
 
-    This is intentionally distinct from an unexpected persistence
-    failure so the API can return a client-actionable response.
+    The state and job_id make the error actionable for the API/client
+    without exposing implementation paths or provider details.
     """
 
     def __init__(
         self,
         video_id: str,
-        state: IndexState,
+        state: str,
+        job_id: str | None = None,
     ) -> None:
         self.video_id = video_id
         self.state = state
+        self.job_id = job_id
 
         super().__init__(
             f"Video index is not ready for '{video_id}'. "
-            f"Current state: {state.value}."
+            f"Current state: {state}."
         )
-
-
-_STATUS_LOCK = threading.Lock()
-_RUNTIME_STATUS: dict[str, str] = {}
-
-
-def _set_runtime_status(video_id: str, state: str | None) -> None:
-    with _STATUS_LOCK:
-        if state is None:
-            _RUNTIME_STATUS.pop(video_id, None)
-        else:
-            _RUNTIME_STATUS[video_id] = state
 
 
 # ============================================================
 # STATUS
 # ============================================================
 
+def _persisted_public_state(
+    state: IndexState,
+) -> tuple[str, str, bool]:
+    public_state = (
+        "ready"
+        if state is IndexState.VALID
+        else state.value
+    )
+
+    return (
+        public_state,
+        get_index_action(state).value,
+        state is IndexState.VALID,
+    )
+
+
 def get_index_status(
     video_id: str,
 ) -> IndexStatus:
     """
-    Return the active runtime state or persisted lifecycle state.
+    Return durable job state when preparation is active, otherwise
+    return the persisted lifecycle state.
 
-    Building/failed states are process-local runtime information.
-    Persisted states survive process restarts; runtime states do not.
+    A failed job does not hide a valid previously persisted index:
+    chat remains available while the latest failed rebuild is retained
+    for diagnostics.
     """
 
     canonical_video_id = validate_video_id(
         video_id
     )
 
-    with _STATUS_LOCK:
-        runtime_state = _RUNTIME_STATUS.get(
-            canonical_video_id
-        )
+    ensure_worker_started()
 
-    if runtime_state == "building":
+    active_job = get_active_job(
+        canonical_video_id
+    )
+
+    if active_job is not None:
         return IndexStatus(
             video_id=canonical_video_id,
-            state="building",
-            action="building",
+            state=active_job.state,
+            action=active_job.action,
             ready=False,
-        )
-
-    if runtime_state == "failed":
-        return IndexStatus(
-            video_id=canonical_video_id,
-            state="failed",
-            action="retry",
-            ready=False,
+            job_id=active_job.job_id,
         )
 
     persisted_state = get_index_state(
         canonical_video_id
     )
-    action = get_index_action(
+
+    public_state, action, ready = _persisted_public_state(
         persisted_state
     )
 
-    public_state = (
-        "ready"
-        if persisted_state is IndexState.VALID
-        else persisted_state.value
+    latest_job = get_latest_job(
+        canonical_video_id
     )
+
+    if (
+        not ready
+        and latest_job is not None
+        and latest_job.state == "failed"
+    ):
+        return IndexStatus(
+            video_id=canonical_video_id,
+            state="failed",
+            action="retry",
+            ready=False,
+            job_id=latest_job.job_id,
+        )
 
     return IndexStatus(
         video_id=canonical_video_id,
         state=public_state,
-        action=action.value,
-        ready=(persisted_state is IndexState.VALID),
+        action=action,
+        ready=ready,
+        job_id=(
+            latest_job.job_id
+            if ready
+            and latest_job is not None
+            and latest_job.state == "ready"
+            else None
+        ),
     )
 
 
@@ -154,50 +184,52 @@ def prepare_index(
     languages: list[str] | None = None,
 ) -> IndexPreparationResult:
     """
-    Create, reuse, or rebuild the video index as required.
+    Enqueue or reuse an idempotent preparation job.
 
     Lifecycle:
-        MISSING         -> CREATE
-        VALID           -> REUSE
-        INVALID / STALE -> REBUILD
+        MISSING         -> queued(create)
+        VALID           -> ready(reuse)
+        INVALID / STALE -> queued(rebuild)
 
-    The underlying index lifecycle operation owns lifecycle locking
-    and final-state verification.
+    Actual transcript/embedding work is performed by the durable
+    background worker in index_jobs.py.
     """
 
     canonical_video_id = validate_video_id(
         video_id
     )
 
-    _set_runtime_status(canonical_video_id, "building")
+    ensure_worker_started()
 
-    try:
-        _vector_store, action = ensure_index_with_action(
-            canonical_video_id,
-            languages=languages,
-        )
-    except Exception:
-        _set_runtime_status(canonical_video_id, "failed")
-        raise
-
-    _set_runtime_status(canonical_video_id, None)
-
-    final_status = get_index_status(
+    current_state = get_index_state(
         canonical_video_id
     )
 
-    if not final_status.ready:
-        _set_runtime_status(canonical_video_id, "failed")
-        raise RuntimeError(
-            "Index preparation completed, but the index "
-            f"is not ready. Final state: {final_status.state}"
+    if current_state is IndexState.VALID:
+        return IndexPreparationResult(
+            video_id=canonical_video_id,
+            state="ready",
+            action=IndexAction.REUSE.value,
+            ready=True,
+            job_id=None,
         )
+
+    action = get_index_action(
+        current_state
+    )
+
+    job = enqueue_index_job(
+        canonical_video_id,
+        action.value,
+        languages=languages,
+    )
 
     return IndexPreparationResult(
         video_id=canonical_video_id,
-        state=final_status.state,
-        action=action.value,
-        ready=True,
+        state=job.state,
+        action=job.action,
+        ready=False,
+        job_id=job.job_id,
     )
 
 
@@ -225,12 +257,10 @@ def load_ready_index(
     )
 
     if not status.ready:
-        persisted_state = get_index_state(
-            canonical_video_id
-        )
         raise IndexNotReadyError(
             canonical_video_id,
-            persisted_state,
+            status.state,
+            status.job_id,
         )
 
     return load_vector_store(
