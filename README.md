@@ -115,7 +115,30 @@ Useful endpoints:
 4. Start the local backend.
 5. Open a YouTube video. The extension prepares its index while the chat remains closed.
 
-The extension currently targets the local development backend at `http://127.0.0.1:8000`. Change this configuration and review host permissions before any hosted release.
+The extension currently targets the local development backend at `http://127.0.0.1:8000`. The backend URL is centralized in `chrome-extension/config.js`; change that value and review `manifest.json` host permissions before any hosted release.
+
+### Containerized backend
+
+Phase 7 adds a single-instance Docker baseline:
+
+```powershell
+docker build -t youtube-video-chat-backend .
+docker run --rm -p 8000:8000 --env-file .env youtube-video-chat-backend
+```
+
+The image does not contain secrets, SQLite state, or FAISS indexes. Persist the backend's vector-store directory and job database outside the container for any restart-safe deployment.
+
+## Production hardening
+
+Phase 7 adds several deployment safeguards without requiring a paid service:
+
+- Explicit trusted-host validation through `TRUSTED_HOSTS`.
+- A configurable request-body limit through `MAX_REQUEST_BODY_BYTES`.
+- Shared CORS and rate-limit configuration remains required for production.
+- The extension backend URL is centralized in one non-secret configuration file.
+- The Docker image provides a repeatable FastAPI runtime and HTTP health check.
+
+Client-side extension configuration is not a secret. Authentication/identity management for a public multi-user deployment is intentionally still a later phase.
 
 ## Tests and CI
 
