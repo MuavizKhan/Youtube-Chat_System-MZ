@@ -391,3 +391,31 @@
         min-width: 0;
     }
 }
+
+/* ============================================================
+   INDEX READINESS
+   ============================================================ */
+
+.index-status {
+    padding: 8px 12px;
+    border-top: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #4b5563;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.index-status[data-state="ready"] {
+    color: #166534;
+    background: #f0fdf4;
+}
+
+.index-status[data-state="failed"] {
+    color: #9a3412;
+    background: #fff7ed;
+}
+
+.index-status[data-state="building"] {
+    color: #1d4ed8;
+    background: #eff6ff;
+}
