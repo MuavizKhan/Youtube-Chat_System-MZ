@@ -599,8 +599,8 @@ def index_prepare(
         raise HTTPException(
             status_code=502,
             detail={
-                "error": "index_preparation_failed",
-                "message": "The video index could not be prepared. Please retry.",
+                "error": "index_queue_unavailable",
+                "message": "The index preparation service is temporarily unavailable. Please retry.",
             },
         ) from error
 
