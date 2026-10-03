@@ -319,6 +319,60 @@ def test_index_prepare_validation_error_uses_api_contract(client):
     assert response.json()["request_id"]
 
 
+
+@pytest.mark.api
+def test_index_endpoints_support_rate_limit_headers(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "submit_index",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="ready",
+            action="reuse",
+            ready=True,
+            job_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_index_status",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="ready",
+            action="reuse",
+            ready=True,
+            job_id=None,
+        ),
+    )
+
+    app_module.limiter.enabled = True
+
+    try:
+        prepare_response = client.post(
+            "/index",
+            json={"video_id": VALID_VIDEO_ID},
+        )
+        status_response = client.get(
+            f"/index/{VALID_VIDEO_ID}",
+        )
+
+        rate_limit_headers = {
+            key.lower()
+            for key in prepare_response.headers
+        }
+
+        assert prepare_response.status_code == 200
+        assert status_response.status_code == 200
+        assert "x-ratelimit-limit" in rate_limit_headers
+        assert "x-ratelimit-limit" in {
+            key.lower()
+            for key in status_response.headers
+        }
+    finally:
+        app_module.limiter.enabled = False
+        app_module.limiter.reset()
+
+
 @pytest.mark.api
 def test_index_prepare_endpoint_returns_202_for_queued_job(client, monkeypatch):
     monkeypatch.setattr(
