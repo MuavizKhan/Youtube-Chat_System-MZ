@@ -34,6 +34,33 @@ VECTOR_STORE_ROOT = RAG_ROOT / "vector_stores"
 
 
 # ============================================================
+# INDEX JOB COORDINATION
+# ============================================================
+
+_default_index_job_db_path = RAG_ROOT / "index_jobs.sqlite3"
+
+INDEX_JOB_DB_PATH = Path(
+    os.getenv(
+        "INDEX_JOB_DB_PATH",
+        str(_default_index_job_db_path),
+    )
+).expanduser()
+
+if not INDEX_JOB_DB_PATH.is_absolute():
+    INDEX_JOB_DB_PATH = PROJECT_ROOT / INDEX_JOB_DB_PATH
+
+INDEX_JOB_WORKERS = _get_int(
+    "INDEX_JOB_WORKERS",
+    2,
+)
+
+INDEX_JOB_LEASE_SECONDS = _get_int(
+    "INDEX_JOB_LEASE_SECONDS",
+    1800,
+)
+
+
+# ============================================================
 # ENVIRONMENT
 # ============================================================
 
@@ -344,6 +371,19 @@ if HF_RETRY_DELAY_SECONDS < 0:
 # ============================================================
 # VALIDATION
 # ============================================================
+
+if INDEX_JOB_WORKERS <= 0:
+
+    raise RuntimeError(
+        "INDEX_JOB_WORKERS must be greater than 0."
+    )
+
+
+if INDEX_JOB_LEASE_SECONDS < 30:
+
+    raise RuntimeError(
+        "INDEX_JOB_LEASE_SECONDS must be at least 30 seconds."
+    )
 
 if CHUNK_SIZE <= 0:
 
