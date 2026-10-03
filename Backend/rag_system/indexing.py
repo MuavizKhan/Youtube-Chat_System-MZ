@@ -1410,15 +1410,25 @@ def ensure_index(
     video_id: str,
     languages: Optional[list[str]] = None,
 ):
-    """
-    Ensure that a usable FAISS index exists for one YouTube video.
+    """Ensure an index exists and return its vector store."""
+    vector_store, _action = ensure_index_with_action(
+        video_id,
+        languages=languages,
+    )
+    return vector_store
 
-    Lifecycle:
 
-        MISSING         -> CREATE
-        VALID           -> REUSE
-        INVALID / STALE -> REBUILD
+def ensure_index_with_action(
+    video_id: str,
+    languages: Optional[list[str]] = None,
+):
     """
+    Ensure a usable index exists and return (vector_store, actual_action).
+
+    The action is determined while holding the per-video lock, so
+    concurrent preparation requests receive an accurate result.
+    """
+
 
     if not video_id or not video_id.strip():
         raise ValueError(
@@ -1450,8 +1460,9 @@ def ensure_index(
         # ----------------------------------------------------
 
         if action is IndexAction.REUSE:
-            return load_vector_store(
-                video_id
+            return (
+                load_vector_store(video_id),
+                action,
             )
 
         # ----------------------------------------------------
@@ -1486,8 +1497,9 @@ def ensure_index(
                     f"Final state: {final_state.value}"
                 )
 
-            return load_vector_store(
-                video_id
+            return (
+                load_vector_store(video_id),
+                action,
             )
 
         raise RuntimeError(
