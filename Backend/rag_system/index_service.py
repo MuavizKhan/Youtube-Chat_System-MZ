@@ -46,8 +46,8 @@ class IndexPreparationResult:
     """Result returned after a successful preparation request."""
 
     video_id: str
-    state: IndexState
-    action: IndexAction
+    state: str
+    action: str
     ready: bool
 
 
@@ -93,12 +93,10 @@ def get_index_status(
     video_id: str,
 ) -> IndexStatus:
     """
-    Return the persisted lifecycle state for one canonical video ID.
+    Return the active runtime state or persisted lifecycle state.
 
-    The status reflects durable index state only. There is no
-    synthetic 'building' state because preparation is synchronous:
-    the caller receives a response only after the lifecycle operation
-    completes.
+    Building/failed states are process-local runtime information.
+    Persisted states survive process restarts; runtime states do not.
     """
 
     canonical_video_id = validate_video_id(
@@ -163,7 +161,7 @@ def prepare_index(
         VALID           -> REUSE
         INVALID / STALE -> REBUILD
 
-    The underlying ensure_index() operation owns lifecycle locking
+    The underlying index lifecycle operation owns lifecycle locking
     and final-state verification.
     """
 
