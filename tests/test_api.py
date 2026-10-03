@@ -222,8 +222,8 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
         calls.append(video_id)
         return SimpleNamespace(
             video_id=VALID_VIDEO_ID,
-            state=SimpleNamespace(value="valid"),
-            action=SimpleNamespace(value="create"),
+            state="ready",
+            action="create",
             ready=True,
         )
 
@@ -237,7 +237,7 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "video_id": VALID_VIDEO_ID,
-        "state": "valid",
+        "state": "ready",
         "action": "create",
         "ready": True,
     }
@@ -280,8 +280,8 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
         "get_index_status",
         lambda video_id: SimpleNamespace(
             video_id=video_id,
-            state=SimpleNamespace(value="missing"),
-            action=SimpleNamespace(value="create"),
+            state="missing",
+            action="create",
             ready=False,
         ),
     )
