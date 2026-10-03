@@ -22,10 +22,8 @@ Local persistence
 
 import shutil
 import uuid
-from pathlib import Path
 
 import argparse
-from importlib.metadata import metadata
 import json
 from typing import Optional
 
@@ -54,6 +52,7 @@ from .config import (
 from .retrieval import (
     create_embedding_model,
     extract_video_id,
+    load_vector_store,
 )
 
 
@@ -1080,7 +1079,7 @@ def save_vector_store(
                 "Staged vector store failed validation."
             )
 
-                # ----------------------------------------------------
+        # ----------------------------------------------------
         # 4. Publish the staged index
         # ----------------------------------------------------
 
@@ -1373,6 +1372,98 @@ def create_index(
 
     return vector_store
 
+
+def clear_vector_store_cache():
+    """
+    Clear cached FAISS vector stores after an index changes.
+    """
+    load_vector_store.cache_clear()
+
+
+# ============================================================
+# INDEX LIFECYCLE ORCHESTRATOR
+# ============================================================
+
+def ensure_index(
+    video_id: str,
+    languages: Optional[list[str]] = None,
+):
+    """
+    Ensure that a usable FAISS index exists for one YouTube video.
+
+    Lifecycle:
+
+        MISSING         -> CREATE
+        VALID           -> REUSE
+        INVALID / STALE -> REBUILD
+
+    The function does not expose lifecycle internals to callers.
+    It returns a loaded, usable vector store only after the
+    persisted index has been verified as VALID.
+    """
+
+    if not video_id or not video_id.strip():
+        raise ValueError(
+            "video_id cannot be empty."
+        )
+
+    video_id = video_id.strip()
+
+    # --------------------------------------------------------
+    # 1. Determine current lifecycle state
+    # --------------------------------------------------------
+
+    state = get_index_state(
+        video_id
+    )
+
+    # --------------------------------------------------------
+    # 2. Convert state into lifecycle action
+    # --------------------------------------------------------
+
+    action = get_index_action(
+        state
+    )
+
+    # --------------------------------------------------------
+    # 3. Execute lifecycle action
+    # --------------------------------------------------------
+
+    if action is IndexAction.REUSE:
+
+        # The index is already known to be valid, so loading it
+        # from persistence is safe.
+        return load_vector_store(
+            video_id
+        )
+
+    if action in (
+        IndexAction.CREATE,
+        IndexAction.REBUILD,
+    ):
+
+        clear_vector_store_cache()
+
+        create_index(
+            video_id,
+            languages=languages,
+        )
+
+        clear_vector_store_cache()
+
+        final_state = get_index_state(
+            video_id
+        )
+
+        if final_state is not IndexState.VALID:
+            raise RuntimeError(
+                "Index creation completed, but the persisted "
+                f"index is not valid. Final state: {final_state.value}"
+            )
+
+        return load_vector_store(
+            video_id
+        )
 
 # ============================================================
 # 10. COMPLETE INDEXING PIPELINE
