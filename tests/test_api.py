@@ -225,6 +225,7 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
             state="ready",
             action="create",
             ready=True,
+            job_id=None,
         )
 
     monkeypatch.setattr(app_module, "submit_index", fake_prepare)
@@ -240,6 +241,7 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
         "state": "ready",
         "action": "create",
         "ready": True,
+        "job_id": None,
     }
     assert calls == [VALID_VIDEO_ID]
 
@@ -284,6 +286,7 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
             state="missing",
             action="create",
             ready=False,
+            job_id=None,
         ),
     )
 
@@ -295,6 +298,7 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
         "state": "missing",
         "action": "create",
         "ready": False,
+        "job_id": None,
     }
 
 
@@ -325,6 +329,7 @@ def test_index_prepare_endpoint_returns_202_for_queued_job(client, monkeypatch):
             state="queued",
             action="create",
             ready=False,
+            job_id="job-queued-1",
         ),
     )
 
@@ -339,6 +344,7 @@ def test_index_prepare_endpoint_returns_202_for_queued_job(client, monkeypatch):
         "state": "queued",
         "action": "create",
         "ready": False,
+        "job_id": "job-queued-1",
     }
 
 
@@ -348,6 +354,7 @@ def test_chat_returns_409_when_index_is_building(client, monkeypatch):
         raise app_module.IndexNotReadyError(
             VALID_VIDEO_ID,
             "building",
+            "job-building-1",
         )
 
     monkeypatch.setattr(
@@ -366,4 +373,6 @@ def test_chat_returns_409_when_index_is_building(client, monkeypatch):
 
     assert response.status_code == 409
     assert response.json()["error"] == "index_not_ready"
+    assert response.json()["state"] == "building"
+    assert response.json()["job_id"] == "job-building-1"
     assert response.json()["request_id"]
