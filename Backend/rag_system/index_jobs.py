@@ -76,6 +76,8 @@ class IndexJob:
 
 _WORKER_LOCK = threading.Lock()
 _WORKER_THREAD: threading.Thread | None = None
+_SCHEMA_LOCK = threading.Lock()
+_SCHEMA_INITIALIZED_PATH: Path | None = None
 
 
 # ============================================================
@@ -105,34 +107,44 @@ def _connect() -> sqlite3.Connection:
 def initialize_job_store() -> None:
     """Create the durable job schema when needed."""
 
-    with _connect() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS index_jobs (
-                job_id TEXT PRIMARY KEY,
-                video_id TEXT NOT NULL,
-                state TEXT NOT NULL,
-                action TEXT NOT NULL,
-                languages_json TEXT NOT NULL DEFAULT '[]',
-                error_type TEXT,
-                error_message TEXT,
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                started_at REAL,
-                completed_at REAL
-            );
+    global _SCHEMA_INITIALIZED_PATH
 
-            CREATE INDEX IF NOT EXISTS idx_index_jobs_video_created
-            ON index_jobs(video_id, created_at DESC);
+    database_path = _database_path()
 
-            CREATE INDEX IF NOT EXISTS idx_index_jobs_state_updated
-            ON index_jobs(state, updated_at);
+    with _SCHEMA_LOCK:
+        if _SCHEMA_INITIALIZED_PATH == database_path:
+            return
 
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_index_jobs_active_video
-            ON index_jobs(video_id)
-            WHERE state IN ('queued', 'building');
-            """
-        )
+        with _connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS index_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    video_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    languages_json TEXT NOT NULL DEFAULT '[]',
+                    error_type TEXT,
+                    error_message TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    started_at REAL,
+                    completed_at REAL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_index_jobs_video_created
+                ON index_jobs(video_id, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_index_jobs_state_updated
+                ON index_jobs(state, updated_at);
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_index_jobs_active_video
+                ON index_jobs(video_id)
+                WHERE state IN ('queued', 'building');
+                """
+            )
+
+        _SCHEMA_INITIALIZED_PATH = database_path
 
 
 def _row_to_job(row: sqlite3.Row | None) -> IndexJob | None:
@@ -448,7 +460,45 @@ def _action_value(action: object) -> str:
     return str(value)
 
 
+def _touch_job(job_id: str) -> None:
+    initialize_job_store()
+
+    with _connect() as connection:
+        connection.execute(
+            """
+            UPDATE index_jobs
+            SET updated_at = ?
+            WHERE job_id = ?
+              AND state = 'building'
+            """,
+            (time.time(), job_id),
+        )
+
+
 def _run_job(job: IndexJob) -> None:
+    heartbeat_stop = threading.Event()
+    heartbeat_interval = max(
+        1.0,
+        min(INDEX_JOB_STALE_SECONDS / 3.0, 60.0),
+    )
+
+    def heartbeat() -> None:
+        while not heartbeat_stop.wait(heartbeat_interval):
+            try:
+                _touch_job(job.job_id)
+            except Exception:
+                logger.exception(
+                    "index job heartbeat failed job_id=%s",
+                    job.job_id,
+                )
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat,
+        name=f"index-heartbeat-{job.job_id[:8]}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+
     try:
         languages = list(job.languages) or None
 
@@ -484,6 +534,9 @@ def _run_job(job: IndexJob) -> None:
             job.job_id,
             job.video_id,
         )
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1.0)
 
 
 def _worker_loop() -> None:
