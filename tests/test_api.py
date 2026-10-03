@@ -270,6 +270,7 @@ def test_index_submit_endpoint_sanitizes_failure(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json()["error"] == "index_queue_unavailable"
+    # Queue submission failures are distinct from worker/index failures.
     assert "private transcript provider details" not in response.text
 
 
