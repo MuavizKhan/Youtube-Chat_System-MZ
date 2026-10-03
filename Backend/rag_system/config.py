@@ -32,6 +32,18 @@ RAG_ROOT = Path(__file__).resolve().parent
 
 VECTOR_STORE_ROOT = RAG_ROOT / "vector_stores"
 
+# ============================================================
+# INDEX JOBS
+# ============================================================
+
+INDEX_JOB_DB_PATH = Path(
+    os.getenv(
+        "INDEX_JOB_DB_PATH",
+        str(RAG_ROOT / "index_jobs.sqlite3"),
+    )
+)
+
+
 
 # ============================================================
 # ENVIRONMENT
@@ -106,6 +118,30 @@ def _get_list(
         if item.strip()
     ]
 
+
+# ============================================================
+# INDEX JOB RUNTIME
+# ============================================================
+
+INDEX_JOB_POLL_SECONDS = _get_float(
+    "INDEX_JOB_POLL_SECONDS",
+    0.5,
+)
+
+INDEX_JOB_STALE_SECONDS = _get_float(
+    "INDEX_JOB_STALE_SECONDS",
+    900.0,
+)
+
+if INDEX_JOB_POLL_SECONDS <= 0:
+    raise RuntimeError(
+        "INDEX_JOB_POLL_SECONDS must be greater than 0."
+    )
+
+if INDEX_JOB_STALE_SECONDS <= INDEX_JOB_POLL_SECONDS:
+    raise RuntimeError(
+        "INDEX_JOB_STALE_SECONDS must be greater than INDEX_JOB_POLL_SECONDS."
+    )
 
 # ============================================================
 # APPLICATION
