@@ -18,7 +18,7 @@ def test_status_reports_missing_index(monkeypatch):
     status = index_service.get_index_status(VIDEO_ID)
 
     assert status.video_id == VIDEO_ID
-    assert status.state is IndexState.MISSING
+    assert status.state == "missing"
     assert status.action is IndexAction.CREATE
     assert status.ready is False
 
@@ -33,7 +33,7 @@ def test_status_reports_valid_index(monkeypatch):
 
     status = index_service.get_index_status(VIDEO_ID)
 
-    assert status.state is IndexState.VALID
+    assert status.state == "ready"
     assert status.action is IndexAction.REUSE
     assert status.ready is True
 
@@ -78,7 +78,7 @@ def test_prepare_index_delegates_lifecycle(
     )
 
     assert result.video_id == VIDEO_ID
-    assert result.state is IndexState.VALID
+    assert result.state == "ready"
     assert result.action is expected_action
     assert result.ready is True
     assert ensure_calls == [(VIDEO_ID, ["en"])]
@@ -150,3 +150,42 @@ def test_load_ready_index_loads_valid_index(monkeypatch):
 def test_service_rejects_invalid_video_ids(video_id):
     with pytest.raises(ValueError):
         index_service.get_index_status(video_id)
+
+
+@pytest.mark.unit
+def test_status_reports_building_without_reading_disk_state(monkeypatch):
+    monkeypatch.setattr(
+        index_service,
+        "_set_runtime_status",
+        lambda video_id, state: index_service._RUNTIME_STATUS.__setitem__(video_id, state)
+        if state is not None
+        else index_service._RUNTIME_STATUS.pop(video_id, None),
+    )
+    index_service._set_runtime_status(VIDEO_ID, "building")
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: pytest.fail(
+            "Building state should be served from runtime status."
+        ),
+    )
+
+    try:
+        status = index_service.get_index_status(VIDEO_ID)
+        assert status.state == "building"
+        assert status.action == "building"
+        assert status.ready is False
+    finally:
+        index_service._set_runtime_status(VIDEO_ID, None)
+
+
+@pytest.mark.unit
+def test_status_reports_failed_preparation(monkeypatch):
+    index_service._set_runtime_status(VIDEO_ID, "failed")
+    try:
+        status = index_service.get_index_status(VIDEO_ID)
+        assert status.state == "failed"
+        assert status.action == "retry"
+        assert status.ready is False
+    finally:
+        index_service._set_runtime_status(VIDEO_ID, None)
