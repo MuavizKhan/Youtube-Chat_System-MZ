@@ -5,10 +5,10 @@ A Chrome extension and FastAPI backend that let a user ask questions about a You
 ## Product flow
 
 1. The user opens a YouTube video.
-2. The extension detects the video ID and requests index preparation in the background while keeping the chat panel closed.
-3. The backend fetches the available transcript, creates timestamp-aware chunks and embeddings, and persists a per-video FAISS index.
-4. The extension shows whether the video is preparing, ready, or failed.
-5. The user opens the chat and asks questions. Chat only uses an already-valid index; it does not build an index as part of the question request.
+2. The extension detects the video ID and queues idempotent index preparation in the background while keeping the chat panel closed.
+3. The backend persists a per-video job in SQLite and a worker fetches the transcript, creates timestamp-aware chunks and embeddings, and persists the FAISS index.
+4. The extension polls durable readiness state and shows whether the video is queued, preparing, ready, or failed.
+5. The user opens the chat and asks questions. Chat only uses an already-valid index; it never builds an index as part of a question request.
 6. Answers include source segments with start/end timestamps.
 
 ## Architecture
@@ -17,15 +17,16 @@ A Chrome extension and FastAPI backend that let a user ask questions about a You
 YouTube page
   └─ Chrome content script
        └─ Manifest V3 service worker
-            ├─ POST /index       → prepare/reuse/rebuild index
-            ├─ GET /index/{id}   → inspect index status
+            ├─ POST /index       → enqueue/reuse preparation job
+            ├─ GET /index/{id}   → inspect durable job/index status
             └─ POST /chat        → retrieve + generate answer
 
 FastAPI
   ├─ index_service.py
-  ├─ indexing.py       → lifecycle policy, validation, safe persistence
-  ├─ retrieval.py      → FAISS loading and retrieval
-  └─ chain.py          → grounded answer generation
+  ├─ index_jobs.py      → durable SQLite queue + worker coordination
+  ├─ indexing.py        → lifecycle policy, validation, safe persistence
+  ├─ retrieval.py       → FAISS loading and retrieval
+  └─ chain.py           → grounded answer generation
 ```
 
 ## API contract
@@ -40,26 +41,31 @@ Request:
 }
 ```
 
-Accepts a raw 11-character YouTube video ID or a supported YouTube URL. This endpoint is synchronous: it returns after the index has been prepared or returns a sanitized error. It may take time for videos whose transcripts and embeddings have not been processed yet.
+Accepts a raw 11-character YouTube video ID or a supported YouTube URL. The endpoint is asynchronous: it creates or reuses an idempotent preparation job and returns immediately.
 
-Success response:
+When work is required, the response is HTTP 202:
 
 ```json
 {
   "video_id": "Gfr50f6ZBvo",
-  "state": "ready",
+  "state": "queued",
   "action": "create",
-  "ready": true
+  "ready": false,
+  "job_id": "..."
 }
 ```
 
-The action is one of `create`, `reuse`, or `rebuild`.
+When the index is already valid, the response is HTTP 200 with `state=ready`, `action=reuse`, and `ready=true`.
+
+The lifecycle action is one of `create`, `reuse`, or `rebuild`. Active job states are `queued` and `building`.
 
 ### `GET /index/{video_id}`
 
-Returns the current state: `missing`, `building`, `ready`, `invalid`, `stale`, or `failed`, plus the recommended lifecycle action and a `ready` boolean.
+Returns the durable preparation/index state: `missing`, `invalid`, `stale`, `queued`, `building`, `ready`, or `failed`.
 
-`building` and `failed` are in-memory runtime states for the current Python process. They are not durable across process restarts and are not shared between multiple worker processes. A multi-worker deployment needs shared job/status storage before relying on this endpoint across workers.
+Queued/building state includes the `job_id`. A failed job is exposed as `state=failed`, `action=retry`.
+
+Index jobs are persisted in SQLite and are coordinated transactionally between API processes that share the same database file. A stale building job is automatically returned to the queue after the configured timeout, allowing recovery from a worker crash.
 
 ### `POST /chat`
 
@@ -72,7 +78,7 @@ Request:
 }
 ```
 
-Chat requires the index to be ready. If it is missing, invalid, or stale, the API returns a not-ready response; clients should call `POST /index` and retry chat after preparation succeeds.
+Chat requires the index to be ready. If it is missing, invalid, stale, queued, or building, the API returns HTTP 409 with `error=index_not_ready` and the current state/job ID where available. Clients should call `POST /index` when preparation is needed, then poll `GET /index/{video_id}` until the state is `ready`.
 
 ## Local development
 
@@ -115,8 +121,8 @@ CI checks dependency consistency, compiles the Python source, validates Chrome e
 ## Current operational boundaries
 
 - FAISS indexes are stored on local disk under the backend vector-store directory.
-- Lifecycle locks and transient `building`/`failed` status are process-local. They do not coordinate separate worker processes or containers.
-- Index preparation is synchronous. Long-running distributed jobs, durable status, queueing, cancellation, and multi-instance storage are later deployment architecture work.
+- Index job state is durable in SQLite and workers coordinate across API processes that share the same SQLite file. This is suitable for a single host/shared filesystem deployment; a multi-container deployment should move the job store to a managed shared database/queue.
+- Index preparation is asynchronous and idempotent. Durable queueing and crash recovery are implemented; cancellation, distributed queueing, and multi-instance shared storage remain deployment architecture work.
 - The extension currently targets local development. A public release still needs a hosted HTTPS backend, production CORS/host-permission settings, authentication/abuse controls, privacy disclosures, and end-to-end release validation.
 - Clickable source timestamps currently seek the in-page YouTube player. A stronger full-view timestamp deep-link experience remains a planned UX phase.
 
