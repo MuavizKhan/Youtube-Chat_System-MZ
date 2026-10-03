@@ -29,6 +29,9 @@ const INDEX_URL =
 const REQUEST_TIMEOUT_MS =
     120000;
 
+const INDEX_REQUEST_TIMEOUT_MS =
+    15000;
+
 
 // ============================================================
 // 1. EXTENSION ACTION → TOGGLE CHAT
@@ -105,6 +108,23 @@ chrome.runtime.onMessage.addListener(
             }
 
             handleIndexPreparation(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type === "get_index_status") {
+            const videoId = normalizeString(message.video_id);
+            const senderUrl = sender?.tab?.url || "";
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (!isYouTubeUrl(senderUrl) || !videoId || pageVideoId !== videoId) {
+                sendResponse({
+                    success: false,
+                    error: "Index status checks must originate from the current YouTube video."
+                });
+                return;
+            }
+
+            handleIndexStatus(videoId, sendResponse);
             return true;
         }
 
@@ -223,7 +243,7 @@ async function handleIndexPreparation(videoId, sendResponse) {
     const controller = new AbortController();
     const timeoutId = setTimeout(
         () => controller.abort(),
-        REQUEST_TIMEOUT_MS
+        INDEX_REQUEST_TIMEOUT_MS
     );
 
     try {
@@ -246,25 +266,81 @@ async function handleIndexPreparation(videoId, sendResponse) {
             );
         }
 
-        if (!data || data.ready !== true) {
-            throw new Error("The backend did not confirm that the video index is ready.");
+        if (!data || typeof data !== "object") {
+            throw new Error("The backend returned an invalid index response.");
         }
 
         sendResponse({
             success: true,
             video_id: data.video_id,
-            state: data.state,
-            action: data.action,
-            ready: true
+            state: typeof data.state === "string" ? data.state : "queued",
+            action: typeof data.action === "string" ? data.action : "",
+            job_id: typeof data.job_id === "string" ? data.job_id : null,
+            ready: data.ready === true
         });
     } catch (error) {
         sendResponse({
             success: false,
             error: error?.name === "AbortError"
-                ? "Preparing this video timed out. Open the chat and retry."
+                ? "The backend took too long to accept the indexing request. Please retry."
                 : (error instanceof Error && error.message
                     ? error.message
-                    : "Unable to prepare this video.")
+                    : "Unable to start video preparation.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+
+async function handleIndexStatus(videoId, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+        () => controller.abort(),
+        10000
+    );
+
+    try {
+        const response = await fetch(
+            `${INDEX_URL}/${encodeURIComponent(videoId)}`,
+            {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json"
+                },
+                signal: controller.signal
+            }
+        );
+
+        const data = await parseResponse(response);
+
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                `Index status failed (HTTP ${response.status}).`
+            );
+        }
+
+        if (!data || typeof data !== "object") {
+            throw new Error("The backend returned an invalid index status.");
+        }
+
+        sendResponse({
+            success: true,
+            video_id: data.video_id,
+            state: typeof data.state === "string" ? data.state : "unknown",
+            action: typeof data.action === "string" ? data.action : "",
+            job_id: typeof data.job_id === "string" ? data.job_id : null,
+            ready: data.ready === true
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Index status check timed out."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to check index status.")
         });
     } finally {
         clearTimeout(timeoutId);
