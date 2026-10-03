@@ -284,3 +284,32 @@ def test_status_reports_failed_preparation_from_durable_job(monkeypatch):
     assert status.state == "failed"
     assert status.action == "retry"
     assert status.ready is False
+
+@pytest.mark.unit
+def test_failed_job_does_not_hide_a_valid_persisted_index(monkeypatch):
+    job = IndexJob(
+        job_id="job-4",
+        video_id=VIDEO_ID,
+        status=JOB_FAILED,
+        action=IndexAction.REBUILD.value,
+        languages=["en"],
+        attempt=1,
+        error="Index preparation failed.",
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.VALID,
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "ready"
+    assert status.action == IndexAction.REUSE.value
+    assert status.ready is True
