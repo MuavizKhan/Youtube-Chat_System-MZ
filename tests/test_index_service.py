@@ -1,5 +1,7 @@
 import pytest
 
+from types import SimpleNamespace
+
 from Backend.rag_system import index_service
 from Backend.rag_system.indexing import IndexAction, IndexState
 
@@ -7,8 +9,27 @@ from Backend.rag_system.indexing import IndexAction, IndexState
 VIDEO_ID = "Gfr50f6ZBvo"
 
 
+def disable_worker(monkeypatch):
+    monkeypatch.setattr(
+        index_service,
+        "ensure_worker_started",
+        lambda: None,
+    )
+
+
 @pytest.mark.unit
 def test_status_reports_missing_index(monkeypatch):
+    disable_worker(monkeypatch)
+    monkeypatch.setattr(
+        index_service,
+        "get_active_job",
+        lambda video_id: None,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_latest_job",
+        lambda video_id: None,
+    )
     monkeypatch.setattr(
         index_service,
         "get_index_state",
@@ -21,10 +42,22 @@ def test_status_reports_missing_index(monkeypatch):
     assert status.state == "missing"
     assert status.action == IndexAction.CREATE.value
     assert status.ready is False
+    assert status.job_id is None
 
 
 @pytest.mark.unit
 def test_status_reports_valid_index(monkeypatch):
+    disable_worker(monkeypatch)
+    monkeypatch.setattr(
+        index_service,
+        "get_active_job",
+        lambda video_id: None,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_latest_job",
+        lambda video_id: None,
+    )
     monkeypatch.setattr(
         index_service,
         "get_index_state",
@@ -39,6 +72,64 @@ def test_status_reports_valid_index(monkeypatch):
 
 
 @pytest.mark.unit
+def test_status_reports_active_job(monkeypatch):
+    disable_worker(monkeypatch)
+
+    active_job = SimpleNamespace(
+        job_id="job-123",
+        state="building",
+        action="create",
+    )
+
+    monkeypatch.setattr(
+        index_service,
+        "get_active_job",
+        lambda video_id: active_job,
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "building"
+    assert status.action == "create"
+    assert status.ready is False
+    assert status.job_id == "job-123"
+
+
+@pytest.mark.unit
+def test_status_reports_failed_job_when_index_is_not_ready(monkeypatch):
+    disable_worker(monkeypatch)
+
+    failed_job = SimpleNamespace(
+        job_id="job-failed",
+        state="failed",
+        action="rebuild",
+    )
+
+    monkeypatch.setattr(
+        index_service,
+        "get_active_job",
+        lambda video_id: None,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_latest_job",
+        lambda video_id: failed_job,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.STALE,
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "failed"
+    assert status.action == "retry"
+    assert status.ready is False
+    assert status.job_id == "job-failed"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "state,expected_action",
     [
@@ -47,29 +138,34 @@ def test_status_reports_valid_index(monkeypatch):
         (IndexState.STALE, IndexAction.REBUILD),
     ],
 )
-def test_prepare_index_delegates_lifecycle(
+def test_prepare_index_enqueues_lifecycle_action(
     monkeypatch,
     state,
     expected_action,
 ):
-    current_state = {"value": state}
-    ensure_calls = []
-
+    disable_worker(monkeypatch)
     monkeypatch.setattr(
         index_service,
         "get_index_state",
-        lambda video_id: current_state["value"],
+        lambda video_id: state,
     )
 
-    def fake_ensure_index_with_action(video_id, languages=None):
-        ensure_calls.append((video_id, languages))
-        current_state["value"] = IndexState.VALID
-        return object(), expected_action
+    expected_job = SimpleNamespace(
+        job_id="job-created",
+        state="queued",
+        action=expected_action.value,
+    )
+
+    calls = []
+
+    def fake_enqueue(video_id, action, languages=None):
+        calls.append((video_id, action, languages))
+        return expected_job
 
     monkeypatch.setattr(
         index_service,
-        "ensure_index_with_action",
-        fake_ensure_index_with_action,
+        "enqueue_index_job",
+        fake_enqueue,
     )
 
     result = index_service.prepare_index(
@@ -78,45 +174,51 @@ def test_prepare_index_delegates_lifecycle(
     )
 
     assert result.video_id == VIDEO_ID
-    assert result.state == "ready"
+    assert result.state == "queued"
     assert result.action == expected_action.value
-    assert result.ready is True
-    assert ensure_calls == [(VIDEO_ID, ["en"])]
+    assert result.ready is False
+    assert result.job_id == "job-created"
+    assert calls == [(VIDEO_ID, expected_action.value, ["en"])]
 
 
 @pytest.mark.unit
 def test_prepare_index_reuses_valid_index(monkeypatch):
+    disable_worker(monkeypatch)
     monkeypatch.setattr(
         index_service,
         "get_index_state",
         lambda video_id: IndexState.VALID,
     )
 
-    monkeypatch.setattr(
-        index_service,
-        "ensure_index_with_action",
-        lambda *args, **kwargs: (object(), IndexAction.REUSE),
-    )
-
     result = index_service.prepare_index(VIDEO_ID)
 
+    assert result.state == "ready"
     assert result.action == IndexAction.REUSE.value
     assert result.ready is True
+    assert result.job_id is None
 
 
 @pytest.mark.unit
 def test_load_ready_index_rejects_missing_index(monkeypatch):
+    disable_worker(monkeypatch)
+
     monkeypatch.setattr(
         index_service,
-        "get_index_state",
-        lambda video_id: IndexState.MISSING,
+        "get_index_status",
+        lambda video_id: index_service.IndexStatus(
+            video_id=VIDEO_ID,
+            state="missing",
+            action="create",
+            ready=False,
+            job_id=None,
+        ),
     )
 
     monkeypatch.setattr(
         index_service,
         "load_vector_store",
         lambda video_id: pytest.fail(
-            "A missing index must not be loaded."
+            "A not-ready index must not be loaded."
         ),
     )
 
@@ -124,7 +226,8 @@ def test_load_ready_index_rejects_missing_index(monkeypatch):
         index_service.load_ready_index(VIDEO_ID)
 
     assert error.value.video_id == VIDEO_ID
-    assert error.value.state is IndexState.MISSING
+    assert error.value.state == "missing"
+    assert error.value.job_id is None
 
 
 @pytest.mark.unit
@@ -133,8 +236,14 @@ def test_load_ready_index_loads_valid_index(monkeypatch):
 
     monkeypatch.setattr(
         index_service,
-        "get_index_state",
-        lambda video_id: IndexState.VALID,
+        "get_index_status",
+        lambda video_id: index_service.IndexStatus(
+            video_id=VIDEO_ID,
+            state="ready",
+            action="reuse",
+            ready=True,
+            job_id=None,
+        ),
     )
     monkeypatch.setattr(
         index_service,
@@ -150,42 +259,3 @@ def test_load_ready_index_loads_valid_index(monkeypatch):
 def test_service_rejects_invalid_video_ids(video_id):
     with pytest.raises(ValueError):
         index_service.get_index_status(video_id)
-
-
-@pytest.mark.unit
-def test_status_reports_building_without_reading_disk_state(monkeypatch):
-    monkeypatch.setattr(
-        index_service,
-        "_set_runtime_status",
-        lambda video_id, state: index_service._RUNTIME_STATUS.__setitem__(video_id, state)
-        if state is not None
-        else index_service._RUNTIME_STATUS.pop(video_id, None),
-    )
-    index_service._set_runtime_status(VIDEO_ID, "building")
-    monkeypatch.setattr(
-        index_service,
-        "get_index_state",
-        lambda video_id: pytest.fail(
-            "Building state should be served from runtime status."
-        ),
-    )
-
-    try:
-        status = index_service.get_index_status(VIDEO_ID)
-        assert status.state == "building"
-        assert status.action == "building"
-        assert status.ready is False
-    finally:
-        index_service._set_runtime_status(VIDEO_ID, None)
-
-
-@pytest.mark.unit
-def test_status_reports_failed_preparation(monkeypatch):
-    index_service._set_runtime_status(VIDEO_ID, "failed")
-    try:
-        status = index_service.get_index_status(VIDEO_ID)
-        assert status.state == "failed"
-        assert status.action == "retry"
-        assert status.ready is False
-    finally:
-        index_service._set_runtime_status(VIDEO_ID, None)
