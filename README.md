@@ -51,7 +51,8 @@ Queued response (HTTP 202):
   "video_id": "Gfr50f6ZBvo",
   "state": "queued",
   "action": "create",
-  "ready": false
+  "ready": false,
+  "job_id": "7c7d9d2d..." 
 }
 ```
 
@@ -62,15 +63,16 @@ Ready response:
   "video_id": "Gfr50f6ZBvo",
   "state": "ready",
   "action": "create",
-  "ready": true
+  "ready": true,
+  "job_id": "7c7d9d2d..."
 }
 ```
 
-The action is one of `create`, `reuse`, or `rebuild`.
+The action is one of `create`, `reuse`, or `rebuild`. Queued/building responses include a durable `job_id` for request tracing; clients should continue using `GET /index/{video_id}` for readiness polling.
 
 ### `GET /index/{video_id}`
 
-Returns the current state: `missing`, `queued`, `building`, `ready`, `invalid`, `stale`, or `failed`, plus the recommended lifecycle action and a `ready` boolean.
+Returns the current state: `missing`, `queued`, `building`, `ready`, `invalid`, `stale`, or `failed`, plus the recommended lifecycle action, a `ready` boolean, and the active/latest `job_id` when one exists.
 
 `queued`, `building`, and `failed` are persisted in SQLite, so multiple FastAPI worker processes on the same shared filesystem observe the same job state. A worker lease expires and can be reclaimed after a process failure.
 
@@ -129,7 +131,8 @@ CI checks dependency consistency, compiles the Python source, validates Chrome e
 
 - FAISS indexes are stored on local disk under the backend vector-store directory.
 - Durable index jobs are stored in SQLite and coordinate multiple FastAPI workers that share the same filesystem.
-- The worker lease, SQLite database, and FAISS directory must all be on shared persistent storage for multi-worker safety. Separate containers need an external database and shared object/storage layer before this design can span instances.
+- The worker lease, SQLite database, and FAISS directory must all be on shared persistent storage for multi-worker safety.
+- Job IDs are diagnostic/request-tracing identifiers; readiness remains keyed by video ID so the extension can safely recover from navigation and repeated requests. Separate containers need an external database and shared object/storage layer before this design can span instances.
 - Index preparation is asynchronous from the HTTP client's perspective. Long-running distributed queues, cancellation, autoscaling, external job brokers, and cross-container storage are deployment architecture work.
 - The extension currently targets local development. A public release still needs a hosted HTTPS backend, production CORS/host-permission settings, authentication/abuse controls, privacy disclosures, and end-to-end release validation.
 - Clickable source timestamps currently seek the in-page YouTube player. A stronger full-view timestamp deep-link experience remains a planned UX phase.
