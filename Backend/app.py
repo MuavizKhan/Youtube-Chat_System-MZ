@@ -553,7 +553,7 @@ def index_prepare(
 
         return {
             "video_id": result.video_id,
-            "state": result.state.value,
+            "state": result.state,
             "action": result.action.value,
             "ready": result.ready,
         }
@@ -596,7 +596,7 @@ def index_status(
         result = get_index_status(video_id)
         return {
             "video_id": result.video_id,
-            "state": result.state.value,
+            "state": result.state,
             "action": result.action.value,
             "ready": result.ready,
         }
