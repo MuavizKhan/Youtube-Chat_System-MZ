@@ -268,7 +268,7 @@ def test_index_submit_endpoint_sanitizes_failure(client, monkeypatch):
         json={"video_id": VALID_VIDEO_ID},
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 503
     assert response.json()["error"] == "index_queue_unavailable"
     # Queue submission failures are distinct from worker/index failures.
     assert "private transcript provider details" not in response.text
