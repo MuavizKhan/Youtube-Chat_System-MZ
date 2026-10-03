@@ -21,6 +21,7 @@ Local persistence
 """
 
 import argparse
+from importlib.metadata import metadata
 import json
 from typing import Optional
 
@@ -31,6 +32,8 @@ from youtube_transcript_api import (
     VideoUnavailable,
     YouTubeTranscriptApi,
 )
+
+from enum import Enum
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -674,6 +677,16 @@ def create_vector_store(
 # 8. BUILD INDEX METADATA
 # ============================================================
 
+class IndexState(str, Enum):
+    """
+    Lifecycle state of a persisted video vector store.
+    """
+
+    MISSING = "missing"
+    VALID = "valid"
+    INVALID = "invalid"
+    STALE = "stale"
+
 INDEX_METADATA_VERSION = 1
 
 
@@ -739,31 +752,25 @@ def build_index_metadata(
         ),
     }
 
-# VALIDATE VECTOR STORE
-def validate_vector_store(
+# private validation helper
+def _validate_vector_store_contents(
     video_id: str,
-) -> bool:
+    video_store_path,
+) -> tuple[bool, bool]:
     """
-    Validate the persisted structure and metadata of one video's
-    FAISS vector store.
+    Validate the persisted files and metadata for one video's
+    vector store.
 
-    This function validates whether the index can be trusted based on
-    the files and metadata persisted by the indexing pipeline.
+    Returns:
+        (is_valid, is_stale)
 
-    It does not load the FAISS index. Index loading remains the
-    responsibility of the retrieval layer.
+    is_valid:
+        True when the persisted structure and metadata are valid.
+
+    is_stale:
+        True when the persisted index is valid but was created
+        using a different indexing configuration.
     """
-
-    if not video_id or not video_id.strip():
-        return False
-
-    video_store_path = (
-        VECTOR_STORE_ROOT
-        / video_id
-    )
-
-    if not video_store_path.is_dir():
-        return False
 
     required_files = (
         "index.faiss",
@@ -772,38 +779,28 @@ def validate_vector_store(
     )
 
     for filename in required_files:
-        file_path = (
-            video_store_path
-            / filename
-        )
+        file_path = video_store_path / filename
 
         if not file_path.is_file():
-            return False
+            return False, False
 
-    metadata_path = (
-        video_store_path
-        / "metadata.json"
-    )
+    metadata_path = video_store_path / "metadata.json"
 
     try:
         with metadata_path.open(
             "r",
             encoding="utf-8",
         ) as metadata_file:
-            metadata = json.load(
-                metadata_file
-            )
+            metadata = json.load(metadata_file)
+
     except (
         OSError,
         json.JSONDecodeError,
     ):
-        return False
+        return False, False
 
-    if not isinstance(
-        metadata,
-        dict,
-    ):
-        return False
+    if not isinstance(metadata, dict):
+        return False, False
 
     required_metadata = {
         "metadata_version",
@@ -817,51 +814,129 @@ def validate_vector_store(
         "transcript_generated",
     }
 
-    if not required_metadata.issubset(
-        metadata.keys()
-    ):
-        return False
+    if not required_metadata.issubset(metadata.keys()):
+        return False, False
+
+    if type(metadata["metadata_version"]) is not int:
+        return False, False
+
+    if type(metadata["chunk_size"]) is not int:
+        return False, False
+
+    if type(metadata["chunk_overlap"]) is not int:
+        return False, False
+
+    if type(metadata["chunk_count"]) is not int:
+        return False, False
+
+    if type(metadata["transcript_generated"]) is not bool:
+        return False, False
 
     if metadata["metadata_version"] != INDEX_METADATA_VERSION:
-        return False
+        return False, False
 
     if metadata["video_id"] != video_id:
-        return False
-
-    if metadata["embedding_model"] != EMBEDDING_MODEL:
-        return False
-
-    if metadata["chunk_size"] != CHUNK_SIZE:
-        return False
-
-    if metadata["chunk_overlap"] != CHUNK_OVERLAP:
-        return False
-
-    if not isinstance(
-        metadata["chunk_count"],
-        int,
-    ):
-        return False
+        return False, False
 
     if metadata["chunk_count"] <= 0:
-        return False
+        return False, False
 
-    if not isinstance(
-        metadata["transcript_language"],
-        str,
-    ) or not metadata["transcript_language"].strip():
-        return False
-
-    if not isinstance(
-        metadata["transcript_language_code"],
-        str,
-    ) or not metadata["transcript_language_code"].strip():
-        return False
-
-    if not isinstance(
-        metadata["transcript_generated"],
-        bool,
+    if (
+        not isinstance(
+            metadata["transcript_language"],
+            str,
+        )
+        or not metadata["transcript_language"].strip()
     ):
+        return False, False
+
+    if (
+        not isinstance(
+            metadata["transcript_language_code"],
+            str,
+        )
+        or not metadata["transcript_language_code"].strip()
+    ):
+        return False, False
+
+    is_stale = (
+        metadata["embedding_model"] != EMBEDDING_MODEL
+        or metadata["chunk_size"] != CHUNK_SIZE
+        or metadata["chunk_overlap"] != CHUNK_OVERLAP
+    )
+
+    return True, is_stale
+
+
+# state resolver
+def get_index_state(
+    video_id: str,
+) -> IndexState:
+    """
+    Determine the lifecycle state of one video's persisted
+    vector store.
+    """
+
+    if not video_id or not video_id.strip():
+        return IndexState.MISSING
+
+    video_store_path = (
+        VECTOR_STORE_ROOT
+        / video_id
+    )
+
+    if not video_store_path.is_dir():
+        return IndexState.MISSING
+
+    is_valid, is_stale = (
+        _validate_vector_store_contents(
+            video_id,
+            video_store_path,
+        )
+    )
+
+    if not is_valid:
+        return IndexState.INVALID
+
+    if is_stale:
+        return IndexState.STALE
+
+    return IndexState.VALID
+
+
+# VALIDATE VECTOR STORE
+def validate_vector_store(
+    video_id: str,
+) -> bool:
+    """
+    Validate the persisted structure and metadata of one video's
+    FAISS vector store.
+
+    Configuration drift is considered invalid by this function.
+    """
+
+    if not video_id or not video_id.strip():
+        return False
+
+    video_store_path = (
+        VECTOR_STORE_ROOT
+        / video_id
+    )
+
+    if not video_store_path.is_dir():
+        return False
+
+    is_valid, is_stale = (
+        _validate_vector_store_contents(
+            video_id,
+            video_store_path,
+        )
+    )
+
+    if not is_valid:
+        return False
+
+    if is_stale:
         return False
 
     return True
