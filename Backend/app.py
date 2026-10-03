@@ -598,7 +598,7 @@ def index_status(
         return {
             "video_id": result.video_id,
             "state": result.state,
-            "action": result.action.value,
+            "action": result.action,
             "ready": result.ready,
         }
 
