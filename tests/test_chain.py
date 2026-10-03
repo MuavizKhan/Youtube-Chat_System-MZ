@@ -373,3 +373,105 @@ def test_create_llm_client_requires_token(monkeypatch):
     monkeypatch.setattr(chain,"HF_TOKEN",None)
     with pytest.raises(RuntimeError,match="HF_TOKEN was not found"):
         chain.create_llm_client()
+
+@pytest.mark.unit
+def test_answer_question_uses_index_lifecycle(monkeypatch):
+    vector_store = object()
+
+    calls = {
+        "ensure_index": 0,
+        "load_vector_store": 0,
+    }
+
+    monkeypatch.setattr(
+        chain,
+        "extract_video_id",
+        lambda reference: "Gfr50f6ZBvo",
+    )
+
+    def fake_ensure_index(video_id):
+        calls["ensure_index"] += 1
+        assert video_id == "Gfr50f6ZBvo"
+        return vector_store
+
+    monkeypatch.setattr(
+        chain,
+        "ensure_index",
+        fake_ensure_index,
+    )
+
+    def forbidden_load(video_id):
+        calls["load_vector_store"] += 1
+        raise AssertionError(
+            "answer_question must not call load_vector_store directly"
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "load_vector_store",
+        forbidden_load,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        chain,
+        "create_llm_client",
+        lambda: object(),
+    )
+
+    class FakeRagChain:
+        def invoke(self, inputs):
+            assert inputs["video_id"] == "Gfr50f6ZBvo"
+            assert inputs["question"] == "What happened?"
+
+            return {
+                "answer": "grounded answer",
+                "retrieved_results": [],
+                "source_groups": [],
+            }
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda vector_store, llm_client: FakeRagChain(),
+    )
+
+    result = chain.answer_question(
+        video_reference="https://www.youtube.com/watch?v=Gfr50f6ZBvo",
+        question="What happened?",
+    )
+
+    assert result["answer"] == "grounded answer"
+    assert result["video_id"] == "Gfr50f6ZBvo"
+    assert calls["ensure_index"] == 1
+    assert calls["load_vector_store"] == 0
+
+@pytest.mark.unit
+def test_answer_question_propagates_index_lifecycle_error(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        chain,
+        "extract_video_id",
+        lambda reference: "Gfr50f6ZBvo",
+    )
+
+    def fail(video_id):
+        raise RuntimeError(
+            "index creation failed"
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "ensure_index",
+        fail,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="index creation failed",
+    ):
+        chain.answer_question(
+            video_reference="Gfr50f6ZBvo",
+            question="What happened?",
+        )

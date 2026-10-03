@@ -55,9 +55,10 @@ from .config import (
 
 from .retrieval import (
     extract_video_id,
-    load_vector_store,
     retrieve_question_context,
 )
+
+from .indexing import ensure_index
 
 
 # ============================================================
@@ -1242,10 +1243,10 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Load cached vector store
+    # Ensure a valid vector store exists
     # --------------------------------------------------------
 
-    vector_store = load_vector_store(
+    vector_store = ensure_index(
         video_id
     )
 

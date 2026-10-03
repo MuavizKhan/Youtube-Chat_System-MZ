@@ -20,6 +20,64 @@ def result():
     }
 
 
+@pytest.mark.api
+def test_chat_returns_404_when_index_lifecycle_reports_missing(
+    client,
+    monkeypatch,
+):
+    def missing_index(video_id):
+        raise FileNotFoundError("index missing")
+
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        lambda **kwargs: missing_index(
+            kwargs["video_reference"]
+        ),
+    )
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What happened?",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "video_not_indexed"
+    assert response.json()["request_id"]
+
+
+@pytest.mark.api
+def test_chat_returns_502_when_index_lifecycle_fails(
+    client,
+    monkeypatch,
+):
+    def lifecycle_failure(**kwargs):
+        raise RuntimeError(
+            "index creation failed"
+        )
+
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        lifecycle_failure,
+    )
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What happened?",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "ai_service_error"
+    assert "index creation failed" not in response.text
+
+
 @pytest.fixture
 def client():
     with TestClient(app_module.app,raise_server_exceptions=False) as c:
