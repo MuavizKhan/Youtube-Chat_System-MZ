@@ -141,3 +141,34 @@ def test_job_store_records_ready_and_failed_states(tmp_path):
     ) is True
     assert store.get(VIDEO_ID).status == JOB_FAILED
     assert claimed is not None
+
+@pytest.mark.unit
+def test_separate_store_instances_coordinate_claims(tmp_path):
+    database = tmp_path / "jobs.sqlite3"
+    first_store = IndexJobStore(database, lease_seconds=60)
+    second_store = IndexJobStore(database, lease_seconds=60)
+
+    first_store.enqueue(VIDEO_ID, action="create")
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def claim(store, worker_id):
+        barrier.wait()
+        results.append(store.claim(VIDEO_ID, worker_id))
+
+    threads = [
+        threading.Thread(target=claim, args=(first_store, "worker-a")),
+        threading.Thread(target=claim, args=(second_store, "worker-b")),
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    successful = [item for item in results if item is not None]
+
+    assert len(successful) == 1
+    assert successful[0].status == JOB_BUILDING
+
