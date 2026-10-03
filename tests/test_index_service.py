@@ -19,7 +19,7 @@ def test_status_reports_missing_index(monkeypatch):
 
     assert status.video_id == VIDEO_ID
     assert status.state == "missing"
-    assert status.action is IndexAction.CREATE
+    assert status.action == IndexAction.CREATE.value
     assert status.ready is False
 
 
@@ -34,7 +34,7 @@ def test_status_reports_valid_index(monkeypatch):
     status = index_service.get_index_status(VIDEO_ID)
 
     assert status.state == "ready"
-    assert status.action is IndexAction.REUSE
+    assert status.action == IndexAction.REUSE.value
     assert status.ready is True
 
 
@@ -79,7 +79,7 @@ def test_prepare_index_delegates_lifecycle(
 
     assert result.video_id == VIDEO_ID
     assert result.state == "ready"
-    assert result.action is expected_action
+    assert result.action == expected_action.value
     assert result.ready is True
     assert ensure_calls == [(VIDEO_ID, ["en"])]
 
@@ -100,7 +100,7 @@ def test_prepare_index_reuses_valid_index(monkeypatch):
 
     result = index_service.prepare_index(VIDEO_ID)
 
-    assert result.action is IndexAction.REUSE
+    assert result.action == IndexAction.REUSE.value
     assert result.ready is True
 
 
