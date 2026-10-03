@@ -313,3 +313,38 @@ def test_failed_job_does_not_hide_a_valid_persisted_index(monkeypatch):
     assert status.state == "ready"
     assert status.action == IndexAction.REUSE.value
     assert status.ready is True
+
+@pytest.mark.unit
+def test_submit_index_returns_durable_job_id(monkeypatch):
+    store = FakeJobStore()
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "_dispatch_video",
+        lambda video_id: None,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.MISSING,
+    )
+
+    status = index_service.submit_index(VIDEO_ID)
+
+    assert status.state == "queued"
+    assert status.job_id == "job-1"
+
+
+@pytest.mark.unit
+def test_not_ready_error_carries_durable_job_id():
+    error = index_service.IndexNotReadyError(
+        VIDEO_ID,
+        "building",
+        "job-123",
+    )
+
+    assert error.video_id == VIDEO_ID
+    assert error.state == "building"
+    assert error.job_id == "job-123"
+
