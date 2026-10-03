@@ -261,7 +261,7 @@ def test_index_submit_endpoint_sanitizes_failure(client, monkeypatch):
     def fail(video_id):
         raise RuntimeError("private transcript provider details")
 
-    monkeypatch.setattr(app_module, "prepare_index", fail)
+    monkeypatch.setattr(app_module, "submit_index", fail)
 
     response = client.post(
         "/index",
