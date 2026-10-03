@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import Backend.app as app_module
 
@@ -211,3 +212,103 @@ def test_rate_limit_contract(client,monkeypatch):
     finally:
         app_module.limiter.enabled=False
         app_module.limiter.reset()
+
+
+@pytest.mark.api
+def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
+    calls = []
+
+    def fake_prepare(video_id):
+        calls.append(video_id)
+        return SimpleNamespace(
+            video_id=VALID_VIDEO_ID,
+            state=SimpleNamespace(value="valid"),
+            action=SimpleNamespace(value="create"),
+            ready=True,
+        )
+
+    monkeypatch.setattr(app_module, "prepare_index", fake_prepare)
+
+    response = client.post(
+        "/index",
+        json={"video_id": f"https://www.youtube.com/watch?v={VALID_VIDEO_ID}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "video_id": VALID_VIDEO_ID,
+        "state": "valid",
+        "action": "create",
+        "ready": True,
+    }
+    assert calls == [VALID_VIDEO_ID]
+
+
+@pytest.mark.api
+def test_prepare_index_endpoint_rejects_invalid_video_reference(client):
+    response = client.post(
+        "/index",
+        json={"video_id": "not-valid"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_video_reference"
+    assert response.json()["request_id"]
+
+
+@pytest.mark.api
+def test_prepare_index_endpoint_sanitizes_failure(client, monkeypatch):
+    def fail(video_id):
+        raise RuntimeError("private transcript provider details")
+
+    monkeypatch.setattr(app_module, "prepare_index", fail)
+
+    response = client.post(
+        "/index",
+        json={"video_id": VALID_VIDEO_ID},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "index_preparation_failed"
+    assert "private transcript provider details" not in response.text
+
+
+@pytest.mark.api
+def test_index_status_endpoint_returns_state(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "get_index_status",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state=SimpleNamespace(value="missing"),
+            action=SimpleNamespace(value="create"),
+            ready=False,
+        ),
+    )
+
+    response = client.get(f"/index/{VALID_VIDEO_ID}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "video_id": VALID_VIDEO_ID,
+        "state": "missing",
+        "action": "create",
+        "ready": False,
+    }
+
+
+@pytest.mark.api
+def test_index_status_endpoint_rejects_invalid_video_id(client):
+    response = client.get("/index/not-valid")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_video_reference"
+
+
+@pytest.mark.api
+def test_index_prepare_validation_error_uses_api_contract(client):
+    response = client.post("/index", json={})
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+    assert response.json()["request_id"]
