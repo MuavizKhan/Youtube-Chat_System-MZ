@@ -5,11 +5,12 @@ A Chrome extension and FastAPI backend that let a user ask questions about a You
 ## Product flow
 
 1. The user opens a YouTube video.
-2. The extension detects the video ID and requests index preparation in the background while keeping the chat panel closed.
-3. The backend fetches the available transcript, creates timestamp-aware chunks and embeddings, and persists a per-video FAISS index.
-4. The extension shows whether the video is preparing, ready, or failed.
-5. The user opens the chat and asks questions. Chat only uses an already-valid index; it does not build an index as part of the question request.
-6. Answers include source segments with start/end timestamps.
+2. The extension detects the video ID and submits index preparation in the background while keeping the chat panel closed.
+3. The backend creates a durable per-video index job, and one worker claims the job through SQLite lease coordination.
+4. The worker fetches the transcript, creates timestamp-aware chunks and embeddings, and persists a per-video FAISS index.
+5. The extension polls the durable status endpoint and shows whether the video is queued, preparing, ready, or failed.
+6. The user opens the chat and asks questions. Chat only uses an already-valid index; it does not build an index as part of the question request.
+7. Answers include source segments with start/end timestamps.
 
 ## Architecture
 
@@ -40,9 +41,20 @@ Request:
 }
 ```
 
-Accepts a raw 11-character YouTube video ID or a supported YouTube URL. This endpoint is synchronous: it returns after the index has been prepared or returns a sanitized error. It may take time for videos whose transcripts and embeddings have not been processed yet.
+Accepts a raw 11-character YouTube video ID or a supported YouTube URL. If the index is already valid, the endpoint returns `200` immediately. Otherwise it creates or reuses a durable background job and returns `202` without waiting for transcript/embedding work to finish.
 
-Success response:
+Queued response:
+
+```json
+{
+  "video_id": "Gfr50f6ZBvo",
+  "state": "queued",
+  "action": "create",
+  "ready": false
+}
+```
+
+Ready response:
 
 ```json
 {
@@ -57,9 +69,9 @@ The action is one of `create`, `reuse`, or `rebuild`.
 
 ### `GET /index/{video_id}`
 
-Returns the current state: `missing`, `building`, `ready`, `invalid`, `stale`, or `failed`, plus the recommended lifecycle action and a `ready` boolean.
+Returns the current state: `missing`, `queued`, `building`, `ready`, `invalid`, `stale`, or `failed`, plus the recommended lifecycle action and a `ready` boolean.
 
-`building` and `failed` are in-memory runtime states for the current Python process. They are not durable across process restarts and are not shared between multiple worker processes. A multi-worker deployment needs shared job/status storage before relying on this endpoint across workers.
+`queued`, `building`, and `failed` are persisted in SQLite, so multiple FastAPI worker processes on the same shared filesystem observe the same job state. A worker lease expires and can be reclaimed after a process failure.
 
 ### `POST /chat`
 
@@ -72,7 +84,7 @@ Request:
 }
 ```
 
-Chat requires the index to be ready. If it is missing, invalid, or stale, the API returns a not-ready response; clients should call `POST /index` and retry chat after preparation succeeds.
+Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes remain unavailable until `POST /index` is requested.
 
 ## Local development
 
@@ -115,8 +127,9 @@ CI checks dependency consistency, compiles the Python source, validates Chrome e
 ## Current operational boundaries
 
 - FAISS indexes are stored on local disk under the backend vector-store directory.
-- Lifecycle locks and transient `building`/`failed` status are process-local. They do not coordinate separate worker processes or containers.
-- Index preparation is synchronous. Long-running distributed jobs, durable status, queueing, cancellation, and multi-instance storage are later deployment architecture work.
+- Durable index jobs are stored in SQLite and coordinate multiple FastAPI workers that share the same filesystem.
+- The worker lease, SQLite database, and FAISS directory must all be on shared persistent storage for multi-worker safety. Separate containers need an external database and shared object/storage layer before this design can span instances.
+- Index preparation is asynchronous from the HTTP client's perspective. Long-running distributed queues, cancellation, autoscaling, external job brokers, and cross-container storage are deployment architecture work.
 - The extension currently targets local development. A public release still needs a hosted HTTPS backend, production CORS/host-permission settings, authentication/abuse controls, privacy disclosures, and end-to-end release validation.
 - Clickable source timestamps currently seek the in-page YouTube player. A stronger full-view timestamp deep-link experience remains a planned UX phase.
 
