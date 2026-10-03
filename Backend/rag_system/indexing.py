@@ -671,7 +671,7 @@ def create_vector_store(
 
 
 # ============================================================
-# BUILD INDEX METADATA
+# 8. BUILD INDEX METADATA
 # ============================================================
 
 INDEX_METADATA_VERSION = 1
@@ -739,10 +739,133 @@ def build_index_metadata(
         ),
     }
 
+# VALIDATE VECTOR STORE
+def validate_vector_store(
+    video_id: str,
+) -> bool:
+    """
+    Validate the persisted structure and metadata of one video's
+    FAISS vector store.
 
-# ============================================================
-# 8. SAVE VECTOR STORE
-# ============================================================
+    This function validates whether the index can be trusted based on
+    the files and metadata persisted by the indexing pipeline.
+
+    It does not load the FAISS index. Index loading remains the
+    responsibility of the retrieval layer.
+    """
+
+    if not video_id or not video_id.strip():
+        return False
+
+    video_store_path = (
+        VECTOR_STORE_ROOT
+        / video_id
+    )
+
+    if not video_store_path.is_dir():
+        return False
+
+    required_files = (
+        "index.faiss",
+        "index.pkl",
+        "metadata.json",
+    )
+
+    for filename in required_files:
+        file_path = (
+            video_store_path
+            / filename
+        )
+
+        if not file_path.is_file():
+            return False
+
+    metadata_path = (
+        video_store_path
+        / "metadata.json"
+    )
+
+    try:
+        with metadata_path.open(
+            "r",
+            encoding="utf-8",
+        ) as metadata_file:
+            metadata = json.load(
+                metadata_file
+            )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):
+        return False
+
+    if not isinstance(
+        metadata,
+        dict,
+    ):
+        return False
+
+    required_metadata = {
+        "metadata_version",
+        "video_id",
+        "embedding_model",
+        "chunk_size",
+        "chunk_overlap",
+        "chunk_count",
+        "transcript_language",
+        "transcript_language_code",
+        "transcript_generated",
+    }
+
+    if not required_metadata.issubset(
+        metadata.keys()
+    ):
+        return False
+
+    if metadata["metadata_version"] != INDEX_METADATA_VERSION:
+        return False
+
+    if metadata["video_id"] != video_id:
+        return False
+
+    if metadata["embedding_model"] != EMBEDDING_MODEL:
+        return False
+
+    if metadata["chunk_size"] != CHUNK_SIZE:
+        return False
+
+    if metadata["chunk_overlap"] != CHUNK_OVERLAP:
+        return False
+
+    if not isinstance(
+        metadata["chunk_count"],
+        int,
+    ):
+        return False
+
+    if metadata["chunk_count"] <= 0:
+        return False
+
+    if not isinstance(
+        metadata["transcript_language"],
+        str,
+    ) or not metadata["transcript_language"].strip():
+        return False
+
+    if not isinstance(
+        metadata["transcript_language_code"],
+        str,
+    ) or not metadata["transcript_language_code"].strip():
+        return False
+
+    if not isinstance(
+        metadata["transcript_generated"],
+        bool,
+    ):
+        return False
+
+    return True
+
 
 # ============================================================
 # 9. SAVE VECTOR STORE
