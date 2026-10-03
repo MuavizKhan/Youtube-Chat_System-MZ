@@ -511,17 +511,23 @@ function extractBackendError(
         return "";
     }
 
-    if (
-        typeof data.detail === "string"
-    ) {
-
+    if (typeof data.detail === "string") {
         return data.detail;
     }
 
     if (
-        typeof data.error === "string"
+        data.detail &&
+        typeof data.detail === "object" &&
+        typeof data.detail.message === "string"
     ) {
+        return data.detail.message;
+    }
 
+    if (typeof data.message === "string") {
+        return data.message;
+    }
+
+    if (typeof data.error === "string") {
         return data.error;
     }
 
