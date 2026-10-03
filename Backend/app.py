@@ -263,13 +263,21 @@ async def http_exception_handler(
         error_code,
     )
 
+    error_content = {
+        "error": error_code,
+        "message": message,
+        "request_id": request_id,
+    }
+
+    if isinstance(detail, dict):
+        if "state" in detail:
+            error_content["state"] = detail["state"]
+        if "job_id" in detail:
+            error_content["job_id"] = detail["job_id"]
+
     response = JSONResponse(
         status_code=exception.status_code,
-        content={
-            "error": error_code,
-            "message": message,
-            "request_id": request_id,
-        },
+        content=error_content,
     )
 
     if exception.headers:
@@ -401,6 +409,7 @@ class IndexStatusResponse(BaseModel):
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -591,6 +600,7 @@ def index_prepare(
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except Exception as error:
@@ -626,6 +636,7 @@ def index_status(
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except ValueError as error:
@@ -713,6 +724,8 @@ def chat(
                 detail={
                     "error": "index_not_ready",
                     "message": "The video index is still being prepared. Retry chat after it becomes ready.",
+                    "state": error.state,
+                    "job_id": error.job_id,
                 },
             ) from error
 
@@ -722,6 +735,8 @@ def chat(
                 detail={
                     "error": "index_preparation_failed",
                     "message": "The video index could not be prepared. Open the index status and retry preparation.",
+                    "state": error.state,
+                    "job_id": error.job_id,
                 },
             ) from error
 
