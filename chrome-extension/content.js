@@ -41,6 +41,10 @@ let indexStatusVideoId = null;
 
 let indexPreparationInProgressFor = null;
 
+let indexPollTimer = null;
+
+const INDEX_STATUS_POLL_MS = 2000;
+
 // ============================================================
 // 1. YOUTUBE VIDEO ID
 // ============================================================
@@ -432,8 +436,124 @@ function updateIndexStatus(videoId, status, message = "") {
         failed: message || "Could not prepare this video. Reopen the chat to retry."
     };
 
-    statusElement.textContent = messages[status] || messages.unknown;
-    statusElement.dataset.state = status;
+    statusElement.textContent =
+        messages[status] || messages.unknown;
+
+    statusElement.dataset.state =
+        status;
+}
+
+
+function clearIndexPolling() {
+    if (indexPollTimer !== null) {
+        clearTimeout(indexPollTimer);
+        indexPollTimer = null;
+    }
+}
+
+
+function scheduleIndexStatusPoll(videoId) {
+    clearIndexPolling();
+
+    indexPollTimer = setTimeout(
+        () => {
+            indexPollTimer = null;
+            pollIndexStatus(videoId);
+        },
+        INDEX_STATUS_POLL_MS
+    );
+}
+
+
+function pollIndexStatus(videoId) {
+    if (
+        videoId !== getVideoId() ||
+        indexPreparationInProgressFor !== videoId
+    ) {
+        return;
+    }
+
+    chrome.runtime.sendMessage(
+        {
+            type: "get_index_status",
+            video_id: videoId
+        },
+        (response) => {
+            const runtimeError =
+                chrome.runtime.lastError;
+
+            if (videoId !== getVideoId()) {
+                return;
+            }
+
+            if (runtimeError) {
+                indexPreparationInProgressFor = null;
+                updateIndexStatus(
+                    videoId,
+                    "failed",
+                    "The extension could not check preparation status. Reopen the chat to retry."
+                );
+                return;
+            }
+
+            if (
+                !response ||
+                response.success !== true
+            ) {
+                indexPreparationInProgressFor = null;
+                updateIndexStatus(
+                    videoId,
+                    "failed",
+                    response?.error ||
+                    "Could not check preparation status. Reopen the chat to retry."
+                );
+                return;
+            }
+
+            if (response.ready === true || response.state === "ready") {
+                indexPreparationInProgressFor = null;
+                updateIndexStatus(
+                    videoId,
+                    "ready"
+                );
+                return;
+            }
+
+            if (
+                response.state === "queued" ||
+                response.state === "building"
+            ) {
+                updateIndexStatus(
+                    videoId,
+                    "preparing"
+                );
+                scheduleIndexStatusPoll(
+                    videoId
+                );
+                return;
+            }
+
+            if (
+                response.state === "missing" ||
+                response.state === "invalid" ||
+                response.state === "stale"
+            ) {
+                // The job may have been lost during a restart.
+                // Re-enqueue it through the idempotent POST /index.
+                requestIndexPreparation(
+                    videoId
+                );
+                return;
+            }
+
+            indexPreparationInProgressFor = null;
+            updateIndexStatus(
+                videoId,
+                "failed",
+                "Video preparation failed. Reopen the chat to retry."
+            );
+        }
+    );
 }
 
 
@@ -449,8 +569,13 @@ function requestIndexPreparation(videoId) {
         return;
     }
 
+    clearIndexPolling();
+
     indexPreparationInProgressFor = videoId;
-    updateIndexStatus(videoId, "preparing");
+    updateIndexStatus(
+        videoId,
+        "preparing"
+    );
 
     chrome.runtime.sendMessage(
         {
@@ -458,17 +583,15 @@ function requestIndexPreparation(videoId) {
             video_id: videoId
         },
         (response) => {
-            const runtimeError = chrome.runtime.lastError;
-
-            if (indexPreparationInProgressFor === videoId) {
-                indexPreparationInProgressFor = null;
-            }
+            const runtimeError =
+                chrome.runtime.lastError;
 
             if (videoId !== getVideoId()) {
                 return;
             }
 
             if (runtimeError) {
+                indexPreparationInProgressFor = null;
                 updateIndexStatus(
                     videoId,
                     "failed",
@@ -477,16 +600,54 @@ function requestIndexPreparation(videoId) {
                 return;
             }
 
-            if (!response || response.success !== true || response.ready !== true) {
+            if (
+                !response ||
+                response.success !== true
+            ) {
+                indexPreparationInProgressFor = null;
                 updateIndexStatus(
                     videoId,
                     "failed",
-                    response?.error || "Could not prepare this video. Reopen the chat to retry."
+                    response?.error ||
+                    "Could not start preparation. Reopen the chat to retry."
                 );
                 return;
             }
 
-            updateIndexStatus(videoId, "ready");
+            if (
+                response.ready === true ||
+                response.state === "ready"
+            ) {
+                indexPreparationInProgressFor = null;
+                updateIndexStatus(
+                    videoId,
+                    "ready"
+                );
+                return;
+            }
+
+            if (
+                response.state === "queued" ||
+                response.state === "building"
+            ) {
+                updateIndexStatus(
+                    videoId,
+                    "preparing"
+                );
+
+                scheduleIndexStatusPoll(
+                    videoId
+                );
+
+                return;
+            }
+
+            indexPreparationInProgressFor = null;
+            updateIndexStatus(
+                videoId,
+                "failed",
+                "Video preparation could not be started. Reopen the chat to retry."
+            );
         }
     );
 }
@@ -1083,6 +1244,8 @@ function handleVideoNavigation() {
     const currentVideoId = getVideoId();
 
     if (currentVideoId !== lastVideoId) {
+        clearIndexPolling();
+        indexPreparationInProgressFor = null;
         lastVideoId = currentVideoId;
 
         // Invalidate responses from the previous video.
@@ -1169,6 +1332,9 @@ chrome.runtime.onMessage.addListener(
 // ============================================================
 
 function initialize() {
+
+    clearIndexPolling();
+    indexPreparationInProgressFor = null;
 
     if (!isVideoPage()) {
         return;
