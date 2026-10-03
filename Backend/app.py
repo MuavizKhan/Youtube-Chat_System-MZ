@@ -246,13 +246,21 @@ async def http_exception_handler(
         error_code,
     )
 
+    content = {
+        "error": error_code,
+        "message": message,
+        "request_id": request_id,
+    }
+
+    if isinstance(detail, dict):
+        if "state" in detail:
+            content["state"] = detail["state"]
+        if "job_id" in detail:
+            content["job_id"] = detail["job_id"]
+
     response = JSONResponse(
         status_code=exception.status_code,
-        content={
-            "error": error_code,
-            "message": message,
-            "request_id": request_id,
-        },
+        content=content,
     )
 
     if exception.headers:
