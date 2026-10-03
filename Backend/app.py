@@ -626,6 +626,7 @@ def index_prepare(
 def index_status(
     video_id: str,
     request: Request,
+    response: Response,
 ):
     """Return the currently persisted index state for a video."""
 
