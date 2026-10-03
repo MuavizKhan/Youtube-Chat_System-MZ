@@ -20,6 +20,10 @@ FAISS vector store
 Local persistence
 """
 
+import shutil
+import uuid
+from pathlib import Path
+
 import argparse
 from importlib.metadata import metadata
 import json
@@ -978,8 +982,13 @@ def save_vector_store(
     chunks: list[Document],
 ):
     """
-    Save one FAISS index per YouTube video together with
-    metadata describing how the index was created.
+    Safely persist one FAISS index per YouTube video.
+
+    The index is first written to a staging directory. Only after
+    the staged index and metadata pass validation is the staged
+    directory published as the final index.
+
+    An existing index is preserved if staging or validation fails.
     """
 
     if not video_id or not video_id.strip():
@@ -992,6 +1001,8 @@ def save_vector_store(
             "Cannot save vector store because no chunks were supplied."
         )
 
+    video_id = video_id.strip()
+
     VECTOR_STORE_ROOT.mkdir(
         parents=True,
         exist_ok=True,
@@ -1002,34 +1013,143 @@ def save_vector_store(
         / video_id
     )
 
-    vector_store.save_local(
-        str(video_store_path)
+    staging_path = (
+        VECTOR_STORE_ROOT
+        / f".{video_id}.staging-{uuid.uuid4().hex}"
     )
 
-    metadata = build_index_metadata(
-        chunks
+    backup_path = (
+        VECTOR_STORE_ROOT
+        / f".{video_id}.backup-{uuid.uuid4().hex}"
     )
 
-    metadata_path = (
-        video_store_path
-        / "metadata.json"
-    )
+    try:
+        # ----------------------------------------------------
+        # 1. Build the complete index in isolation
+        # ----------------------------------------------------
 
-    with metadata_path.open(
-        "w",
-        encoding="utf-8",
-    ) as metadata_file:
-
-        json.dump(
-            metadata,
-            metadata_file,
-            indent=2,
-            ensure_ascii=False,
+        staging_path.mkdir(
+            parents=True,
+            exist_ok=False,
         )
 
-        metadata_file.write("\n")
+        vector_store.save_local(
+            str(staging_path)
+        )
 
-    return video_store_path
+        # ----------------------------------------------------
+        # 2. Write metadata into the staging directory
+        # ----------------------------------------------------
+
+        metadata = build_index_metadata(
+            chunks
+        )
+
+        metadata_path = (
+            staging_path
+            / "metadata.json"
+        )
+
+        with metadata_path.open(
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+
+            json.dump(
+                metadata,
+                metadata_file,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+            metadata_file.write("\n")
+
+        # ----------------------------------------------------
+        # 3. Validate the complete staged index
+        # ----------------------------------------------------
+
+        is_valid, is_stale = (
+            _validate_vector_store_contents(
+                video_id,
+                staging_path,
+            )
+        )
+
+        if not is_valid or is_stale:
+            raise RuntimeError(
+                "Staged vector store failed validation."
+            )
+
+                # ----------------------------------------------------
+        # 4. Publish the staged index
+        # ----------------------------------------------------
+
+        existing_index = video_store_path.exists()
+        backup_created = False
+
+        if existing_index:
+            video_store_path.rename(backup_path)
+            backup_created = True
+
+        try:
+            staging_path.rename(video_store_path)
+        except Exception:
+            # The new index was not published.
+            #
+            # Restore the previous index when possible. If restoration
+            # fails, deliberately leave the backup in place so the
+            # original index is still recoverable.
+            if (
+                backup_created
+                and backup_path.exists()
+                and not video_store_path.exists()
+            ):
+                try:
+                    backup_path.rename(video_store_path)
+                except OSError as restore_error:
+                    raise RuntimeError(
+                        "Failed to publish the new vector store and "
+                        f"failed to restore the previous index. "
+                        f"Original index preserved at: {backup_path}"
+                    ) from restore_error
+
+            raise
+
+        # ----------------------------------------------------
+        # 5. New index published successfully
+        # ----------------------------------------------------
+
+        if backup_created and backup_path.exists():
+            # Failure to remove an obsolete backup must not invalidate
+            # an already successful publication.
+            shutil.rmtree(
+                backup_path,
+                ignore_errors=True,
+            )
+
+        return video_store_path
+
+    except Exception:
+        # Remove incomplete staging data.
+        if staging_path.exists():
+            shutil.rmtree(
+                staging_path,
+                ignore_errors=True,
+            )
+
+        raise
+
+    finally:
+        # Defensive cleanup for staging only.
+        #
+        # IMPORTANT:
+        # Never delete backup_path here. If recovery failed, that
+        # backup may be the only remaining copy of the previous index.
+        if staging_path.exists():
+            shutil.rmtree(
+                staging_path,
+                ignore_errors=True,
+            )
 
 # ============================================================
 # 9. INSPECT CHUNKS
