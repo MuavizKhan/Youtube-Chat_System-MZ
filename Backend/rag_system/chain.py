@@ -58,7 +58,7 @@ from .retrieval import (
     retrieve_question_context,
 )
 
-from .indexing import ensure_index
+from .index_service import load_ready_index
 
 
 # ============================================================
@@ -1243,10 +1243,11 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Ensure a valid vector store exists
+    # Chat requires an index prepared through POST /index.
+    # It must not perform expensive transcript indexing inline.
     # --------------------------------------------------------
 
-    vector_store = ensure_index(
+    vector_store = load_ready_index(
         video_id
     )
 
