@@ -389,6 +389,44 @@ class IndexJobStore:
 
         return self._row_to_job(claimed)
 
+    def renew_lease(
+        self,
+        job_id: str,
+        worker_id: str,
+    ) -> bool:
+        """
+        Extend an active worker lease.
+
+        A heartbeat prevents a legitimately long indexing operation from
+        being reclaimed by another worker before it finishes.
+        """
+        now = time.time()
+        lease_until = now + self.lease_seconds
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET
+                    updated_at = ?,
+                    lease_until = ?
+                WHERE
+                    job_id = ?
+                    AND worker_id = ?
+                    AND status = ?
+                """,
+                (
+                    now,
+                    lease_until,
+                    job_id,
+                    worker_id,
+                    JOB_BUILDING,
+                ),
+            )
+
+        return cursor.rowcount == 1
+
+
     def mark_ready(
         self,
         job_id: str,
