@@ -62,6 +62,7 @@ class IndexStatus:
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class IndexPreparationResult:
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 class IndexNotReadyError(FileNotFoundError):
@@ -86,9 +88,11 @@ class IndexNotReadyError(FileNotFoundError):
         self,
         video_id: str,
         state: str,
+        job_id: str | None = None,
     ) -> None:
         self.video_id = video_id
         self.state = state
+        self.job_id = job_id
 
         super().__init__(
             f"Video index is not ready for '{video_id}'. "
@@ -133,6 +137,13 @@ def _get_executor() -> ThreadPoolExecutor:
 def _on_worker_finished(video_id: str, _future) -> None:
     with _DISPATCHED_LOCK:
         _DISPATCHED_VIDEOS.discard(video_id)
+
+    try:
+        _dispatch_available_jobs()
+    except Exception:
+        logger.exception(
+            "Failed to dispatch queued index jobs after worker completion"
+        )
 
 
 def _dispatch_video(video_id: str) -> None:
@@ -337,6 +348,7 @@ def get_index_status(
                 state="queued",
                 action=job.action,
                 ready=False,
+                job_id=job.job_id,
             )
 
         if job.status == JOB_BUILDING:
@@ -345,6 +357,7 @@ def get_index_status(
                 state="building",
                 action=job.action,
                 ready=False,
+                job_id=job.job_id,
             )
 
         if job.status == JOB_FAILED:
@@ -358,6 +371,7 @@ def get_index_status(
                     state="ready",
                     action=IndexAction.REUSE.value,
                     ready=True,
+                    job_id=job.job_id,
                 )
 
             return IndexStatus(
@@ -365,6 +379,7 @@ def get_index_status(
                 state="failed",
                 action="retry",
                 ready=False,
+                job_id=job.job_id,
             )
 
         if job.status == JOB_READY:
@@ -378,6 +393,7 @@ def get_index_status(
                     state="ready",
                     action=job.action,
                     ready=True,
+                    job_id=job.job_id,
                 )
 
     persisted_state = get_index_state(
@@ -399,6 +415,7 @@ def get_index_status(
         state=public_state,
         action=action.value,
         ready=(persisted_state is IndexState.VALID),
+        job_id=None,
     )
 
 
@@ -433,6 +450,7 @@ def submit_index(
             state="ready",
             action=IndexAction.REUSE.value,
             ready=True,
+            job_id=None,
         )
 
     action = get_index_action(
@@ -503,6 +521,7 @@ def prepare_index(
         state="ready",
         action=action.value,
         ready=True,
+        job_id=None,
     )
 
 
@@ -533,6 +552,7 @@ def load_ready_index(
         raise IndexNotReadyError(
             canonical_video_id,
             status.state,
+            status.job_id,
         )
 
     return load_vector_store(
