@@ -542,22 +542,6 @@ def index_prepare(
         video_id = extract_video_id(
             index_request.video_id.strip()
         )
-        result = prepare_index(video_id)
-
-        logger.info(
-            "Index preparation completed request_id=%s video_id=%s action=%s",
-            request.state.request_id,
-            video_id,
-            result.action.value,
-        )
-
-        return {
-            "video_id": result.video_id,
-            "state": result.state,
-            "action": result.action.value,
-            "ready": result.ready,
-        }
-
     except ValueError as error:
         raise HTTPException(
             status_code=400,
@@ -567,10 +551,27 @@ def index_prepare(
             },
         ) from error
 
+    try:
+        result = prepare_index(video_id)
+        logger.info(
+            "Index preparation completed request_id=%s video_id=%s action=%s",
+            request.state.request_id,
+            video_id,
+            result.action,
+        )
+
+        return {
+            "video_id": result.video_id,
+            "state": result.state,
+            "action": result.action,
+            "ready": result.ready,
+        }
+
     except Exception as error:
         logger.exception(
-            "Index preparation failed request_id=%s",
+            "Index preparation failed request_id=%s video_id=%s",
             request.state.request_id,
+            video_id,
         )
         raise HTTPException(
             status_code=502,
