@@ -555,7 +555,8 @@ def index_prepare(
     request: Request,
     response: Response,
 ):
-    """Synchronously create, reuse, or rebuild a video's index."""
+    """Queue, reuse, or rebuild a video's index without blocking the request."""
+
 
     try:
         video_id = extract_video_id(
@@ -580,7 +581,9 @@ def index_prepare(
             result.action,
         )
 
-        if not result.ready:
+        if result.state == "failed":
+            response.status_code = 503
+        elif not result.ready:
             response.status_code = 202
 
         return {
