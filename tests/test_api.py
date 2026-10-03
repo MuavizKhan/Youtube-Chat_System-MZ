@@ -227,7 +227,7 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
             ready=True,
         )
 
-    monkeypatch.setattr(app_module, "prepare_index", fake_prepare)
+    monkeypatch.setattr(app_module, "submit_index", fake_prepare)
 
     response = client.post(
         "/index",
@@ -257,7 +257,7 @@ def test_prepare_index_endpoint_rejects_invalid_video_reference(client):
 
 
 @pytest.mark.api
-def test_prepare_index_endpoint_sanitizes_failure(client, monkeypatch):
+def test_index_submit_endpoint_sanitizes_failure(client, monkeypatch):
     def fail(video_id):
         raise RuntimeError("private transcript provider details")
 
@@ -269,7 +269,7 @@ def test_prepare_index_endpoint_sanitizes_failure(client, monkeypatch):
     )
 
     assert response.status_code == 502
-    assert response.json()["error"] == "index_preparation_failed"
+    assert response.json()["error"] == "index_queue_unavailable"
     assert "private transcript provider details" not in response.text
 
 
@@ -311,4 +311,58 @@ def test_index_prepare_validation_error_uses_api_contract(client):
 
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
+    assert response.json()["request_id"]
+
+
+@pytest.mark.api
+def test_index_prepare_endpoint_returns_202_for_queued_job(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "submit_index",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="queued",
+            action="create",
+            ready=False,
+        ),
+    )
+
+    response = client.post(
+        "/index",
+        json={"video_id": VALID_VIDEO_ID},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "video_id": VALID_VIDEO_ID,
+        "state": "queued",
+        "action": "create",
+        "ready": False,
+    }
+
+
+@pytest.mark.api
+def test_chat_returns_409_when_index_is_building(client, monkeypatch):
+    def index_not_ready(**kwargs):
+        raise app_module.IndexNotReadyError(
+            VALID_VIDEO_ID,
+            "building",
+        )
+
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        index_not_ready,
+    )
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What happened?",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "index_not_ready"
     assert response.json()["request_id"]
