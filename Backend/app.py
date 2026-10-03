@@ -567,7 +567,7 @@ def index_prepare(
             },
         ) from error
 
-    except RuntimeError as error:
+    except Exception as error:
         logger.exception(
             "Index preparation failed request_id=%s",
             request.state.request_id,
