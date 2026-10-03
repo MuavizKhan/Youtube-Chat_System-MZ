@@ -12,13 +12,12 @@
  * 5. Return the complete RAG response, including sources.
  */
 
+importScripts("config.js");
 
 // ============================================================
 // CONFIGURATION
 // ============================================================
 
-const BACKEND_BASE_URL =
-    "http://127.0.0.1:8000";
 
 const BACKEND_URL =
     `${BACKEND_BASE_URL}/chat`;
