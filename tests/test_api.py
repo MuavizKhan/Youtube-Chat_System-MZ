@@ -225,9 +225,10 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
             state="ready",
             action="create",
             ready=True,
+            job_id=None,
         )
 
-    monkeypatch.setattr(app_module, "prepare_index", fake_prepare)
+    monkeypatch.setattr(app_module, "submit_index", fake_prepare)
 
     response = client.post(
         "/index",
@@ -240,6 +241,7 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
         "state": "ready",
         "action": "create",
         "ready": True,
+        "job_id": None,
     }
     assert calls == [VALID_VIDEO_ID]
 
@@ -257,11 +259,11 @@ def test_prepare_index_endpoint_rejects_invalid_video_reference(client):
 
 
 @pytest.mark.api
-def test_prepare_index_endpoint_sanitizes_failure(client, monkeypatch):
+def test_index_submit_endpoint_sanitizes_failure(client, monkeypatch):
     def fail(video_id):
         raise RuntimeError("private transcript provider details")
 
-    monkeypatch.setattr(app_module, "prepare_index", fail)
+    monkeypatch.setattr(app_module, "submit_index", fail)
 
     response = client.post(
         "/index",
@@ -269,7 +271,8 @@ def test_prepare_index_endpoint_sanitizes_failure(client, monkeypatch):
     )
 
     assert response.status_code == 502
-    assert response.json()["error"] == "index_preparation_failed"
+    assert response.json()["error"] == "index_queue_unavailable"
+    # Queue submission failures are distinct from worker/index failures.
     assert "private transcript provider details" not in response.text
 
 
@@ -283,6 +286,7 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
             state="missing",
             action="create",
             ready=False,
+            job_id=None,
         ),
     )
 
@@ -294,6 +298,7 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
         "state": "missing",
         "action": "create",
         "ready": False,
+        "job_id": None,
     }
 
 
@@ -311,4 +316,117 @@ def test_index_prepare_validation_error_uses_api_contract(client):
 
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
+    assert response.json()["request_id"]
+
+
+
+@pytest.mark.api
+def test_index_endpoints_support_rate_limit_headers(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "submit_index",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="ready",
+            action="reuse",
+            ready=True,
+            job_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_index_status",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="ready",
+            action="reuse",
+            ready=True,
+            job_id=None,
+        ),
+    )
+
+    app_module.limiter.enabled = True
+
+    try:
+        prepare_response = client.post(
+            "/index",
+            json={"video_id": VALID_VIDEO_ID},
+        )
+        status_response = client.get(
+            f"/index/{VALID_VIDEO_ID}",
+        )
+
+        rate_limit_headers = {
+            key.lower()
+            for key in prepare_response.headers
+        }
+
+        assert prepare_response.status_code == 200
+        assert status_response.status_code == 200
+        assert "x-ratelimit-limit" in rate_limit_headers
+        assert "x-ratelimit-limit" in {
+            key.lower()
+            for key in status_response.headers
+        }
+    finally:
+        app_module.limiter.enabled = False
+        app_module.limiter.reset()
+
+
+@pytest.mark.api
+def test_index_prepare_endpoint_returns_202_for_queued_job(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "submit_index",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="queued",
+            action="create",
+            ready=False,
+            job_id="job-queued-1",
+        ),
+    )
+
+    response = client.post(
+        "/index",
+        json={"video_id": VALID_VIDEO_ID},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "video_id": VALID_VIDEO_ID,
+        "state": "queued",
+        "action": "create",
+        "ready": False,
+        "job_id": "job-queued-1",
+    }
+
+
+@pytest.mark.api
+def test_chat_returns_409_when_index_is_building(client, monkeypatch):
+    def index_not_ready(**kwargs):
+        raise app_module.IndexNotReadyError(
+            VALID_VIDEO_ID,
+            "building",
+            "job-building-1",
+        )
+
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        index_not_ready,
+    )
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What happened?",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "index_not_ready"
+    assert response.json()["state"] == "building"
+    assert response.json()["job_id"] == "job-building-1"
     assert response.json()["request_id"]

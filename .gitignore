@@ -10,3 +10,6 @@ Backend/rag_system/vector_stores/
 .coverage
 coverage.xml
 htmlcov/
+
+*.sqlite3
+*.db

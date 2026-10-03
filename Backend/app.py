@@ -22,6 +22,7 @@ Hugging Face
 Answer + Sources
 """
 
+from contextlib import asynccontextmanager
 import logging
 import time
 import uuid
@@ -35,8 +36,11 @@ from pydantic import BaseModel, Field
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.index_service import (
+    IndexNotReadyError,
     get_index_status,
-    prepare_index,
+    recover_index_jobs,
+    shutdown_index_workers,
+    submit_index,
 )
 
 from Backend.rag_system.config import (
@@ -71,6 +75,19 @@ logger = logging.getLogger(
 
 
 # ============================================================
+# APPLICATION LIFECYCLE
+# ============================================================
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    recover_index_jobs()
+    try:
+        yield
+    finally:
+        shutdown_index_workers()
+
+
+# ============================================================
 # APPLICATION
 # ============================================================
 
@@ -84,6 +101,7 @@ app = FastAPI(
     ),
 
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ============================================================
@@ -245,13 +263,21 @@ async def http_exception_handler(
         error_code,
     )
 
+    error_content = {
+        "error": error_code,
+        "message": message,
+        "request_id": request_id,
+    }
+
+    if isinstance(detail, dict):
+        if "state" in detail:
+            error_content["state"] = detail["state"]
+        if "job_id" in detail:
+            error_content["job_id"] = detail["job_id"]
+
     response = JSONResponse(
         status_code=exception.status_code,
-        content={
-            "error": error_code,
-            "message": message,
-            "request_id": request_id,
-        },
+        content=error_content,
     )
 
     if exception.headers:
@@ -383,6 +409,7 @@ class IndexStatusResponse(BaseModel):
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -535,8 +562,10 @@ def readiness():
 def index_prepare(
     index_request: IndexPrepareRequest,
     request: Request,
+    response: Response,
 ):
-    """Synchronously create, reuse, or rebuild a video's index."""
+    """Queue, reuse, or rebuild a video's index without blocking the request."""
+
 
     try:
         video_id = extract_video_id(
@@ -552,19 +581,26 @@ def index_prepare(
         ) from error
 
     try:
-        result = prepare_index(video_id)
+        result = submit_index(video_id)
         logger.info(
-            "Index preparation completed request_id=%s video_id=%s action=%s",
+            "Index request accepted request_id=%s video_id=%s state=%s action=%s",
             request.state.request_id,
             video_id,
+            result.state,
             result.action,
         )
+
+        if result.state == "failed":
+            response.status_code = 503
+        elif not result.ready:
+            response.status_code = 202
 
         return {
             "video_id": result.video_id,
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except Exception as error:
@@ -576,8 +612,8 @@ def index_prepare(
         raise HTTPException(
             status_code=502,
             detail={
-                "error": "index_preparation_failed",
-                "message": "The video index could not be prepared. Please retry.",
+                "error": "index_queue_unavailable",
+                "message": "The index preparation service is temporarily unavailable. Please retry.",
             },
         ) from error
 
@@ -590,6 +626,7 @@ def index_prepare(
 def index_status(
     video_id: str,
     request: Request,
+    response: Response,
 ):
     """Return the currently persisted index state for a video."""
 
@@ -600,6 +637,7 @@ def index_status(
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except ValueError as error:
@@ -671,6 +709,45 @@ def chat(
         )
 
         return result
+
+    except IndexNotReadyError as error:
+
+        logger.info(
+            "Index not ready request_id=%s video_id=%s state=%s",
+            request.state.request_id,
+            canonical_video_id,
+            error.state,
+        )
+
+        if error.state in {"queued", "building"}:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "index_not_ready",
+                    "message": "The video index is still being prepared. Retry chat after it becomes ready.",
+                    "state": error.state,
+                    "job_id": error.job_id,
+                },
+            ) from error
+
+        if error.state == "failed":
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "index_preparation_failed",
+                    "message": "The video index could not be prepared. Open the index status and retry preparation.",
+                    "state": error.state,
+                    "job_id": error.job_id,
+                },
+            ) from error
+
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "video_not_indexed",
+                "message": "No indexed transcript is available for this video.",
+            },
+        ) from error
 
     except FileNotFoundError as error:
 
