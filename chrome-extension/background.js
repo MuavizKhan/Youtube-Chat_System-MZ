@@ -17,8 +17,14 @@
 // CONFIGURATION
 // ============================================================
 
+const BACKEND_BASE_URL =
+    "http://127.0.0.1:8000";
+
 const BACKEND_URL =
-    "http://127.0.0.1:8000/chat";
+    `${BACKEND_BASE_URL}/chat`;
+
+const INDEX_URL =
+    `${BACKEND_BASE_URL}/index`;
 
 const REQUEST_TIMEOUT_MS =
     120000;
@@ -81,10 +87,28 @@ chrome.runtime.onMessage.addListener(
         sendResponse
     ) => {
 
-        if (
-            !message ||
-            message.type !== "chat"
-        ) {
+        if (!message) {
+            return;
+        }
+
+        if (message.type === "prepare_index") {
+            const videoId = normalizeString(message.video_id);
+            const senderUrl = sender?.tab?.url || "";
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (!isYouTubeUrl(senderUrl) || !videoId || pageVideoId !== videoId) {
+                sendResponse({
+                    success: false,
+                    error: "Index preparation must originate from the current YouTube video."
+                });
+                return;
+            }
+
+            handleIndexPreparation(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type !== "chat") {
             return;
         }
 
@@ -189,6 +213,63 @@ chrome.runtime.onMessage.addListener(
         return true;
     }
 );
+
+
+// ============================================================
+ // 3. PREPARE VIDEO INDEX
+ // ============================================================
+
+async function handleIndexPreparation(videoId, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+        () => controller.abort(),
+        REQUEST_TIMEOUT_MS
+    );
+
+    try {
+        const response = await fetch(INDEX_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify({ video_id: videoId }),
+            signal: controller.signal
+        });
+
+        const data = await parseResponse(response);
+
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                `Index preparation failed (HTTP ${response.status}).`
+            );
+        }
+
+        if (!data || data.ready !== true) {
+            throw new Error("The backend did not confirm that the video index is ready.");
+        }
+
+        sendResponse({
+            success: true,
+            video_id: data.video_id,
+            state: data.state,
+            action: data.action,
+            ready: true
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Preparing this video timed out. Open the chat and retry."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to prepare this video.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
 
 
 // ============================================================
