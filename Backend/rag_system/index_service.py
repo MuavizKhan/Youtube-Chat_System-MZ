@@ -179,6 +179,42 @@ def _run_index_job(video_id: str) -> None:
     if job is None:
         return
 
+    heartbeat_stop = threading.Event()
+    heartbeat_interval = max(
+        1.0,
+        min(INDEX_JOB_LEASE_SECONDS / 3.0, 60.0),
+    )
+
+    def heartbeat() -> None:
+        while not heartbeat_stop.wait(heartbeat_interval):
+            try:
+                renewed = _JOB_STORE.renew_lease(
+                    job.job_id,
+                    worker_id=_WORKER_ID,
+                )
+
+                if not renewed:
+                    logger.warning(
+                        "Index job lease was lost video_id=%s job_id=%s",
+                        job.video_id,
+                        job.job_id,
+                    )
+                    return
+
+            except Exception:
+                logger.exception(
+                    "Index job heartbeat failed video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat,
+        name=f"index-heartbeat-{job.job_id[:8]}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+
     try:
         _vector_store, actual_action = ensure_index_with_action(
             job.video_id,
@@ -238,6 +274,9 @@ def _run_index_job(video_id: str) -> None:
                 job.video_id,
                 job.job_id,
             )
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1.0)
 
 
 def recover_index_jobs() -> None:
