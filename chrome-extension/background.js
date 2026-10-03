@@ -26,8 +26,11 @@ const BACKEND_URL =
 const INDEX_URL =
     `${BACKEND_BASE_URL}/index`;
 
+const INDEX_STATUS_URL =
+    `${BACKEND_BASE_URL}/index`;
+
 const REQUEST_TIMEOUT_MS =
-    120000;
+    15000;
 
 
 // ============================================================
@@ -105,6 +108,23 @@ chrome.runtime.onMessage.addListener(
             }
 
             handleIndexPreparation(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type === "index_status") {
+            const videoId = normalizeString(message.video_id);
+            const senderUrl = sender?.tab?.url || "";
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (!isYouTubeUrl(senderUrl) || !videoId || pageVideoId !== videoId) {
+                sendResponse({
+                    success: false,
+                    error: "Index status requests must originate from the current YouTube video."
+                });
+                return;
+            }
+
+            handleIndexStatus(videoId, sendResponse);
             return true;
         }
 
@@ -242,12 +262,12 @@ async function handleIndexPreparation(videoId, sendResponse) {
         if (!response.ok) {
             throw new Error(
                 extractBackendError(data) ||
-                `Index preparation failed (HTTP ${response.status}).`
+                `Index request failed (HTTP ${response.status}).`
             );
         }
 
-        if (!data || data.ready !== true) {
-            throw new Error("The backend did not confirm that the video index is ready.");
+        if (!data || typeof data !== "object") {
+            throw new Error("The backend returned an invalid index response.");
         }
 
         sendResponse({
@@ -255,22 +275,71 @@ async function handleIndexPreparation(videoId, sendResponse) {
             video_id: data.video_id,
             state: data.state,
             action: data.action,
-            ready: true
+            ready: data.ready === true
         });
     } catch (error) {
         sendResponse({
             success: false,
             error: error?.name === "AbortError"
-                ? "Preparing this video timed out. Open the chat and retry."
+                ? "The index service did not respond. Reopen the chat to retry."
                 : (error instanceof Error && error.message
                     ? error.message
-                    : "Unable to prepare this video.")
+                    : "Unable to contact the index service.")
         });
     } finally {
         clearTimeout(timeoutId);
     }
 }
 
+
+async function handleIndexStatus(videoId, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+        () => controller.abort(),
+        REQUEST_TIMEOUT_MS
+    );
+
+    try {
+        const response = await fetch(
+            `${INDEX_STATUS_URL}/${encodeURIComponent(videoId)}`,
+            {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json"
+                },
+                signal: controller.signal
+            }
+        );
+
+        const data = await parseResponse(response);
+
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                `Index status failed (HTTP ${response.status}).`
+            );
+        }
+
+        sendResponse({
+            success: true,
+            video_id: data?.video_id || videoId,
+            state: data?.state || "unknown",
+            action: data?.action || "unknown",
+            ready: data?.ready === true
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Checking video readiness timed out."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to check video readiness.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
 
 // ============================================================
 // 3. HANDLE CHAT REQUEST
