@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from .indexing import (
     IndexAction,
     IndexState,
-    ensure_index,
+    ensure_index_with_action,
     get_index_action,
     get_index_state,
 )
@@ -134,15 +134,7 @@ def prepare_index(
         video_id
     )
 
-    initial_state = get_index_state(
-        canonical_video_id
-    )
-
-    action = get_index_action(
-        initial_state
-    )
-
-    ensure_index(
+    _vector_store, action = ensure_index_with_action(
         canonical_video_id,
         languages=languages,
     )
