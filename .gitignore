@@ -10,3 +10,6 @@ Backend/rag_system/vector_stores/
 .coverage
 coverage.xml
 htmlcov/
+
+Backend/rag_system/index_jobs.sqlite3
+Backend/rag_system/index_jobs.sqlite3-*
