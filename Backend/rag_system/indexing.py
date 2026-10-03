@@ -23,6 +23,8 @@ Local persistence
 import shutil
 import uuid
 
+import threading
+
 import argparse
 import json
 from typing import Optional
@@ -1380,6 +1382,26 @@ def clear_vector_store_cache():
     load_vector_store.cache_clear()
 
 
+_INDEX_LOCKS: dict[str, threading.Lock] = {}
+_INDEX_LOCKS_GUARD = threading.Lock()
+
+
+def _get_index_lock(video_id: str) -> threading.Lock:
+    """
+    Return the in-process lifecycle lock for one video ID.
+
+    The guard protects creation of entries in the lock registry.
+    """
+    with _INDEX_LOCKS_GUARD:
+        lock = _INDEX_LOCKS.get(video_id)
+
+        if lock is None:
+            lock = threading.Lock()
+            _INDEX_LOCKS[video_id] = lock
+
+        return lock
+
+
 # ============================================================
 # INDEX LIFECYCLE ORCHESTRATOR
 # ============================================================
@@ -1396,10 +1418,6 @@ def ensure_index(
         MISSING         -> CREATE
         VALID           -> REUSE
         INVALID / STALE -> REBUILD
-
-    The function does not expose lifecycle internals to callers.
-    It returns a loaded, usable vector store only after the
-    persisted index has been verified as VALID.
     """
 
     if not video_id or not video_id.strip():
@@ -1409,60 +1427,71 @@ def ensure_index(
 
     video_id = video_id.strip()
 
-    # --------------------------------------------------------
-    # 1. Determine current lifecycle state
-    # --------------------------------------------------------
-
-    state = get_index_state(
+    lifecycle_lock = _get_index_lock(
         video_id
     )
 
-    # --------------------------------------------------------
-    # 2. Convert state into lifecycle action
-    # --------------------------------------------------------
+    with lifecycle_lock:
 
-    action = get_index_action(
-        state
-    )
+        # ----------------------------------------------------
+        # 1. Determine state AFTER acquiring the lock
+        # ----------------------------------------------------
 
-    # --------------------------------------------------------
-    # 3. Execute lifecycle action
-    # --------------------------------------------------------
-
-    if action is IndexAction.REUSE:
-
-        # The index is already known to be valid, so loading it
-        # from persistence is safe.
-        return load_vector_store(
+        state = get_index_state(
             video_id
         )
 
-    if action in (
-        IndexAction.CREATE,
-        IndexAction.REBUILD,
-    ):
-
-        clear_vector_store_cache()
-
-        create_index(
-            video_id,
-            languages=languages,
+        action = get_index_action(
+            state
         )
 
-        clear_vector_store_cache()
+        # ----------------------------------------------------
+        # 2. Reuse
+        # ----------------------------------------------------
 
-        final_state = get_index_state(
-            video_id
-        )
-
-        if final_state is not IndexState.VALID:
-            raise RuntimeError(
-                "Index creation completed, but the persisted "
-                f"index is not valid. Final state: {final_state.value}"
+        if action is IndexAction.REUSE:
+            return load_vector_store(
+                video_id
             )
 
-        return load_vector_store(
-            video_id
+        # ----------------------------------------------------
+        # 3. Create / rebuild
+        # ----------------------------------------------------
+
+        if action in (
+            IndexAction.CREATE,
+            IndexAction.REBUILD,
+        ):
+            clear_vector_store_cache()
+
+            create_index(
+                video_id,
+                languages=languages,
+            )
+
+            clear_vector_store_cache()
+
+            # ------------------------------------------------
+            # 4. Verify persisted result
+            # ------------------------------------------------
+
+            final_state = get_index_state(
+                video_id
+            )
+
+            if final_state is not IndexState.VALID:
+                raise RuntimeError(
+                    "Index creation completed, but the persisted "
+                    f"index is not valid. "
+                    f"Final state: {final_state.value}"
+                )
+
+            return load_vector_store(
+                video_id
+            )
+
+        raise RuntimeError(
+            f"Unsupported lifecycle action: {action}"
         )
 
 # ============================================================

@@ -1,4 +1,6 @@
 import pytest
+import threading
+import time
 
 from Backend.rag_system import indexing
 
@@ -81,6 +83,226 @@ def test_ensure_index_reuses_valid_index(
     assert calls["create"] == 0
     assert calls["load"] == 1
     assert disable_cache_clear == []
+
+
+def test_ensure_index_serializes_same_video_creation(
+    monkeypatch,
+):
+    video_id = "Gfr50f6ZBvo"
+    vector_store = FakeVectorStore()
+
+    create_started = threading.Event()
+    allow_create_to_finish = threading.Event()
+
+    state_lock = threading.Lock()
+
+    states = {
+        video_id: indexing.IndexState.MISSING,
+    }
+
+    create_calls = 0
+    create_calls_lock = threading.Lock()
+
+    def fake_get_index_state(requested_video_id):
+        with state_lock:
+            return states[requested_video_id]
+
+    def fake_create_index(
+        requested_video_id,
+        languages=None,
+    ):
+        nonlocal create_calls
+
+        with create_calls_lock:
+            create_calls += 1
+
+        create_started.set()
+
+        if not allow_create_to_finish.wait(
+            timeout=2
+        ):
+            raise RuntimeError(
+                "Timed out waiting for test release."
+            )
+
+        with state_lock:
+            states[requested_video_id] = (
+                indexing.IndexState.VALID
+            )
+
+        return vector_store
+
+    monkeypatch.setattr(
+        indexing,
+        "get_index_state",
+        fake_get_index_state,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "create_index",
+        fake_create_index,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "clear_vector_store_cache",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "load_vector_store",
+        lambda requested_video_id: vector_store,
+    )
+
+    results = []
+    errors = []
+
+    def run():
+        try:
+            results.append(
+                indexing.ensure_index(
+                    video_id
+                )
+            )
+        except Exception as error:
+            errors.append(error)
+
+    first = threading.Thread(
+        target=run
+    )
+
+    second = threading.Thread(
+        target=run
+    )
+
+    first.start()
+
+    assert create_started.wait(
+        timeout=2
+    )
+
+    second.start()
+
+    # The second request must still be waiting for the
+    # same video's lifecycle lock.
+    assert second.is_alive()
+
+    allow_create_to_finish.set()
+
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not errors
+    assert create_calls == 1
+    assert len(results) == 2
+    assert all(
+        result is vector_store
+        for result in results
+    )
+
+
+def test_ensure_index_allows_different_video_ids_to_progress(
+    monkeypatch,
+):
+    first_video = "Gfr50f6ZBvo"
+    second_video = "dQw4w9WgXcQ"
+
+    vector_store = FakeVectorStore()
+
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_creates = threading.Event()
+
+    states = {
+        first_video: indexing.IndexState.MISSING,
+        second_video: indexing.IndexState.MISSING,
+    }
+
+    def fake_get_index_state(video_id):
+        return states[video_id]
+
+    def fake_create_index(
+        video_id,
+        languages=None,
+    ):
+        if video_id == first_video:
+            first_started.set()
+        else:
+            second_started.set()
+
+        if not release_creates.wait(
+            timeout=2
+        ):
+            raise RuntimeError(
+                "Timed out waiting for test release."
+            )
+
+        states[video_id] = (
+            indexing.IndexState.VALID
+        )
+
+        return vector_store
+
+    monkeypatch.setattr(
+        indexing,
+        "get_index_state",
+        fake_get_index_state,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "create_index",
+        fake_create_index,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "clear_vector_store_cache",
+        lambda: None,
+    )
+
+    monkeypatch.setattr(
+        indexing,
+        "load_vector_store",
+        lambda video_id: vector_store,
+    )
+
+    errors = []
+
+    def run(video_id):
+        try:
+            indexing.ensure_index(video_id)
+        except Exception as error:
+            errors.append(error)
+
+    first = threading.Thread(
+        target=run,
+        args=(first_video,),
+    )
+
+    second = threading.Thread(
+        target=run,
+        args=(second_video,),
+    )
+
+    first.start()
+    second.start()
+
+    assert first_started.wait(
+        timeout=2
+    )
+
+    assert second_started.wait(
+        timeout=2
+    )
+
+    release_creates.set()
+
+    first.join(timeout=2)
+    second.join(timeout=2)
+    assert not errors
 
 
 def test_ensure_index_rejects_invalid_final_state(
