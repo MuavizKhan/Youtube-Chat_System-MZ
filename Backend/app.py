@@ -34,6 +34,10 @@ from pydantic import BaseModel, Field
 
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
+from Backend.rag_system.index_service import (
+    get_index_status,
+    prepare_index,
+)
 
 from Backend.rag_system.config import (
     CORS_ALLOW_ORIGINS,
@@ -365,6 +369,22 @@ async def unexpected_exception_handler(
 # REQUEST MODELS
 # ============================================================
 
+class IndexPrepareRequest(BaseModel):
+    video_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description="YouTube video ID or URL to prepare.",
+    )
+
+
+class IndexStatusResponse(BaseModel):
+    video_id: str
+    state: str
+    action: str
+    ready: bool
+
+
 class ChatRequest(BaseModel):
 
     video_id: str = Field(
@@ -501,6 +521,94 @@ def readiness():
         "service": "YouTube Video AI Chat",
         "version": app.version,
     }
+
+
+# ============================================================
+# INDEX PREPARATION AND STATUS
+# ============================================================
+
+@app.post(
+    "/index",
+    response_model=IndexStatusResponse,
+)
+@limiter.limit(RATE_LIMIT)
+def index_prepare(
+    index_request: IndexPrepareRequest,
+    request: Request,
+):
+    """Synchronously create, reuse, or rebuild a video's index."""
+
+    try:
+        video_id = extract_video_id(
+            index_request.video_id.strip()
+        )
+        result = prepare_index(video_id)
+
+        logger.info(
+            "Index preparation completed request_id=%s video_id=%s action=%s",
+            request.state.request_id,
+            video_id,
+            result.action.value,
+        )
+
+        return {
+            "video_id": result.video_id,
+            "state": result.state.value,
+            "action": result.action.value,
+            "ready": result.ready,
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_video_reference",
+                "message": "The supplied value is not a valid YouTube video ID or URL.",
+            },
+        ) from error
+
+    except RuntimeError as error:
+        logger.exception(
+            "Index preparation failed request_id=%s",
+            request.state.request_id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "index_preparation_failed",
+                "message": "The video index could not be prepared. Please retry.",
+            },
+        ) from error
+
+
+@app.get(
+    "/index/{video_id}",
+    response_model=IndexStatusResponse,
+)
+@limiter.limit(RATE_LIMIT)
+def index_status(
+    video_id: str,
+    request: Request,
+):
+    """Return the currently persisted index state for a video."""
+
+    try:
+        result = get_index_status(video_id)
+        return {
+            "video_id": result.video_id,
+            "state": result.state.value,
+            "action": result.action.value,
+            "ready": result.ready,
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_video_reference",
+                "message": "The supplied value is not a valid YouTube video ID.",
+            },
+        ) from error
 
 
 # ============================================================
