@@ -309,6 +309,18 @@ def get_index_status(
             )
 
         if job.status == JOB_FAILED:
+            persisted_state = get_index_state(
+                canonical_video_id
+            )
+
+            if persisted_state is IndexState.VALID:
+                return IndexStatus(
+                    video_id=canonical_video_id,
+                    state="ready",
+                    action=IndexAction.REUSE.value,
+                    ready=True,
+                )
+
             return IndexStatus(
                 video_id=canonical_video_id,
                 state="failed",
