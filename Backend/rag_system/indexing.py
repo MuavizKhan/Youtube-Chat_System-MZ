@@ -21,6 +21,7 @@ Local persistence
 """
 
 import argparse
+import json
 from typing import Optional
 
 from youtube_transcript_api import (
@@ -38,6 +39,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from .config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    EMBEDDING_MODEL,
     PREFERRED_LANGUAGES,
     VECTOR_STORE_ROOT,
 )
@@ -669,37 +671,141 @@ def create_vector_store(
 
 
 # ============================================================
+# BUILD INDEX METADATA
+# ============================================================
+
+INDEX_METADATA_VERSION = 1
+
+
+def build_index_metadata(
+    chunks: list[Document],
+) -> dict:
+    """
+    Build metadata describing the configuration and source
+    information used to create a FAISS index.
+
+    Metadata is derived from the actual indexed chunks so that
+    persisted index information cannot silently disagree with
+    the index contents.
+    """
+
+    if not chunks:
+        raise ValueError(
+            "Cannot build index metadata because no chunks were produced."
+        )
+
+    first_chunk = chunks[0]
+    metadata = first_chunk.metadata
+
+    required_metadata = {
+        "video_id",
+        "language",
+        "language_code",
+        "is_generated",
+    }
+
+    missing_metadata = required_metadata - metadata.keys()
+
+    if missing_metadata:
+        missing = ", ".join(sorted(missing_metadata))
+
+        raise ValueError(
+            "Cannot build index metadata because required chunk "
+            f"metadata is missing: {missing}"
+        )
+
+    video_ids = {
+        chunk.metadata.get("video_id")
+        for chunk in chunks
+    }
+
+    if len(video_ids) != 1:
+        raise ValueError(
+            "Cannot build index metadata because chunks contain "
+            "multiple video IDs."
+        )
+
+    return {
+        "metadata_version": INDEX_METADATA_VERSION,
+        "video_id": metadata["video_id"],
+        "embedding_model": EMBEDDING_MODEL,
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+        "chunk_count": len(chunks),
+        "transcript_language": metadata["language"],
+        "transcript_language_code": metadata["language_code"],
+        "transcript_generated": bool(
+            metadata["is_generated"]
+        ),
+    }
+
+
+# ============================================================
 # 8. SAVE VECTOR STORE
+# ============================================================
+
+# ============================================================
+# 9. SAVE VECTOR STORE
 # ============================================================
 
 def save_vector_store(
     vector_store,
     video_id: str,
+    chunks: list[Document],
 ):
     """
-    Save one FAISS index per YouTube video.
+    Save one FAISS index per YouTube video together with
+    metadata describing how the index was created.
     """
+
+    if not video_id or not video_id.strip():
+        raise ValueError(
+            "video_id cannot be empty."
+        )
+
+    if not chunks:
+        raise ValueError(
+            "Cannot save vector store because no chunks were supplied."
+        )
 
     VECTOR_STORE_ROOT.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-
     video_store_path = (
         VECTOR_STORE_ROOT
         / video_id
     )
 
-
     vector_store.save_local(
-
         str(video_store_path)
     )
 
+    metadata = build_index_metadata(
+        chunks
+    )
+
+    metadata_path = (
+        video_store_path
+        / "metadata.json"
+    )
+
+    with metadata_path.open(
+        "w",
+        encoding="utf-8",
+    ) as metadata_file:
+
+        json.dump(
+            metadata,
+            metadata_file,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+        metadata_file.write("\n")
 
     return video_store_path
-
 
 # ============================================================
 # 9. INSPECT CHUNKS
@@ -935,10 +1041,9 @@ def index_video(
 
 
         saved_path = save_vector_store(
-
             vector_store,
-
             video_id,
+            chunks,
         )
 
 
