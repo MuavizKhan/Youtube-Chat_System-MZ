@@ -673,6 +673,12 @@ def create_vector_store(
     )
 
 
+class IndexAction(str, Enum):
+    CREATE = "create"
+    REUSE = "reuse"
+    REBUILD = "rebuild"
+
+
 # ============================================================
 # 8. BUILD INDEX METADATA
 # ============================================================
@@ -688,6 +694,26 @@ class IndexState(str, Enum):
     STALE = "stale"
 
 INDEX_METADATA_VERSION = 1
+
+
+def get_index_action(state: IndexState) -> IndexAction:
+    """
+    Determine the lifecycle action for an index state.
+
+    This function only decides what should happen.
+    It does not create, reuse, delete, or rebuild an index.
+    """
+
+    if state is IndexState.MISSING:
+        return IndexAction.CREATE
+
+    if state is IndexState.VALID:
+        return IndexAction.REUSE
+
+    if state in (IndexState.INVALID, IndexState.STALE):
+        return IndexAction.REBUILD
+
+    raise ValueError(f"Unsupported index state: {state}")
 
 
 def build_index_metadata(
