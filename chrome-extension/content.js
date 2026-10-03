@@ -540,6 +540,7 @@ function pollIndexStatus(videoId) {
             ) {
                 // The job may have been lost during a restart.
                 // Re-enqueue it through the idempotent POST /index.
+                indexPreparationInProgressFor = null;
                 requestIndexPreparation(
                     videoId
                 );
