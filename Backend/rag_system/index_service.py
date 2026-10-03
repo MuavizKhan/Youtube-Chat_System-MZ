@@ -12,6 +12,7 @@ Responsibilities
 """
 
 from dataclasses import dataclass
+import threading
 
 from .indexing import (
     IndexAction,
@@ -35,8 +36,8 @@ class IndexStatus:
     """Public service representation of persisted index state."""
 
     video_id: str
-    state: IndexState
-    action: IndexAction
+    state: str
+    action: str
     ready: bool
 
 
@@ -72,6 +73,18 @@ class IndexNotReadyError(FileNotFoundError):
         )
 
 
+_STATUS_LOCK = threading.Lock()
+_RUNTIME_STATUS: dict[str, str] = {}
+
+
+def _set_runtime_status(video_id: str, state: str | None) -> None:
+    with _STATUS_LOCK:
+        if state is None:
+            _RUNTIME_STATUS.pop(video_id, None)
+        else:
+            _RUNTIME_STATUS[video_id] = state
+
+
 # ============================================================
 # STATUS
 # ============================================================
@@ -92,21 +105,45 @@ def get_index_status(
         video_id
     )
 
-    state = get_index_state(
+    with _STATUS_LOCK:
+        runtime_state = _RUNTIME_STATUS.get(
+            canonical_video_id
+        )
+
+    if runtime_state == "building":
+        return IndexStatus(
+            video_id=canonical_video_id,
+            state="building",
+            action="building",
+            ready=False,
+        )
+
+    if runtime_state == "failed":
+        return IndexStatus(
+            video_id=canonical_video_id,
+            state="failed",
+            action="retry",
+            ready=False,
+        )
+
+    persisted_state = get_index_state(
         canonical_video_id
     )
-
     action = get_index_action(
-        state
+        persisted_state
+    )
+
+    public_state = (
+        "ready"
+        if persisted_state is IndexState.VALID
+        else persisted_state.value
     )
 
     return IndexStatus(
         video_id=canonical_video_id,
-        state=state,
-        action=action,
-        ready=(
-            state is IndexState.VALID
-        ),
+        state=public_state,
+        action=action.value,
+        ready=(persisted_state is IndexState.VALID),
     )
 
 
@@ -134,26 +171,34 @@ def prepare_index(
         video_id
     )
 
-    _vector_store, action = ensure_index_with_action(
-        canonical_video_id,
-        languages=languages,
-    )
+    _set_runtime_status(canonical_video_id, "building")
+
+    try:
+        _vector_store, action = ensure_index_with_action(
+            canonical_video_id,
+            languages=languages,
+        )
+    except Exception:
+        _set_runtime_status(canonical_video_id, "failed")
+        raise
+
+    _set_runtime_status(canonical_video_id, None)
 
     final_status = get_index_status(
         canonical_video_id
     )
 
     if not final_status.ready:
+        _set_runtime_status(canonical_video_id, "failed")
         raise RuntimeError(
             "Index preparation completed, but the index "
-            f"is not ready. Final state: "
-            f"{final_status.state.value}"
+            f"is not ready. Final state: {final_status.state}"
         )
 
     return IndexPreparationResult(
         video_id=canonical_video_id,
         state=final_status.state,
-        action=action,
+        action=action.value,
         ready=True,
     )
 
@@ -182,9 +227,12 @@ def load_ready_index(
     )
 
     if not status.ready:
+        persisted_state = get_index_state(
+            canonical_video_id
+        )
         raise IndexNotReadyError(
             canonical_video_id,
-            status.state,
+            persisted_state,
         )
 
     return load_vector_store(
