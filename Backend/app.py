@@ -22,6 +22,7 @@ Hugging Face
 Answer + Sources
 """
 
+from contextlib import asynccontextmanager
 import logging
 import time
 import uuid
@@ -35,8 +36,11 @@ from pydantic import BaseModel, Field
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.index_service import (
+    IndexNotReadyError,
     get_index_status,
-    prepare_index,
+    recover_index_jobs,
+    shutdown_index_workers,
+    submit_index,
 )
 
 from Backend.rag_system.config import (
@@ -71,6 +75,19 @@ logger = logging.getLogger(
 
 
 # ============================================================
+# APPLICATION LIFECYCLE
+# ============================================================
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    recover_index_jobs()
+    try:
+        yield
+    finally:
+        shutdown_index_workers()
+
+
+# ============================================================
 # APPLICATION
 # ============================================================
 
@@ -84,6 +101,7 @@ app = FastAPI(
     ),
 
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ============================================================
@@ -535,6 +553,7 @@ def readiness():
 def index_prepare(
     index_request: IndexPrepareRequest,
     request: Request,
+    response: Response,
 ):
     """Synchronously create, reuse, or rebuild a video's index."""
 
@@ -552,13 +571,17 @@ def index_prepare(
         ) from error
 
     try:
-        result = prepare_index(video_id)
+        result = submit_index(video_id)
         logger.info(
-            "Index preparation completed request_id=%s video_id=%s action=%s",
+            "Index request accepted request_id=%s video_id=%s state=%s action=%s",
             request.state.request_id,
             video_id,
+            result.state,
             result.action,
         )
+
+        if not result.ready:
+            response.status_code = 202
 
         return {
             "video_id": result.video_id,
@@ -671,6 +694,41 @@ def chat(
         )
 
         return result
+
+    except IndexNotReadyError as error:
+
+        logger.info(
+            "Index not ready request_id=%s video_id=%s state=%s",
+            request.state.request_id,
+            canonical_video_id,
+            error.state,
+        )
+
+        if error.state in {"queued", "building"}:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "index_not_ready",
+                    "message": "The video index is still being prepared. Retry chat after it becomes ready.",
+                },
+            ) from error
+
+        if error.state == "failed":
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "index_preparation_failed",
+                    "message": "The video index could not be prepared. Open the index status and retry preparation.",
+                },
+            ) from error
+
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "video_not_indexed",
+                "message": "No indexed transcript is available for this video.",
+            },
+        ) from error
 
     except FileNotFoundError as error:
 
