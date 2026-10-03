@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.index_service import (
+    IndexNotReadyError,
     get_index_status,
     prepare_index,
 )
@@ -383,6 +384,7 @@ class IndexStatusResponse(BaseModel):
     state: str
     action: str
     ready: bool
+    job_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -535,8 +537,9 @@ def readiness():
 def index_prepare(
     index_request: IndexPrepareRequest,
     request: Request,
+    response: Response,
 ):
-    """Synchronously create, reuse, or rebuild a video's index."""
+    """Queue or reuse an idempotent video-index preparation job."""
 
     try:
         video_id = extract_video_id(
@@ -560,11 +563,15 @@ def index_prepare(
             result.action,
         )
 
+        if not result.ready:
+            response.status_code = 202
+
         return {
             "video_id": result.video_id,
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except Exception as error:
@@ -591,7 +598,7 @@ def index_status(
     video_id: str,
     request: Request,
 ):
-    """Return the currently persisted index state for a video."""
+    """Return the current durable job or persisted index state for a video."""
 
     try:
         result = get_index_status(video_id)
@@ -600,6 +607,7 @@ def index_status(
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
+            "job_id": result.job_id,
         }
 
     except ValueError as error:
@@ -671,6 +679,39 @@ def chat(
         )
 
         return result
+
+    except IndexNotReadyError as error:
+
+        logger.info(
+            "Index not ready for chat "
+            "request_id=%s video_id=%s state=%s job_id=%s",
+            request.state.request_id,
+            canonical_video_id,
+            error.state,
+            error.job_id,
+        )
+
+        detail = {
+            "error": "index_not_ready",
+            "message": (
+                "The video index is not ready. "
+                "Prepare the video before chatting."
+            ),
+            "state": error.state,
+            "job_id": error.job_id,
+        }
+
+        headers = (
+            {"Retry-After": "2"}
+            if error.state in {"queued", "building"}
+            else None
+        )
+
+        raise HTTPException(
+            status_code=409,
+            detail=detail,
+            headers=headers,
+        ) from error
 
     except FileNotFoundError as error:
 
