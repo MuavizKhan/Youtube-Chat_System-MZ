@@ -182,6 +182,30 @@ if (
     )
 
 # ============================================================
+# NETWORK / HOST HARDENING
+# ============================================================
+
+MAX_REQUEST_BODY_BYTES = _get_int(
+    "MAX_REQUEST_BODY_BYTES",
+    16384,
+)
+
+TRUSTED_HOSTS = _get_list(
+    "TRUSTED_HOSTS",
+    (
+        ["testserver", "127.0.0.1", "localhost"]
+        if APP_ENV == "test"
+        else ["127.0.0.1", "localhost"]
+    ),
+)
+
+if APP_ENV == "production" and not TRUSTED_HOSTS:
+    raise RuntimeError(
+        "TRUSTED_HOSTS must be configured when APP_ENV=production."
+    )
+
+
+# ============================================================
 # RATE LIMITING
 # ============================================================
 
@@ -369,7 +393,13 @@ if HF_RETRY_DELAY_SECONDS < 0:
 
 # ============================================================
 # VALIDATION
-# ============================================================
+# ============================================================\n\nif MAX_REQUEST_BODY_BYTES <= 0:
+    raise RuntimeError(
+        "MAX_REQUEST_BODY_BYTES must be greater than 0."
+    )
+
+
+
 
 if INDEX_JOB_WORKERS <= 0:
 
