@@ -23,7 +23,8 @@ YouTube page
             └─ POST /chat        → retrieve + generate answer
 
 FastAPI
-  ├─ index_service.py
+  ├─ index_service.py  → job dispatch, recovery, worker lifecycle
+  ├─ index_jobs.py     → durable SQLite state + worker leases
   ├─ indexing.py       → lifecycle policy, validation, safe persistence
   ├─ retrieval.py      → FAISS loading and retrieval
   └─ chain.py          → grounded answer generation
@@ -43,7 +44,7 @@ Request:
 
 Accepts a raw 11-character YouTube video ID or a supported YouTube URL. If the index is already valid, the endpoint returns `200` immediately. Otherwise it creates or reuses a durable background job and returns `202` without waiting for transcript/embedding work to finish.
 
-Queued response:
+Queued response (HTTP 202):
 
 ```json
 {
@@ -84,7 +85,7 @@ Request:
 }
 ```
 
-Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes remain unavailable until `POST /index` is requested.
+Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation has failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes return `404 video_not_indexed` until `POST /index` is requested.
 
 ## Local development
 
