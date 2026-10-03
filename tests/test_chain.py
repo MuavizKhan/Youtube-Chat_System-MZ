@@ -379,7 +379,7 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     vector_store = object()
 
     calls = {
-        "ensure_index": 0,
+        "load_ready_index": 0,
         "load_vector_store": 0,
     }
 
@@ -389,15 +389,15 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
         lambda reference: "Gfr50f6ZBvo",
     )
 
-    def fake_ensure_index(video_id):
-        calls["ensure_index"] += 1
+    def fake_load_ready_index(video_id):
+        calls["load_ready_index"] += 1
         assert video_id == "Gfr50f6ZBvo"
         return vector_store
 
     monkeypatch.setattr(
         chain,
-        "ensure_index",
-        fake_ensure_index,
+        "load_ready_index",
+        fake_load_ready_index,
     )
 
     def forbidden_load(video_id):
@@ -443,7 +443,7 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
 
     assert result["answer"] == "grounded answer"
     assert result["video_id"] == "Gfr50f6ZBvo"
-    assert calls["ensure_index"] == 1
+    assert calls["load_ready_index"] == 1
     assert calls["load_vector_store"] == 0
 
 @pytest.mark.unit
@@ -463,7 +463,7 @@ def test_answer_question_propagates_index_lifecycle_error(
 
     monkeypatch.setattr(
         chain,
-        "ensure_index",
+        "load_ready_index",
         fail,
     )
 
