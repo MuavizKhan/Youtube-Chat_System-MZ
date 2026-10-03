@@ -1062,6 +1062,171 @@ def inspect_chunks(
             f"{chunk.page_content}"
         )
 
+# create the index-building primitive
+def create_index(
+    video_id: str,
+    languages: Optional[list[str]] = None,
+):
+    """
+    Create and persist a FAISS index for one YouTube video.
+
+    This function is responsible only for index creation.
+    Lifecycle decisions such as whether an existing index should
+    be reused, rebuilt, or treated as stale are handled separately.
+    """
+
+    if not video_id or not video_id.strip():
+        raise ValueError(
+            "video_id cannot be empty."
+        )
+
+    video_id = video_id.strip()
+
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "YOUTUBE RAG INDEX CREATION"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        f"\nVideo ID: {video_id}"
+    )
+
+    # --------------------------------------------------------
+    # 1. Transcript
+    # --------------------------------------------------------
+
+    print(
+        "\n[1/5] Fetching transcript..."
+    )
+
+    transcript = get_transcript(
+        video_id,
+        languages=languages,
+    )
+
+    print(
+        f"Language: "
+        f"{transcript.language}"
+    )
+
+    print(
+        f"Language code: "
+        f"{transcript.language_code}"
+    )
+
+    print(
+        f"Generated: "
+        f"{transcript.is_generated}"
+    )
+
+    print(
+        f"Transcript snippets: "
+        f"{len(transcript.snippets)}"
+    )
+
+    # --------------------------------------------------------
+    # 2. Documents
+    # --------------------------------------------------------
+
+    print(
+        "\n[2/5] Creating LangChain Documents..."
+    )
+
+    documents = transcript_to_documents(
+        transcript
+    )
+
+    print(
+        f"Documents created: "
+        f"{len(documents)}"
+    )
+
+    # --------------------------------------------------------
+    # 3. Timestamp-aware chunks
+    # --------------------------------------------------------
+
+    print(
+        "\n[3/5] Creating timestamp-aware chunks..."
+    )
+
+    chunks = split_into_timestamped_chunks(
+        documents
+    )
+
+    print(
+        f"Chunks created: "
+        f"{len(chunks)}"
+    )
+
+    print(
+        f"Chunk size: "
+        f"{CHUNK_SIZE}"
+    )
+
+    print(
+        f"Chunk overlap: "
+        f"{CHUNK_OVERLAP}"
+    )
+
+    inspect_chunks(
+        chunks
+    )
+
+    # --------------------------------------------------------
+    # 4. Embeddings + FAISS
+    # --------------------------------------------------------
+
+    print(
+        "\n[4/5] Creating FAISS vector store..."
+    )
+
+    vector_store = create_vector_store(
+        chunks
+    )
+
+    print(
+        "FAISS vector store created."
+    )
+
+    # --------------------------------------------------------
+    # 5. Persistence
+    # --------------------------------------------------------
+
+    print(
+        "\n[5/5] Saving vector store..."
+    )
+
+    saved_path = save_vector_store(
+        vector_store,
+        video_id,
+        chunks,
+    )
+
+    print(
+        f"Saved to:\n{saved_path}"
+    )
+
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "INDEX CREATION COMPLETED"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    return vector_store
+
 
 # ============================================================
 # 10. COMPLETE INDEXING PIPELINE
