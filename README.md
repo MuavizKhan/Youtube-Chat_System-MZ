@@ -149,6 +149,17 @@ The next Phase 8 slice expands strong retrieval hits with a small, chronological
 
 This improves continuity for questions that depend on what was said immediately before or after a retrieved passage while keeping the existing FAISS/MMR/lexical retrieval strategy intact.
 
+## Phase 8 — Answer-quality evaluation
+
+The next Phase 8 slice strengthens the deterministic RAG evaluation harness. The live end-to-end evaluator now checks not only the answer text but also the evidence provenance returned by the RAG chain.
+
+- Answerable cases must have retrieved evidence and at least one valid source segment.
+- Unanswerable cases must not return retrieved evidence or source segments.
+- Source counts, video identity, timestamps, and duration metadata are validated.
+- These checks run without another model call, so CI can enforce the contract without consuming inference quota.
+
+The evaluator remains a regression harness rather than a claim of semantic faithfulness; human or model-based evaluation is still needed for deeper answer correctness.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
