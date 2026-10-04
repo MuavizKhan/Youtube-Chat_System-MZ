@@ -1116,7 +1116,11 @@ def fuse_semantic_and_lexical_results(
             -entry["score"],
             entry["distance"],
             float(entry["document"].metadata.get("start", 0.0)),
-            entry["document"].metadata.get("chunk_id", 0),
+            (
+                entry["document"].metadata.get("chunk_id")
+                if entry["document"].metadata.get("chunk_id") is not None
+                else 10**9
+            ),
         ),
     )
 
