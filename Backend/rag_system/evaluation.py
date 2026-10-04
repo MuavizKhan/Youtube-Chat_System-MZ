@@ -28,6 +28,7 @@ from .gold_evidence import (
     GOLD_EVIDENCE_VIDEO_ID,
     get_gold_evidence_case,
     matched_gold_groups,
+    normalize_evidence_text,
 )
 from .temporal_evidence import (
     GOLD_TEMPORAL_VIDEO_ID,
@@ -578,6 +579,9 @@ def _build_temporal_result_record(
             continue
 
         start, end = bounds
+        normalized_content = normalize_evidence_text(
+            getattr(document, "page_content", "") or ""
+        )
         matched_this_result = False
 
         for window_index, window in enumerate(temporal_case.windows):
@@ -585,7 +589,11 @@ def _build_temporal_result_record(
                 start,
                 window.start_seconds,
             )
-            if overlap > 0:
+            has_topic_evidence = any(
+                normalize_evidence_text(phrase) in normalized_content
+                for phrase in window.topic_phrases
+            )
+            if overlap > 0 and has_topic_evidence:
                 matched_window_indexes.add(window_index)
                 matched_this_result = True
 
