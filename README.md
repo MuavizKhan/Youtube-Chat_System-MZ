@@ -203,6 +203,23 @@ The observed live benchmark showed that semantic retrieval could find the right 
 
 This addresses a real ranking weakness rather than relaxing the gold thresholds merely to make the benchmark green.
 
+## Phase 8 — Query-aware hybrid retrieval correction
+
+The live benchmark showed a second retrieval weakness after RRF was introduced: the full conversational question could dilute the embedding signal with speaker attribution and question boilerplate. At the same time, lexical matching treated those generic words as evidence.
+
+The retrieval path now:
+
+- preserves the original question;
+- creates a deterministic content-focused query variant;
+- retrieves both semantic variants and rank-fuses them with RRF;
+- uses content-aware lexical retrieval with lightweight inverse-document-frequency weighting;
+- gives stronger weight to rare domain terms and adjacent phrase matches;
+- keeps lexical fallback conservative so weak common-word matches do not bypass the semantic evidence gate.
+
+This is a general retrieval improvement. It does not contain benchmark-specific answer phrases, lower evaluation thresholds, or change the production context limit.
+
+The distinction is important: the original query preserves conversational intent, while the focus query improves recall for transcript wording when the same intent is expressed with different language.
+
 ## Phase 8 — Timestamp-grounded temporal evaluation
 
 Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.
