@@ -16,6 +16,10 @@ from dataclasses import dataclass
 
 
 GOLD_EVIDENCE_VIDEO_ID = "MdeQMVBuGgY"
+GOLD_EVIDENCE_SOURCE_URL = (
+    "https://youtubetotranscript.com/transcript"
+    "?current_language_code=en&v=MdeQMVBuGgY"
+)
 
 
 @dataclass(frozen=True)
@@ -35,37 +39,67 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q01",
         groups=(
-            ("single class airline",),
-            ("best flying experience", "premium experience"),
-            ("in flight, entertainment", "offered meals"),
+            ("single class airline", "low cost",),
+            (
+                "best flying experience that India had ever seen",
+                "best flying experience",
+                "premium experience",
+            ),
+            (
+                "inflight entertainment",
+                "it had inflight entertainment",
+                "offered meals",
+                "good food",
+            ),
         ),
         min_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q02",
         groups=(
-            ("Formula 1", "Formula One car"),
+            (
+                "Formula 1",
+                "pinnacle of motorsport",
+                "dream to have a team on the F1 grid",
+            ),
         ),
         min_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q03",
         groups=(
-            ("United Breweries", "United Spirits"),
-            ("Kingfisher Airlines", "Air Deccan"),
-            ("Royal Challengers Bangalore", "Royal Challenge"),
+            ("United Breweries", "United Breweries Limited", "United Spirits"),
+            (
+                "merger of Kingfisher and",
+                "Kingfisher Red",
+                "eliminate the disruptor",
+            ),
+            (
+                "Royal Challengers Bangalore",
+                "Royal Challenge",
+                "RCB was born",
+            ),
         ),
         min_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q04",
         groups=(
-            ("Lehman Brothers", "global financial crisis"),
-            ("banks will support you", "not to downsize Kingfisher"),
+            (
+                "global financial crisis",
+                "money stopped",
+                "depressed economic circumstances",
+            ),
+            (
+                "banks will support you",
+                "not to downsize Kingfisher",
+                "I was told not to downsize Kingfisher",
+            ),
             (
                 "government policies that didn't help",
                 "mounting losses",
-                "Etihad invest in Kingfisher",
+                "refusal to let Etihad invest",
+                "final straw",
             ),
         ),
         min_group_coverage=2 / 3,
@@ -73,11 +107,16 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q05",
         groups=(
-            ("global financial crisis", "Lehman Brothers"),
-            ("working capital cycle got disrupted", "cash flow issue"),
+            ("global financial crisis", "money stopped",),
             (
+                "working capital cycle got disrupted",
+                "cash flow issue",
+            ),
+            (
+                "non-payment of the oil bills",
                 "any money in the account of the airline was frozen",
-                "oil bills",
+                "airport fees",
+                "landing charges",
             ),
         ),
         min_group_coverage=2 / 3,
@@ -85,9 +124,13 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q06",
         groups=(
-            ("brand needs a personality",),
-            ("surrogate advertising",),
-            ("water business around Kingfisher",),
+            ("a brand needs a personality", "gave brands their personalities"),
+            ("surrogate advertising", "authoring surrogate advertising"),
+            (
+                "full water business around Kingfisher",
+                "water business around Kingfisher",
+                "advertise the core brand",
+            ),
         ),
         min_group_coverage=2 / 3,
     ),
@@ -95,35 +138,62 @@ GOLD_EVIDENCE_CASES = (
         question_id="Q07",
         groups=(
             ("4,999 crores", "4999 crores"),
-            ("6203 crores",),
-            ("14,100 crores",),
+            ("6203 crores", "6,203 crores"),
+            ("14,100 crores", "14100 crores"),
         ),
         min_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q08",
         groups=(
-            ("recovery of 14,100 crores", "14,100 crores recovered"),
-            ("banks have been fully paid", "banks had been fully paid"),
-            ("statement of account",),
+            (
+                "14,100 crores recovered from me",
+                "government has recovered 14,100 crores",
+            ),
+            (
+                "banks have been fully paid",
+                "the banks have been fully paid",
+            ),
+            ("statement of account", "statement in parliament"),
         ),
         min_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q09",
         groups=(
-            ("banks will support you", "not to downsize Kingfisher"),
-            ("asked only for policy changes",),
-            ("government policies that didn't help",),
+            (
+                "I asked only for policy changes",
+                "policy changes",
+            ),
+            (
+                "cost of crude",
+                "aviation turbine fuel",
+                "ad valorum sales tax",
+            ),
+            (
+                "banks will support you",
+                "not to downsize Kingfisher",
+                "government policies",
+            ),
         ),
         min_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q10",
         groups=(
-            ("global financial crisis", "Lehman Brothers"),
-            ("government policies that didn't help", "mounting losses"),
-            ("final straw", "Etihad invest in Kingfisher"),
+            (
+                "global financial crisis",
+                "money stopped",
+            ),
+            (
+                "government policies that didn't help",
+                "mounting losses",
+            ),
+            (
+                "final straw",
+                "refusal to let Etihad invest",
+                "run out of options",
+            ),
         ),
         min_group_coverage=2 / 3,
     ),
