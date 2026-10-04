@@ -29,6 +29,9 @@ def evaluate_video(video_reference: str) -> dict:
         quality = evaluate_response_contract(
             answer=result["answer"],
             answerable=case.answerable,
+            retrieved_chunks=result["retrieved_chunks"],
+            source_segments=result["source_segments"],
+            sources=result["sources"],
         )
 
         results.append(
