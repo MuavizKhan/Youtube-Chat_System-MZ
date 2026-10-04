@@ -164,6 +164,44 @@ def test_mmr_selects_nonduplicate_candidate():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("Why did Kingfisher Airlines fail?", True),
+        ("How did Vijay Mallya describe the challenges?", True),
+        ("What is Kingfisher Airlines?", False),
+    ],
+)
+def test_evidence_dense_question_detection(query, expected):
+    assert retrieval.is_evidence_dense_question(query) is expected
+
+
+@pytest.mark.unit
+def test_evidence_dense_question_gets_wider_candidate_budget(monkeypatch):
+    calls = []
+    anchor = doc(1, 0, 10, "anchor")
+
+    def fake_retrieve_mmr(**kwargs):
+        calls.append((kwargs["k"], kwargs["fetch_k"]))
+        return [(anchor, 0.2)]
+
+    monkeypatch.setattr(retrieval, "retrieve_mmr", fake_retrieve_mmr)
+    monkeypatch.setattr(retrieval, "lexical_search", lambda **kwargs: [])
+
+    retrieval.retrieve_question_context(
+        object(),
+        "Why does Kingfisher Airlines struggle and what problems caused the failure?",
+        expand_context=False,
+    )
+
+    assert calls
+    assert all(k == 8 for k, _fetch_k in calls)
+    assert all(fetch_k >= 16 for _k, fetch_k in calls)
+
+
+
+
+@pytest.mark.unit
 def test_question_context_uses_overview_path(monkeypatch):
     expected=[(doc(1,0,10,"overview"),0.0)]
     monkeypatch.setattr(retrieval,"retrieve_overview",lambda *a,**k:expected)
