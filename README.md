@@ -160,6 +160,21 @@ The next Phase 8 slice strengthens the deterministic RAG evaluation harness. The
 
 The evaluator remains a regression harness rather than a claim of semantic faithfulness; human or model-based evaluation is still needed for deeper answer correctness.
 
+## Phase 8 — Retrieval quality benchmarking
+
+The next slice turns the retrieval regression suite into an explicit quality benchmark with machine-readable metrics and hard thresholds.
+
+- must_retrieve_recall measures how often the 11 required retrieval cases return evidence.
+- must_not_retrieve_rejection_rate measures whether the unrelated control case stays empty.
+- strict_pass_rate combines the strict positive and negative retrieval contracts.
+- strict_max_best_distance records the worst best-match distance for required retrieval cases and keeps it within the existing MAX_DISTANCE contract.
+- The JSON evaluation summary includes benchmark metrics, thresholds, and explicit benchmark failures so regressions are visible in CI or manual evaluation output.
+- The benchmark remains deterministic and model-free. It does not claim semantic relevance without labeled ground-truth chunks or human/model judgments.
+
+The live evaluator can be run with: python -m Backend.rag_system.evaluation --json
+
+A non-zero exit code indicates either a per-case retrieval regression or a failed benchmark threshold.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
