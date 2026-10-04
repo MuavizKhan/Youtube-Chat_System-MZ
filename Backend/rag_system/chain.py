@@ -25,6 +25,7 @@ Final Answer + Sources
 
 import time
 import argparse
+import re
 from typing import Any
 
 from huggingface_hub import InferenceClient
@@ -793,7 +794,36 @@ def get_huggingface_response_diagnostics(
 
 
 # ============================================================
-# 8. HUGGING FACE GENERATION
+# 8. OUTPUT SANITIZATION
+# ============================================================
+
+def sanitize_generated_answer(answer: str) -> str:
+    """Remove accidental source/citation scaffolding from model output."""
+
+    if not answer or not answer.strip():
+        return FALLBACK_ANSWER
+
+    cleaned = answer.strip()
+
+    # Keep the API contract defensive if the provider ignores the prompt
+    # and echoes internal source labels.
+    cleaned = re.sub(
+        r"(?im)^\s*\[?source\s+\d+\]?\s*$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?im)^\s*(?:sources?|citations?)\s*:\s*$",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+    return cleaned or FALLBACK_ANSWER
+
+
+# ============================================================
+# 9. HUGGING FACE GENERATION
 # ============================================================
 
 def generate_with_huggingface(
@@ -877,7 +907,7 @@ def generate_with_huggingface(
         answer = extract_huggingface_answer(response)
 
         if answer:
-            return answer
+            return sanitize_generated_answer(answer)
 
         # --------------------------------------------------------
         # Empty response diagnostics
