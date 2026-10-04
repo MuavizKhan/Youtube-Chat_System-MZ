@@ -24,6 +24,7 @@ class TemporalEvidenceWindow:
     start_seconds: float
     end_seconds: float
     label: str
+    topic_phrases: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -44,12 +45,28 @@ TEMPORAL_EVIDENCE_CASES = (
                 start_seconds=4040.0,  # 01:07:20
                 end_seconds=5700.0,    # 01:35:00
                 label="Rise & Fall of Kingfisher Airlines",
+                topic_phrases=(
+                    "Kingfisher Airlines",
+                    "King Fisher Airlines",
+                    "Kingfisher",
+                    "airline",
+                    "aviation",
+                ),
             ),
             TemporalEvidenceWindow(
                 section_id="kingfisher_financial_turmoil",
                 start_seconds=7171.0,  # 01:59:31
                 end_seconds=8172.0,    # 02:16:12
                 label="Turmoil at Kingfisher Airlines",
+                topic_phrases=(
+                    "Kingfisher",
+                    "airline",
+                    "banks",
+                    "debt",
+                    "loan",
+                    "financial crisis",
+                    "recovery",
+                ),
             ),
         ),
         # Q11 asks broadly where the topic is discussed. Either major
