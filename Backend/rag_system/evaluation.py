@@ -559,7 +559,6 @@ def _build_temporal_result_record(
     valid_identity_count = 0
     matched_window_indexes: set[int] = set()
     relevant_ranks: list[int] = []
-    overlap_seconds_by_window = [0.0 for _ in temporal_case.windows]
 
     for rank, (document, _distance) in enumerate(top_results, start=1):
         bounds = _validated_timestamp_bounds(document)
@@ -588,7 +587,6 @@ def _build_temporal_result_record(
             )
             if overlap > 0:
                 matched_window_indexes.add(window_index)
-                overlap_seconds_by_window[window_index] += overlap
                 matched_this_result = True
 
         if matched_this_result:
@@ -641,7 +639,6 @@ def _build_temporal_result_record(
         "timestamp_validity_rate": timestamp_validity_rate,
         "valid_source_identity_count": valid_identity_count,
         "source_identity_validity_rate": source_identity_validity_rate,
-        "overlap_seconds_by_window": overlap_seconds_by_window,
         "passed": passed,
     }
 
