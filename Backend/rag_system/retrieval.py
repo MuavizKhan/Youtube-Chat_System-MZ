@@ -31,6 +31,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 
 from .config import (
+    CONTEXT_EXPANSION_CHUNKS,
+    CONTEXT_MAX_CHUNKS,
     EMBEDDING_MODEL,
     MAX_DISTANCE,
     MMR_FETCH_K,
@@ -1113,6 +1115,154 @@ def retrieve_overview(
     ]
 
 
+def expand_retrieval_context(
+    vector_store,
+    retrieved_results,
+    window: int = CONTEXT_EXPANSION_CHUNKS,
+    max_chunks: int = CONTEXT_MAX_CHUNKS,
+):
+    """
+    Add bounded chronological neighbors around retrieved evidence.
+
+    The original retrieved chunks remain anchors. Neighboring chunks are
+    selected by their sequential chunk_id, then the final set is returned
+    in transcript order. The hard max keeps prompt/context growth bounded.
+    """
+
+    if not retrieved_results:
+        return []
+
+    if window < 0:
+        raise ValueError("window cannot be negative.")
+
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be greater than 0.")
+
+    if window == 0:
+        return retrieved_results[:max_chunks]
+
+    documents = get_all_documents(vector_store)
+
+    if not documents:
+        return retrieved_results[:max_chunks]
+
+    ordered_documents = sorted(
+        documents,
+        key=lambda document: (
+            float(document.metadata.get("start", 0.0)),
+            float(document.metadata.get("end", 0.0)),
+            document.metadata.get("chunk_id", 0),
+        ),
+    )
+
+    positions = {}
+    for position, document in enumerate(ordered_documents):
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None:
+            positions[chunk_id] = position
+
+    selected = {}
+    anchor_keys = set()
+    anchor_positions = []
+
+    def result_key(document):
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None:
+            return ("chunk", chunk_id)
+
+        return (
+            "time",
+            float(document.metadata.get("start", 0.0)),
+            float(document.metadata.get("end", 0.0)),
+        )
+
+    def add_document(document, distance, is_anchor=False):
+        key = result_key(document)
+
+        if is_anchor:
+            anchor_keys.add(key)
+
+        if key not in selected:
+            selected[key] = (
+                document,
+                float(distance),
+            )
+
+    for anchor_document, anchor_distance in retrieved_results:
+        add_document(
+            anchor_document,
+            anchor_distance,
+            is_anchor=True,
+        )
+
+        chunk_id = anchor_document.metadata.get("chunk_id")
+        position = positions.get(chunk_id)
+
+        if position is None:
+            continue
+
+        anchor_positions.append(position)
+
+        start = max(0, position - window)
+        end = min(len(ordered_documents), position + window + 1)
+
+        for neighbor_position in range(start, end):
+            neighbor = ordered_documents[neighbor_position]
+            add_document(
+                neighbor,
+                anchor_distance,
+                is_anchor=(neighbor_position == position),
+            )
+
+    if len(selected) > max_chunks:
+        def priority(item):
+            key, (document, _distance) = item
+            position = positions.get(
+                document.metadata.get("chunk_id"),
+                10**9,
+            )
+
+            if anchor_positions:
+                neighbor_distance = min(
+                    abs(position - anchor_position)
+                    for anchor_position in anchor_positions
+                )
+            else:
+                neighbor_distance = 10**9
+
+            return (
+                0 if key in anchor_keys else 1,
+                neighbor_distance,
+                float(document.metadata.get("start", 0.0)),
+            )
+
+        selected_items = sorted(
+            selected.items(),
+            key=priority,
+        )[:max_chunks]
+    else:
+        selected_items = list(selected.items())
+
+    expanded_results = [
+        item[1]
+        for item in selected_items
+    ]
+
+    expanded_results.sort(
+        key=lambda item: (
+            float(item[0].metadata.get("start", 0.0)),
+            float(item[0].metadata.get("end", 0.0)),
+            item[0].metadata.get("chunk_id", 0),
+        )
+    )
+
+    return expanded_results
+
+
+# ============================================================
+# QUESTION-AWARE RETRIEVAL
+# ============================================================
+
 def retrieve_question_context(
     vector_store,
     query: str,
@@ -1262,7 +1412,10 @@ def retrieve_question_context(
 
     if has_lexical_evidence:
 
-        return combined_results[:k + 2]
+        return expand_retrieval_context(
+            vector_store,
+            combined_results[:k + 2],
+        )
 
     # No lexical evidence.
     # Require stronger semantic evidence before allowing
@@ -1295,4 +1448,7 @@ def retrieve_question_context(
 
         return []
 
-    return combined_results[:k]
+    return expand_retrieval_context(
+        vector_store,
+        combined_results[:k],
+    )
