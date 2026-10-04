@@ -278,6 +278,13 @@ def test_status_reports_failed_preparation_from_durable_job(monkeypatch):
     )
     monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
     monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    # This test is about durable job state. Keep the persisted-index state
+    # explicit so a real local FAISS index cannot affect the unit test.
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.MISSING,
+    )
 
     status = index_service.get_index_status(VIDEO_ID)
 

@@ -31,6 +31,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 
 from Backend.rag_system.chain import answer_question
@@ -49,6 +50,8 @@ from Backend.rag_system.config import (
     HF_TOKEN,
     RATE_LIMIT,
     RATE_LIMIT_STORAGE_URI,
+    MAX_REQUEST_BODY_BYTES,
+    TRUSTED_HOSTS,
 )
 
 from slowapi import Limiter
@@ -145,6 +148,15 @@ app.add_middleware(
 
 
 # ============================================================
+# HOST HARDENING
+# ============================================================
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=TRUSTED_HOSTS,
+)
+
+# ============================================================
 # REQUEST CONTEXT / LOGGING MIDDLEWARE
 # ============================================================
 
@@ -158,6 +170,39 @@ async def request_context_middleware(
     request.state.request_id = request_id
 
     start_time = time.perf_counter()
+
+    content_length = request.headers.get("content-length")
+
+    if content_length:
+        try:
+            request_size = int(content_length)
+        except ValueError:
+            request_size = None
+
+        if (
+            request_size is not None
+            and request_size > MAX_REQUEST_BODY_BYTES
+        ):
+            logger.warning(
+                "request rejected: body too large "
+                "request_id=%s size=%s limit=%s method=%s path=%s",
+                request_id,
+                request_size,
+                MAX_REQUEST_BODY_BYTES,
+                request.method,
+                request.url.path,
+            )
+
+            response = JSONResponse(
+                status_code=413,
+                content={
+                    "error": "request_too_large",
+                    "message": "The request body is too large.",
+                    "request_id": request_id,
+                },
+            )
+            response.headers["X-Request-ID"] = request_id
+            return response
 
     try:
 

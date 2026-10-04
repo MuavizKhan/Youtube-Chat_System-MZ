@@ -100,6 +100,31 @@ def test_health(client):
 
 
 @pytest.mark.api
+def test_request_body_limit(client):
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "x" * 20000,
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"] == "request_too_large"
+    assert response.json()["request_id"]
+
+
+@pytest.mark.api
+def test_trusted_host_rejects_unconfigured_host(client):
+    response = client.get(
+        "/health",
+        headers={"host": "evil.example.com"},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.api
 def test_ready(client):
     r=client.get("/ready")
     assert r.status_code==200

@@ -41,6 +41,7 @@ jobs:
 
       - name: Validate Chrome extension JavaScript syntax
         run: |
+          node --check chrome-extension/config.js
           node --check chrome-extension/background.js
           node --check chrome-extension/content.js
 
