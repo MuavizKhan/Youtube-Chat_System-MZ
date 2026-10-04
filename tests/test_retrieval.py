@@ -320,3 +320,52 @@ def test_question_context_can_return_raw_retrieval_without_expansion(monkeypatch
 
     assert raw == [(anchor, 0.2)]
     assert expanded == [(neighbor, 0.2), (anchor, 0.2)]
+
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_fusion_combines_semantic_and_lexical_rankings():
+    semantic = [
+        (doc(1, 0, 5, "semantic one"), 0.1),
+        (doc(2, 5, 10, "semantic two"), 0.2),
+        (doc(3, 10, 15, "semantic three"), 0.3),
+        (doc(4, 15, 20, "semantic four"), 0.4),
+    ]
+    lexical = [
+        (doc(5, 20, 25, "exact lexical evidence"), 1.0),
+    ]
+
+    results = retrieval.fuse_semantic_and_lexical_results(
+        semantic,
+        lexical,
+        lexical_distance=1.3,
+        rrf_k=60,
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _ in results]
+
+    assert chunk_ids[0] == 1
+    assert chunk_ids[1] == 5
+    assert chunk_ids.index(5) < chunk_ids.index(4)
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_fusion_prefers_documents_supported_by_both_signals():
+    shared = doc(2, 5, 10, "shared evidence")
+    semantic = [
+        (doc(1, 0, 5, "semantic only"), 0.1),
+        (shared, 0.2),
+    ]
+    lexical = [
+        (shared, 1.0),
+        (doc(3, 10, 15, "lexical only"), 1.0),
+    ]
+
+    results = retrieval.fuse_semantic_and_lexical_results(
+        semantic,
+        lexical,
+        lexical_distance=1.3,
+        rrf_k=60,
+    )
+
+    assert results[0][0].metadata["chunk_id"] == 2

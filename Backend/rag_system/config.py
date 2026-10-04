@@ -295,6 +295,13 @@ MMR_LAMBDA = _get_float(
     0.7,
 )
 
+# Reciprocal Rank Fusion constant used to combine semantic and lexical
+# rankings without comparing their incompatible score scales.
+RRF_K = _get_int(
+    "RAG_RRF_K",
+    60,
+)
+
 MAX_DISTANCE = _get_float(
     "RAG_MAX_DISTANCE",
     1.30,
@@ -474,6 +481,12 @@ if not 0.0 <= MMR_LAMBDA <= 1.0:
 
     raise RuntimeError(
         "RAG_MMR_LAMBDA must be between 0.0 and 1.0."
+    )
+
+
+if RRF_K <= 0:
+    raise RuntimeError(
+        "RAG_RRF_K must be greater than 0."
     )
 
 

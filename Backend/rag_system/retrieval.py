@@ -37,6 +37,7 @@ from .config import (
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
+    RRF_K,
     TOP_K,
     VECTOR_STORE_ROOT,
 )
@@ -1028,6 +1029,110 @@ def lexical_search(
     return scored_documents[:limit]
 
 
+
+
+
+def fuse_semantic_and_lexical_results(
+    semantic_results,
+    lexical_results,
+    *,
+    lexical_distance: float = MAX_DISTANCE,
+    rrf_k: int = RRF_K,
+):
+    """
+    Fuse semantic and lexical rankings with Reciprocal Rank Fusion.
+
+    Semantic FAISS distances and lexical scores live on different scales,
+    so directly sorting their raw values would be misleading. RRF uses only
+    rank position and therefore combines the two retrieval signals without
+    pretending their scores are comparable.
+
+    The returned tuple keeps the original FAISS distance when a document was
+    retrieved semantically. Lexical-only documents receive MAX_DISTANCE so
+    downstream semantic-distance contracts remain conservative.
+    """
+
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be greater than 0.")
+
+    fused = {}
+
+    def identity(document):
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None:
+            return ("chunk", chunk_id)
+
+        return (
+            "time",
+            float(document.metadata.get("start", 0.0)),
+            float(document.metadata.get("end", 0.0)),
+        )
+
+    def add_ranked_result(document, distance, rank):
+        key = identity(document)
+        entry = fused.get(key)
+
+        if entry is None:
+            entry = {
+                "document": document,
+                "distance": float(distance),
+                "score": 0.0,
+            }
+            fused[key] = entry
+
+        else:
+            # Prefer the real FAISS distance when the same chunk is present
+            # in both branches.
+            entry["distance"] = min(
+                entry["distance"],
+                float(distance),
+            )
+
+        entry["score"] += 1.0 / (rrf_k + rank)
+
+    for rank, (document, distance) in enumerate(
+        semantic_results,
+        start=1,
+    ):
+        add_ranked_result(
+            document,
+            distance,
+            rank,
+        )
+
+    for rank, (document, _lexical_score) in enumerate(
+        lexical_results,
+        start=1,
+    ):
+        add_ranked_result(
+            document,
+            lexical_distance,
+            rank,
+        )
+
+    ranked = sorted(
+        fused.values(),
+        key=lambda entry: (
+            -entry["score"],
+            entry["distance"],
+            float(entry["document"].metadata.get("start", 0.0)),
+            (
+                entry["document"].metadata.get("chunk_id")
+                if entry["document"].metadata.get("chunk_id") is not None
+                else 10**9
+            ),
+        ),
+    )
+
+    return [
+        (
+            entry["document"],
+            entry["distance"],
+        )
+        for entry in ranked
+    ]
+
+
 def retrieve_overview(
     vector_store,
     number_of_chunks: int = 6,
@@ -1333,76 +1438,17 @@ def retrieve_question_context(
     )
 
     # --------------------------------------------------------
-    # 4. Merge semantic + lexical results
+    # 4. Fuse semantic + lexical rankings
     # --------------------------------------------------------
 
-    combined_results = []
-
-    seen_chunk_ids = set()
-
-    def add_result(
-        document,
-        distance,
-    ):
-
-        chunk_id = (
-            document
-            .metadata
-            .get("chunk_id")
-        )
-
-        identity = (
-            chunk_id
-            if chunk_id is not None
-            else (
-                document
-                .metadata
-                .get("start"),
-                document
-                .metadata
-                .get("end"),
-            )
-        )
-
-        if identity in seen_chunk_ids:
-
-            return
-
-        seen_chunk_ids.add(
-            identity
-        )
-
-        combined_results.append(
-            (
-                document,
-                float(distance),
-            )
-        )
-
-    # Semantic results first.
-    for (
-        document,
-        distance,
-    ) in semantic_results:
-
-        add_result(
-            document,
-            distance,
-        )
-
-    # Lexical results next.
-    #
-    # We use max_distance as a neutral value for these
-    # because lexical score is not a FAISS distance.
-    for (
-        document,
-        lexical_score,
-    ) in lexical_results:
-
-        add_result(
-            document,
-            max_distance,
-        )
+    # Semantic distance and lexical score are intentionally not compared
+    # numerically. Reciprocal Rank Fusion combines the ranked lists while
+    # preserving the downstream distance contract.
+    combined_results = fuse_semantic_and_lexical_results(
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        lexical_distance=max_distance,
+    )
 
     # --------------------------------------------------------
     # 5. Evidence gate

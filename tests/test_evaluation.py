@@ -9,6 +9,8 @@ from Backend.rag_system.evaluation import (
     build_benchmark_metrics,
     build_evaluation_summary,
     build_gold_benchmark_metrics,
+    build_gold_context_benchmark_metrics,
+    evaluate_gold_context_benchmark_thresholds,
     evaluate_benchmark_thresholds,
     evaluate_gold_benchmark_thresholds,
     evaluate_temporal_benchmark_thresholds,
@@ -366,6 +368,41 @@ def test_summary_contains_benchmark_and_gold_contract():
     )
 
 
+@pytest.mark.regression
+def test_summary_contains_production_context_gold_benchmark():
+    results = [
+        {
+            "id": "Q01",
+            "expected": "must_retrieve",
+            "passed": True,
+            "retrieved": 2,
+            "best_distance": 0.42,
+        }
+    ]
+    context_results = [
+        {
+            "id": "Q01",
+            "evidence_presence": True,
+            "group_coverage": 2 / 3,
+            "relevance_ratio": 0.20,
+            "passed": True,
+        }
+    ]
+
+    summary = build_evaluation_summary(
+        "MdeQMVBuGgY",
+        results,
+        gold_context_results=context_results,
+    )
+
+    assert summary["gold_context_benchmark"]["passed"]
+    assert summary["gold_context_benchmark"]["failures"] == []
+    assert (
+        summary["gold_context_benchmark"]["metrics"]["case_pass_rate"]
+        == pytest.approx(1.0)
+    )
+
+
 
 def _temporal_document(
     start,
@@ -618,3 +655,83 @@ def test_video_specific_gold_benchmarks_are_skipped_for_other_videos(monkeypatch
     assert summary["video_id"] == other_video_id
     assert summary["gold_benchmark"] is None
     assert summary["temporal_benchmark"] is None
+
+
+
+@pytest.mark.regression
+def test_gold_context_result_scores_final_expanded_context():
+    test_case = TEST_QUESTIONS[0]
+    context = [
+        (
+            Document(
+                page_content=(
+                    "Kingfisher Airlines started off as a single class "
+                    "airline. It had inflight entertainment and offered meals."
+                ),
+                metadata={},
+            ),
+            1.0,
+        ),
+        (
+            Document(
+                page_content=(
+                    "The best flying experience that India had ever seen."
+                ),
+                metadata={},
+            ),
+            1.0,
+        ),
+        (
+            Document(
+                page_content="Unrelated surrounding transcript.",
+                metadata={},
+            ),
+            1.0,
+        ),
+    ]
+
+    from Backend.rag_system.evaluation import (
+        _build_gold_context_result_record,
+    )
+
+    result = _build_gold_context_result_record(
+        test_case,
+        context,
+    )
+
+    assert result["evidence_presence"]
+    assert result["matched_gold_groups"] == 3
+    assert result["group_coverage"] == pytest.approx(1.0)
+    assert result["relevance_ratio"] == pytest.approx(2 / 3)
+    assert result["passed"]
+
+
+@pytest.mark.regression
+def test_gold_context_benchmark_metrics_and_thresholds_pass():
+    context_results = [
+        {
+            "evidence_presence": True,
+            "group_coverage": 1.0,
+            "relevance_ratio": 0.25,
+            "passed": True,
+        },
+        {
+            "evidence_presence": True,
+            "group_coverage": 2 / 3,
+            "relevance_ratio": 0.20,
+            "passed": True,
+        },
+    ]
+
+    metrics = build_gold_context_benchmark_metrics(context_results)
+
+    assert metrics["cases"] == 2
+    assert metrics["evidence_presence_rate"] == pytest.approx(1.0)
+    assert metrics["mean_group_coverage"] == pytest.approx(5 / 6)
+    assert metrics["mean_relevance_ratio"] == pytest.approx(0.225)
+    assert metrics["case_pass_rate"] == pytest.approx(1.0)
+
+    passed, failures = evaluate_gold_context_benchmark_thresholds(metrics)
+
+    assert passed
+    assert failures == []
