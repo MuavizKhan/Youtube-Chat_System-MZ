@@ -4,6 +4,7 @@ from Backend.rag_system.evaluation import (
     EXPECTED_RETRIEVAL,
     TEST_QUESTIONS,
     BENCHMARK_THRESHOLDS,
+    MAX_DISTANCE,
     build_benchmark_metrics,
     build_evaluation_summary,
     evaluate_benchmark_thresholds,
