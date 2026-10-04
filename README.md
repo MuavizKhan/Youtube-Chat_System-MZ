@@ -189,6 +189,19 @@ This slice moves the retrieval benchmark from "did anything come back?" to "did 
 
 The evaluator now returns both the existing retrieval benchmark and the gold-evidence benchmark in JSON output. A non-zero exit code is returned when either benchmark violates its thresholds.
 
+## Phase 8 — Timestamp-grounded temporal evaluation
+
+Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.
+
+- `Backend/rag_system/temporal_evidence.py` defines chapter-level gold windows for the benchmark video `MdeQMVBuGgY`: **01:07:20–01:35:00** (“Rise & Fall of Kingfisher Airlines”) and **01:59:31–02:16:12** (“Turmoil at Kingfisher Airlines”).
+- These are coarse chapter intervals taken from the [published video chapter list](https://socialcounts.org/youtube-video-live-view-count/MdeQMVBuGgY), not word-level or manually verified sentence boundaries. A retrieved chunk is considered temporally relevant only when its timestamp interval overlaps a gold window and its transcript text matches that section’s curated topic phrases.
+- The benchmark evaluates raw top-k retrieval anchors with context expansion disabled, and reports temporal Hit@K, section-window coverage, MRR, timestamp-bound validity, and source-video identity validity.
+- Missing, non-finite, negative, reversed/zero-length timestamps and sources from a different video cannot earn temporal relevance. The evaluator fails if any retrieved top-k result has invalid timestamp metadata or the wrong video identity.
+- Video-specific text and temporal gold benchmarks run only for `MdeQMVBuGgY`. The Q01–Q13 regression questions are also written for this benchmark video; use a matching question set before interpreting those regression results for a different video.
+- This is a deterministic section-level retrieval benchmark. It does not claim word-level timestamp precision, answer faithfulness, or that the answer's prose accurately summarizes the section.
+
+The machine-readable JSON summary includes `temporal_benchmark`; the evaluator exits non-zero if its thresholds fail. Real-video retrieval quality still needs a smoke run against the indexed benchmark video and the configured embedding environment.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
