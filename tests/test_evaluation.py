@@ -435,6 +435,27 @@ def test_temporal_result_scores_relevant_sections_and_valid_provenance():
 
 
 @pytest.mark.regression
+def test_temporal_result_requires_topic_evidence_inside_gold_window():
+    test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
+    results = [
+        (
+            _temporal_document(
+                4100,
+                4200,
+                text="A completely unrelated conversation about gardening.",
+            ),
+            0.1,
+        )
+    ]
+
+    result = _build_temporal_result_record(test_case, results)
+
+    assert not result["hit_at_k"]
+    assert result["matched_windows"] == 0
+    assert not result["passed"]
+
+
+@pytest.mark.regression
 def test_temporal_result_fails_when_retrieved_timestamps_miss_gold_windows():
     test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
     results = [(_temporal_document(9000, 9100), 0.1)]
@@ -499,6 +520,8 @@ def test_temporal_benchmark_metrics_and_thresholds_pass():
 
     assert passed
     assert failures == []
+    assert metrics["hit_rate_at_k"] >= TEMPORAL_BENCHMARK_THRESHOLDS["hit_rate_at_k"]
+    assert metrics["mean_window_coverage"] >= TEMPORAL_BENCHMARK_THRESHOLDS["mean_window_coverage"]
 
 
 @pytest.mark.regression
