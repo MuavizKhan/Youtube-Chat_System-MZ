@@ -139,6 +139,16 @@ Phase 8 begins tightening the user-facing trust contract around retrieved eviden
 
 The focus of this phase is retrieval quality, grounded answers, and evidence usability before moving into broader deployment architecture.
 
+## Phase 8 — Context-aware retrieval
+
+The next Phase 8 slice expands strong retrieval hits with a small, chronological neighborhood of transcript chunks. The expansion is bounded and configurable so follow-up or multi-part questions can receive nearby evidence without allowing prompt/context growth to become unbounded.
+
+- RAG_CONTEXT_EXPANSION_CHUNKS controls the number of adjacent chunks added on each side of a retrieved anchor (default 1).
+- RAG_CONTEXT_MAX_CHUNKS caps the final retrieved context (default 12).
+- Anchor chunks are preserved, duplicates are removed, and the final context is returned in chronological order.
+
+This improves continuity for questions that depend on what was said immediately before or after a retrieved passage while keeping the existing FAISS/MMR/lexical retrieval strategy intact.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
