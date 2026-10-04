@@ -75,6 +75,24 @@ def test_query_terms_keep_short_domain_terms():
 
 
 @pytest.mark.unit
+def test_query_focus_terms_remove_speaker_question_boilerplate():
+    terms = retrieval.extract_query_focus_terms(
+        "What does Vijay Mallya say about the failure of Kingfisher Airlines?"
+    )
+    assert terms == ["failure", "kingfisher", "airlines"]
+
+
+@pytest.mark.unit
+def test_query_variants_keep_original_and_add_content_focus():
+    variants = retrieval.build_retrieval_query_variants(
+        "What does Vijay Mallya say about building the Kingfisher brand?"
+    )
+    assert variants[0].startswith("What does Vijay Mallya say")
+    assert "building kingfisher brand" in variants
+
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("query",[
     "What is this video about?","Give me an overview",
     "Summarise the video","What are the main topics?",
@@ -178,6 +196,44 @@ def test_question_context_accepts_strong_semantic_match(monkeypatch):
     monkeypatch.setattr(retrieval,"retrieve_mmr",lambda **k:[(item,1.0)])
     monkeypatch.setattr(retrieval,"lexical_search",lambda **k:[])
     assert retrieval.retrieve_question_context(object(),"relevant question",max_distance=1.3)==[(item,1.0)]
+
+
+
+@pytest.mark.unit
+def test_semantic_query_variant_fusion_prefers_shared_evidence():
+    shared = doc(2, 10, 15, "shared topic")
+    original = [
+        (doc(1, 0, 5, "generic question match"), 0.2),
+        (shared, 0.3),
+    ]
+    focused = [
+        (shared, 0.25),
+        (doc(3, 20, 25, "focused match"), 0.4),
+    ]
+
+    results = retrieval.fuse_semantic_rankings(
+        [original, focused],
+        rrf_k=60,
+    )
+
+    assert results[0][0].metadata["chunk_id"] == 2
+
+
+@pytest.mark.unit
+def test_lexical_search_weights_specific_terms_over_question_boilerplate():
+    documents = {
+        "a": doc(1, 0, 10, "Kingfisher Airlines is a company."),
+        "b": doc(2, 10, 20, "Kingfisher Airlines faced a global financial crisis."),
+        "c": doc(3, 20, 30, "This is a general discussion about the interview."),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "What does Vijay Mallya say about the global financial crisis affecting Kingfisher Airlines?",
+        limit=3,
+    )
+
+    assert results[0][0].metadata["chunk_id"] == 2
 
 
 
