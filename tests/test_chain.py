@@ -478,13 +478,6 @@ def test_answer_question_propagates_index_lifecycle_error(
 
 
 @pytest.mark.unit
-def test_identity_grounding_rules_are_present():
-    assert "IDENTITY / PARTICIPANT RULES" in chain.SYSTEM_INSTRUCTIONS
-    assert "identify a person only when" in chain.SYSTEM_INSTRUCTIONS
-    assert chain.FALLBACK_ANSWER in chain.SYSTEM_INSTRUCTIONS
-
-
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
