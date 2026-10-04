@@ -301,6 +301,20 @@ MAX_DISTANCE = _get_float(
 )
 
 
+# Optional context expansion around strong retrieval hits.
+# A window of 1 adds at most one chronological neighbor on each side.
+CONTEXT_EXPANSION_CHUNKS = _get_int(
+    "RAG_CONTEXT_EXPANSION_CHUNKS",
+    1,
+)
+
+# Hard upper bound for the final retrieved context before generation.
+CONTEXT_MAX_CHUNKS = _get_int(
+    "RAG_CONTEXT_MAX_CHUNKS",
+    12,
+)
+
+
 # ============================================================
 # SOURCE SEGMENTATION
 # ============================================================
@@ -467,6 +481,20 @@ if MAX_DISTANCE < 0:
 
     raise RuntimeError(
         "RAG_MAX_DISTANCE cannot be negative."
+    )
+
+
+if CONTEXT_EXPANSION_CHUNKS < 0:
+
+    raise RuntimeError(
+        "RAG_CONTEXT_EXPANSION_CHUNKS cannot be negative."
+    )
+
+
+if CONTEXT_MAX_CHUNKS <= 0:
+
+    raise RuntimeError(
+        "RAG_CONTEXT_MAX_CHUNKS must be greater than 0."
     )
 
 

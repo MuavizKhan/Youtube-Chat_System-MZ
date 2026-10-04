@@ -155,6 +155,7 @@ def test_question_context_uses_overview_path(monkeypatch):
 
 @pytest.mark.unit
 def test_question_context_merges_and_deduplicates(monkeypatch):
+    monkeypatch.setattr(retrieval,"expand_retrieval_context",lambda vector_store,retrieved_results,**kwargs:retrieved_results)
     one,two,duplicate=doc(1,0,10,"one"),doc(2,10,20,"two"),doc(1,20,30,"duplicate")
     monkeypatch.setattr(retrieval,"retrieve_mmr",lambda **k:[(one,0.4),(duplicate,0.5)])
     monkeypatch.setattr(retrieval,"lexical_search",lambda **k:[(two,0.9),(duplicate,1.0)])
@@ -164,6 +165,7 @@ def test_question_context_merges_and_deduplicates(monkeypatch):
 
 @pytest.mark.unit
 def test_question_context_rejects_weak_semantic_only_match(monkeypatch):
+    monkeypatch.setattr(retrieval,"expand_retrieval_context",lambda vector_store,retrieved_results,**kwargs:retrieved_results)
     monkeypatch.setattr(retrieval,"retrieve_mmr",lambda **k:[(doc(1,0,10,"weak"),1.25)])
     monkeypatch.setattr(retrieval,"lexical_search",lambda **k:[])
     assert retrieval.retrieve_question_context(object(),"unrelated question",max_distance=1.3)==[]
@@ -171,7 +173,114 @@ def test_question_context_rejects_weak_semantic_only_match(monkeypatch):
 
 @pytest.mark.unit
 def test_question_context_accepts_strong_semantic_match(monkeypatch):
+    monkeypatch.setattr(retrieval,"expand_retrieval_context",lambda vector_store,retrieved_results,**kwargs:retrieved_results)
     item=doc(1,0,10,"strong")
     monkeypatch.setattr(retrieval,"retrieve_mmr",lambda **k:[(item,1.0)])
     monkeypatch.setattr(retrieval,"lexical_search",lambda **k:[])
     assert retrieval.retrieve_question_context(object(),"relevant question",max_distance=1.3)==[(item,1.0)]
+
+
+
+@pytest.mark.unit
+def test_context_expansion_adds_adjacent_chunks_in_chronological_order():
+    documents = {
+        f"d{i}": doc(
+            i,
+            i * 10,
+            i * 10 + 5,
+            f"segment {i}",
+        )
+        for i in range(5)
+    }
+    store = FakeVectorStore(documents)
+
+    results = retrieval.expand_retrieval_context(
+        store,
+        [(documents["d2"], 0.2)],
+        window=1,
+        max_chunks=12,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [1, 2, 3]
+
+
+@pytest.mark.unit
+def test_context_expansion_deduplicates_overlapping_neighbors():
+    documents = {
+        f"d{i}": doc(
+            i,
+            i * 10,
+            i * 10 + 5,
+            f"segment {i}",
+        )
+        for i in range(5)
+    }
+    store = FakeVectorStore(documents)
+
+    results = retrieval.expand_retrieval_context(
+        store,
+        [
+            (documents["d1"], 0.2),
+            (documents["d2"], 0.3),
+        ],
+        window=1,
+        max_chunks=12,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [0, 1, 2, 3]
+
+
+@pytest.mark.unit
+def test_context_expansion_honors_hard_maximum_and_keeps_anchors():
+    documents = {
+        f"d{i}": doc(
+            i,
+            i * 10,
+            i * 10 + 5,
+            f"segment {i}",
+        )
+        for i in range(7)
+    }
+    store = FakeVectorStore(documents)
+
+    results = retrieval.expand_retrieval_context(
+        store,
+        [
+            (documents["d1"], 0.2),
+            (documents["d5"], 0.3),
+        ],
+        window=2,
+        max_chunks=4,
+    )
+
+    chunk_ids = [
+        item[0].metadata["chunk_id"]
+        for item in results
+    ]
+
+    assert len(chunk_ids) == 4
+    assert 1 in chunk_ids
+    assert 5 in chunk_ids
+    assert chunk_ids == sorted(chunk_ids)
+
+
+@pytest.mark.unit
+def test_context_expansion_can_be_disabled():
+    documents = {
+        f"d{i}": doc(
+            i,
+            i * 10,
+            i * 10 + 5,
+            f"segment {i}",
+        )
+        for i in range(3)
+    }
+    store = FakeVectorStore(documents)
+    anchor = (documents["d1"], 0.2)
+
+    assert retrieval.expand_retrieval_context(
+        store,
+        [anchor],
+        window=0,
+        max_chunks=12,
+    ) == [anchor]

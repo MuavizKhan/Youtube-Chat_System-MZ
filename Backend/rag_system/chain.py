@@ -45,6 +45,8 @@ from .config import (
     HF_REASONING_EFFORT,
     HF_TEMPERATURE,
     HF_TOKEN,
+    CONTEXT_EXPANSION_CHUNKS,
+    CONTEXT_MAX_CHUNKS,
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
@@ -1369,6 +1371,12 @@ def answer_question(
 
             "max_distance":
                 MAX_DISTANCE,
+
+            "context_expansion_chunks":
+                CONTEXT_EXPANSION_CHUNKS,
+
+            "context_max_chunks":
+                CONTEXT_MAX_CHUNKS,
         },
 }
 
