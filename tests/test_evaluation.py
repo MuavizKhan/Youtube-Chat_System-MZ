@@ -368,6 +368,41 @@ def test_summary_contains_benchmark_and_gold_contract():
     )
 
 
+@pytest.mark.regression
+def test_summary_contains_production_context_gold_benchmark():
+    results = [
+        {
+            "id": "Q01",
+            "expected": "must_retrieve",
+            "passed": True,
+            "retrieved": 2,
+            "best_distance": 0.42,
+        }
+    ]
+    context_results = [
+        {
+            "id": "Q01",
+            "evidence_presence": True,
+            "group_coverage": 2 / 3,
+            "relevance_ratio": 0.20,
+            "passed": True,
+        }
+    ]
+
+    summary = build_evaluation_summary(
+        "MdeQMVBuGgY",
+        results,
+        gold_context_results=context_results,
+    )
+
+    assert summary["gold_context_benchmark"]["passed"]
+    assert summary["gold_context_benchmark"]["failures"] == []
+    assert (
+        summary["gold_context_benchmark"]["metrics"]["case_pass_rate"]
+        == pytest.approx(1.0)
+    )
+
+
 
 def _temporal_document(
     start,
