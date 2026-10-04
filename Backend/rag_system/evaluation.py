@@ -13,6 +13,7 @@ the generation/grounding layer.
 
 import argparse
 import json
+import math
 from typing import Any
 
 from .config import (
@@ -24,8 +25,15 @@ from .config import (
 
 from .gold_evidence import (
     GOLD_EVIDENCE_CASES,
+    GOLD_EVIDENCE_VIDEO_ID,
     get_gold_evidence_case,
     matched_gold_groups,
+)
+from .temporal_evidence import (
+    GOLD_TEMPORAL_VIDEO_ID,
+    TEMPORAL_BENCHMARK_THRESHOLDS,
+    TEMPORAL_EVIDENCE_CASES,
+    get_temporal_evidence_case,
 )
 
 from .retrieval import (
@@ -506,10 +514,221 @@ def evaluate_gold_benchmark_thresholds(
     return not failures, failures
 
 
+
+def _validated_timestamp_bounds(
+    document: Any,
+) -> tuple[float, float] | None:
+    """Return finite, ordered timestamp bounds or None for invalid metadata."""
+
+    metadata = getattr(document, "metadata", None) or {}
+    start = metadata.get("start")
+    end = metadata.get("end")
+
+    # bool is an int subclass, but True/False are not meaningful timestamps.
+    if isinstance(start, bool) or isinstance(end, bool):
+        return None
+
+    try:
+        start_value = float(start)
+        end_value = float(end)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if (
+        not math.isfinite(start_value)
+        or not math.isfinite(end_value)
+        or start_value < 0
+        or end_value <= start_value
+    ):
+        return None
+
+    return start_value, end_value
+
+
+def _build_temporal_result_record(
+    test_case: dict[str, str],
+    results: list[tuple[Any, float]],
+    *,
+    expected_video_id: str = GOLD_TEMPORAL_VIDEO_ID,
+) -> dict[str, Any]:
+    """Score top-k retrieval against chapter-level timestamp gold windows."""
+
+    temporal_case = get_temporal_evidence_case(test_case["id"])
+    top_results = results[:TOP_K]
+    valid_timestamp_count = 0
+    valid_identity_count = 0
+    matched_window_indexes: set[int] = set()
+    relevant_ranks: list[int] = []
+    overlap_seconds_by_window = [0.0 for _ in temporal_case.windows]
+
+    for rank, (document, _distance) in enumerate(top_results, start=1):
+        bounds = _validated_timestamp_bounds(document)
+        metadata = getattr(document, "metadata", None) or {}
+        identity_valid = metadata.get("video_id") == expected_video_id
+
+        if identity_valid:
+            valid_identity_count += 1
+
+        if bounds is None:
+            continue
+
+        valid_timestamp_count += 1
+        if not identity_valid:
+            # A valid timestamp from another video is not valid evidence for
+            # this benchmark's video, and must not count as a temporal hit.
+            continue
+
+        start, end = bounds
+        matched_this_result = False
+
+        for window_index, window in enumerate(temporal_case.windows):
+            overlap = min(end, window.end_seconds) - max(
+                start,
+                window.start_seconds,
+            )
+            if overlap > 0:
+                matched_window_indexes.add(window_index)
+                overlap_seconds_by_window[window_index] += overlap
+                matched_this_result = True
+
+        if matched_this_result:
+            relevant_ranks.append(rank)
+
+    denominator = len(top_results)
+    timestamp_validity_rate = (
+        valid_timestamp_count / denominator if denominator else 0.0
+    )
+    source_identity_validity_rate = (
+        valid_identity_count / denominator if denominator else 0.0
+    )
+    window_coverage = (
+        len(matched_window_indexes) / len(temporal_case.windows)
+        if temporal_case.windows
+        else 0.0
+    )
+    first_relevant_rank = min(relevant_ranks) if relevant_ranks else None
+    mrr = 1.0 / first_relevant_rank if first_relevant_rank else 0.0
+    hit_at_k = bool(relevant_ranks)
+    passed = (
+        hit_at_k
+        and window_coverage >= temporal_case.min_window_coverage
+        and timestamp_validity_rate == 1.0
+        and source_identity_validity_rate == 1.0
+    )
+
+    return {
+        "id": test_case["id"],
+        "question": test_case["question"],
+        "gold_windows": len(temporal_case.windows),
+        "matched_windows": len(matched_window_indexes),
+        "matched_section_ids": [
+            window.section_id
+            for index, window in enumerate(temporal_case.windows)
+            if index in matched_window_indexes
+        ],
+        "matched_section_labels": [
+            window.label
+            for index, window in enumerate(temporal_case.windows)
+            if index in matched_window_indexes
+        ],
+        "window_coverage": window_coverage,
+        "required_window_coverage": temporal_case.min_window_coverage,
+        "retrieved": denominator,
+        "hit_at_k": hit_at_k,
+        "first_relevant_rank": first_relevant_rank,
+        "mrr": mrr,
+        "valid_timestamp_count": valid_timestamp_count,
+        "timestamp_validity_rate": timestamp_validity_rate,
+        "valid_source_identity_count": valid_identity_count,
+        "source_identity_validity_rate": source_identity_validity_rate,
+        "overlap_seconds_by_window": overlap_seconds_by_window,
+        "passed": passed,
+    }
+
+
+def build_temporal_benchmark_metrics(
+    temporal_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate temporal retrieval, timestamp, and identity metrics."""
+
+    total = len(temporal_results)
+    if not total:
+        return {
+            "cases": 0,
+            "hit_rate_at_k": 0.0,
+            "mean_window_coverage": 0.0,
+            "timestamp_validity_rate": 0.0,
+            "source_identity_validity_rate": 0.0,
+            "mrr": 0.0,
+            "passed_cases": 0,
+            "pass_rate": 0.0,
+        }
+
+    return {
+        "cases": total,
+        "hit_rate_at_k": sum(
+            1 for result in temporal_results if result["hit_at_k"]
+        ) / total,
+        "mean_window_coverage": sum(
+            result["window_coverage"] for result in temporal_results
+        ) / total,
+        "timestamp_validity_rate": sum(
+            result["timestamp_validity_rate"] for result in temporal_results
+        ) / total,
+        "source_identity_validity_rate": sum(
+            result["source_identity_validity_rate"]
+            for result in temporal_results
+        ) / total,
+        "mrr": sum(result["mrr"] for result in temporal_results) / total,
+        "passed_cases": sum(
+            1 for result in temporal_results if result["passed"]
+        ),
+        "pass_rate": sum(
+            1 for result in temporal_results if result["passed"]
+        ) / total,
+    }
+
+
+def evaluate_temporal_benchmark_thresholds(
+    temporal_metrics: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Apply strict thresholds to temporal evidence and timestamp metadata."""
+
+    if not temporal_metrics["cases"]:
+        return False, ["temporal_benchmark_has_no_cases"]
+
+    failures: list[str] = []
+    if (
+        temporal_metrics["hit_rate_at_k"]
+        < TEMPORAL_BENCHMARK_THRESHOLDS["hit_rate_at_k"]
+    ):
+        failures.append("temporal_hit_rate_below_threshold")
+    if (
+        temporal_metrics["mean_window_coverage"]
+        < TEMPORAL_BENCHMARK_THRESHOLDS["mean_window_coverage"]
+    ):
+        failures.append("temporal_window_coverage_below_threshold")
+    if (
+        temporal_metrics["timestamp_validity_rate"]
+        < TEMPORAL_BENCHMARK_THRESHOLDS["timestamp_validity_rate"]
+    ):
+        failures.append("temporal_timestamp_validity_below_threshold")
+    if (
+        temporal_metrics["source_identity_validity_rate"]
+        < TEMPORAL_BENCHMARK_THRESHOLDS["source_identity_validity_rate"]
+    ):
+        failures.append("temporal_source_identity_below_threshold")
+    if temporal_metrics["mrr"] < TEMPORAL_BENCHMARK_THRESHOLDS["mrr"]:
+        failures.append("temporal_mrr_below_threshold")
+
+    return not failures, failures
+
+
 def build_evaluation_summary(
     video_id: str,
     results: list[dict[str, Any]],
     gold_results: list[dict[str, Any]] | None = None,
+    temporal_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a stable machine-readable evaluation summary."""
 
@@ -549,6 +768,20 @@ def build_evaluation_summary(
             "results": gold_results,
         }
 
+    temporal_benchmark = None
+    if temporal_results is not None:
+        temporal_metrics = build_temporal_benchmark_metrics(temporal_results)
+        temporal_passed, temporal_failures = (
+            evaluate_temporal_benchmark_thresholds(temporal_metrics)
+        )
+        temporal_benchmark = {
+            "thresholds": TEMPORAL_BENCHMARK_THRESHOLDS,
+            "metrics": temporal_metrics,
+            "passed": temporal_passed,
+            "failures": temporal_failures,
+            "results": temporal_results,
+        }
+
     return {
         "video_id": video_id,
         "retrieval_strategy": "question_aware_mmr_lexical",
@@ -563,6 +796,7 @@ def build_evaluation_summary(
         "benchmark_passed": benchmark_passed,
         "benchmark_failures": benchmark_failures,
         "gold_benchmark": gold_benchmark,
+        "temporal_benchmark": temporal_benchmark,
         "total": total,
         "passed": passed,
         "failed": failed,
@@ -609,6 +843,9 @@ def evaluate_video(
 
     results = []
     gold_results = []
+    temporal_results = []
+    run_video_specific_gold = video_id == GOLD_EVIDENCE_VIDEO_ID
+    run_temporal_gold = video_id == GOLD_TEMPORAL_VIDEO_ID
 
     if display:
         print("\n" + "=" * 80)
@@ -662,10 +899,13 @@ def evaluate_video(
         )
         results.append(record)
 
-        if question_id in {
-            case.question_id
-            for case in GOLD_EVIDENCE_CASES
-        }:
+        if (
+            run_video_specific_gold
+            and question_id in {
+                case.question_id
+                for case in GOLD_EVIDENCE_CASES
+            }
+        ):
             raw_retrieved = retrieve_question_context(
                 vector_store=vector_store,
                 query=question,
@@ -678,6 +918,23 @@ def evaluate_video(
                 )
             )
 
+        if run_temporal_gold and question_id in {
+            case.question_id
+            for case in TEMPORAL_EVIDENCE_CASES
+        }:
+            raw_retrieved = retrieve_question_context(
+                vector_store=vector_store,
+                query=question,
+                expand_context=False,
+            )
+            temporal_results.append(
+                _build_temporal_result_record(
+                    test_case=test_case,
+                    results=raw_retrieved,
+                    expected_video_id=GOLD_TEMPORAL_VIDEO_ID,
+                )
+            )
+
         if display:
             display_results(retrieved)
             print(f"\nExpected: {record['expected']}")
@@ -687,7 +944,8 @@ def evaluate_video(
     summary = build_evaluation_summary(
         video_id=video_id,
         results=results,
-        gold_results=gold_results,
+        gold_results=gold_results if run_video_specific_gold else None,
+        temporal_results=temporal_results if run_temporal_gold else None,
     )
 
     if display:
@@ -765,6 +1023,39 @@ def evaluate_video(
                     "  gold benchmark failures     = "
                     + ", ".join(gold_benchmark["failures"])
                 )
+        temporal_benchmark = summary["temporal_benchmark"]
+        if temporal_benchmark is not None:
+            temporal_metrics = temporal_benchmark["metrics"]
+            print("\nTemporal Evidence Benchmark:")
+            print(
+                "  temporal hit@k              = "
+                f"{temporal_metrics['hit_rate_at_k']:.1%}"
+            )
+            print(
+                "  section coverage            = "
+                f"{temporal_metrics['mean_window_coverage']:.1%}"
+            )
+            print(
+                "  timestamp validity          = "
+                f"{temporal_metrics['timestamp_validity_rate']:.1%}"
+            )
+            print(
+                "  source identity validity    = "
+                f"{temporal_metrics['source_identity_validity_rate']:.1%}"
+            )
+            print(
+                "  temporal MRR                = "
+                f"{temporal_metrics['mrr']:.3f}"
+            )
+            print(
+                "  temporal benchmark status   = "
+                f"{'PASS' if temporal_benchmark['passed'] else 'FAIL'}"
+            )
+            if temporal_benchmark["failures"]:
+                print(
+                    "  temporal benchmark failures = "
+                    + ", ".join(temporal_benchmark["failures"])
+                )
         print("-" * 80)
 
     return summary
@@ -800,11 +1091,16 @@ def main() -> int:
         summary["gold_benchmark"] is None
         or summary["gold_benchmark"]["passed"]
     )
+    temporal_passed = (
+        summary["temporal_benchmark"] is None
+        or summary["temporal_benchmark"]["passed"]
+    )
 
     return 0 if (
         summary["failed"] == 0
         and summary["benchmark_passed"]
         and gold_passed
+        and temporal_passed
     ) else 1
 
 
