@@ -11,6 +11,9 @@ from Backend.rag_system.evaluation import (
     build_gold_benchmark_metrics,
     evaluate_benchmark_thresholds,
     evaluate_gold_benchmark_thresholds,
+    evaluate_temporal_benchmark_thresholds,
+    build_temporal_benchmark_metrics,
+    _build_temporal_result_record,
     evaluate_retrieval_result,
     _build_gold_result_record,
 )
@@ -18,6 +21,12 @@ from Backend.rag_system.gold_evidence import (
     GOLD_EVIDENCE_CASES,
     get_gold_evidence_case,
     matched_gold_groups,
+)
+from Backend.rag_system.temporal_evidence import (
+    GOLD_TEMPORAL_VIDEO_ID,
+    TEMPORAL_BENCHMARK_THRESHOLDS,
+    TEMPORAL_EVIDENCE_CASES,
+    get_temporal_evidence_case,
 )
 
 
@@ -355,3 +364,202 @@ def test_summary_contains_benchmark_and_gold_contract():
     assert summary["gold_benchmark"]["metrics"]["hit_rate_at_k"] == pytest.approx(
         1.0
     )
+
+
+
+def _temporal_document(
+    start,
+    end,
+    *,
+    video_id=GOLD_TEMPORAL_VIDEO_ID,
+    text="Kingfisher Airlines and its financial turmoil.",
+):
+    metadata = {"video_id": video_id}
+    if start is not None:
+        metadata["start"] = start
+    if end is not None:
+        metadata["end"] = end
+    return Document(page_content=text, metadata=metadata)
+
+
+@pytest.mark.regression
+def test_temporal_gold_windows_are_ordered_and_question_specific():
+    cases = TEMPORAL_EVIDENCE_CASES
+    assert [case.question_id for case in cases] == ["Q11"]
+
+    case = get_temporal_evidence_case("Q11")
+    assert len(case.windows) == 2
+    assert case.windows[0].start_seconds == pytest.approx(4040.0)
+    assert case.windows[0].end_seconds == pytest.approx(5700.0)
+    assert case.windows[1].start_seconds == pytest.approx(7171.0)
+    assert case.windows[1].end_seconds == pytest.approx(8172.0)
+    assert all(
+        window.start_seconds < window.end_seconds
+        for window in case.windows
+    )
+    assert 0.0 < case.min_window_coverage <= 1.0
+
+
+@pytest.mark.regression
+def test_temporal_result_scores_relevant_sections_and_valid_provenance():
+    test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
+    results = [
+        (
+            _temporal_document(4100, 4200),
+            0.1,
+        ),
+        (
+            _temporal_document(7200, 7300, text="Banks and Kingfisher debt."),
+            0.2,
+        ),
+        (
+            _temporal_document(9000, 9100, text="Unrelated later section."),
+            0.3,
+        ),
+    ]
+
+    result = _build_temporal_result_record(test_case, results)
+
+    assert result["hit_at_k"]
+    assert result["first_relevant_rank"] == 1
+    assert result["mrr"] == pytest.approx(1.0)
+    assert result["matched_windows"] == 2
+    assert result["matched_section_ids"] == [
+        "kingfisher_rise_and_fall",
+        "kingfisher_financial_turmoil",
+    ]
+    assert result["window_coverage"] == pytest.approx(1.0)
+    assert result["timestamp_validity_rate"] == pytest.approx(1.0)
+    assert result["source_identity_validity_rate"] == pytest.approx(1.0)
+    assert result["passed"]
+
+
+@pytest.mark.regression
+def test_temporal_result_fails_when_retrieved_timestamps_miss_gold_windows():
+    test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
+    results = [(_temporal_document(9000, 9100), 0.1)]
+
+    result = _build_temporal_result_record(test_case, results)
+
+    assert not result["hit_at_k"]
+    assert result["matched_windows"] == 0
+    assert result["window_coverage"] == pytest.approx(0.0)
+    assert not result["passed"]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        (None, 4100),
+        (-1, 4100),
+        (4200, 4100),
+        (float("nan"), 4200),
+        (4100, float("inf")),
+        (True, 4200),
+    ],
+)
+def test_temporal_result_rejects_invalid_timestamp_bounds(start, end):
+    test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
+    result = _build_temporal_result_record(
+        test_case,
+        [(_temporal_document(start, end), 0.1)],
+    )
+
+    assert result["timestamp_validity_rate"] == pytest.approx(0.0)
+    assert not result["passed"]
+
+
+@pytest.mark.regression
+def test_temporal_result_rejects_sources_from_another_video():
+    test_case = next(item for item in TEST_QUESTIONS if item["id"] == "Q11")
+    result = _build_temporal_result_record(
+        test_case,
+        [(_temporal_document(4100, 4200, video_id="Gfr50f6ZBvo"), 0.1)],
+    )
+
+    assert result["timestamp_validity_rate"] == pytest.approx(1.0)
+    assert result["source_identity_validity_rate"] == pytest.approx(0.0)
+    assert not result["hit_at_k"]
+    assert not result["passed"]
+
+
+@pytest.mark.regression
+def test_temporal_benchmark_metrics_and_thresholds_pass():
+    metrics = {
+        "cases": 1,
+        "hit_rate_at_k": 1.0,
+        "mean_window_coverage": 0.5,
+        "timestamp_validity_rate": 1.0,
+        "source_identity_validity_rate": 1.0,
+        "mrr": 0.5,
+    }
+
+    passed, failures = evaluate_temporal_benchmark_thresholds(metrics)
+
+    assert passed
+    assert failures == []
+
+
+@pytest.mark.regression
+def test_temporal_benchmark_thresholds_fail_on_bad_timestamps_or_misses():
+    metrics = {
+        "cases": 1,
+        "hit_rate_at_k": 0.0,
+        "mean_window_coverage": 0.0,
+        "timestamp_validity_rate": 0.5,
+        "source_identity_validity_rate": 0.0,
+        "mrr": 0.0,
+    }
+
+    passed, failures = evaluate_temporal_benchmark_thresholds(metrics)
+
+    assert not passed
+    assert "temporal_hit_rate_below_threshold" in failures
+    assert "temporal_window_coverage_below_threshold" in failures
+    assert "temporal_timestamp_validity_below_threshold" in failures
+    assert "temporal_source_identity_below_threshold" in failures
+    assert "temporal_mrr_below_threshold" in failures
+
+
+@pytest.mark.regression
+def test_summary_includes_temporal_benchmark():
+    results = [
+        {
+            "id": "Q11",
+            "expected": "must_retrieve",
+            "passed": True,
+            "retrieved": 1,
+            "best_distance": 0.1,
+        }
+    ]
+    temporal_results = [
+        {
+            "id": "Q11",
+            "hit_at_k": True,
+            "window_coverage": 0.5,
+            "timestamp_validity_rate": 1.0,
+            "source_identity_validity_rate": 1.0,
+            "mrr": 1.0,
+            "passed": True,
+        }
+    ]
+
+    summary = build_evaluation_summary(
+        GOLD_TEMPORAL_VIDEO_ID,
+        results,
+        temporal_results=temporal_results,
+    )
+
+    assert summary["temporal_benchmark"]["passed"]
+    assert summary["temporal_benchmark"]["failures"] == []
+    assert summary["temporal_benchmark"]["metrics"]["hit_rate_at_k"] == 1.0
+
+
+@pytest.mark.regression
+def test_temporal_benchmark_does_not_treat_empty_results_as_pass():
+    metrics = build_temporal_benchmark_metrics([])
+    passed, failures = evaluate_temporal_benchmark_thresholds(metrics)
+
+    assert not passed
+    assert failures == ["temporal_benchmark_has_no_cases"]
