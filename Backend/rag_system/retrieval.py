@@ -1039,12 +1039,11 @@ def lexical_search(
             / total_query_weight
         )
 
-        # A single common term is not sufficient evidence for a multi-term
-        # query. Rare, highly distinctive terms can still stand alone.
-        if len(unique_terms) > 1 and len(matched_terms) == 1:
-            only_term = matched_terms[0]
-            if term_weights[only_term] < 2.0 and weighted_coverage < 0.30:
-                continue
+        # Multi-term lexical matches require shared evidence in the same
+        # chunk. This prevents one generic/query-side term from becoming
+        # enough evidence on its own. Single-term queries remain supported.
+        if len(unique_terms) > 1 and len(matched_terms) < 2:
+            continue
 
         raw_coverage = len(matched_terms) / len(unique_terms)
 
