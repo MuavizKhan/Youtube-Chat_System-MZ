@@ -199,8 +199,9 @@ def test_gold_result_record_scores_top_k_against_curated_groups():
             Document(
                 page_content=(
                     "Kingfisher Airlines started off as a single class "
-                    "airline, low cost, but with a difference. It had "
-                    "in flight, entertainment and it offered meals."
+                    "airline, low cost, but with a difference. The best "
+                    "flying experience we had ever seen. It had in flight, "
+                    "entertainment and it offered meals."
                 ),
                 metadata={},
             ),
