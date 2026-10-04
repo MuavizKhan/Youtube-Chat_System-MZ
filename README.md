@@ -132,7 +132,7 @@ The image does not contain secrets, SQLite state, or FAISS indexes. Persist the 
 
 Phase 8 begins tightening the user-facing trust contract around retrieved evidence:
 
-- Identity and participant questions must be answered only when the transcript explicitly establishes the identity.
+- The user-facing answer remains grounded in retrieved transcript evidence, with accidental internal source scaffolding stripped defensively.
 - Model output is defensively sanitized so accidental internal source labels do not leak into the user-facing answer.
 - Video sources are shown as distinct, labeled controls with clean timestamps for easier evidence navigation.
 - Regression tests cover the new grounding contract and output sanitization.
