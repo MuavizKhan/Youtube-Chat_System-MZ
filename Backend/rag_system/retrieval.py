@@ -1271,6 +1271,7 @@ def retrieve_question_context(
     fetch_k: int = MMR_FETCH_K,
     lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
+    expand_context: bool = True,
 ):
     """
     Main question-aware retrieval entry point.
