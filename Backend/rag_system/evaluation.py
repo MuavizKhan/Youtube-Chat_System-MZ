@@ -451,10 +451,6 @@ def evaluate_video(
         )
         print(
             "  must_not_retrieve_rejection    = "
-            f"{BENCHMARK_THRESHOLDS['must_not_retrieve_retrieve_rate']:.1%}"
-            if "must_not_retrieve_retrieve_rate" in BENCHMARK_THRESHOLDS
-            else
-            "  must_not_retrieve_rejection    = "
             f"{BENCHMARK_THRESHOLDS['must_not_retrieve_rejection_rate']:.1%}"
         )
         print(
