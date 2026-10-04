@@ -1038,6 +1038,52 @@ def lexical_search(
             sum(term_weights[term] for term in matched_terms)
             / total_query_weight
         )
+
+        # A single common term is not sufficient evidence for a multi-term
+        # query. Rare, highly distinctive terms can still stand alone.
+        if len(unique_terms) > 1 and len(matched_terms) == 1:
+            only_term = matched_terms[0]
+            if term_weights[only_term] < 2.0 and weighted_coverage < 0.30:
+                continue
+
+        raw_coverage = len(matched_terms) / len(unique_terms)
+
+        phrase_bonus = 0.0
+        for left, right in zip(focus_terms, focus_terms[1:]):
+            if f"{left} {right}" in text:
+                phrase_bonus += 0.12
+
+        if normalized_focus in text and len(unique_terms) >= 2:
+            phrase_bonus += 0.5
+
+        score = (
+            weighted_coverage
+            + (0.20 * raw_coverage)
+            + phrase_bonus
+        )
+
+        scored_documents.append((document, float(score)))
+
+    scored_documents.sort(
+        key=lambda item: (
+            -item[1],
+            float(item[0].metadata.get("start", 0.0)),
+            (
+                item[0].metadata.get("chunk_id")
+                if item[0].metadata.get("chunk_id") is not None
+                else 10**9
+            ),
+        )
+    )
+
+    return scored_documents[:limit]
+
+
+# Remove the old duplicated scoring tail introduced by the incremental update.
+
+            sum(term_weights[term] for term in matched_terms)
+            / total_query_weight
+        )
         raw_coverage = len(matched_terms) / len(unique_terms)
 
         phrase_bonus = 0.0
