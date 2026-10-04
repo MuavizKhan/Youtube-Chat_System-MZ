@@ -475,3 +475,32 @@ def test_answer_question_propagates_index_lifecycle_error(
             video_reference="Gfr50f6ZBvo",
             question="What happened?",
         )
+
+
+@pytest.mark.unit
+def test_identity_grounding_rules_are_present():
+    assert "IDENTITY / PARTICIPANT RULES" in chain.SYSTEM_INSTRUCTIONS
+    assert "identify a person only when" in chain.SYSTEM_INSTRUCTIONS
+    assert chain.FALLBACK_ANSWER in chain.SYSTEM_INSTRUCTIONS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "[SOURCE 1]\n\nThe speaker discusses protein folding.",
+            "The speaker discusses protein folding.",
+        ),
+        (
+            "The answer is supported.\n\nSources:",
+            "The answer is supported.",
+        ),
+        (
+            "   ",
+            chain.FALLBACK_ANSWER,
+        ),
+    ],
+)
+def test_sanitize_generated_answer(raw, expected):
+    assert chain.sanitize_generated_answer(raw) == expected
