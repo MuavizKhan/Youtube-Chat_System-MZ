@@ -11,6 +11,7 @@ and remains covered by the existing retrieval regression contract; a
 separate timestamp-grounded annotation set is intentionally deferred.
 """
 
+import re
 from dataclasses import dataclass
 
 
@@ -149,7 +150,12 @@ def get_gold_evidence_case(question_id: str) -> GoldEvidenceCase:
 def normalize_evidence_text(text: str) -> str:
     """Normalize transcript text for deterministic phrase matching."""
 
-    return " ".join(text.casefold().split())
+    normalized = text.casefold()
+    normalized = normalized.replace("’", "'")
+    normalized = normalized.replace("“", '"')
+    normalized = normalized.replace("”", '"')
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return " ".join(normalized.split())
 
 
 def matched_gold_groups(
