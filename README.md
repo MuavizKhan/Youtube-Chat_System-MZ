@@ -193,7 +193,7 @@ The JSON evaluation summary exposes both `gold_benchmark` (raw-anchor diagnostic
 
 ## Phase 8 — Retrieval fusion improvement
 
-The observed live benchmark showed that semantic retrieval could find the right section only after adjacent-context expansion, while lexical evidence was appended behind semantic results even when it contained exact transcript terminology. Part 6 therefore adds Reciprocal Rank Fusion (RRF) to the semantic + lexical retrieval merge:
+The observed live benchmark showed that semantic retrieval could find the right section only after adjacent-context expansion, while lexical evidence was appended behind semantic results even when it contained exact transcript terminology. This follow-up adds Reciprocal Rank Fusion (RRF) to the semantic + lexical retrieval merge:
 
 - semantic and lexical score scales are not compared directly;
 - each branch contributes according to rank using configurable `RAG_RRF_K` (default `60`);
