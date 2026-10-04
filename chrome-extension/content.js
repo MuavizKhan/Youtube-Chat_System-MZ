@@ -858,13 +858,27 @@ function renderSources(
                 ) || start;
 
 
+            const sourceId =
+                Number(source.source_id) ||
+                (sources.indexOf(source) + 1);
+
+
             sourceButton.textContent =
-                `${formatTimestamp(start)} → ` +
-                `${formatTimestamp(end)}`;
+                "Source " + sourceId + " · " +
+                formatTimestamp(start) + " → " +
+                formatTimestamp(end);
 
 
             sourceButton.title =
-                "Jump to this part of the video";
+                "Jump to this evidence segment";
+
+
+            sourceButton.setAttribute(
+                "aria-label",
+                "Source " + sourceId + ", " +
+                formatTimestamp(start) + " to " +
+                formatTimestamp(end) + ". Jump to this part of the video."
+            );
 
 
             sourceButton.addEventListener(

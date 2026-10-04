@@ -475,3 +475,25 @@ def test_answer_question_propagates_index_lifecycle_error(
             video_reference="Gfr50f6ZBvo",
             question="What happened?",
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "[SOURCE 1]\n\nThe speaker discusses protein folding.",
+            "The speaker discusses protein folding.",
+        ),
+        (
+            "The answer is supported.\n\nSources:",
+            "The answer is supported.",
+        ),
+        (
+            "   ",
+            chain.FALLBACK_ANSWER,
+        ),
+    ],
+)
+def test_sanitize_generated_answer(raw, expected):
+    assert chain.sanitize_generated_answer(raw) == expected

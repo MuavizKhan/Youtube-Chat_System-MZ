@@ -128,6 +128,17 @@ docker run --rm -p 8000:8000 --env-file .env youtube-video-chat-backend
 
 The image does not contain secrets, SQLite state, or FAISS indexes. Persist the backend's vector-store directory and job database outside the container for any restart-safe deployment.
 
+## Phase 8: RAG quality and source UX
+
+Phase 8 begins tightening the user-facing trust contract around retrieved evidence:
+
+- The user-facing answer remains grounded in retrieved transcript evidence, with accidental internal source scaffolding stripped defensively.
+- Model output is defensively sanitized so accidental internal source labels do not leak into the user-facing answer.
+- Video sources are shown as distinct, labeled controls with clean timestamps for easier evidence navigation.
+- Regression tests cover the new grounding contract and output sanitization.
+
+The focus of this phase is retrieval quality, grounded answers, and evidence usability before moving into broader deployment architecture.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
