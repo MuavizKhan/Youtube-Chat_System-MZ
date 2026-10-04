@@ -739,8 +739,7 @@ def evaluate_video(
         gold_benchmark = summary["gold_benchmark"]
         if gold_benchmark is not None:
             gold_metrics = gold_benchmark["metrics"]
-            print("
-Gold Evidence Benchmark:")
+            print("\nGold Evidence Benchmark:")
             print(
                 "  hit@k                       = "
                 f"{gold_metrics['hit_rate_at_k']:.1%}"
