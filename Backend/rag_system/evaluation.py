@@ -22,6 +22,12 @@ from .config import (
     TOP_K,
 )
 
+from .gold_evidence import (
+    GOLD_EVIDENCE_CASES,
+    get_gold_evidence_case,
+    matched_gold_groups,
+)
+
 from .retrieval import (
     extract_video_id,
     load_vector_store,
@@ -151,6 +157,13 @@ BENCHMARK_THRESHOLDS = {
     "must_retrieve_recall": 1.0,
     "must_not_retrieve_rejection_rate": 1.0,
     "strict_max_best_distance": MAX_DISTANCE,
+}
+
+GOLD_BENCHMARK_THRESHOLDS = {
+    "hit_rate_at_k": 1.0,
+    "mean_group_coverage": 0.66,
+    "mrr": 0.50,
+    "mean_precision_at_k": 0.15,
 }
 
 
@@ -344,9 +357,159 @@ def evaluate_benchmark_thresholds(
     return not failures, failures
 
 
+def _build_gold_result_record(
+    test_case: dict[str, str],
+    results: list[tuple[Any, float]],
+) -> dict[str, Any]:
+    """Score raw top-k retrieval against curated evidence groups."""
+
+    gold_case = get_gold_evidence_case(test_case["id"])
+    top_results = results[:TOP_K]
+
+    matched_group_indexes: set[int] = set()
+    relevant_ranks: list[int] = []
+    relevant_documents = 0
+
+    for rank, (document, _distance) in enumerate(
+        top_results,
+        start=1,
+    ):
+        matched_groups = matched_gold_groups(
+            document.page_content,
+            gold_case,
+        )
+
+        if matched_groups:
+            relevant_documents += 1
+            relevant_ranks.append(rank)
+            matched_group_indexes.update(matched_groups)
+
+    group_coverage = (
+        len(matched_group_indexes)
+        / len(gold_case.groups)
+    )
+
+    first_relevant_rank = (
+        min(relevant_ranks)
+        if relevant_ranks
+        else None
+    )
+
+    mrr = (
+        1.0 / first_relevant_rank
+        if first_relevant_rank is not None
+        else 0.0
+    )
+
+    precision_at_k = (
+        relevant_documents / TOP_K
+        if TOP_K
+        else 0.0
+    )
+
+    passed = (
+        group_coverage
+        >= gold_case.min_group_coverage
+    )
+
+    return {
+        "id": test_case["id"],
+        "question": test_case["question"],
+        "gold_groups": len(gold_case.groups),
+        "matched_gold_groups": len(matched_group_indexes),
+        "group_coverage": group_coverage,
+        "required_group_coverage": gold_case.min_group_coverage,
+        "retrieved": len(top_results),
+        "relevant_retrieved": relevant_documents,
+        "hit_at_k": bool(relevant_ranks),
+        "first_relevant_rank": first_relevant_rank,
+        "mrr": mrr,
+        "precision_at_k": precision_at_k,
+        "passed": passed,
+    }
+
+
+def build_gold_benchmark_metrics(
+    gold_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate gold-evidence retrieval metrics."""
+
+    total = len(gold_results)
+    if not total:
+        return {
+            "cases": 0,
+            "hit_rate_at_k": 1.0,
+            "mean_group_coverage": 1.0,
+            "mrr": 1.0,
+            "mean_precision_at_k": 1.0,
+            "passed_cases": 0,
+            "pass_rate": 1.0,
+        }
+
+    return {
+        "cases": total,
+        "hit_rate_at_k": sum(
+            1 for result in gold_results if result["hit_at_k"]
+        ) / total,
+        "mean_group_coverage": sum(
+            result["group_coverage"]
+            for result in gold_results
+        ) / total,
+        "mrr": sum(
+            result["mrr"]
+            for result in gold_results
+        ) / total,
+        "mean_precision_at_k": sum(
+            result["precision_at_k"]
+            for result in gold_results
+        ) / total,
+        "passed_cases": sum(
+            1 for result in gold_results if result["passed"]
+        ),
+        "pass_rate": sum(
+            1 for result in gold_results if result["passed"]
+        ) / total,
+    }
+
+
+def evaluate_gold_benchmark_thresholds(
+    gold_metrics: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Apply hard thresholds to the curated gold-evidence benchmark."""
+
+    if not gold_metrics["cases"]:
+        return True, []
+
+    failures: list[str] = []
+
+    if (
+        gold_metrics["hit_rate_at_k"]
+        < GOLD_BENCHMARK_THRESHOLDS["hit_rate_at_k"]
+    ):
+        failures.append("gold_hit_rate_below_threshold")
+
+    if (
+        gold_metrics["mean_group_coverage"]
+        < GOLD_BENCHMARK_THRESHOLDS["mean_group_coverage"]
+    ):
+        failures.append("gold_group_coverage_below_threshold")
+
+    if gold_metrics["mrr"] < GOLD_BENCHMARK_THRESHOLDS["mrr"]:
+        failures.append("gold_mrr_below_threshold")
+
+    if (
+        gold_metrics["mean_precision_at_k"]
+        < GOLD_BENCHMARK_THRESHOLDS["mean_precision_at_k"]
+    ):
+        failures.append("gold_precision_below_threshold")
+
+    return not failures, failures
+
+
 def build_evaluation_summary(
     video_id: str,
     results: list[dict[str, Any]],
+    gold_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a stable machine-readable evaluation summary."""
 
@@ -370,6 +533,22 @@ def build_evaluation_summary(
         benchmark_metrics
     )
 
+    gold_benchmark = None
+    if gold_results is not None:
+        gold_metrics = build_gold_benchmark_metrics(
+            gold_results
+        )
+        gold_passed, gold_failures = evaluate_gold_benchmark_thresholds(
+            gold_metrics
+        )
+        gold_benchmark = {
+            "thresholds": GOLD_BENCHMARK_THRESHOLDS,
+            "metrics": gold_metrics,
+            "passed": gold_passed,
+            "failures": gold_failures,
+            "results": gold_results,
+        }
+
     return {
         "video_id": video_id,
         "retrieval_strategy": "question_aware_mmr_lexical",
@@ -383,6 +562,7 @@ def build_evaluation_summary(
         "benchmark_metrics": benchmark_metrics,
         "benchmark_passed": benchmark_passed,
         "benchmark_failures": benchmark_failures,
+        "gold_benchmark": gold_benchmark,
         "total": total,
         "passed": passed,
         "failed": failed,
@@ -428,6 +608,7 @@ def evaluate_video(
     vector_store = load_vector_store(video_id)
 
     results = []
+    gold_results = []
 
     if display:
         print("\n" + "=" * 80)
@@ -481,6 +662,22 @@ def evaluate_video(
         )
         results.append(record)
 
+        if question_id in {
+            case.question_id
+            for case in GOLD_EVIDENCE_CASES
+        }:
+            raw_retrieved = retrieve_question_context(
+                vector_store=vector_store,
+                query=question,
+                expand_context=False,
+            )
+            gold_results.append(
+                _build_gold_result_record(
+                    test_case=test_case,
+                    results=raw_retrieved,
+                )
+            )
+
         if display:
             display_results(retrieved)
             print(f"\nExpected: {record['expected']}")
@@ -490,6 +687,7 @@ def evaluate_video(
     summary = build_evaluation_summary(
         video_id=video_id,
         results=results,
+        gold_results=gold_results,
     )
 
     if display:
@@ -537,6 +735,37 @@ def evaluate_video(
                 "  benchmark failures          = "
                 + ", ".join(summary["benchmark_failures"])
             )
+
+        gold_benchmark = summary["gold_benchmark"]
+        if gold_benchmark is not None:
+            gold_metrics = gold_benchmark["metrics"]
+            print("
+Gold Evidence Benchmark:")
+            print(
+                "  hit@k                       = "
+                f"{gold_metrics['hit_rate_at_k']:.1%}"
+            )
+            print(
+                "  mean group coverage        = "
+                f"{gold_metrics['mean_group_coverage']:.1%}"
+            )
+            print(
+                "  MRR                         = "
+                f"{gold_metrics['mrr']:.3f}"
+            )
+            print(
+                "  mean precision@k            = "
+                f"{gold_metrics['mean_precision_at_k']:.1%}"
+            )
+            print(
+                "  gold benchmark status       = "
+                f"{'PASS' if gold_benchmark['passed'] else 'FAIL'}"
+            )
+            if gold_benchmark["failures"]:
+                print(
+                    "  gold benchmark failures     = "
+                    + ", ".join(gold_benchmark["failures"])
+                )
         print("-" * 80)
 
     return summary
@@ -568,9 +797,15 @@ def main() -> int:
     if args.json:
         print(json.dumps(summary, indent=2))
 
+    gold_passed = (
+        summary["gold_benchmark"] is None
+        or summary["gold_benchmark"]["passed"]
+    )
+
     return 0 if (
         summary["failed"] == 0
         and summary["benchmark_passed"]
+        and gold_passed
     ) else 1
 
 
