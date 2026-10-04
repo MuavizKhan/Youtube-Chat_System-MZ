@@ -19,7 +19,9 @@ This file does NOT:
 - call the generation model
 - handle FastAPI
 """
+import math
 import re
+from typing import Any
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -791,6 +793,79 @@ STOPWORDS = {
 }
 
 
+
+# Question boilerplate is useful for human language but is weak retrieval
+# evidence. These terms are removed only from the focus-query path; the
+# original user query is always retained as a semantic retrieval variant.
+QUERY_FOCUS_STOPWORDS = STOPWORDS | {
+    "he", "she", "his", "her", "their", "them", "me", "my", "your", "our",
+    "we", "i", "say", "says", "said", "tell", "tells", "told",
+    "discuss", "discusses", "discussed", "describe", "describes",
+    "described", "explain", "explains", "explained", "talk", "talks",
+    "talking", "mention", "mentions", "mentioned", "give", "gives",
+    "given", "provide", "provides", "provided", "does", "did",
+    "video", "interview",
+}
+
+SPEAKER_ATTRIBUTION_PATTERN = re.compile(
+    r"\b(?:does|did|is|are|was|were|can|could|would|will|has|have|had)"
+    r"\s+[a-z]+(?:\s+[a-z]+){0,2}\s+"
+    r"(?:say|says|said|tell|tells|told|discuss|discusses|discussed|"
+    r"describe|describes|described|explain|explains|explained|"
+    r"talk|talks|mention|mentions|mentioned)\b"
+)
+
+
+def extract_query_focus_terms(
+    query: str,
+) -> list[str]:
+    """Extract content-bearing terms after removing speaker/question boilerplate."""
+
+    normalized_query = " ".join(query.strip().lower().split())
+    normalized_query = SPEAKER_ATTRIBUTION_PATTERN.sub(
+        " ",
+        normalized_query,
+        count=1,
+    )
+    normalized_query = re.sub(
+        r"^\s*(?:what|how|why|where|when|who|which)\b",
+        " ",
+        normalized_query,
+        count=1,
+    )
+
+    words = re.findall(r"[a-zA-Z0-9]+", normalized_query)
+    return [
+        word
+        for word in words
+        if len(word) >= 2 and word not in QUERY_FOCUS_STOPWORDS
+    ]
+
+
+def build_retrieval_query_variants(
+    query: str,
+) -> list[str]:
+    """Build deterministic semantic-query variants for hybrid retrieval.
+
+    The original question is always preserved. A second, content-focused
+    variant removes question/speaker boilerplate so the embedding model is
+    exposed to the actual topic terms.
+    """
+
+    original = " ".join(query.strip().split())
+    if not original:
+        return []
+
+    variants = [original]
+    focus_terms = extract_query_focus_terms(original)
+
+    if len(focus_terms) >= 2:
+        focus_query = " ".join(focus_terms)
+        if focus_query.casefold() != original.casefold():
+            variants.append(focus_query)
+
+    return variants
+
 OVERVIEW_PATTERNS = (
     r"\bwhat is this video about\b",
     r"\bwhat's this video about\b",
@@ -906,130 +981,164 @@ def get_all_documents(
 def lexical_search(
     vector_store,
     query: str,
-    limit: int = 4,
+    limit: int = 8,
 ):
-    """
-    Search transcript chunks using actual words from
-    the user's question.
+    """Search transcript chunks with content-aware lexical evidence.
 
-    This is especially useful for:
-
-        - names
-        - organizations
-        - products
-        - technical terms
-        - exact phrases
-
-    Returns:
-
-        [(Document, score), ...]
-
-    The second value is a lexical relevance score,
-    not a FAISS distance.
+    The lexical path uses query-focus terms plus lightweight inverse-document
+    frequency weighting. This prevents generic question words from outranking
+    rare domain terms and allows a single distinctive term to surface a
+    relevant chunk even when the exact wording differs.
     """
 
-    query_terms = (
-        extract_query_terms(
-            query
-        )
-    )
+    focus_terms = extract_query_focus_terms(query)
+    if not focus_terms:
+        focus_terms = list(extract_query_terms(query))
 
-    if not query_terms:
-
+    if not focus_terms:
         return []
 
-    normalized_query = (
-        " ".join(
-            query.lower()
-            .split()
-        )
-    )
+    documents = get_all_documents(vector_store)
+    if not documents:
+        return []
 
-    documents = (
-        get_all_documents(
-            vector_store
-        )
-    )
+    normalized_focus = " ".join(focus_terms)
+    unique_terms = list(dict.fromkeys(focus_terms))
+    document_frequency = {term: 0 for term in unique_terms}
 
+    for document in documents:
+        text = document.page_content.casefold()
+        for term in unique_terms:
+            if re.search(rf"\b{re.escape(term)}\b", text):
+                document_frequency[term] += 1
+
+    total_documents = len(documents)
+    term_weights = {
+        term: (
+            math.log((total_documents + 1) / (frequency + 1)) + 1.0
+        )
+        for term, frequency in document_frequency.items()
+    }
+
+    total_query_weight = sum(term_weights.values()) or 1.0
     scored_documents = []
 
     for document in documents:
+        text = document.page_content.casefold()
+        matched_terms = [
+            term
+            for term in unique_terms
+            if re.search(rf"\b{re.escape(term)}\b", text)
+        ]
 
-        text = (
-            document.page_content
-            .lower()
+        if not matched_terms:
+            continue
+
+        weighted_coverage = (
+            sum(term_weights[term] for term in matched_terms)
+            / total_query_weight
         )
 
-        matched_terms = sum(
-            1
-            for term in query_terms
-            if re.search(
-            rf"\b{re.escape(term)}\b",
-                text,
-            )
+        # Multi-term lexical matches require shared evidence in the same
+        # chunk. This prevents one generic/query-side term from becoming
+        # enough evidence on its own. Single-term queries remain supported.
+        if len(unique_terms) > 1 and len(matched_terms) < 2:
+            continue
+
+        raw_coverage = len(matched_terms) / len(unique_terms)
+
+        phrase_bonus = 0.0
+        for left, right in zip(focus_terms, focus_terms[1:]):
+            if f"{left} {right}" in text:
+                phrase_bonus += 0.12
+
+        if normalized_focus in text and len(unique_terms) >= 2:
+            phrase_bonus += 0.5
+
+        score = (
+            weighted_coverage
+            + (0.20 * raw_coverage)
+            + phrase_bonus
         )
 
-        # ----------------------------------------------------
-        # Exact phrase match
-        # ----------------------------------------------------
-
-        exact_phrase_match = (
-            normalized_query in text
-            and len(query_terms) >= 2
-        )
-
-        # ----------------------------------------------------
-        # Evidence rule
-        #
-        # For a multi-term query, require at least two
-        # meaningful query terms to appear in the same chunk.
-        #
-        # This is especially important for names such as:
-        #
-        #     "Who is Demis Hassabis?"
-        #
-        # A chunk containing both "demis" and "hassabis"
-        # is strong lexical evidence.
-        # ----------------------------------------------------
-
-        if exact_phrase_match:
-
-            score = 1.0
-
-        elif len(query_terms) == 1:
-
-            if matched_terms != 1:
-                continue
-
-            score = 1.0
-
-        else:
-
-            if matched_terms < 2:
-                continue
-
-            score = (
-                matched_terms
-                /
-                len(query_terms)
-            )
-
-        scored_documents.append(
-            (
-                document,
-                float(score),
-            )
-        )
+        scored_documents.append((document, float(score)))
 
     scored_documents.sort(
-        key=lambda item: item[1],
-        reverse=True,
+        key=lambda item: (
+            -item[1],
+            float(item[0].metadata.get("start", 0.0)),
+            (
+                item[0].metadata.get("chunk_id")
+                if item[0].metadata.get("chunk_id") is not None
+                else 10**9
+            ),
+        )
     )
 
     return scored_documents[:limit]
 
 
+def fuse_semantic_rankings(
+    ranked_results: list[list[tuple[Any, float]]],
+    *,
+    rrf_k: int = RRF_K,
+):
+    """Fuse multiple semantic query variants with Reciprocal Rank Fusion."""
 
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be greater than 0.")
+
+    fused = {}
+
+    def identity(document):
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None:
+            return ("chunk", chunk_id)
+
+        return (
+            "time",
+            float(document.metadata.get("start", 0.0)),
+            float(document.metadata.get("end", 0.0)),
+        )
+
+    for results in ranked_results:
+        for rank, (document, distance) in enumerate(results, start=1):
+            key = identity(document)
+            entry = fused.get(key)
+
+            if entry is None:
+                entry = {
+                    "document": document,
+                    "distance": float(distance),
+                    "score": 0.0,
+                }
+                fused[key] = entry
+            else:
+                entry["distance"] = min(
+                    entry["distance"],
+                    float(distance),
+                )
+
+            entry["score"] += 1.0 / (rrf_k + rank)
+
+    ranked = sorted(
+        fused.values(),
+        key=lambda entry: (
+            -entry["score"],
+            entry["distance"],
+            float(entry["document"].metadata.get("start", 0.0)),
+            (
+                entry["document"].metadata.get("chunk_id")
+                if entry["document"].metadata.get("chunk_id") is not None
+                else 10**9
+            ),
+        ),
+    )
+
+    return [
+        (entry["document"], entry["distance"])
+        for entry in ranked
+    ]
 
 
 def fuse_semantic_and_lexical_results(
@@ -1378,93 +1487,66 @@ def retrieve_question_context(
     max_distance: float = MAX_DISTANCE,
     expand_context: bool = True,
 ):
-    """
-    Main question-aware retrieval entry point.
-
-    ``expand_context`` defaults to the production behavior used by chat.
-    Evaluation code can disable it to benchmark the raw retrieval anchors
-    without awarding relevance credit to adjacent-context expansion.
+    """Main question-aware retrieval entry point.
 
     Strategy:
 
         Overview question
-            ↓
-        representative video sections
+            -> representative video sections
 
         Otherwise
-            ↓
-        MMR semantic retrieval
-            +
-        lexical/name retrieval
+            -> original semantic query + content-focused semantic query
+            -> lexical evidence using content-aware TF-IDF-like weighting
+            -> Reciprocal Rank Fusion across all signals
+            -> bounded chronological context expansion
 
-        If neither gives sufficient evidence:
-            ↓
-        return []
+    Keeping the original query and adding a deterministic focus query fixes a
+    common failure mode where conversational wording dominates the embedding
+    while the actual topic appears late in a transcript.
     """
 
-    # --------------------------------------------------------
-    # 1. Broad overview question
-    # --------------------------------------------------------
+    if is_overview_question(query):
+        return retrieve_overview(vector_store)
 
-    if is_overview_question(
-        query
-    ):
+    query_variants = build_retrieval_query_variants(query)
+    semantic_rankings = []
 
-        return retrieve_overview(
-            vector_store
+    for variant in query_variants:
+        semantic_rankings.append(
+            retrieve_mmr(
+                vector_store=vector_store,
+                query=variant,
+                k=k,
+                fetch_k=fetch_k,
+                lambda_mult=lambda_mult,
+                max_distance=max_distance,
+            )
         )
 
-    # --------------------------------------------------------
-    # 2. Semantic retrieval
-    # --------------------------------------------------------
-
-    semantic_results = retrieve_mmr(
-        vector_store=vector_store,
-        query=query,
-        k=k,
-        fetch_k=fetch_k,
-        lambda_mult=lambda_mult,
-        max_distance=max_distance,
-    )
-
-    # --------------------------------------------------------
-    # 3. Lexical retrieval
-    # --------------------------------------------------------
+    semantic_results = fuse_semantic_rankings(semantic_rankings)
 
     lexical_results = lexical_search(
         vector_store=vector_store,
         query=query,
-        limit=k,
+        limit=max(k, min(k * 2, 8)),
     )
 
-    # --------------------------------------------------------
-    # 4. Fuse semantic + lexical rankings
-    # --------------------------------------------------------
-
-    # Semantic distance and lexical score are intentionally not compared
-    # numerically. Reciprocal Rank Fusion combines the ranked lists while
-    # preserving the downstream distance contract.
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
         lexical_results=lexical_results,
         lexical_distance=max_distance,
     )
 
-    # --------------------------------------------------------
-    # 5. Evidence gate
-    # --------------------------------------------------------
-
     if not combined_results:
-
         return []
 
-    has_lexical_evidence = (
-        len(lexical_results) > 0
-    )
+    # Any lexical evidence is an explicit transcript-term signal. Keep the
+    # existing conservative semantic-only gate for queries without lexical
+    # evidence.
+    has_lexical_evidence = bool(lexical_results)
 
     if has_lexical_evidence:
-
-        raw_results = combined_results[:k + 2]
+        raw_results = combined_results[: k + 2]
 
         if not expand_context:
             return raw_results
@@ -1474,35 +1556,18 @@ def retrieve_question_context(
             raw_results,
         )
 
-    # No lexical evidence.
-    # Require stronger semantic evidence before allowing
-    # the LLM to answer.
     semantic_distances = [
         distance
-        for (
-            _document,
-            distance,
-        )
-        in semantic_results
+        for _document, distance in semantic_results
     ]
 
     if not semantic_distances:
-
         return []
 
-    best_distance = min(
-        semantic_distances
-    )
+    best_distance = min(semantic_distances)
+    strict_semantic_limit = max_distance * 0.92
 
-    strict_semantic_limit = (
-        max_distance * 0.92
-    )
-
-    if (
-        best_distance
-        > strict_semantic_limit
-    ):
-
+    if best_distance > strict_semantic_limit:
         return []
 
     raw_results = combined_results[:k]
@@ -1514,3 +1579,4 @@ def retrieve_question_context(
         vector_store,
         raw_results,
     )
+
