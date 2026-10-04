@@ -31,7 +31,6 @@ from .retrieval import (
 
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=MdeQMVBuGgY"
 
-
 TEST_QUESTIONS = [
     {
         "id": "Q01",
@@ -137,11 +136,21 @@ TEST_QUESTIONS = [
     },
 ]
 
-
 EXPECTED_RETRIEVAL = {
     **{f"Q{i:02d}": "must_retrieve" for i in range(1, 12)},
     "Q12": "may_retrieve",
     "Q13": "must_not_retrieve",
+}
+
+# The benchmark deliberately keeps hard thresholds tied to the existing
+# retrieval contract instead of inventing arbitrary semantic-quality scores.
+# A future benchmark can add labeled relevant chunks or human judgments
+# without changing these deterministic regression metrics.
+BENCHMARK_THRESHOLDS = {
+    "strict_pass_rate": 1.0,
+    "must_retrieve_recall": 1.0,
+    "must_not_retrieve_rejection_rate": 1.0,
+    "strict_max_best_distance": MAX_DISTANCE,
 }
 
 
@@ -223,6 +232,118 @@ def _build_result_record(
     }
 
 
+def _rate(
+    numerator: int,
+    denominator: int,
+) -> float:
+    return numerator / denominator if denominator else 1.0
+
+
+def build_benchmark_metrics(
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build deterministic retrieval-quality metrics for the suite."""
+
+    must_retrieve = [
+        result
+        for result in results
+        if result["expected"] == "must_retrieve"
+    ]
+    must_not_retrieve = [
+        result
+        for result in results
+        if result["expected"] == "must_not_retrieve"
+    ]
+
+    must_retrieve_passed = sum(
+        1 for result in must_retrieve if result["passed"]
+    )
+    must_not_retrieve_passed = sum(
+        1 for result in must_not_retrieve if result["passed"]
+    )
+
+    strict_results = [
+        result
+        for result in results
+        if result["expected"] != "may_retrieve"
+    ]
+    strict_passed = sum(
+        1 for result in strict_results if result["passed"]
+    )
+
+    best_distances = [
+        float(result["best_distance"])
+        for result in must_retrieve
+        if result["best_distance"] is not None
+    ]
+
+    return {
+        "strict_pass_rate": _rate(
+            strict_passed,
+            len(strict_results),
+        ),
+        "must_retrieve_recall": _rate(
+            must_retrieve_passed,
+            len(must_retrieve),
+        ),
+        "must_not_retrieve_rejection_rate": _rate(
+            must_not_retrieve_passed,
+            len(must_not_retrieve),
+        ),
+        "strict_max_best_distance": (
+            max(best_distances) if best_distances else None
+        ),
+        "strict_mean_best_distance": (
+            sum(best_distances) / len(best_distances)
+            if best_distances
+            else None
+        ),
+        "must_retrieve_cases": len(must_retrieve),
+        "must_retrieve_passed": must_retrieve_passed,
+        "must_not_retrieve_cases": len(must_not_retrieve),
+        "must_not_retrieve_passed": must_not_retrieve_passed,
+    }
+
+
+def evaluate_benchmark_thresholds(
+    benchmark_metrics: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Apply the deterministic retrieval benchmark thresholds."""
+
+    failures: list[str] = []
+
+    strict_pass_rate = benchmark_metrics["strict_pass_rate"]
+    if strict_pass_rate < BENCHMARK_THRESHOLDS["strict_pass_rate"]:
+        failures.append("strict_pass_rate_below_threshold")
+
+    recall = benchmark_metrics["must_retrieve_recall"]
+    if recall < BENCHMARK_THRESHOLDS["must_retrieve_recall"]:
+        failures.append("must_retrieve_recall_below_threshold")
+
+    rejection_rate = benchmark_metrics[
+        "must_not_retrieve_rejection_rate"
+    ]
+    if (
+        rejection_rate
+        < BENCHMARK_THRESHOLDS[
+            "must_not_retrieve_rejection_rate"
+        ]
+    ):
+        failures.append(
+            "must_not_retrieve_rejection_rate_below_threshold"
+        )
+
+    max_distance = benchmark_metrics["strict_max_best_distance"]
+    if (
+        max_distance is not None
+        and max_distance
+        > BENCHMARK_THRESHOLDS["strict_max_best_distance"]
+    ):
+        failures.append("strict_best_distance_above_threshold")
+
+    return not failures, failures
+
+
 def build_evaluation_summary(
     video_id: str,
     results: list[dict[str, Any]],
@@ -244,6 +365,11 @@ def build_evaluation_summary(
     )
     strict_failed = strict_total - strict_passed
 
+    benchmark_metrics = build_benchmark_metrics(results)
+    benchmark_passed, benchmark_failures = evaluate_benchmark_thresholds(
+        benchmark_metrics
+    )
+
     return {
         "video_id": video_id,
         "retrieval_strategy": "question_aware_mmr_lexical",
@@ -253,6 +379,10 @@ def build_evaluation_summary(
             "lambda_mult": MMR_LAMBDA,
             "max_distance": MAX_DISTANCE,
         },
+        "benchmark_thresholds": BENCHMARK_THRESHOLDS,
+        "benchmark_metrics": benchmark_metrics,
+        "benchmark_passed": benchmark_passed,
+        "benchmark_failures": benchmark_failures,
         "total": total,
         "passed": passed,
         "failed": failed,
@@ -310,6 +440,27 @@ def evaluate_video(
         print(f"  fetch_k      = {MMR_FETCH_K}")
         print(f"  lambda       = {MMR_LAMBDA}")
         print(f"  max_distance = {MAX_DISTANCE}")
+        print("\nBenchmark Thresholds:")
+        print(
+            "  strict_pass_rate               = "
+            f"{BENCHMARK_THRESHOLDS['strict_pass_rate']:.1%}"
+        )
+        print(
+            "  must_retrieve_recall           = "
+            f"{BENCHMARK_THRESHOLDS['must_retrieve_recall']:.1%}"
+        )
+        print(
+            "  must_not_retrieve_rejection    = "
+            f"{BENCHMARK_THRESHOLDS['must_not_retrieve_retrieve_rate']:.1%}"
+            if "must_not_retrieve_retrieve_rate" in BENCHMARK_THRESHOLDS
+            else
+            "  must_not_retrieve_rejection    = "
+            f"{BENCHMARK_THRESHOLDS['must_not_retrieve_rejection_rate']:.1%}"
+        )
+        print(
+            "  strict_max_best_distance       = "
+            f"{BENCHMARK_THRESHOLDS['strict_max_best_distance']:.3f}"
+        )
         print("\nLoading vector store...")
 
     for test_case in TEST_QUESTIONS:
@@ -357,6 +508,7 @@ def evaluate_video(
                 f"{'PASS' if result['passed'] else 'FAIL'}"
             )
 
+        metrics = summary["benchmark_metrics"]
         print("\n" + "-" * 80)
         print(
             f"Overall: {summary['passed']}/{summary['total']} passed "
@@ -367,6 +519,28 @@ def evaluate_video(
             f"{summary['strict_total']} passed "
             f"({summary['strict_pass_rate']:.1%})"
         )
+        print("\nBenchmark Metrics:")
+        print(
+            "  must-retrieve recall        = "
+            f"{metrics['must_retrieve_recall']:.1%}"
+        )
+        print(
+            "  unrelated rejection         = "
+            f"{metrics['must_not_retrieve_rejection_rate']:.1%}"
+        )
+        print(
+            "  strict max best distance    = "
+            f"{metrics['strict_max_best_distance']}"
+        )
+        print(
+            "  benchmark status             = "
+            f"{'PASS' if summary['benchmark_passed'] else 'FAIL'}"
+        )
+        if summary["benchmark_failures"]:
+            print(
+                "  benchmark failures          = "
+                + ", ".join(summary["benchmark_failures"])
+            )
         print("-" * 80)
 
     return summary
@@ -398,7 +572,10 @@ def main() -> int:
     if args.json:
         print(json.dumps(summary, indent=2))
 
-    return 0 if summary["failed"] == 0 else 1
+    return 0 if (
+        summary["failed"] == 0
+        and summary["benchmark_passed"]
+    ) else 1
 
 
 if __name__ == "__main__":
