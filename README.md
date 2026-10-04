@@ -175,6 +175,20 @@ The live evaluator can be run with: python -m Backend.rag_system.evaluation --js
 
 A non-zero exit code indicates either a per-case retrieval regression or a failed benchmark threshold.
 
+
+## Phase 8 — Gold-evidence retrieval evaluation
+
+This slice moves the retrieval benchmark from "did anything come back?" to "did the top results contain the curated transcript evidence needed by the question?"
+
+- `Backend/rag_system/gold_evidence.py` stores human-curated evidence groups for Q01-Q10 using transcript phrases rather than chunk IDs, so the annotations survive chunking changes.
+- Each evidence group may contain alternative phrases for the same concept, and each question defines the minimum evidence-group coverage required to pass.
+- Gold evaluation uses raw retrieval anchors with context expansion disabled, so adjacent-context expansion cannot receive relevance credit by itself.
+- The benchmark reports Hit@K, mean evidence-group coverage, MRR, and mean Precision@K.
+- Q11 remains covered by the normal retrieval regression contract because it is a temporal question; timestamp-grounded gold annotation is intentionally a separate future evaluation slice.
+- The gold benchmark is deterministic and model-free. It evaluates curated textual evidence anchors, not semantic faithfulness.
+
+The evaluator now returns both the existing retrieval benchmark and the gold-evidence benchmark in JSON output. A non-zero exit code is returned when either benchmark violates its thresholds.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:

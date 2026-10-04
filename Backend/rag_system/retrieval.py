@@ -293,6 +293,7 @@ def retrieve_mmr(
     fetch_k: int = MMR_FETCH_K,
     lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
+    expand_context: bool = True,
 ):
     """
     Retrieve relevant transcript chunks using MMR.
@@ -1270,9 +1271,14 @@ def retrieve_question_context(
     fetch_k: int = MMR_FETCH_K,
     lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
+    expand_context: bool = True,
 ):
     """
     Main question-aware retrieval entry point.
+
+    ``expand_context`` defaults to the production behavior used by chat.
+    Evaluation code can disable it to benchmark the raw retrieval anchors
+    without awarding relevance credit to adjacent-context expansion.
 
     Strategy:
 
@@ -1412,9 +1418,14 @@ def retrieve_question_context(
 
     if has_lexical_evidence:
 
+        raw_results = combined_results[:k + 2]
+
+        if not expand_context:
+            return raw_results
+
         return expand_retrieval_context(
             vector_store,
-            combined_results[:k + 2],
+            raw_results,
         )
 
     # No lexical evidence.
@@ -1448,7 +1459,12 @@ def retrieve_question_context(
 
         return []
 
+    raw_results = combined_results[:k]
+
+    if not expand_context:
+        return raw_results
+
     return expand_retrieval_context(
         vector_store,
-        combined_results[:k],
+        raw_results,
     )

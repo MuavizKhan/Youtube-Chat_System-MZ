@@ -284,3 +284,39 @@ def test_context_expansion_can_be_disabled():
         window=0,
         max_chunks=12,
     ) == [anchor]
+
+
+@pytest.mark.unit
+def test_question_context_can_return_raw_retrieval_without_expansion(monkeypatch):
+    anchor = doc(2, 20, 25, "anchor")
+    neighbor = doc(3, 30, 35, "neighbor")
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: [(anchor, 0.2)],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda *args, **kwargs: [(neighbor, 0.2), (anchor, 0.2)],
+    )
+
+    raw = retrieval.retrieve_question_context(
+        object(),
+        "relevant question",
+        expand_context=False,
+    )
+    expanded = retrieval.retrieve_question_context(
+        object(),
+        "relevant question",
+        expand_context=True,
+    )
+
+    assert raw == [(anchor, 0.2)]
+    assert expanded == [(neighbor, 0.2), (anchor, 0.2)]
