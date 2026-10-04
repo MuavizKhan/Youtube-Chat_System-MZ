@@ -175,6 +175,16 @@ GOLD_BENCHMARK_THRESHOLDS = {
     "mean_precision_at_k": 0.15,
 }
 
+# The production retriever intentionally expands strong anchors with nearby
+# transcript chunks. This benchmark evaluates the final production context
+# separately from the raw-anchor diagnostic so chunk-boundary expansion is
+# measured rather than hidden.
+GOLD_CONTEXT_BENCHMARK_THRESHOLDS = {
+    "evidence_presence_rate": 1.0,
+    "mean_group_coverage": 0.66,
+    "case_pass_rate": 1.0,
+}
+
 
 def _expected_for(question_id: str) -> str:
     try:
@@ -436,6 +446,134 @@ def _build_gold_result_record(
         "precision_at_k": precision_at_k,
         "passed": passed,
     }
+
+
+def _build_gold_context_result_record(
+    test_case: dict[str, str],
+    results: list[tuple[Any, float]],
+) -> dict[str, Any]:
+    """Score the full production-expanded context against gold evidence."""
+
+    gold_case = get_gold_evidence_case(test_case["id"])
+    matched_group_indexes: set[int] = set()
+    relevant_documents = 0
+
+    for document, _distance in results:
+        matched_groups = matched_gold_groups(
+            document.page_content,
+            gold_case,
+        )
+
+        if matched_groups:
+            relevant_documents += 1
+            matched_group_indexes.update(matched_groups)
+
+    group_coverage = (
+        len(matched_group_indexes)
+        / len(gold_case.groups)
+    )
+
+    context_size = len(results)
+    relevance_ratio = (
+        relevant_documents / context_size
+        if context_size
+        else 0.0
+    )
+
+    hit = bool(matched_group_indexes)
+    passed = (
+        group_coverage
+        >= gold_case.min_group_coverage
+    )
+
+    return {
+        "id": test_case["id"],
+        "question": test_case["question"],
+        "gold_groups": len(gold_case.groups),
+        "matched_gold_groups": len(matched_group_indexes),
+        "group_coverage": group_coverage,
+        "required_group_coverage": gold_case.min_group_coverage,
+        "context_chunks": context_size,
+        "relevant_context_chunks": relevant_documents,
+        "evidence_presence": hit,
+        "relevance_ratio": relevance_ratio,
+        "passed": passed,
+    }
+
+
+def build_gold_context_benchmark_metrics(
+    context_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate evidence coverage over final production context."""
+
+    total = len(context_results)
+    if not total:
+        return {
+            "cases": 0,
+            "evidence_presence_rate": 1.0,
+            "mean_group_coverage": 1.0,
+            "mean_relevance_ratio": 1.0,
+            "passed_cases": 0,
+            "case_pass_rate": 1.0,
+        }
+
+    return {
+        "cases": total,
+        "evidence_presence_rate": sum(
+            1
+            for result in context_results
+            if result["evidence_presence"]
+        ) / total,
+        "mean_group_coverage": sum(
+            result["group_coverage"]
+            for result in context_results
+        ) / total,
+        "mean_relevance_ratio": sum(
+            result["relevance_ratio"]
+            for result in context_results
+        ) / total,
+        "passed_cases": sum(
+            1 for result in context_results if result["passed"]
+        ),
+        "case_pass_rate": sum(
+            1 for result in context_results if result["passed"]
+        ) / total,
+    }
+
+
+def evaluate_gold_context_benchmark_thresholds(
+    context_metrics: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    """Apply thresholds to the production-expanded gold-evidence benchmark."""
+
+    if not context_metrics["cases"]:
+        return True, []
+
+    failures: list[str] = []
+
+    if (
+        context_metrics["evidence_presence_rate"]
+        < GOLD_CONTEXT_BENCHMARK_THRESHOLDS[
+            "evidence_presence_rate"
+        ]
+    ):
+        failures.append("gold_context_evidence_presence_below_threshold")
+
+    if (
+        context_metrics["mean_group_coverage"]
+        < GOLD_CONTEXT_BENCHMARK_THRESHOLDS[
+            "mean_group_coverage"
+        ]
+    ):
+        failures.append("gold_context_group_coverage_below_threshold")
+
+    if (
+        context_metrics["case_pass_rate"]
+        < GOLD_CONTEXT_BENCHMARK_THRESHOLDS["case_pass_rate"]
+    ):
+        failures.append("gold_context_case_pass_rate_below_threshold")
+
+    return not failures, failures
 
 
 def build_gold_benchmark_metrics(
@@ -733,6 +871,7 @@ def build_evaluation_summary(
     video_id: str,
     results: list[dict[str, Any]],
     gold_results: list[dict[str, Any]] | None = None,
+    gold_context_results: list[dict[str, Any]] | None = None,
     temporal_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a stable machine-readable evaluation summary."""
@@ -773,6 +912,24 @@ def build_evaluation_summary(
             "results": gold_results,
         }
 
+    gold_context_benchmark = None
+    if gold_context_results is not None:
+        context_metrics = build_gold_context_benchmark_metrics(
+            gold_context_results
+        )
+        context_passed, context_failures = (
+            evaluate_gold_context_benchmark_thresholds(
+                context_metrics
+            )
+        )
+        gold_context_benchmark = {
+            "thresholds": GOLD_CONTEXT_BENCHMARK_THRESHOLDS,
+            "metrics": context_metrics,
+            "passed": context_passed,
+            "failures": context_failures,
+            "results": gold_context_results,
+        }
+
     temporal_benchmark = None
     if temporal_results is not None:
         temporal_metrics = build_temporal_benchmark_metrics(temporal_results)
@@ -801,6 +958,7 @@ def build_evaluation_summary(
         "benchmark_passed": benchmark_passed,
         "benchmark_failures": benchmark_failures,
         "gold_benchmark": gold_benchmark,
+        "gold_context_benchmark": gold_context_benchmark,
         "temporal_benchmark": temporal_benchmark,
         "total": total,
         "passed": passed,
@@ -848,6 +1006,7 @@ def evaluate_video(
 
     results = []
     gold_results = []
+    gold_context_results = []
     temporal_results = []
     run_video_specific_gold = video_id == GOLD_EVIDENCE_VIDEO_ID
     run_temporal_gold = video_id == GOLD_TEMPORAL_VIDEO_ID
@@ -922,6 +1081,12 @@ def evaluate_video(
                     results=raw_retrieved,
                 )
             )
+            gold_context_results.append(
+                _build_gold_context_result_record(
+                    test_case=test_case,
+                    results=retrieved,
+                )
+            )
 
         if run_temporal_gold and question_id in {
             case.question_id
@@ -950,6 +1115,11 @@ def evaluate_video(
         video_id=video_id,
         results=results,
         gold_results=gold_results if run_video_specific_gold else None,
+        gold_context_results=(
+            gold_context_results
+            if run_video_specific_gold
+            else None
+        ),
         temporal_results=temporal_results if run_temporal_gold else None,
     )
 
@@ -1028,6 +1198,36 @@ def evaluate_video(
                     "  gold benchmark failures     = "
                     + ", ".join(gold_benchmark["failures"])
                 )
+        gold_context_benchmark = summary["gold_context_benchmark"]
+        if gold_context_benchmark is not None:
+            context_metrics = gold_context_benchmark["metrics"]
+            print("\nGold Context Benchmark (production):")
+            print(
+                "  evidence presence           = "
+                f"{context_metrics['evidence_presence_rate']:.1%}"
+            )
+            print(
+                "  mean group coverage         = "
+                f"{context_metrics['mean_group_coverage']:.1%}"
+            )
+            print(
+                "  mean relevance ratio        = "
+                f"{context_metrics['mean_relevance_ratio']:.1%}"
+            )
+            print(
+                "  case pass rate              = "
+                f"{context_metrics['case_pass_rate']:.1%}"
+            )
+            print(
+                "  production gold status      = "
+                f"{'PASS' if gold_context_benchmark['passed'] else 'FAIL'}"
+            )
+            if gold_context_benchmark["failures"]:
+                print(
+                    "  production gold failures    = "
+                    + ", ".join(gold_context_benchmark["failures"])
+                )
+
         temporal_benchmark = summary["temporal_benchmark"]
         if temporal_benchmark is not None:
             temporal_metrics = temporal_benchmark["metrics"]
@@ -1092,9 +1292,12 @@ def main() -> int:
     if args.json:
         print(json.dumps(summary, indent=2))
 
-    gold_passed = (
-        summary["gold_benchmark"] is None
-        or summary["gold_benchmark"]["passed"]
+    # The raw-anchor gold benchmark remains diagnostic: production uses
+    # context expansion, so the production-expanded gold benchmark is the
+    # quality gate for the live evaluator.
+    gold_context_passed = (
+        summary["gold_context_benchmark"] is None
+        or summary["gold_context_benchmark"]["passed"]
     )
     temporal_passed = (
         summary["temporal_benchmark"] is None
@@ -1104,7 +1307,7 @@ def main() -> int:
     return 0 if (
         summary["failed"] == 0
         and summary["benchmark_passed"]
-        and gold_passed
+        and gold_context_passed
         and temporal_passed
     ) else 1
 
