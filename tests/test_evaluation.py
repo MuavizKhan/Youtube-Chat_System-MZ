@@ -563,3 +563,35 @@ def test_temporal_benchmark_does_not_treat_empty_results_as_pass():
 
     assert not passed
     assert failures == ["temporal_benchmark_has_no_cases"]
+
+
+
+@pytest.mark.regression
+def test_video_specific_gold_benchmarks_are_skipped_for_other_videos(monkeypatch):
+    from Backend.rag_system import evaluation
+
+    other_video_id = "AbcdefGhijk"
+    monkeypatch.setattr(
+        evaluation,
+        "extract_video_id",
+        lambda _reference: other_video_id,
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "load_vector_store",
+        lambda _video_id: object(),
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "retrieve_question_context",
+        lambda **_kwargs: [],
+    )
+
+    summary = evaluation.evaluate_video(
+        "https://www.youtube.com/watch?v=AbcdefGhijk",
+        display=False,
+    )
+
+    assert summary["video_id"] == other_video_id
+    assert summary["gold_benchmark"] is None
+    assert summary["temporal_benchmark"] is None
