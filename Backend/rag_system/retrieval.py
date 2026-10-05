@@ -943,6 +943,8 @@ def diagnose_retrieval_pipeline(
         else min(k + 2, context_max_chunks)
     )
 
+    reranked_results = combined_results
+
     if lexical_results:
         reranked_results = (
             rerank_with_soft_facet_support(
