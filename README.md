@@ -246,6 +246,26 @@ The dense capacity defaults remain:
 
 The end-to-end diagnostic now exposes the planned lexical facet queries and their per-query results in addition to the semantic stages, so failures can still be localized without changing production benchmark thresholds.
 
+## Phase 8 — Facet-aware anchor routing
+
+The evidence-query decomposition phase improved production gold coverage, but the remaining failures showed a selection bottleneck: several facet-specific searches can find different evidence regions, yet a single global fused ranking can still spend too much of the bounded anchor budget on one region.
+
+This slice routes anchors by evidence facet:
+
+- each planned dense-question facet keeps its own fused semantic+lexical candidate ranking;
+- the anchor selector reserves a small minimum number of slots for each available facet;
+- duplicate chunks shared by multiple facets are included once and count toward each facet;
+- remaining anchor slots are filled from the global fused ranking, subject to a per-facet maximum and the existing transcript-region diversity rule;
+- simple factual questions continue using the existing ranking path;
+- the final context-size bound, distance gates, and evidence gates remain unchanged.
+
+Defaults are intentionally small:
+
+- `RAG_DENSE_FACET_MIN_ANCHORS=1`
+- `RAG_DENSE_FACET_MAX_ANCHORS=3`
+
+The diagnostic output exposes per-facet fused rankings so a missing evidence group can be distinguished from an anchor-allocation miss.
+
 ## Phase 8 — Evidence-diversified anchor selection
 
 The evidence-gap diagnostics showed that the remaining failures were often retrieval-selection failures: the indexed transcript contained the required evidence, but a bounded anchor budget could concentrate on neighboring chunks from one transcript region. For evidence-dense questions, the retriever now selects anchors in two passes:

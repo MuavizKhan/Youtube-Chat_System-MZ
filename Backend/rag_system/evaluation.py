@@ -1313,7 +1313,7 @@ def build_evaluation_summary(
 
     return {
         "video_id": video_id,
-        "retrieval_strategy": "question_aware_evidence_decomposition_hybrid",
+        "retrieval_strategy": "question_aware_facet_routed_evidence",
         "retrieval_config": {
             "top_k": TOP_K,
             "fetch_k": MMR_FETCH_K,
