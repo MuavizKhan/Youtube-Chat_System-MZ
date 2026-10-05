@@ -310,6 +310,61 @@ def test_lexical_search_weights_specific_terms_over_question_boilerplate():
 
 
 @pytest.mark.unit
+def test_raw_faiss_diagnostic_exposes_candidate_rank():
+    documents = {
+        "a": doc(1, 0, 10, "Alice failed at Acme."),
+        "b": doc(2, 10, 20, "Another segment."),
+        "c": doc(3, 20, 30, "Different segment."),
+    }
+    store = FakeVectorStore(
+        documents,
+        distances=[0.1, 0.9, 1.4],
+        indices=[0, 1, 2],
+    )
+
+    results = retrieval.retrieve_faiss_candidates_for_diagnostics(
+        store,
+        "alice failed",
+        fetch_k=3,
+        max_distance=1.0,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [1, 2]
+    assert [item[2] for item in results] == [1, 2]
+
+
+@pytest.mark.unit
+def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
+    documents = {
+        "a": doc(1, 0, 10, "Alice failed at Acme."),
+        "b": doc(2, 10, 20, "Alice challenges at Acme."),
+        "c": doc(3, 20, 30, "Unrelated segment."),
+    }
+    store = FakeVectorStore(
+        documents,
+        distances=[0.1, 0.2, 0.9],
+        indices=[0, 1, 2],
+    )
+
+    result = retrieval.diagnose_retrieval_pipeline(
+        store,
+        "Why did Alice fail at Acme?",
+        k=2,
+        fetch_k=3,
+    )
+
+    assert result["dense_question"]
+    assert result["semantic_fetch_k"] == 4
+    assert result["query_variants"]
+    assert result["semantic_stages"]
+    assert result["semantic_fused"]
+    assert result["lexical"]
+    assert result["hybrid_fused"]
+    assert result["anchors"]
+    assert result["final_context"]
+
+
+@pytest.mark.unit
 def test_context_expansion_adds_adjacent_chunks_in_chronological_order():
     documents = {
         f"d{i}": doc(
