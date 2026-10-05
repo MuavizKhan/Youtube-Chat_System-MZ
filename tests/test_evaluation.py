@@ -814,14 +814,6 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
         lambda _store: documents,
     )
 
-    gold_case = get_gold_evidence_case("Q01")
-    monkeypatch.setattr(
-        gold_case.__class__,
-        "groups",
-        gold_case.groups,
-        raising=False,
-    )
-
     # Use a tiny synthetic gold case through the existing immutable shape.
     synthetic = type(gold_case)(
         question_id="Q01",
