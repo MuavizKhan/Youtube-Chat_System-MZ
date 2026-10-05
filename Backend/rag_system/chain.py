@@ -1360,7 +1360,7 @@ def answer_question(
         HF_MODEL_ID,
 
     "retrieval_method": 
-        "question_aware_multifacet_mmr_lexical",
+        "question_aware_evidence_decomposition_hybrid",
 
     "retrieval_config":
         {
