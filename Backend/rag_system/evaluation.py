@@ -957,6 +957,15 @@ def _best_variant_rank(variant_rank_maps):
     return min(values) if values else None
 
 
+def _best_variant_distance(variant_rank_maps, variant_distance_maps):
+    values = [
+        variant_distance_maps.get(variant)
+        for variant, rank in variant_rank_maps.items()
+        if rank is not None and variant_distance_maps.get(variant) is not None
+    ]
+    return min(values) if values else None
+
+
 def _candidate_diagnosis(candidate: dict[str, Any]) -> str:
     if candidate["final_context_rank"] is not None:
         return "reached_final_context"
@@ -968,6 +977,8 @@ def _candidate_diagnosis(candidate: dict[str, Any]) -> str:
         return "hybrid_fusion_miss"
     if candidate["semantic_mmr_rank"] is not None:
         return "semantic_fusion_miss"
+    if candidate["raw_faiss_rank"] and candidate["raw_faiss_distance"] is not None and candidate["raw_faiss_distance"] > MAX_DISTANCE:
+        return "faiss_distance_gate_miss"
     if candidate["raw_faiss_rank"]:
         return "mmr_selection_miss"
     return "candidate_generation_miss"
@@ -1052,6 +1063,14 @@ def build_end_to_end_retrieval_diagnostics(
             )
             for stage in pipeline["semantic_stages"]
         }
+        semantic_raw_distance_maps = {
+            stage["query"]: {
+                document.metadata.get("chunk_id"): distance
+                for document, distance, _rank in stage["raw_candidates"]
+                if document.metadata.get("chunk_id") is not None
+            }
+            for stage in pipeline["semantic_stages"]
+        }
         semantic_mmr_maps = {
             stage["query"]: _rank_map(stage["mmr_results"])
             for stage in pipeline["semantic_stages"]
@@ -1072,6 +1091,10 @@ def build_end_to_end_retrieval_diagnostics(
                     variant: ranks.get(chunk_id)
                     for variant, ranks in semantic_raw_maps.items()
                 }
+                raw_distance_by_variant = {
+                    variant: distances.get(chunk_id)
+                    for variant, distances in semantic_raw_distance_maps.items()
+                }
                 mmr_by_variant = {
                     variant: ranks.get(chunk_id)
                     for variant, ranks in semantic_mmr_maps.items()
@@ -1081,6 +1104,10 @@ def build_end_to_end_retrieval_diagnostics(
                     "chunk_id": chunk_id,
                     "raw_faiss_rank": _best_variant_rank(raw_by_variant),
                     "raw_faiss_rank_by_variant": raw_by_variant,
+                    "raw_faiss_distance": _best_variant_distance(
+                        raw_by_variant,
+                        raw_distance_by_variant,
+                    ),
                     "semantic_mmr_rank": _best_variant_rank(mmr_by_variant),
                     "semantic_mmr_rank_by_variant": mmr_by_variant,
                     "semantic_fused_rank": semantic_fused_map.get(chunk_id),
