@@ -329,10 +329,33 @@ def test_raw_faiss_diagnostic_exposes_candidate_rank():
         max_distance=1.0,
     )
 
-    assert [item[0].metadata["chunk_id"] for item in results] == [1, 2]
-    assert [item[2] for item in results] == [1, 2]
+    assert [item[0].metadata["chunk_id"] for item in results] == [1, 2, 3]
+    assert [item[2] for item in results] == [1, 2, 3]
 
 
+
+
+@pytest.mark.unit
+def test_raw_faiss_diagnostic_keeps_distance_for_gate_analysis():
+    documents = {
+        "a": doc(1, 0, 10, "Alice evidence."),
+    }
+    store = FakeVectorStore(
+        documents,
+        distances=[1.5],
+        indices=[0],
+    )
+
+    results = retrieval.retrieve_faiss_candidates_for_diagnostics(
+        store,
+        "Alice evidence",
+        fetch_k=1,
+        max_distance=1.0,
+    )
+
+    assert results[0][0].metadata["chunk_id"] == 1
+    assert results[0][1] == pytest.approx(1.5)
+    assert results[0][2] == 1
 @pytest.mark.unit
 def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     documents = {
