@@ -35,6 +35,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from .config import (
     CONTEXT_EXPANSION_CHUNKS,
     CONTEXT_MAX_CHUNKS,
+    DENSE_ANCHOR_LIMIT,
+    DENSE_CONTEXT_MAX_CHUNKS,
+    DENSE_SEMANTIC_FETCH_K,
+    DENSE_SEMANTIC_K,
     EMBEDDING_MODEL,
     MAX_DISTANCE,
     MMR_FETCH_K,
@@ -832,8 +836,16 @@ def diagnose_retrieval_pipeline(
         )
 
     dense_question = is_evidence_dense_question(query)
-    semantic_k = min(max(k * 2, k), 8) if dense_question else k
-    semantic_fetch_k = max(fetch_k, semantic_k * 2)
+    semantic_k = (
+        DENSE_SEMANTIC_K
+        if dense_question
+        else k
+    )
+    semantic_fetch_k = (
+        DENSE_SEMANTIC_FETCH_K
+        if dense_question
+        else max(fetch_k, semantic_k * 2)
+    )
     lexical_limit = (
         max(k * 2, 8)
         if dense_question
@@ -878,10 +890,15 @@ def diagnose_retrieval_pipeline(
         lexical_distance=max_distance,
     )
 
-    anchor_limit = (
-        min(semantic_k, CONTEXT_MAX_CHUNKS)
+    context_max_chunks = (
+        DENSE_CONTEXT_MAX_CHUNKS
         if dense_question
-        else min(k + 2, CONTEXT_MAX_CHUNKS)
+        else CONTEXT_MAX_CHUNKS
+    )
+    anchor_limit = (
+        min(DENSE_ANCHOR_LIMIT, context_max_chunks)
+        if dense_question
+        else min(k + 2, context_max_chunks)
     )
 
     if lexical_results:
@@ -914,6 +931,7 @@ def diagnose_retrieval_pipeline(
     context_results = expand_retrieval_context(
         vector_store,
         anchor_results,
+        max_chunks=context_max_chunks,
     )
 
     return {
@@ -1026,14 +1044,31 @@ def extract_query_focus_terms(
     ]
 
 
+EVIDENCE_FACET_QUERY_SUFFIXES = (
+    (
+        "financial_economic",
+        "financial economic money cash flow cost losses debt investment",
+    ),
+    (
+        "policy_governance",
+        "government policy regulation banks support downsizing approval investment",
+    ),
+    (
+        "operational_challenges",
+        "operational challenges payments suppliers fees cash flow service costs decisions consequences",
+    ),
+)
+
+
 def build_retrieval_query_variants(
     query: str,
 ) -> list[str]:
     """Build deterministic semantic-query variants for hybrid retrieval.
 
-    The original question is always preserved. A second, content-focused
-    variant removes question/speaker boilerplate so the embedding model is
-    exposed to the actual topic terms.
+    The original question is always preserved. A content-focused variant
+    removes question/speaker boilerplate, and evidence-dense questions also
+    receive a small set of deterministic facet queries. These facets are
+    generic evidence categories rather than benchmark-specific answer text.
     """
 
     original = " ".join(query.strip().split())
@@ -1048,7 +1083,13 @@ def build_retrieval_query_variants(
         if focus_query.casefold() != original.casefold():
             variants.append(focus_query)
 
-    return variants
+        if is_evidence_dense_question(original):
+            for _facet_name, suffix in EVIDENCE_FACET_QUERY_SUFFIXES:
+                variants.append(
+                    f"{focus_query} {suffix}"
+                )
+
+    return list(dict.fromkeys(variants))
 
 OVERVIEW_PATTERNS = (
     r"\bwhat is this video about\b",
@@ -1764,13 +1805,17 @@ def retrieve_question_context(
     dense_question = is_evidence_dense_question(query)
 
     semantic_k = (
-        min(max(k * 2, k), 8)
+        DENSE_SEMANTIC_K
         if dense_question
         else k
     )
-    semantic_fetch_k = max(
-        fetch_k,
-        semantic_k * 2,
+    semantic_fetch_k = (
+        DENSE_SEMANTIC_FETCH_K
+        if dense_question
+        else max(
+            fetch_k,
+            semantic_k * 2,
+        )
     )
     lexical_limit = (
         max(k * 2, 8)
@@ -1812,10 +1857,15 @@ def retrieve_question_context(
 
     has_lexical_evidence = bool(lexical_results)
 
-    anchor_limit = (
-        min(semantic_k, CONTEXT_MAX_CHUNKS)
+    context_max_chunks = (
+        DENSE_CONTEXT_MAX_CHUNKS
         if dense_question
-        else min(k + 2, CONTEXT_MAX_CHUNKS)
+        else CONTEXT_MAX_CHUNKS
+    )
+    anchor_limit = (
+        min(DENSE_ANCHOR_LIMIT, context_max_chunks)
+        if dense_question
+        else min(k + 2, context_max_chunks)
     )
 
     if has_lexical_evidence:
@@ -1833,6 +1883,7 @@ def retrieve_question_context(
         return expand_retrieval_context(
             vector_store,
             raw_results,
+            max_chunks=context_max_chunks,
         )
 
     semantic_distances = [
