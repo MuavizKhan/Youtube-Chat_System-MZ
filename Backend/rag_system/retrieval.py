@@ -793,7 +793,7 @@ def retrieve_faiss_candidates_for_diagnostics(
         vector_id = int(indices[0][position])
         faiss_rank = position + 1
 
-        if vector_id < 0 or float(distance) > max_distance:
+        if vector_id < 0:
             continue
 
         docstore_id = vector_store.index_to_docstore_id.get(vector_id)
