@@ -410,11 +410,17 @@ def test_select_diverse_retrieval_anchors_fills_remaining_budget():
 def test_question_context_diversifies_dense_anchors(monkeypatch):
     dense = "Why did the company fail and what challenges caused the problems?"
     ranked = [
-        (doc(10, 100, 105, "first region"), 0.1),
-        (doc(11, 110, 115, "first region neighbor"), 0.2),
-        (doc(40, 400, 405, "second region"), 0.3),
-        (doc(80, 800, 805, "third region"), 0.4),
+        (doc(10, 100, 105, "financial evidence"), 0.1),
+        (doc(11, 110, 115, "financial neighbor"), 0.2),
+        (doc(40, 400, 405, "policy evidence"), 0.3),
+        (doc(80, 800, 805, "operations evidence"), 0.4),
     ]
+
+    facet_rankings = {
+        "financial_economic": ranked[:2],
+        "policy_governance": [ranked[2]],
+        "operational_challenges": [ranked[3]],
+    }
 
     monkeypatch.setattr(
         retrieval,
@@ -425,6 +431,17 @@ def test_question_context_diversifies_dense_anchors(monkeypatch):
         retrieval,
         "lexical_search",
         lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "build_retrieval_query_plan",
+        lambda query: [
+            ("original", query),
+            ("focus", "failure challenges problems"),
+            ("financial_economic", "financial evidence"),
+            ("policy_governance", "policy evidence"),
+            ("operational_challenges", "operations evidence"),
+        ],
     )
     monkeypatch.setattr(
         retrieval,
