@@ -358,8 +358,7 @@ def test_soft_facet_rerank_boosts_facet_supported_candidate_without_hard_quota()
 
     facet_rankings = {
         "financial_economic": [
-            (ranked[3][0], 0.4),
-            (ranked[0][0], 0.1),
+            (ranked[5][0], 0.6),
         ],
     }
 
@@ -374,7 +373,7 @@ def test_soft_facet_rerank_boosts_facet_supported_candidate_without_hard_quota()
         for document, _ in reranked
     ]
 
-    assert chunk_ids.index(4) < chunk_ids.index(5)
+    assert chunk_ids.index(6) < chunk_ids.index(4)
     assert chunk_ids[0] == 1
 
 
