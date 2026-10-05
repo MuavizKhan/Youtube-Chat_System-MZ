@@ -748,6 +748,190 @@ def retrieve_mmr(
 
     return results
 
+
+def retrieve_faiss_candidates_for_diagnostics(
+    vector_store,
+    query: str,
+    *,
+    fetch_k: int,
+    max_distance: float,
+):
+    """Return raw FAISS candidates before MMR for diagnostic inspection only.
+
+    Each tuple is (document, distance, faiss_rank). The production retriever
+    performs the same FAISS search internally before MMR; this helper exposes
+    that otherwise-hidden candidate stage without changing production output.
+    """
+
+    if not query or not query.strip():
+        raise ValueError("Query cannot be empty.")
+    if fetch_k <= 0:
+        raise ValueError("fetch_k must be greater than 0.")
+    if max_distance < 0:
+        raise ValueError("max_distance cannot be negative.")
+
+    query_embedding = vector_store.embedding_function.embed_query(
+        query.strip()
+    )
+    query_vector = np.asarray(
+        query_embedding,
+        dtype=np.float32,
+    ).reshape(1, -1)
+
+    total_vectors = vector_store.index.ntotal
+    if total_vectors == 0:
+        return []
+
+    candidate_k = min(fetch_k, total_vectors)
+    distances, indices = vector_store.index.search(
+        np.ascontiguousarray(query_vector),
+        candidate_k,
+    )
+
+    results = []
+    for position, distance in enumerate(distances[0]):
+        vector_id = int(indices[0][position])
+        faiss_rank = position + 1
+
+        if vector_id < 0 or float(distance) > max_distance:
+            continue
+
+        docstore_id = vector_store.index_to_docstore_id.get(vector_id)
+        if docstore_id is None:
+            continue
+
+        document = vector_store.docstore.search(docstore_id)
+        if document is None:
+            continue
+
+        results.append((document, float(distance), faiss_rank))
+
+    return results
+
+
+def diagnose_retrieval_pipeline(
+    vector_store,
+    query: str,
+    *,
+    k: int = TOP_K,
+    fetch_k: int = MMR_FETCH_K,
+    lambda_mult: float = MMR_LAMBDA,
+    max_distance: float = MAX_DISTANCE,
+):
+    """Capture every retrieval stage for end-to-end debugging.
+
+    This function is diagnostic-only. It does not alter the production
+    retrieval path. It exposes raw FAISS candidates, per-variant MMR output,
+    semantic RRF, lexical retrieval, hybrid RRF, anchor selection, and final
+    context expansion so a missing gold chunk can be localized precisely.
+    """
+
+    if is_overview_question(query):
+        raise ValueError(
+            "End-to-end retrieval diagnostics are not defined for overview questions."
+        )
+
+    dense_question = is_evidence_dense_question(query)
+    semantic_k = min(max(k * 2, k), 8) if dense_question else k
+    semantic_fetch_k = max(fetch_k, semantic_k * 2)
+    lexical_limit = (
+        max(k * 2, 8)
+        if dense_question
+        else max(k, min(k * 2, 8))
+    )
+
+    query_variants = build_retrieval_query_variants(query)
+    semantic_stages = []
+    semantic_rankings = []
+
+    for variant in query_variants:
+        raw_candidates = retrieve_faiss_candidates_for_diagnostics(
+            vector_store,
+            variant,
+            fetch_k=semantic_fetch_k,
+            max_distance=max_distance,
+        )
+        mmr_results = retrieve_mmr(
+            vector_store=vector_store,
+            query=variant,
+            k=semantic_k,
+            fetch_k=semantic_fetch_k,
+            lambda_mult=lambda_mult,
+            max_distance=max_distance,
+        )
+        semantic_stages.append({
+            "query": variant,
+            "raw_candidates": raw_candidates,
+            "mmr_results": mmr_results,
+        })
+        semantic_rankings.append(mmr_results)
+
+    semantic_results = fuse_semantic_rankings(semantic_rankings)
+    lexical_results = lexical_search(
+        vector_store=vector_store,
+        query=query,
+        limit=lexical_limit,
+    )
+    combined_results = fuse_semantic_and_lexical_results(
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        lexical_distance=max_distance,
+    )
+
+    anchor_limit = (
+        min(semantic_k, CONTEXT_MAX_CHUNKS)
+        if dense_question
+        else min(k + 2, CONTEXT_MAX_CHUNKS)
+    )
+
+    if lexical_results:
+        anchor_results = (
+            select_diverse_retrieval_anchors(
+                combined_results,
+                limit=anchor_limit,
+            )
+            if dense_question
+            else combined_results[:anchor_limit]
+        )
+    else:
+        semantic_distances = [
+            distance
+            for _document, distance in semantic_results
+        ]
+        strict_semantic_limit = max_distance * 0.92
+        if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
+            anchor_results = []
+        else:
+            anchor_results = (
+                select_diverse_retrieval_anchors(
+                    combined_results,
+                    limit=anchor_limit,
+                )
+                if dense_question
+                else combined_results[:anchor_limit]
+            )
+
+    context_results = expand_retrieval_context(
+        vector_store,
+        anchor_results,
+    )
+
+    return {
+        "query": query,
+        "dense_question": dense_question,
+        "semantic_k": semantic_k,
+        "semantic_fetch_k": semantic_fetch_k,
+        "lexical_limit": lexical_limit,
+        "anchor_limit": anchor_limit,
+        "query_variants": query_variants,
+        "semantic_stages": semantic_stages,
+        "semantic_fused": semantic_results,
+        "lexical": lexical_results,
+        "hybrid_fused": combined_results,
+        "anchors": anchor_results,
+        "final_context": context_results,
+    }
+
 # ============================================================
 # 9. QUESTION-AWARE RETRIEVAL
 # ============================================================
