@@ -121,7 +121,15 @@ def test_query_variants_do_not_add_facets_to_simple_questions():
         "Who is Vijay Mallya?"
     )
 
-    assert len(variants) == 1
+    assert len(variants) == 2
+    assert variants[0] == "Who is Vijay Mallya?"
+    assert variants[1] == "vijay mallya"
+    assert not any(
+        "financial economic" in variant
+        or "government policy" in variant
+        or "operational challenges" in variant
+        for variant in variants
+    )
 
 
 @pytest.mark.unit
