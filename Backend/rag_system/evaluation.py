@@ -42,6 +42,7 @@ from .retrieval import (
     get_all_documents,
     load_vector_store,
     retrieve_question_context,
+    diagnose_retrieval_pipeline,
 )
 
 
@@ -938,6 +939,273 @@ def evaluate_temporal_benchmark_thresholds(
     return not failures, failures
 
 
+
+def _rank_map(results, *, include_faiss_rank: bool = False):
+    ranks = {}
+    for position, item in enumerate(results, start=1):
+        document = item[0]
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is None:
+            continue
+        rank = item[2] if include_faiss_rank else position
+        ranks.setdefault(chunk_id, rank)
+    return ranks
+
+
+def _best_variant_rank(variant_rank_maps):
+    values = [rank for rank in variant_rank_maps.values() if rank is not None]
+    return min(values) if values else None
+
+
+def _candidate_diagnosis(candidate: dict[str, Any]) -> str:
+    if candidate["final_context_rank"] is not None:
+        return "reached_final_context"
+    if candidate["anchor_rank"] is not None:
+        return "context_selection_miss"
+    if candidate["hybrid_fused_rank"] is not None:
+        return "anchor_selection_miss"
+    if candidate["semantic_fused_rank"] is not None or candidate["lexical_rank"] is not None:
+        return "hybrid_fusion_miss"
+    if candidate["semantic_mmr_rank"] is not None:
+        return "semantic_fusion_miss"
+    if candidate["raw_faiss_rank"]:
+        return "mmr_selection_miss"
+    return "candidate_generation_miss"
+
+
+def _group_diagnosis(candidate_diagnostics: list[dict[str, Any]]) -> str:
+    severity = {
+        "reached_final_context": 0,
+        "context_selection_miss": 1,
+        "anchor_selection_miss": 2,
+        "hybrid_fusion_miss": 3,
+        "semantic_fusion_miss": 4,
+        "mmr_selection_miss": 5,
+        "candidate_generation_miss": 6,
+    }
+    if not candidate_diagnostics:
+        return "candidate_generation_miss"
+    return min(
+        (candidate["diagnosis"] for candidate in candidate_diagnostics),
+        key=lambda value: severity[value],
+    )
+
+
+def _gold_candidate_map(vector_store, gold_case):
+    documents = get_all_documents(vector_store)
+    group_map = {}
+    for group_index in range(len(gold_case.groups)):
+        candidate_ids = []
+        matched_phrase = None
+        for document in documents:
+            matched_groups = matched_gold_groups(
+                document.page_content,
+                gold_case,
+            )
+            if group_index not in matched_groups:
+                continue
+            chunk_id = document.metadata.get("chunk_id")
+            if chunk_id is not None:
+                candidate_ids.append(chunk_id)
+            normalized = normalize_evidence_text(document.page_content)
+            for phrase in gold_case.groups[group_index]:
+                if normalize_evidence_text(phrase) in normalized:
+                    matched_phrase = phrase
+                    break
+        group_map[group_index] = {
+            "candidate_chunk_ids": sorted(set(candidate_ids)),
+            "matched_index_phrase": matched_phrase,
+        }
+    return group_map
+
+
+def build_end_to_end_retrieval_diagnostics(
+    vector_store,
+    test_cases: list[dict[str, str]],
+    gold_cases,
+) -> list[dict[str, Any]]:
+    """Localize gold-evidence misses across every retrieval stage.
+
+    This is diagnostic-only. It compares each indexed gold candidate against
+    raw FAISS search, per-query MMR, semantic RRF, lexical retrieval, hybrid
+    RRF, diversified anchors, and final expanded context.
+    """
+
+    gold_by_id = {case.question_id: case for case in gold_cases}
+    diagnostics = []
+
+    for test_case in test_cases:
+        question_id = test_case["id"]
+        gold_case = gold_by_id.get(question_id)
+        if gold_case is None:
+            continue
+
+        pipeline = diagnose_retrieval_pipeline(
+            vector_store,
+            test_case["question"],
+        )
+
+        semantic_raw_maps = {
+            stage["query"]: _rank_map(
+                stage["raw_candidates"],
+                include_faiss_rank=True,
+            )
+            for stage in pipeline["semantic_stages"]
+        }
+        semantic_mmr_maps = {
+            stage["query"]: _rank_map(stage["mmr_results"])
+            for stage in pipeline["semantic_stages"]
+        }
+        semantic_fused_map = _rank_map(pipeline["semantic_fused"])
+        lexical_map = _rank_map(pipeline["lexical"])
+        hybrid_map = _rank_map(pipeline["hybrid_fused"])
+        anchor_map = _rank_map(pipeline["anchors"])
+        context_map = _rank_map(pipeline["final_context"])
+
+        gold_groups = _gold_candidate_map(vector_store, gold_case)
+        groups = []
+
+        for group_index, group_info in gold_groups.items():
+            candidates = []
+            for chunk_id in group_info["candidate_chunk_ids"]:
+                raw_by_variant = {
+                    variant: ranks.get(chunk_id)
+                    for variant, ranks in semantic_raw_maps.items()
+                }
+                mmr_by_variant = {
+                    variant: ranks.get(chunk_id)
+                    for variant, ranks in semantic_mmr_maps.items()
+                }
+
+                candidate = {
+                    "chunk_id": chunk_id,
+                    "raw_faiss_rank": _best_variant_rank(raw_by_variant),
+                    "raw_faiss_rank_by_variant": raw_by_variant,
+                    "semantic_mmr_rank": _best_variant_rank(mmr_by_variant),
+                    "semantic_mmr_rank_by_variant": mmr_by_variant,
+                    "semantic_fused_rank": semantic_fused_map.get(chunk_id),
+                    "lexical_rank": lexical_map.get(chunk_id),
+                    "hybrid_fused_rank": hybrid_map.get(chunk_id),
+                    "anchor_rank": anchor_map.get(chunk_id),
+                    "final_context_rank": context_map.get(chunk_id),
+                }
+                candidate["diagnosis"] = _candidate_diagnosis(candidate)
+                candidates.append(candidate)
+
+            groups.append({
+                "group": group_index,
+                "candidate_count": len(candidates),
+                "candidate_chunk_ids": group_info["candidate_chunk_ids"][:12],
+                "matched_index_phrase": group_info["matched_index_phrase"],
+                "diagnosis": _group_diagnosis(candidates),
+                "candidates": candidates[:12],
+            })
+
+        diagnostics.append({
+            "id": question_id,
+            "question": test_case["question"],
+            "dense_question": pipeline["dense_question"],
+            "query_variants": pipeline["query_variants"],
+            "semantic_k": pipeline["semantic_k"],
+            "semantic_fetch_k": pipeline["semantic_fetch_k"],
+            "lexical_limit": pipeline["lexical_limit"],
+            "anchor_limit": pipeline["anchor_limit"],
+            "semantic_fused_top_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in pipeline["semantic_fused"][:12]
+            ],
+            "lexical_top_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _score in pipeline["lexical"][:12]
+            ],
+            "hybrid_fused_top_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in pipeline["hybrid_fused"][:12]
+            ],
+            "anchor_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in pipeline["anchors"]
+            ],
+            "final_context_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in pipeline["final_context"]
+            ],
+            "groups": groups,
+        })
+
+    return diagnostics
+
+
+def diagnose_video(
+    video_reference: str,
+    question_ids: list[str],
+    *,
+    display: bool = True,
+) -> dict[str, Any]:
+    """Run end-to-end retrieval diagnostics for selected gold questions."""
+
+    video_id = extract_video_id(video_reference)
+    if video_id != GOLD_EVIDENCE_VIDEO_ID:
+        raise ValueError(
+            "End-to-end gold retrieval diagnostics are currently defined only "
+            f"for benchmark video {GOLD_EVIDENCE_VIDEO_ID}."
+        )
+
+    test_case_map = {case["id"]: case for case in TEST_QUESTIONS}
+    available = {case.question_id for case in GOLD_EVIDENCE_CASES}
+    invalid = [question_id for question_id in question_ids if question_id not in available]
+    if invalid:
+        raise ValueError(
+            "Diagnostic question IDs must be one of "
+            f"{sorted(available)}; invalid: {invalid}"
+        )
+
+    selected_cases = [test_case_map[question_id] for question_id in question_ids]
+    vector_store = load_vector_store(video_id)
+    diagnostics = build_end_to_end_retrieval_diagnostics(
+        vector_store,
+        selected_cases,
+        [case for case in GOLD_EVIDENCE_CASES if case.question_id in question_ids],
+    )
+
+    result = {
+        "video_id": video_id,
+        "questions": question_ids,
+        "diagnostics": diagnostics,
+    }
+
+    if display:
+        print("\\n" + "=" * 80)
+        print("END-TO-END RETRIEVAL DIAGNOSTIC")
+        print("=" * 80)
+        for diagnostic in diagnostics:
+            print(
+                f"\\n{diagnostic['id']} | dense={diagnostic['dense_question']} | "
+                f"semantic_k={diagnostic['semantic_k']} | "
+                f"fetch_k={diagnostic['semantic_fetch_k']} | "
+                f"anchor_limit={diagnostic['anchor_limit']}"
+            )
+            for group in diagnostic["groups"]:
+                print(
+                    f"  Group {group['group']} | {group['matched_index_phrase']} | "
+                    f"{group['diagnosis']}"
+                )
+                for candidate in group["candidates"]:
+                    print(
+                        "    "
+                        f"chunk={candidate['chunk_id']} "
+                        f"raw={candidate['raw_faiss_rank']} "
+                        f"mmr={candidate['semantic_mmr_rank']} "
+                        f"semantic_rrf={candidate['semantic_fused_rank']} "
+                        f"lexical={candidate['lexical_rank']} "
+                        f"hybrid={candidate['hybrid_fused_rank']} "
+                        f"anchor={candidate['anchor_rank']} "
+                        f"context={candidate['final_context_rank']} "
+                        f"=> {candidate['diagnosis']}"
+                    )
+
+    return result
+
 def build_evaluation_summary(
     video_id: str,
     results: list[dict[str, Any]],
@@ -1365,8 +1633,24 @@ def main() -> int:
         action="store_true",
         help="Print only machine-readable JSON.",
     )
+    parser.add_argument(
+        "--diagnose",
+        nargs="+",
+        metavar="QUESTION_ID",
+        help="Run end-to-end retrieval diagnostics for selected gold question IDs, such as Q04 Q05.",
+    )
 
     args = parser.parse_args()
+
+    if args.diagnose:
+        diagnostic = diagnose_video(
+            args.video,
+            args.diagnose,
+            display=not args.json,
+        )
+        if args.json:
+            print(json.dumps(diagnostic, indent=2))
+        return 0
 
     summary = evaluate_video(
         args.video,
