@@ -39,6 +39,7 @@ from .temporal_evidence import (
 
 from .retrieval import (
     extract_video_id,
+    get_all_documents,
     load_vector_store,
     retrieve_question_context,
 )
@@ -501,6 +502,76 @@ def _build_gold_context_result_record(
     }
 
 
+
+def build_gold_retrieval_gap_diagnostics(
+    vector_store,
+    gold_cases,
+    production_results_by_id: dict[str, list[tuple[Any, float]]],
+) -> list[dict[str, Any]]:
+    """Report whether gold phrases exist in the index and whether retrieval found them.
+
+    Diagnostic only: this does not affect benchmark thresholds or pass/fail status.
+    """
+    documents = get_all_documents(vector_store)
+    diagnostics = []
+
+    for gold_case in gold_cases:
+        production_results = production_results_by_id.get(
+            gold_case.question_id,
+            [],
+        )
+        production_ids = {
+            document.metadata.get("chunk_id")
+            for document, _distance in production_results
+            if document.metadata.get("chunk_id") is not None
+        }
+
+        groups = []
+        for group_index in range(len(gold_case.groups)):
+            candidate_ids = []
+            matched_phrase = None
+
+            for document in documents:
+                matched_groups = matched_gold_groups(
+                    document.page_content,
+                    gold_case,
+                )
+                if group_index not in matched_groups:
+                    continue
+
+                chunk_id = document.metadata.get("chunk_id")
+                if chunk_id is not None:
+                    candidate_ids.append(chunk_id)
+
+                normalized = normalize_evidence_text(
+                    document.page_content
+                )
+                for phrase in gold_case.groups[group_index]:
+                    if normalize_evidence_text(phrase) in normalized:
+                        matched_phrase = phrase
+                        break
+
+            candidate_ids = sorted(set(candidate_ids))
+
+            groups.append({
+                "group": group_index,
+                "candidate_count": len(candidate_ids),
+                "candidate_chunk_ids": candidate_ids[:12],
+                "retrieved_candidate_chunk_ids": [
+                    chunk_id
+                    for chunk_id in candidate_ids
+                    if chunk_id in production_ids
+                ][:12],
+                "matched_index_phrase": matched_phrase,
+            })
+
+        diagnostics.append({
+            "id": gold_case.question_id,
+            "groups": groups,
+        })
+
+    return diagnostics
+
 def build_gold_context_benchmark_metrics(
     context_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -873,6 +944,7 @@ def build_evaluation_summary(
     gold_results: list[dict[str, Any]] | None = None,
     gold_context_results: list[dict[str, Any]] | None = None,
     temporal_results: list[dict[str, Any]] | None = None,
+    gold_retrieval_diagnostics: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a stable machine-readable evaluation summary."""
 
@@ -959,6 +1031,7 @@ def build_evaluation_summary(
         "benchmark_failures": benchmark_failures,
         "gold_benchmark": gold_benchmark,
         "gold_context_benchmark": gold_context_benchmark,
+        "gold_retrieval_diagnostics": gold_retrieval_diagnostics,
         "temporal_benchmark": temporal_benchmark,
         "total": total,
         "passed": passed,
@@ -1008,6 +1081,8 @@ def evaluate_video(
     gold_results = []
     gold_context_results = []
     temporal_results = []
+    gold_retrieval_diagnostics = None
+    production_gold_results_by_id = {}
     run_video_specific_gold = video_id == GOLD_EVIDENCE_VIDEO_ID
     run_temporal_gold = video_id == GOLD_TEMPORAL_VIDEO_ID
 
@@ -1087,6 +1162,7 @@ def evaluate_video(
                     results=retrieved,
                 )
             )
+            production_gold_results_by_id[question_id] = retrieved
 
         if run_temporal_gold and question_id in {
             case.question_id
@@ -1111,6 +1187,13 @@ def evaluate_video(
             print(f"Result: {'PASS' if record['passed'] else 'FAIL'}")
             print(f"Evaluation: {record['message']}")
 
+    if run_video_specific_gold:
+        gold_retrieval_diagnostics = build_gold_retrieval_gap_diagnostics(
+            vector_store=vector_store,
+            gold_cases=GOLD_EVIDENCE_CASES,
+            production_results_by_id=production_gold_results_by_id,
+        )
+
     summary = build_evaluation_summary(
         video_id=video_id,
         results=results,
@@ -1121,6 +1204,7 @@ def evaluate_video(
             else None
         ),
         temporal_results=temporal_results if run_temporal_gold else None,
+        gold_retrieval_diagnostics=gold_retrieval_diagnostics,
     )
 
     if display:
