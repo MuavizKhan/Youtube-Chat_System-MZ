@@ -93,7 +93,7 @@ def test_query_variants_keep_original_and_add_content_focus():
 
 
 @pytest.mark.unit
-def test_query_variants_add_evidence_facets_for_dense_questions():
+def test_query_variants_add_intent_specific_facets_for_dense_questions():
     variants = retrieval.build_retrieval_query_variants(
         "Why did the company fail and what challenges caused the problems?"
     )
@@ -102,7 +102,7 @@ def test_query_variants_add_evidence_facets_for_dense_questions():
     assert variants[0].startswith("Why did the company fail")
     assert "company fail challenges caused problems" in variants[1]
     assert any(
-        "financial economic money cash flow" in variant
+        "financial crisis economic circumstances" in variant
         for variant in variants[2:]
     )
     assert any(
@@ -110,9 +110,21 @@ def test_query_variants_add_evidence_facets_for_dense_questions():
         for variant in variants[2:]
     )
     assert any(
-        "operational challenges payments suppliers fees" in variant
+        "operational challenges payments fees fuel" in variant
         for variant in variants[2:]
     )
+
+
+@pytest.mark.unit
+def test_evidence_facet_planner_switches_to_brand_queries():
+    queries = retrieval.build_evidence_facet_queries(
+        "What does Vijay Mallya say about building the Kingfisher brand?"
+    )
+
+    assert len(queries) == 3
+    assert any("brand branding advertising marketing" in query for query in queries)
+    assert any("business companies subsidiaries ownership" in query for query in queries)
+    assert any("operational challenges payments fees" in query for query in queries)
 
 
 @pytest.mark.unit
@@ -162,6 +174,64 @@ def test_lexical_search_supports_single_term():
     documents={"a":doc(1,0,10,"Alice works at Acme."),"b":doc(2,10,20,"Bob works elsewhere.")}
     results=retrieval.lexical_search(FakeVectorStore(documents),"Alice")
     assert [d.metadata["chunk_id"] for d,_ in results]==[1]
+
+
+@pytest.mark.unit
+def test_lexical_facet_fusion_prefers_shared_evidence():
+    shared = doc(2, 10, 15, "shared financial policy evidence")
+    financial = [
+        (shared, 0.8),
+        (doc(1, 0, 5, "financial only"), 0.9),
+    ]
+    policy = [
+        (shared, 0.7),
+        (doc(3, 20, 25, "policy only"), 0.9),
+    ]
+
+    results = retrieval.fuse_lexical_rankings(
+        [financial, policy],
+        rrf_k=60,
+    )
+
+    assert results[0][0].metadata["chunk_id"] == 2
+
+
+@pytest.mark.unit
+def test_dense_question_runs_facet_lexical_queries(monkeypatch):
+    item = doc(1, 0, 10, "evidence")
+    lexical_queries = []
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: [(item, 0.5)],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: (
+            lexical_queries.append(kwargs["query"])
+            or []
+        ),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda vector_store, retrieved_results, **kwargs: retrieved_results,
+    )
+
+    results = retrieval.retrieve_question_context(
+        object(),
+        "Why did the company fail and what challenges caused the problems?",
+        expand_context=False,
+    )
+
+    assert results == [(item, 0.5)]
+    assert len(lexical_queries) == 4
+    assert lexical_queries[0].startswith("Why did the company fail")
+    assert any("financial crisis economic circumstances" in query for query in lexical_queries[1:])
+    assert any("government policy regulation banks support" in query for query in lexical_queries[1:])
+    assert any("operational challenges payments fees fuel" in query for query in lexical_queries[1:])
 
 
 @pytest.mark.unit
@@ -422,6 +492,8 @@ def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     assert result["query_variants"]
     assert result["semantic_stages"]
     assert result["semantic_fused"]
+    assert result["lexical_queries"]
+    assert result["lexical_stages"]
     assert result["lexical"]
     assert result["hybrid_fused"]
     assert result["anchors"]
