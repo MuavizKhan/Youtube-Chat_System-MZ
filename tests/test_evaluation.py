@@ -10,6 +10,7 @@ from Backend.rag_system.evaluation import (
     build_evaluation_summary,
     build_gold_benchmark_metrics,
     build_gold_context_benchmark_metrics,
+    build_gold_retrieval_gap_diagnostics,
     evaluate_gold_context_benchmark_thresholds,
     evaluate_benchmark_thresholds,
     evaluate_gold_benchmark_thresholds,
@@ -308,6 +309,55 @@ def test_gold_benchmark_thresholds_fail_on_missing_evidence():
     assert "gold_group_coverage_below_threshold" in failures
     assert "gold_mrr_below_threshold" in failures
     assert "gold_precision_below_threshold" in failures
+
+
+@pytest.mark.regression
+def test_gold_retrieval_gap_diagnostic_distinguishes_index_presence_from_retrieval():
+    case = get_gold_evidence_case("Q06")
+
+    matching = Document(
+        page_content=(
+            "a brand needs a personality and surrogate advertising "
+            "with a full water business around Kingfisher"
+        ),
+        metadata={"chunk_id": 23},
+    )
+    unrelated = Document(
+        page_content="Unrelated transcript.",
+        metadata={"chunk_id": 24},
+    )
+
+    class FakeDocstore:
+        def search(self, docstore_id):
+            return {
+                "matching": matching,
+                "unrelated": unrelated,
+            }.get(docstore_id)
+
+    class FakeVectorStore:
+        index_to_docstore_id = {
+            0: "matching",
+            1: "unrelated",
+        }
+        docstore = FakeDocstore()
+
+    diagnostics = build_gold_retrieval_gap_diagnostics(
+        FakeVectorStore(),
+        [case],
+        {
+            "Q06": [(matching, 0.2)],
+        },
+    )
+
+    groups = diagnostics[0]["groups"]
+
+    assert groups[0]["candidate_count"] >= 1
+    assert groups[0]["retrieved_candidate_chunk_ids"] == [23]
+    assert groups[1]["candidate_count"] >= 1
+    assert groups[1]["retrieved_candidate_chunk_ids"] == [23]
+    assert groups[2]["candidate_count"] >= 1
+    assert groups[2]["retrieved_candidate_chunk_ids"] == [23]
+
 
 
 @pytest.mark.regression
