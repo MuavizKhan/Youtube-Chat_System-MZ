@@ -220,6 +220,18 @@ This is a general retrieval improvement. It does not contain benchmark-specific 
 
 The distinction is important: the original query preserves conversational intent, while the focus query improves recall for transcript wording when the same intent is expressed with different language.
 
+## Phase 8 — Adaptive retrieval and evidence-gap diagnostics
+
+The benchmark showed that explanation and multi-part questions can require evidence from several transcript regions. The retriever now uses a larger semantic/lexical candidate budget for evidence-dense question shapes while keeping the final context bounded by RAG_CONTEXT_MAX_CHUNKS.
+
+The evaluator also exposes a non-gating gold-evidence diagnostic. For every curated evidence group it reports whether an exact annotated phrase exists anywhere in the indexed transcript and whether any matching chunk reached the production context. This separates:
+
+- annotation/transcript mismatch (no matching chunk exists in the index);
+- retrieval miss (matching chunks exist but were not retrieved);
+- context-selection miss (matching chunks were retrieved initially but did not survive final context selection).
+
+This diagnostic is intentionally separate from the quality gate and does not change benchmark pass/fail behavior.
+
 ## Phase 8 — Timestamp-grounded temporal evaluation
 
 Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.
