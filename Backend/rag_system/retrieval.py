@@ -1478,6 +1478,21 @@ def expand_retrieval_context(
 # QUESTION-AWARE RETRIEVAL
 # ============================================================
 
+def is_evidence_dense_question(query: str) -> bool:
+    """Detect questions that benefit from a wider set of retrieval anchors."""
+
+    normalized = " ".join(query.strip().lower().split())
+    focus_terms = extract_query_focus_terms(query)
+
+    return bool(
+        len(focus_terms) >= 4
+        or re.search(
+            r"\b(?:why|how|reasons?|challenges?|problems?|role of|impact|causes?)\b",
+            normalized,
+        )
+    )
+
+
 def retrieve_question_context(
     vector_store,
     query: str,
@@ -1489,24 +1504,33 @@ def retrieve_question_context(
 ):
     """Main question-aware retrieval entry point.
 
-    Strategy:
-
-        Overview question
-            -> representative video sections
-
-        Otherwise
-            -> original semantic query + content-focused semantic query
-            -> lexical evidence using content-aware TF-IDF-like weighting
-            -> Reciprocal Rank Fusion across all signals
-            -> bounded chronological context expansion
-
-    Keeping the original query and adding a deterministic focus query fixes a
-    common failure mode where conversational wording dominates the embedding
-    while the actual topic appears late in a transcript.
+    Dense explanation/multi-part questions receive a wider candidate budget.
+    The final context remains bounded by CONTEXT_MAX_CHUNKS.
     """
 
     if is_overview_question(query):
         return retrieve_overview(vector_store)
+
+    dense_question = is_evidence_dense_question(query)
+
+    # Simple factual questions keep the existing budget. Questions asking for
+    # causes, challenges, impact, policy, or several evidence facets get more
+    # candidate anchors so important passages are not crowded out by one
+    # highly similar transcript region.
+    semantic_k = (
+        min(max(k * 2, k), 8)
+        if dense_question
+        else k
+    )
+    semantic_fetch_k = max(
+        fetch_k,
+        semantic_k * 2,
+    )
+    lexical_limit = (
+        max(k * 2, 8)
+        if dense_question
+        else max(k, min(k * 2, 8))
+    )
 
     query_variants = build_retrieval_query_variants(query)
     semantic_rankings = []
@@ -1516,8 +1540,8 @@ def retrieve_question_context(
             retrieve_mmr(
                 vector_store=vector_store,
                 query=variant,
-                k=k,
-                fetch_k=fetch_k,
+                k=semantic_k,
+                fetch_k=semantic_fetch_k,
                 lambda_mult=lambda_mult,
                 max_distance=max_distance,
             )
@@ -1528,7 +1552,7 @@ def retrieve_question_context(
     lexical_results = lexical_search(
         vector_store=vector_store,
         query=query,
-        limit=max(k, min(k * 2, 8)),
+        limit=lexical_limit,
     )
 
     combined_results = fuse_semantic_and_lexical_results(
@@ -1540,13 +1564,18 @@ def retrieve_question_context(
     if not combined_results:
         return []
 
-    # Any lexical evidence is an explicit transcript-term signal. Keep the
-    # existing conservative semantic-only gate for queries without lexical
-    # evidence.
     has_lexical_evidence = bool(lexical_results)
 
+    # Keep multiple anchors for evidence-dense questions. The expansion layer
+    # still enforces CONTEXT_MAX_CHUNKS, so prompt growth remains bounded.
+    anchor_limit = (
+        min(semantic_k, CONTEXT_MAX_CHUNKS)
+        if dense_question
+        else min(k + 2, CONTEXT_MAX_CHUNKS)
+    )
+
     if has_lexical_evidence:
-        raw_results = combined_results[: k + 2]
+        raw_results = combined_results[:anchor_limit]
 
         if not expand_context:
             return raw_results
@@ -1570,7 +1599,7 @@ def retrieve_question_context(
     if best_distance > strict_semantic_limit:
         return []
 
-    raw_results = combined_results[:k]
+    raw_results = combined_results[:anchor_limit]
 
     if not expand_context:
         return raw_results

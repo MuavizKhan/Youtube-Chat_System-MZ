@@ -220,6 +220,20 @@ This is a general retrieval improvement. It does not contain benchmark-specific 
 
 The distinction is important: the original query preserves conversational intent, while the focus query improves recall for transcript wording when the same intent is expressed with different language.
 
+## Phase 8 — Adaptive evidence retrieval for dense questions
+
+The live benchmark showed that explanation and multi-part questions can legitimately require evidence from more than one transcript region. A fixed four-anchor budget can over-concentrate retrieval around one semantically similar passage even when the answer needs multiple causes, impacts, or supporting details.
+
+The retriever therefore uses an adaptive candidate budget for evidence-dense questions:
+
+- simple factual questions keep the existing retrieval budget;
+- questions containing causal, challenge, impact, policy, or multi-facet language retrieve up to eight semantic anchors and a larger candidate pool;
+- lexical candidates are widened for the same class of questions;
+- the final production context remains capped by RAG_CONTEXT_MAX_CHUNKS, so prompt growth is still bounded;
+- the change is query-shape based and does not contain benchmark-specific phrases or question IDs.
+
+This improves evidence breadth without weakening unrelated-question rejection or the existing semantic-distance contract.
+
 ## Phase 8 — Timestamp-grounded temporal evaluation
 
 Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.
