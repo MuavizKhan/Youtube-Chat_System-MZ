@@ -422,6 +422,8 @@ def test_question_context_diversifies_dense_anchors(monkeypatch):
         "operational_challenges": [ranked[3]],
     }
 
+    original_select = retrieval.select_facet_aware_retrieval_anchors
+
     monkeypatch.setattr(
         retrieval,
         "retrieve_mmr",
@@ -434,14 +436,12 @@ def test_question_context_diversifies_dense_anchors(monkeypatch):
     )
     monkeypatch.setattr(
         retrieval,
-        "build_retrieval_query_plan",
-        lambda query: [
-            ("original", query),
-            ("focus", "failure challenges problems"),
-            ("financial_economic", "financial evidence"),
-            ("policy_governance", "policy evidence"),
-            ("operational_challenges", "operations evidence"),
-        ],
+        "select_facet_aware_retrieval_anchors",
+        lambda ranked_results, actual_facet_rankings, **kwargs: original_select(
+            ranked_results,
+            facet_rankings,
+            **kwargs,
+        ),
     )
     monkeypatch.setattr(
         retrieval,
