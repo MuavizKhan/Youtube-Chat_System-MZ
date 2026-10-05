@@ -344,15 +344,11 @@ DENSE_CONTEXT_MAX_CHUNKS = _get_int(
     16,
 )
 
-# Reserve small anchor capacity for each planned evidence facet.
-DENSE_FACET_MIN_ANCHORS = _get_int(
-    "RAG_DENSE_FACET_MIN_ANCHORS",
-    1,
-)
-
-DENSE_FACET_MAX_ANCHORS = _get_int(
-    "RAG_DENSE_FACET_MAX_ANCHORS",
-    3,
+# Apply a conservative soft bonus when a candidate is strongly ranked
+# by one or more evidence facets. A value of 0 disables the bonus.
+DENSE_FACET_RERANK_WEIGHT = _get_float(
+    "RAG_DENSE_FACET_RERANK_WEIGHT",
+    0.10,
 )
 
 
@@ -531,41 +527,10 @@ if MAX_DISTANCE < 0:
     )
 
 
-if DENSE_FACET_MIN_ANCHORS <= 0:
+if DENSE_FACET_RERANK_WEIGHT < 0:
 
     raise RuntimeError(
-        "RAG_DENSE_FACET_MIN_ANCHORS must be greater than 0."
-    )
-
-
-if DENSE_FACET_MAX_ANCHORS <= 0:
-
-    raise RuntimeError(
-        "RAG_DENSE_FACET_MAX_ANCHORS must be greater than 0."
-    )
-
-
-if DENSE_FACET_MIN_ANCHORS > DENSE_FACET_MAX_ANCHORS:
-
-    raise RuntimeError(
-        "RAG_DENSE_FACET_MIN_ANCHORS cannot be greater than "
-        "RAG_DENSE_FACET_MAX_ANCHORS."
-    )
-
-
-if DENSE_FACET_MIN_ANCHORS * 3 > DENSE_ANCHOR_LIMIT:
-
-    raise RuntimeError(
-        "DENSE_FACET_MIN_ANCHORS reserves more slots than "
-        "RAG_DENSE_ANCHOR_LIMIT can provide."
-    )
-
-
-if DENSE_FACET_MAX_ANCHORS > DENSE_ANCHOR_LIMIT:
-
-    raise RuntimeError(
-        "DENSE_FACET_MAX_ANCHORS cannot be greater than "
-        "RAG_DENSE_ANCHOR_LIMIT."
+        "RAG_DENSE_FACET_RERANK_WEIGHT cannot be negative."
     )
 
 
