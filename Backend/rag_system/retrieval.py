@@ -37,6 +37,8 @@ from .config import (
     CONTEXT_MAX_CHUNKS,
     DENSE_ANCHOR_LIMIT,
     DENSE_CONTEXT_MAX_CHUNKS,
+    DENSE_FACET_MAX_ANCHORS,
+    DENSE_FACET_MIN_ANCHORS,
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     EMBEDDING_MODEL,
@@ -852,64 +854,84 @@ def diagnose_retrieval_pipeline(
         else max(k, min(k * 2, 8))
     )
 
-    query_variants = build_retrieval_query_variants(query)
+    query_plan = build_retrieval_query_plan(query)
     semantic_stages = []
     semantic_rankings = []
+    semantic_rankings_by_label = {}
 
-    for variant in query_variants:
+    for label, query_variant in query_plan:
         raw_candidates = retrieve_faiss_candidates_for_diagnostics(
             vector_store,
-            variant,
+            query_variant,
             fetch_k=semantic_fetch_k,
             max_distance=max_distance,
         )
         mmr_results = retrieve_mmr(
             vector_store=vector_store,
-            query=variant,
+            query=query_variant,
             k=semantic_k,
             fetch_k=semantic_fetch_k,
             lambda_mult=lambda_mult,
             max_distance=max_distance,
         )
         semantic_stages.append({
-            "query": variant,
+            "label": label,
+            "query": query_variant,
             "raw_candidates": raw_candidates,
             "mmr_results": mmr_results,
         })
         semantic_rankings.append(mmr_results)
+        if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
+            semantic_rankings_by_label[label] = mmr_results
 
     semantic_results = fuse_semantic_rankings(semantic_rankings)
 
-    lexical_queries = [query]
+    lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(
-            build_evidence_facet_queries(query)
+            build_evidence_facet_plan(query)
         )
 
     lexical_stages = []
     lexical_rankings = []
+    lexical_rankings_by_label = {}
 
-    for lexical_query in lexical_queries:
+    for label, lexical_query in lexical_queries:
         lexical_results_for_query = lexical_search(
             vector_store=vector_store,
             query=lexical_query,
             limit=lexical_limit,
         )
         lexical_stages.append({
+            "label": label,
             "query": lexical_query,
             "results": lexical_results_for_query,
         })
         lexical_rankings.append(lexical_results_for_query)
+        if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
+            lexical_rankings_by_label[label] = lexical_results_for_query
 
-    lexical_results = fuse_lexical_rankings(
-        lexical_rankings
-    )
+    lexical_results = fuse_lexical_rankings(lexical_rankings)
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
         lexical_results=lexical_results,
         lexical_distance=max_distance,
     )
+
+    facet_rankings = {}
+    for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
+        semantic_facet = semantic_rankings_by_label.get(facet_name, [])
+        lexical_facet = lexical_rankings_by_label.get(facet_name, [])
+
+        if semantic_facet or lexical_facet:
+            facet_rankings[facet_name] = (
+                fuse_semantic_and_lexical_results(
+                    semantic_results=semantic_facet,
+                    lexical_results=lexical_facet,
+                    lexical_distance=max_distance,
+                )
+            )
 
     context_max_chunks = (
         DENSE_CONTEXT_MAX_CHUNKS
@@ -924,12 +946,20 @@ def diagnose_retrieval_pipeline(
 
     if lexical_results:
         anchor_results = (
-            select_diverse_retrieval_anchors(
+            select_facet_aware_retrieval_anchors(
                 combined_results,
+                facet_rankings,
                 limit=anchor_limit,
             )
-            if dense_question
-            else combined_results[:anchor_limit]
+            if dense_question and facet_rankings
+            else (
+                select_diverse_retrieval_anchors(
+                    combined_results,
+                    limit=anchor_limit,
+                )
+                if dense_question
+                else combined_results[:anchor_limit]
+            )
         )
     else:
         semantic_distances = [
@@ -941,12 +971,20 @@ def diagnose_retrieval_pipeline(
             anchor_results = []
         else:
             anchor_results = (
-                select_diverse_retrieval_anchors(
+                select_facet_aware_retrieval_anchors(
                     combined_results,
+                    facet_rankings,
                     limit=anchor_limit,
                 )
-                if dense_question
-                else combined_results[:anchor_limit]
+                if dense_question and facet_rankings
+                else (
+                    select_diverse_retrieval_anchors(
+                        combined_results,
+                        limit=anchor_limit,
+                    )
+                    if dense_question
+                    else combined_results[:anchor_limit]
+                )
             )
 
     context_results = expand_retrieval_context(
@@ -962,12 +1000,23 @@ def diagnose_retrieval_pipeline(
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
         "anchor_limit": anchor_limit,
-        "query_variants": query_variants,
+        "query_plan": query_plan,
+        "query_variants": [
+            query_text
+            for _label, query_text in query_plan
+        ],
         "semantic_stages": semantic_stages,
         "semantic_fused": semantic_results,
-        "lexical_queries": lexical_queries,
+        "lexical_queries": [
+            {
+                "label": label,
+                "query": lexical_query,
+            }
+            for label, lexical_query in lexical_queries
+        ],
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
+        "facet_rankings": facet_rankings,
         "hybrid_fused": combined_results,
         "anchors": anchor_results,
         "final_context": context_results,
@@ -1087,15 +1136,10 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
 }
 
 
-def build_evidence_facet_queries(
+def build_evidence_facet_plan(
     query: str,
-) -> list[str]:
-    """Plan compact, intent-specific evidence queries for dense questions.
-
-    The planner uses only generic evidence concepts. It deliberately keeps
-    each facet as an independent query so one broad semantic embedding does
-    not dilute every evidence dimension at once.
-    """
+) -> list[tuple[str, str]]:
+    """Build ordered, intent-specific evidence facets for a dense question."""
 
     original = " ".join(query.strip().split())
     if not original:
@@ -1165,40 +1209,61 @@ def build_evidence_facet_queries(
         )
 
     return [
-        f"{focus_query} {EVIDENCE_FACET_QUERY_DEFINITIONS[name]}"
-        for name in facet_names
+        (
+            facet_name,
+            f"{focus_query} "
+            f"{EVIDENCE_FACET_QUERY_DEFINITIONS[facet_name]}",
+        )
+        for facet_name in facet_names
     ]
 
 
-def build_retrieval_query_variants(
+def build_evidence_facet_queries(
     query: str,
 ) -> list[str]:
-    """Build deterministic semantic-query variants for evidence retrieval.
+    """Return planned facet query strings."""
 
-    The original question is always preserved. Dense questions additionally
-    receive three independently planned evidence queries chosen from generic
-    intent families. Each facet is intentionally compact and independently
-    embedded.
-    """
+    return [
+        facet_query
+        for _facet_name, facet_query in build_evidence_facet_plan(query)
+    ]
+
+
+def build_retrieval_query_plan(
+    query: str,
+) -> list[tuple[str, str]]:
+    """Build labeled query variants for retrieval and diagnostics."""
 
     original = " ".join(query.strip().split())
     if not original:
         return []
 
-    variants = [original]
+    plan = [("original", original)]
     focus_terms = extract_query_focus_terms(original)
 
-    if len(focus_terms) >= 2:
-        focus_query = " ".join(focus_terms)
-        if focus_query.casefold() != original.casefold():
-            variants.append(focus_query)
+    if len(focus_terms) < 2:
+        return plan
 
-        if is_evidence_dense_question(original):
-            variants.extend(
-                build_evidence_facet_queries(original)
-            )
+    focus_query = " ".join(focus_terms)
 
-    return list(dict.fromkeys(variants))
+    if focus_query.casefold() != original.casefold():
+        plan.append(("focus", focus_query))
+
+    if is_evidence_dense_question(original):
+        plan.extend(build_evidence_facet_plan(original))
+
+    return plan
+
+
+def build_retrieval_query_variants(
+    query: str,
+) -> list[str]:
+    """Build deterministic query strings while preserving the public API."""
+
+    return [
+        query_text
+        for _label, query_text in build_retrieval_query_plan(query)
+    ]
 
 
 OVERVIEW_PATTERNS = (
@@ -1860,23 +1925,181 @@ def is_evidence_dense_question(query: str) -> bool:
 
 
 
+def _retrieval_document_identity(document):
+    chunk_id = document.metadata.get("chunk_id")
+    if chunk_id is not None:
+        return ("chunk", chunk_id)
+
+    return (
+        "time",
+        float(document.metadata.get("start", 0.0)),
+        float(document.metadata.get("end", 0.0)),
+    )
+
+
+def select_facet_aware_retrieval_anchors(
+    ranked_results,
+    facet_rankings: dict[str, list[tuple[Any, float]]],
+    *,
+    limit: int,
+    min_per_facet: int = DENSE_FACET_MIN_ANCHORS,
+    max_per_facet: int = DENSE_FACET_MAX_ANCHORS,
+    min_chunk_gap: int = 3,
+):
+    """Reserve anchor capacity across evidence facets, then fill globally."""
+
+    if limit <= 0 or not ranked_results:
+        return []
+
+    if min_per_facet <= 0:
+        raise ValueError("min_per_facet must be greater than 0.")
+
+    if max_per_facet <= 0:
+        raise ValueError("max_per_facet must be greater than 0.")
+
+    if min_per_facet > max_per_facet:
+        raise ValueError(
+            "min_per_facet cannot be greater than max_per_facet."
+        )
+
+    if min_chunk_gap < 0:
+        raise ValueError("min_chunk_gap cannot be negative.")
+
+    ranked_by_identity = {
+        _retrieval_document_identity(item[0]): item
+        for item in ranked_results
+    }
+
+    facet_memberships: dict[tuple, set[str]] = {}
+    for facet_name, candidates in facet_rankings.items():
+        for item in candidates:
+            identity = _retrieval_document_identity(item[0])
+            facet_memberships.setdefault(identity, set()).add(facet_name)
+
+    selected = []
+    selected_keys = set()
+    facet_counts = {
+        facet_name: 0
+        for facet_name in facet_rankings
+    }
+    selected_chunk_ids = []
+
+    # Pass 1: reserve minimum capacity for each facet.
+    for facet_name, candidates in facet_rankings.items():
+        for item in candidates:
+            identity = _retrieval_document_identity(item[0])
+            global_item = ranked_by_identity.get(identity)
+            if global_item is None or identity in selected_keys:
+                continue
+
+            selected.append(global_item)
+            selected_keys.add(identity)
+
+            for member_facet in facet_memberships.get(identity, ()):
+                facet_counts[member_facet] += 1
+
+            chunk_id = global_item[0].metadata.get("chunk_id")
+            if chunk_id is not None:
+                selected_chunk_ids.append(int(chunk_id))
+
+            if (
+                facet_counts[facet_name] >= min_per_facet
+                or len(selected) >= limit
+            ):
+                break
+
+        if len(selected) >= limit:
+            break
+
+    # Pass 2: fill by global fused rank, preferring candidates that are
+    # still useful for a facet quota and separated from existing anchors.
+    remaining = [
+        item
+        for item in ranked_results
+        if _retrieval_document_identity(item[0]) not in selected_keys
+    ]
+
+    def candidate_priority(item):
+        identity = _retrieval_document_identity(item[0])
+        facet_names = facet_memberships.get(identity, ())
+        quota_available = (
+            any(
+                facet_counts.get(name, 0) < max_per_facet
+                for name in facet_names
+            )
+            if facet_names
+            else True
+        )
+
+        chunk_id = item[0].metadata.get("chunk_id")
+        far_from_selected = True
+        if chunk_id is not None and selected_chunk_ids:
+            far_from_selected = all(
+                abs(int(chunk_id) - previous_id) >= min_chunk_gap
+                for previous_id in selected_chunk_ids
+            )
+
+        return (
+            0 if quota_available and far_from_selected
+            else 1 if quota_available
+            else 2 if far_from_selected
+            else 3
+        )
+
+    for item in sorted(
+        remaining,
+        key=lambda candidate: (
+            candidate_priority(candidate),
+            ranked_results.index(candidate),
+        ),
+    ):
+        if len(selected) >= limit:
+            break
+
+        identity = _retrieval_document_identity(item[0])
+        if identity in selected_keys:
+            continue
+
+        facet_names = facet_memberships.get(identity, ())
+        if facet_names and not any(
+            facet_counts.get(name, 0) < max_per_facet
+            for name in facet_names
+        ):
+            continue
+
+        selected.append(item)
+        selected_keys.add(identity)
+
+        for member_facet in facet_names:
+            facet_counts[member_facet] += 1
+
+        chunk_id = item[0].metadata.get("chunk_id")
+        if chunk_id is not None:
+            selected_chunk_ids.append(int(chunk_id))
+
+    # Final fallback preserves the original global ranking if capacity remains.
+    if len(selected) < limit:
+        for item in ranked_results:
+            if len(selected) >= limit:
+                break
+
+            identity = _retrieval_document_identity(item[0])
+            if identity in selected_keys:
+                continue
+
+            selected.append(item)
+            selected_keys.add(identity)
+
+    return selected[:limit]
+
+
 def select_diverse_retrieval_anchors(
     ranked_results,
     *,
     limit: int,
     min_chunk_gap: int = 3,
 ):
-    """Select high-ranked anchors while spreading them across the transcript.
-
-    Dense questions can require evidence from multiple, widely separated
-    transcript regions. A pure top-rank slice can spend most of the anchor
-    budget on neighboring chunks from one region. This greedy selector first
-    prefers candidates that are sufficiently separated from already-selected
-    chunk IDs, then fills any remaining slots with the original ranking.
-
-    The function only changes anchor selection; score computation, evidence
-    gates, and the final context-size limit remain unchanged.
-    """
+    """Select high-ranked anchors while spreading them across the transcript."""
 
     if limit <= 0 or not ranked_results:
         return []
@@ -1892,8 +2115,6 @@ def select_diverse_retrieval_anchors(
         value = document.metadata.get("chunk_id")
         return int(value) if value is not None else None
 
-    # First pass: maximize transcript-region diversity without changing the
-    # relative order of candidates that qualify for the next slot.
     for item in ranked_results:
         if len(selected) >= limit:
             break
@@ -1913,9 +2134,6 @@ def select_diverse_retrieval_anchors(
             selected_chunk_ids.append(current_id)
             remaining.remove(item)
 
-    # Second pass: preserve the original ranking when the diversity pass
-    # cannot fill the requested budget. This keeps small/compact evidence
-    # regions from being accidentally excluded.
     for item in remaining:
         if len(selected) >= limit:
             break
@@ -1923,6 +2141,7 @@ def select_diverse_retrieval_anchors(
             selected.append(item)
 
     return selected[:limit]
+
 
 def retrieve_question_context(
     vector_store,
@@ -1964,37 +2183,43 @@ def retrieve_question_context(
         else max(k, min(k * 2, 8))
     )
 
-    query_variants = build_retrieval_query_variants(query)
+    query_plan = build_retrieval_query_plan(query)
     semantic_rankings = []
+    semantic_rankings_by_label = {}
 
-    for variant in query_variants:
-        semantic_rankings.append(
-            retrieve_mmr(
-                vector_store=vector_store,
-                query=variant,
-                k=semantic_k,
-                fetch_k=semantic_fetch_k,
-                lambda_mult=lambda_mult,
-                max_distance=max_distance,
-            )
+    for label, query_variant in query_plan:
+        ranking = retrieve_mmr(
+            vector_store=vector_store,
+            query=query_variant,
+            k=semantic_k,
+            fetch_k=semantic_fetch_k,
+            lambda_mult=lambda_mult,
+            max_distance=max_distance,
         )
+        semantic_rankings.append(ranking)
+        if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
+            semantic_rankings_by_label[label] = ranking
 
     semantic_results = fuse_semantic_rankings(semantic_rankings)
 
-    lexical_queries = [query]
+    lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(
-            build_evidence_facet_queries(query)
+            build_evidence_facet_plan(query)
         )
 
-    lexical_rankings = [
-        lexical_search(
+    lexical_rankings = []
+    lexical_rankings_by_label = {}
+
+    for label, lexical_query in lexical_queries:
+        ranking = lexical_search(
             vector_store=vector_store,
             query=lexical_query,
             limit=lexical_limit,
         )
-        for lexical_query in lexical_queries
-    ]
+        lexical_rankings.append(ranking)
+        if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
+            lexical_rankings_by_label[label] = ranking
 
     lexical_results = fuse_lexical_rankings(
         lexical_rankings
@@ -2005,6 +2230,20 @@ def retrieve_question_context(
         lexical_results=lexical_results,
         lexical_distance=max_distance,
     )
+
+    facet_rankings = {}
+    for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
+        semantic_facet = semantic_rankings_by_label.get(facet_name, [])
+        lexical_facet = lexical_rankings_by_label.get(facet_name, [])
+
+        if semantic_facet or lexical_facet:
+            facet_rankings[facet_name] = (
+                fuse_semantic_and_lexical_results(
+                    semantic_results=semantic_facet,
+                    lexical_results=lexical_facet,
+                    lexical_distance=max_distance,
+                )
+            )
 
     if not combined_results:
         return []
@@ -2024,9 +2263,17 @@ def retrieve_question_context(
 
     if has_lexical_evidence:
         if dense_question:
-            raw_results = select_diverse_retrieval_anchors(
-                combined_results,
-                limit=anchor_limit,
+            raw_results = (
+                select_facet_aware_retrieval_anchors(
+                    combined_results,
+                    facet_rankings,
+                    limit=anchor_limit,
+                )
+                if facet_rankings
+                else select_diverse_retrieval_anchors(
+                    combined_results,
+                    limit=anchor_limit,
+                )
             )
         else:
             raw_results = combined_results[:anchor_limit]
@@ -2055,9 +2302,17 @@ def retrieve_question_context(
         return []
 
     if dense_question:
-        raw_results = select_diverse_retrieval_anchors(
-            combined_results,
-            limit=anchor_limit,
+        raw_results = (
+            select_facet_aware_retrieval_anchors(
+                combined_results,
+                facet_rankings,
+                limit=anchor_limit,
+            )
+            if facet_rankings
+            else select_diverse_retrieval_anchors(
+                combined_results,
+                limit=anchor_limit,
+            )
         )
     else:
         raw_results = combined_results[:anchor_limit]
