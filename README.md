@@ -246,25 +246,26 @@ The dense capacity defaults remain:
 
 The end-to-end diagnostic now exposes the planned lexical facet queries and their per-query results in addition to the semantic stages, so failures can still be localized without changing production benchmark thresholds.
 
-## Phase 8 — Facet-aware anchor routing
+## Phase 8 — Soft facet evidence reranking
 
-The evidence-query decomposition phase improved production gold coverage, but the remaining failures showed a selection bottleneck: several facet-specific searches can find different evidence regions, yet a single global fused ranking can still spend too much of the bounded anchor budget on one region.
+The hard facet-anchor routing experiment showed that mandatory per-facet quotas can over-prioritize weak facet candidates and reduce the overall evidence quality. This slice keeps the global hybrid ranking as the primary signal and applies only a conservative soft bonus to candidates that are strongly supported by the planned evidence facets.
 
-This slice routes anchors by evidence facet:
+The dense-question retrieval path now:
 
-- each planned dense-question facet keeps its own fused semantic+lexical candidate ranking;
-- the anchor selector reserves a small minimum number of slots for each available facet;
-- duplicate chunks shared by multiple facets are included once and count toward each facet;
-- remaining anchor slots are filled from the global fused ranking, subject to a per-facet maximum and the existing transcript-region diversity rule;
-- simple factual questions continue using the existing ranking path;
-- the final context-size bound, distance gates, and evidence gates remain unchanged.
+- preserves the global semantic+lexical fused ranking;
+- keeps each evidence facet's fused semantic+lexical ranking as supporting evidence;
+- applies a bounded rank-based facet bonus with diminishing returns across multiple facets;
+- passes the softly reranked candidates through the existing transcript-region diversity selector;
+- keeps simple questions on the existing ranking path;
+- leaves distance gates, evidence gates, semantic/lexical capacity, and context bounds unchanged.
 
-Defaults are intentionally small:
+Default:
 
-- `RAG_DENSE_FACET_MIN_ANCHORS=1`
-- `RAG_DENSE_FACET_MAX_ANCHORS=3`
+- `RAG_DENSE_FACET_RERANK_WEIGHT=0.05`
 
-The diagnostic output exposes per-facet fused rankings so a missing evidence group can be distinguished from an anchor-allocation miss.
+A value of `0` disables the soft facet bonus. The diagnostic output exposes both the original hybrid ranking and the softly reranked candidate list so changes in anchor selection remain inspectable.
+
+The strategy label is `question_aware_soft_facet_rerank`.
 
 ## Phase 8 — Evidence-diversified anchor selection
 

@@ -10,7 +10,7 @@ Responsibilities
 3. Load cached FAISS vector stores.
 4. Retrieve candidates from FAISS.
 5. Apply distance filtering.
-6. Select final chunks using MMR.
+6. Select final chunks using MMR and bounded soft facet reranking.
 
 This file does NOT:
 - fetch YouTube transcripts
@@ -37,8 +37,7 @@ from .config import (
     CONTEXT_MAX_CHUNKS,
     DENSE_ANCHOR_LIMIT,
     DENSE_CONTEXT_MAX_CHUNKS,
-    DENSE_FACET_MAX_ANCHORS,
-    DENSE_FACET_MIN_ANCHORS,
+    DENSE_FACET_RERANK_WEIGHT,
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     EMBEDDING_MODEL,
@@ -944,22 +943,24 @@ def diagnose_retrieval_pipeline(
         else min(k + 2, context_max_chunks)
     )
 
+    reranked_results = combined_results
+
     if lexical_results:
-        anchor_results = (
-            select_facet_aware_retrieval_anchors(
+        reranked_results = (
+            rerank_with_soft_facet_support(
                 combined_results,
                 facet_rankings,
-                limit=anchor_limit,
             )
             if dense_question and facet_rankings
-            else (
-                select_diverse_retrieval_anchors(
-                    combined_results,
-                    limit=anchor_limit,
-                )
-                if dense_question
-                else combined_results[:anchor_limit]
+            else combined_results
+        )
+        anchor_results = (
+            select_diverse_retrieval_anchors(
+                reranked_results,
+                limit=anchor_limit,
             )
+            if dense_question
+            else reranked_results[:anchor_limit]
         )
     else:
         semantic_distances = [
@@ -970,21 +971,21 @@ def diagnose_retrieval_pipeline(
         if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
             anchor_results = []
         else:
-            anchor_results = (
-                select_facet_aware_retrieval_anchors(
+            reranked_results = (
+                rerank_with_soft_facet_support(
                     combined_results,
                     facet_rankings,
-                    limit=anchor_limit,
                 )
                 if dense_question and facet_rankings
-                else (
-                    select_diverse_retrieval_anchors(
-                        combined_results,
-                        limit=anchor_limit,
-                    )
-                    if dense_question
-                    else combined_results[:anchor_limit]
+                else combined_results
+            )
+            anchor_results = (
+                select_diverse_retrieval_anchors(
+                    reranked_results,
+                    limit=anchor_limit,
                 )
+                if dense_question
+                else reranked_results[:anchor_limit]
             )
 
     context_results = expand_retrieval_context(
@@ -1017,6 +1018,7 @@ def diagnose_retrieval_pipeline(
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
+        "facet_soft_reranked": reranked_results,
         "hybrid_fused": combined_results,
         "anchors": anchor_results,
         "final_context": context_results,
@@ -1937,160 +1939,94 @@ def _retrieval_document_identity(document):
     )
 
 
-def select_facet_aware_retrieval_anchors(
+def rerank_with_soft_facet_support(
     ranked_results,
     facet_rankings: dict[str, list[tuple[Any, float]]],
     *,
-    limit: int,
-    min_per_facet: int = DENSE_FACET_MIN_ANCHORS,
-    max_per_facet: int = DENSE_FACET_MAX_ANCHORS,
-    min_chunk_gap: int = 3,
+    rrf_k: int = RRF_K,
+    facet_weight: float = DENSE_FACET_RERANK_WEIGHT,
 ):
-    """Reserve anchor capacity across evidence facets, then fill globally."""
+    """Softly boost candidates supported strongly by evidence facets.
 
-    if limit <= 0 or not ranked_results:
-        return []
+    The global fused ranking remains the primary signal. Facet support adds a
+    bounded, rank-based bonus with diminishing returns across multiple facets.
+    Unlike hard facet quotas, this can only reorder candidates; it cannot force
+    a low-confidence candidate into the anchor set.
+    """
 
-    if min_per_facet <= 0:
-        raise ValueError("min_per_facet must be greater than 0.")
+    if rrf_k <= 0:
+        raise ValueError("rrf_k must be greater than 0.")
 
-    if max_per_facet <= 0:
-        raise ValueError("max_per_facet must be greater than 0.")
+    if facet_weight < 0:
+        raise ValueError("facet_weight cannot be negative.")
 
-    if min_per_facet > max_per_facet:
-        raise ValueError(
-            "min_per_facet cannot be greater than max_per_facet."
-        )
+    if not ranked_results or not facet_rankings or facet_weight == 0:
+        return list(ranked_results)
 
-    if min_chunk_gap < 0:
-        raise ValueError("min_chunk_gap cannot be negative.")
-
-    ranked_by_identity = {
-        _retrieval_document_identity(item[0]): item
-        for item in ranked_results
+    global_scores = {
+        _retrieval_document_identity(item[0]): 1.0 / (rrf_k + rank)
+        for rank, item in enumerate(ranked_results, start=1)
     }
 
-    facet_memberships: dict[tuple, set[str]] = {}
-    for facet_name, candidates in facet_rankings.items():
-        for item in candidates:
-            identity = _retrieval_document_identity(item[0])
-            facet_memberships.setdefault(identity, set()).add(facet_name)
+    facet_scores: dict[tuple, list[float]] = {}
 
-    selected = []
-    selected_keys = set()
-    facet_counts = {
-        facet_name: 0
-        for facet_name in facet_rankings
-    }
-    selected_chunk_ids = []
-
-    # Pass 1: reserve minimum capacity for each facet.
-    for facet_name, candidates in facet_rankings.items():
-        for item in candidates:
-            identity = _retrieval_document_identity(item[0])
-            global_item = ranked_by_identity.get(identity)
-            if global_item is None or identity in selected_keys:
-                continue
-
-            selected.append(global_item)
-            selected_keys.add(identity)
-
-            for member_facet in facet_memberships.get(identity, ()):
-                facet_counts[member_facet] += 1
-
-            chunk_id = global_item[0].metadata.get("chunk_id")
-            if chunk_id is not None:
-                selected_chunk_ids.append(int(chunk_id))
-
-            if (
-                facet_counts[facet_name] >= min_per_facet
-                or len(selected) >= limit
-            ):
-                break
-
-        if len(selected) >= limit:
-            break
-
-    # Pass 2: fill by global fused rank, preferring candidates that are
-    # still useful for a facet quota and separated from existing anchors.
-    remaining = [
-        item
-        for item in ranked_results
-        if _retrieval_document_identity(item[0]) not in selected_keys
-    ]
-
-    def candidate_priority(item):
-        identity = _retrieval_document_identity(item[0])
-        facet_names = facet_memberships.get(identity, ())
-        quota_available = (
-            any(
-                facet_counts.get(name, 0) < max_per_facet
-                for name in facet_names
-            )
-            if facet_names
-            else True
-        )
-
-        chunk_id = item[0].metadata.get("chunk_id")
-        far_from_selected = True
-        if chunk_id is not None and selected_chunk_ids:
-            far_from_selected = all(
-                abs(int(chunk_id) - previous_id) >= min_chunk_gap
-                for previous_id in selected_chunk_ids
-            )
-
-        return (
-            0 if quota_available and far_from_selected
-            else 1 if quota_available
-            else 2 if far_from_selected
-            else 3
-        )
-
-    for item in sorted(
-        remaining,
-        key=lambda candidate: (
-            candidate_priority(candidate),
-            ranked_results.index(candidate),
-        ),
-    ):
-        if len(selected) >= limit:
-            break
-
-        identity = _retrieval_document_identity(item[0])
-        if identity in selected_keys:
-            continue
-
-        facet_names = facet_memberships.get(identity, ())
-        if facet_names and not any(
-            facet_counts.get(name, 0) < max_per_facet
-            for name in facet_names
+    for candidates in facet_rankings.values():
+        for rank, (document, _distance) in enumerate(
+            candidates,
+            start=1,
         ):
-            continue
+            identity = _retrieval_document_identity(document)
+            facet_scores.setdefault(identity, []).append(
+                1.0 / (rrf_k + rank)
+            )
 
-        selected.append(item)
-        selected_keys.add(identity)
+    scored = []
 
-        for member_facet in facet_names:
-            facet_counts[member_facet] += 1
+    for global_rank, item in enumerate(
+        ranked_results,
+        start=1,
+    ):
+        identity = _retrieval_document_identity(item[0])
+        base_score = global_scores[identity]
 
-        chunk_id = item[0].metadata.get("chunk_id")
-        if chunk_id is not None:
-            selected_chunk_ids.append(int(chunk_id))
+        support_scores = sorted(
+            facet_scores.get(identity, []),
+            reverse=True,
+        )
 
-    # Final fallback preserves the original global ranking if capacity remains.
-    if len(selected) < limit:
-        for item in ranked_results:
-            if len(selected) >= limit:
-                break
+        # Diminishing returns prevent a chunk shared by several facets from
+        # overwhelming the global retrieval signal.
+        facet_support = 0.0
+        decay = 1.0
 
-            identity = _retrieval_document_identity(item[0])
-            if identity in selected_keys:
-                continue
+        for support_score in support_scores[:3]:
+            facet_support += decay * support_score
+            decay *= 0.5
 
-            selected.append(item)
-            selected_keys.add(identity)
+        soft_score = (
+            base_score
+            + facet_weight * facet_support
+        )
 
-    return selected[:limit]
+        scored.append(
+            (
+                soft_score,
+                global_rank,
+                item,
+            )
+        )
+
+    scored.sort(
+        key=lambda entry: (
+            -entry[0],
+            entry[1],
+        )
+    )
+
+    return [
+        item
+        for _soft_score, _global_rank, item in scored
+    ]
 
 
 def select_diverse_retrieval_anchors(
@@ -2263,17 +2199,17 @@ def retrieve_question_context(
 
     if has_lexical_evidence:
         if dense_question:
-            raw_results = (
-                select_facet_aware_retrieval_anchors(
+            reranked_results = (
+                rerank_with_soft_facet_support(
                     combined_results,
                     facet_rankings,
-                    limit=anchor_limit,
                 )
                 if facet_rankings
-                else select_diverse_retrieval_anchors(
-                    combined_results,
-                    limit=anchor_limit,
-                )
+                else combined_results
+            )
+            raw_results = select_diverse_retrieval_anchors(
+                reranked_results,
+                limit=anchor_limit,
             )
         else:
             raw_results = combined_results[:anchor_limit]
@@ -2302,17 +2238,17 @@ def retrieve_question_context(
         return []
 
     if dense_question:
-        raw_results = (
-            select_facet_aware_retrieval_anchors(
+        reranked_results = (
+            rerank_with_soft_facet_support(
                 combined_results,
                 facet_rankings,
-                limit=anchor_limit,
             )
             if facet_rankings
-            else select_diverse_retrieval_anchors(
-                combined_results,
-                limit=anchor_limit,
-            )
+            else combined_results
+        )
+        raw_results = select_diverse_retrieval_anchors(
+            reranked_results,
+            limit=anchor_limit,
         )
     else:
         raw_results = combined_results[:anchor_limit]
