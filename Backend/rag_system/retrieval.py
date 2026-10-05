@@ -879,11 +879,32 @@ def diagnose_retrieval_pipeline(
         semantic_rankings.append(mmr_results)
 
     semantic_results = fuse_semantic_rankings(semantic_rankings)
-    lexical_results = lexical_search(
-        vector_store=vector_store,
-        query=query,
-        limit=lexical_limit,
+
+    lexical_queries = [query]
+    if dense_question:
+        lexical_queries.extend(
+            build_evidence_facet_queries(query)
+        )
+
+    lexical_stages = []
+    lexical_rankings = []
+
+    for lexical_query in lexical_queries:
+        lexical_results_for_query = lexical_search(
+            vector_store=vector_store,
+            query=lexical_query,
+            limit=lexical_limit,
+        )
+        lexical_stages.append({
+            "query": lexical_query,
+            "results": lexical_results_for_query,
+        })
+        lexical_rankings.append(lexical_results_for_query)
+
+    lexical_results = fuse_lexical_rankings(
+        lexical_rankings
     )
+
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
         lexical_results=lexical_results,
@@ -944,6 +965,8 @@ def diagnose_retrieval_pipeline(
         "query_variants": query_variants,
         "semantic_stages": semantic_stages,
         "semantic_fused": semantic_results,
+        "lexical_queries": lexical_queries,
+        "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "hybrid_fused": combined_results,
         "anchors": anchor_results,
@@ -1044,31 +1067,118 @@ def extract_query_focus_terms(
     ]
 
 
-EVIDENCE_FACET_QUERY_SUFFIXES = (
-    (
-        "financial_economic",
-        "financial economic money cash flow cost losses debt investment",
+EVIDENCE_FACET_QUERY_DEFINITIONS = {
+    "financial_economic": (
+        "financial crisis economic circumstances cash flow money debt "
+        "losses costs"
     ),
-    (
-        "policy_governance",
-        "government policy regulation banks support downsizing approval investment",
+    "policy_governance": (
+        "government policy regulation banks support approval restrictions"
     ),
-    (
-        "operational_challenges",
-        "operational challenges payments suppliers fees cash flow service costs decisions consequences",
+    "operational_challenges": (
+        "operational challenges payments fees fuel suppliers service costs"
     ),
-)
+    "brand_marketing": (
+        "brand branding advertising marketing personality identity"
+    ),
+    "business_corporate": (
+        "business companies subsidiaries ownership investments"
+    ),
+}
+
+
+def build_evidence_facet_queries(
+    query: str,
+) -> list[str]:
+    """Plan compact, intent-specific evidence queries for dense questions.
+
+    The planner uses only generic evidence concepts. It deliberately keeps
+    each facet as an independent query so one broad semantic embedding does
+    not dilute every evidence dimension at once.
+    """
+
+    original = " ".join(query.strip().split())
+    if not original:
+        return []
+
+    focus_terms = extract_query_focus_terms(original)
+    if len(focus_terms) < 2:
+        return []
+
+    focus_query = " ".join(focus_terms)
+    normalized = original.casefold()
+
+    if re.search(
+        r"\b(?:brand|branding|advertis|marketing|personality)\b",
+        normalized,
+    ):
+        facet_names = (
+            "brand_marketing",
+            "business_corporate",
+            "operational_challenges",
+        )
+    elif re.search(
+        r"\b(?:policy|government|regulation|banks?|support|approval|"
+        r"restrictions?)\b",
+        normalized,
+    ):
+        facet_names = (
+            "policy_governance",
+            "operational_challenges",
+            "financial_economic",
+        )
+    elif re.search(
+        r"\b(?:challenge|challenges|problems?|problem|operations?|"
+        r"operational|running)\b",
+        normalized,
+    ):
+        facet_names = (
+            "operational_challenges",
+            "financial_economic",
+            "policy_governance",
+        )
+    elif re.search(
+        r"\b(?:why|reasons?|cause|causes?|failure|failed|struggled|"
+        r"impact)\b",
+        normalized,
+    ):
+        facet_names = (
+            "financial_economic",
+            "policy_governance",
+            "operational_challenges",
+        )
+    elif re.search(
+        r"\b(?:businesses|companies|company|corporate|subsidiaries|"
+        r"ownership|investments?)\b",
+        normalized,
+    ):
+        facet_names = (
+            "business_corporate",
+            "brand_marketing",
+            "financial_economic",
+        )
+    else:
+        facet_names = (
+            "financial_economic",
+            "policy_governance",
+            "operational_challenges",
+        )
+
+    return [
+        f"{focus_query} {EVIDENCE_FACET_QUERY_DEFINITIONS[name]}"
+        for name in facet_names
+    ]
 
 
 def build_retrieval_query_variants(
     query: str,
 ) -> list[str]:
-    """Build deterministic semantic-query variants for hybrid retrieval.
+    """Build deterministic semantic-query variants for evidence retrieval.
 
-    The original question is always preserved. A content-focused variant
-    removes question/speaker boilerplate, and evidence-dense questions also
-    receive a small set of deterministic facet queries. These facets are
-    generic evidence categories rather than benchmark-specific answer text.
+    The original question is always preserved. Dense questions additionally
+    receive three independently planned evidence queries chosen from generic
+    intent families. Each facet is intentionally compact and independently
+    embedded.
     """
 
     original = " ".join(query.strip().split())
@@ -1084,12 +1194,12 @@ def build_retrieval_query_variants(
             variants.append(focus_query)
 
         if is_evidence_dense_question(original):
-            for _facet_name, suffix in EVIDENCE_FACET_QUERY_SUFFIXES:
-                variants.append(
-                    f"{focus_query} {suffix}"
-                )
+            variants.extend(
+                build_evidence_facet_queries(original)
+            )
 
     return list(dict.fromkeys(variants))
+
 
 OVERVIEW_PATTERNS = (
     r"\bwhat is this video about\b",
@@ -1303,12 +1413,12 @@ def lexical_search(
     return scored_documents[:limit]
 
 
-def fuse_semantic_rankings(
+def fuse_ranked_results(
     ranked_results: list[list[tuple[Any, float]]],
     *,
     rrf_k: int = RRF_K,
 ):
-    """Fuse multiple semantic query variants with Reciprocal Rank Fusion."""
+    """Fuse independently ranked result lists with Reciprocal Rank Fusion."""
 
     if rrf_k <= 0:
         raise ValueError("rrf_k must be greater than 0.")
@@ -1327,30 +1437,30 @@ def fuse_semantic_rankings(
         )
 
     for results in ranked_results:
-        for rank, (document, distance) in enumerate(results, start=1):
+        for rank, (document, score) in enumerate(results, start=1):
             key = identity(document)
             entry = fused.get(key)
 
             if entry is None:
                 entry = {
                     "document": document,
-                    "distance": float(distance),
-                    "score": 0.0,
+                    "score": float(score),
+                    "rrf_score": 0.0,
                 }
                 fused[key] = entry
             else:
-                entry["distance"] = min(
-                    entry["distance"],
-                    float(distance),
+                entry["score"] = min(
+                    entry["score"],
+                    float(score),
                 )
 
-            entry["score"] += 1.0 / (rrf_k + rank)
+            entry["rrf_score"] += 1.0 / (rrf_k + rank)
 
     ranked = sorted(
         fused.values(),
         key=lambda entry: (
-            -entry["score"],
-            entry["distance"],
+            -entry["rrf_score"],
+            entry["score"],
             float(entry["document"].metadata.get("start", 0.0)),
             (
                 entry["document"].metadata.get("chunk_id")
@@ -1361,9 +1471,35 @@ def fuse_semantic_rankings(
     )
 
     return [
-        (entry["document"], entry["distance"])
+        (entry["document"], entry["score"])
         for entry in ranked
     ]
+
+
+def fuse_semantic_rankings(
+    ranked_results: list[list[tuple[Any, float]]],
+    *,
+    rrf_k: int = RRF_K,
+):
+    """Fuse semantic query variants with Reciprocal Rank Fusion."""
+
+    return fuse_ranked_results(
+        ranked_results,
+        rrf_k=rrf_k,
+    )
+
+
+def fuse_lexical_rankings(
+    ranked_results: list[list[tuple[Any, float]]],
+    *,
+    rrf_k: int = RRF_K,
+):
+    """Fuse lexical facet query results with Reciprocal Rank Fusion."""
+
+    return fuse_ranked_results(
+        ranked_results,
+        rrf_k=rrf_k,
+    )
 
 
 def fuse_semantic_and_lexical_results(
@@ -1704,17 +1840,22 @@ def expand_retrieval_context(
 # ============================================================
 
 def is_evidence_dense_question(query: str) -> bool:
-    """Detect questions that can require evidence from multiple transcript regions."""
+    """Detect questions that are likely to require several evidence facets."""
 
     normalized = " ".join(query.strip().lower().split())
     focus_terms = extract_query_focus_terms(query)
 
+    if re.search(
+        r"\b(?:why|how|reasons?|challenges?|problems?|failure|causes?|"
+        r"role of|impact|building .*\b(?:brand|business)\b|"
+        r"policy|government|businesses|companies|multiple|several)\b",
+        normalized,
+    ):
+        return True
+
     return bool(
-        len(focus_terms) >= 4
-        or re.search(
-            r"\b(?:why|how|reasons?|challenges?|problems?|role of|impact|causes?)\b",
-            normalized,
-        )
+        len(focus_terms) >= 6
+        and re.search(r"\b(?:and|or|both)\b", normalized)
     )
 
 
@@ -1840,10 +1981,23 @@ def retrieve_question_context(
 
     semantic_results = fuse_semantic_rankings(semantic_rankings)
 
-    lexical_results = lexical_search(
-        vector_store=vector_store,
-        query=query,
-        limit=lexical_limit,
+    lexical_queries = [query]
+    if dense_question:
+        lexical_queries.extend(
+            build_evidence_facet_queries(query)
+        )
+
+    lexical_rankings = [
+        lexical_search(
+            vector_store=vector_store,
+            query=lexical_query,
+            limit=lexical_limit,
+        )
+        for lexical_query in lexical_queries
+    ]
+
+    lexical_results = fuse_lexical_rankings(
+        lexical_rankings
     )
 
     combined_results = fuse_semantic_and_lexical_results(
