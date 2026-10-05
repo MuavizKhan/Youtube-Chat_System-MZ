@@ -93,6 +93,46 @@ def test_query_variants_keep_original_and_add_content_focus():
 
 
 @pytest.mark.unit
+def test_query_variants_add_evidence_facets_for_dense_questions():
+    variants = retrieval.build_retrieval_query_variants(
+        "Why did the company fail and what challenges caused the problems?"
+    )
+
+    assert len(variants) == 5
+    assert variants[0].startswith("Why did the company fail")
+    assert "company fail challenges caused problems" in variants[1]
+    assert any(
+        "financial economic money cash flow" in variant
+        for variant in variants[2:]
+    )
+    assert any(
+        "government policy regulation banks support" in variant
+        for variant in variants[2:]
+    )
+    assert any(
+        "operational challenges payments suppliers fees" in variant
+        for variant in variants[2:]
+    )
+
+
+@pytest.mark.unit
+def test_query_variants_do_not_add_facets_to_simple_questions():
+    variants = retrieval.build_retrieval_query_variants(
+        "Who is Vijay Mallya?"
+    )
+
+    assert len(variants) == 2
+    assert variants[0] == "Who is Vijay Mallya?"
+    assert variants[1] == "vijay mallya"
+    assert not any(
+        "financial economic" in variant
+        or "government policy" in variant
+        or "operational challenges" in variant
+        for variant in variants
+    )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("query",[
     "What is this video about?","Give me an overview",
     "Summarise the video","What are the main topics?",
@@ -377,7 +417,8 @@ def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     )
 
     assert result["dense_question"]
-    assert result["semantic_fetch_k"] == 8
+    assert result["semantic_k"] == retrieval.DENSE_SEMANTIC_K
+    assert result["semantic_fetch_k"] == retrieval.DENSE_SEMANTIC_FETCH_K
     assert result["query_variants"]
     assert result["semantic_stages"]
     assert result["semantic_fused"]

@@ -322,6 +322,29 @@ CONTEXT_MAX_CHUNKS = _get_int(
 )
 
 
+# Evidence-dense questions need more semantic and downstream capacity because
+# one answer can require multiple transcript regions.
+DENSE_SEMANTIC_K = _get_int(
+    "RAG_DENSE_SEMANTIC_K",
+    24,
+)
+
+DENSE_SEMANTIC_FETCH_K = _get_int(
+    "RAG_DENSE_SEMANTIC_FETCH_K",
+    32,
+)
+
+DENSE_ANCHOR_LIMIT = _get_int(
+    "RAG_DENSE_ANCHOR_LIMIT",
+    16,
+)
+
+DENSE_CONTEXT_MAX_CHUNKS = _get_int(
+    "RAG_DENSE_CONTEXT_MAX_CHUNKS",
+    16,
+)
+
+
 # ============================================================
 # SOURCE SEGMENTATION
 # ============================================================

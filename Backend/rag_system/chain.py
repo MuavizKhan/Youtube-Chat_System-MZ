@@ -47,6 +47,10 @@ from .config import (
     HF_TOKEN,
     CONTEXT_EXPANSION_CHUNKS,
     CONTEXT_MAX_CHUNKS,
+    DENSE_ANCHOR_LIMIT,
+    DENSE_CONTEXT_MAX_CHUNKS,
+    DENSE_SEMANTIC_FETCH_K,
+    DENSE_SEMANTIC_K,
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
@@ -1356,7 +1360,7 @@ def answer_question(
         HF_MODEL_ID,
 
     "retrieval_method": 
-        "question_aware_mmr_lexical",
+        "question_aware_multifacet_mmr_lexical",
 
     "retrieval_config":
         {
@@ -1377,6 +1381,18 @@ def answer_question(
 
             "context_max_chunks":
                 CONTEXT_MAX_CHUNKS,
+
+            "dense_semantic_k":
+                DENSE_SEMANTIC_K,
+
+            "dense_semantic_fetch_k":
+                DENSE_SEMANTIC_FETCH_K,
+
+            "dense_anchor_limit":
+                DENSE_ANCHOR_LIMIT,
+
+            "dense_context_max_chunks":
+                DENSE_CONTEXT_MAX_CHUNKS,
         },
 }
 

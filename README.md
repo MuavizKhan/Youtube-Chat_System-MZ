@@ -220,9 +220,27 @@ This is a general retrieval improvement. It does not contain benchmark-specific 
 
 The distinction is important: the original query preserves conversational intent, while the focus query improves recall for transcript wording when the same intent is expressed with different language.
 
-## Phase 8 — Adaptive retrieval and evidence-gap diagnostics
+## Phase 8 — Adaptive retrieval, multi-facet expansion, and evidence-gap diagnostics
 
-The benchmark showed that explanation and multi-part questions can require evidence from several transcript regions. The retriever now uses a larger semantic/lexical candidate budget for evidence-dense question shapes while keeping the final context bounded by RAG_CONTEXT_MAX_CHUNKS.
+The benchmark showed that explanation and multi-part questions can require evidence from several transcript regions. The retriever now treats those questions differently from simple factual lookups:
+
+- evidence-dense questions use dedicated semantic, anchor, and context budgets;
+- the original user question is always preserved;
+- a deterministic content-focused query remains available;
+- three generic evidence-facet queries cover financial/economic, policy/governance, and operational/challenge language;
+- all semantic variants are rank-fused before lexical hybrid fusion;
+- the facet queries contain generic evidence categories rather than benchmark-specific answer phrases;
+- simple factual questions keep the smaller existing retrieval path.
+
+The dense defaults are bounded by configuration:
+
+- `RAG_DENSE_SEMANTIC_K=24`
+- `RAG_DENSE_SEMANTIC_FETCH_K=32`
+- `RAG_DENSE_ANCHOR_LIMIT=16`
+- `RAG_DENSE_CONTEXT_MAX_CHUNKS=16`
+
+These settings address the measured failure pattern where evidence existed in the FAISS index but was lost because a single semantic query or the previous 12-chunk downstream budget could not preserve enough independent evidence regions.
+
 
 The evaluator also exposes a non-gating gold-evidence diagnostic. For every curated evidence group it reports whether an exact annotated phrase exists anywhere in the indexed transcript and whether any matching chunk reached the production context. This separates:
 
