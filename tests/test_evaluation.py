@@ -23,6 +23,7 @@ from Backend.rag_system.evaluation import (
 )
 from Backend.rag_system.gold_evidence import (
     GOLD_EVIDENCE_CASES,
+    GoldEvidenceCase,
     get_gold_evidence_case,
     matched_gold_groups,
 )
@@ -815,7 +816,7 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     )
 
     # Use a tiny synthetic gold case through the existing immutable shape.
-    synthetic = type(gold_case)(
+    synthetic = GoldEvidenceCase(
         question_id="Q01",
         groups=(("group zero evidence",), ("group one evidence",)),
         min_group_coverage=0.5,
