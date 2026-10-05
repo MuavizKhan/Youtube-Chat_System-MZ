@@ -244,6 +244,27 @@ The evidence-gap diagnostics showed that the remaining failures were often retri
 This change targets evidence coverage without using benchmark-specific phrases or question IDs. The diagnostics remain available to verify whether the diversified anchors reach the required evidence groups.
 
 
+## Phase 8 — End-to-end retrieval diagnostics
+
+The retrieval-gap diagnostics showed that the remaining gold-evidence failures could occur at several different stages. The diagnostic evaluator now traces selected gold chunks through the complete production retrieval path:
+
+- raw FAISS candidates before MMR;
+- per-query semantic MMR results;
+- semantic-variant RRF;
+- lexical retrieval;
+- semantic + lexical hybrid RRF;
+- diversified anchor selection;
+- final context expansion.
+
+For each gold candidate it reports stage ranks and classifies the first observed failure as candidate generation, MMR, fusion, anchor selection, or context selection. This instrumentation does not change production retrieval or benchmark thresholds.
+
+Run a focused diagnostic for the benchmark questions with:
+
+python -m Backend.rag_system.evaluation MdeQMVBuGgY --diagnose Q04 Q05 --json
+
+The focused JSON output can be redirected to a small file for inspection without scrolling through the full regression benchmark.
+
+
 ## Phase 8 — Timestamp-grounded temporal evaluation
 
 Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.
