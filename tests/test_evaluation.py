@@ -11,6 +11,7 @@ from Backend.rag_system.evaluation import (
     build_gold_benchmark_metrics,
     build_gold_context_benchmark_metrics,
     build_gold_retrieval_gap_diagnostics,
+    build_end_to_end_retrieval_diagnostics,
     evaluate_gold_context_benchmark_thresholds,
     evaluate_benchmark_thresholds,
     evaluate_gold_benchmark_thresholds,
@@ -22,6 +23,7 @@ from Backend.rag_system.evaluation import (
 )
 from Backend.rag_system.gold_evidence import (
     GOLD_EVIDENCE_CASES,
+    GoldEvidenceCase,
     get_gold_evidence_case,
     matched_gold_groups,
 )
@@ -754,6 +756,90 @@ def test_gold_context_result_scores_final_expanded_context():
     assert result["group_coverage"] == pytest.approx(1.0)
     assert result["relevance_ratio"] == pytest.approx(2 / 3)
     assert result["passed"]
+
+
+@pytest.mark.regression
+def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
+    documents = [
+        Document(
+            page_content="group zero evidence",
+            metadata={"chunk_id": 10, "start": 0, "end": 5},
+        ),
+        Document(
+            page_content="group one evidence",
+            metadata={"chunk_id": 20, "start": 10, "end": 15},
+        ),
+    ]
+
+    class FakeStore:
+        index_to_docstore_id = {"a": "a", "b": "b"}
+
+        class _Docstore:
+            def search(self, key):
+                return {"a": documents[0], "b": documents[1]}.get(key)
+
+        docstore = _Docstore()
+
+    pipeline = {
+        "dense_question": True,
+        "query_variants": ["original", "focused"],
+        "semantic_k": 8,
+        "semantic_fetch_k": 16,
+        "lexical_limit": 8,
+        "anchor_limit": 8,
+        "semantic_stages": [
+            {
+                "query": "original",
+                "raw_candidates": [(documents[0], 0.1, 1)],
+                "mmr_results": [(documents[0], 0.1)],
+            },
+            {
+                "query": "focused",
+                "raw_candidates": [(documents[1], 0.2, 2)],
+                "mmr_results": [],
+            },
+        ],
+        "semantic_fused": [(documents[0], 0.1)],
+        "lexical": [],
+        "hybrid_fused": [(documents[0], 0.1)],
+        "anchors": [(documents[0], 0.1)],
+        "final_context": [(documents[0], 0.1)],
+    }
+
+    monkeypatch.setattr(
+        "Backend.rag_system.evaluation.diagnose_retrieval_pipeline",
+        lambda *args, **kwargs: pipeline,
+    )
+    monkeypatch.setattr(
+        "Backend.rag_system.evaluation.get_all_documents",
+        lambda _store: documents,
+    )
+
+    # Use a tiny synthetic gold case through the existing immutable shape.
+    synthetic = GoldEvidenceCase(
+        question_id="Q01",
+        groups=(("group zero evidence",), ("group one evidence",)),
+        min_group_coverage=0.5,
+    )
+
+    test_case = {
+        "id": "Q01",
+        "type": "direct_fact",
+        "question": "What is the test evidence?",
+    }
+
+    diagnostics = build_end_to_end_retrieval_diagnostics(
+        FakeStore(),
+        [test_case],
+        [synthetic],
+    )
+
+    groups = diagnostics[0]["groups"]
+    assert groups[0]["diagnosis"] == "reached_final_context"
+    assert groups[0]["candidates"][0]["semantic_mmr_rank"] == 1
+    assert groups[1]["diagnosis"] == "mmr_selection_miss"
+    assert groups[1]["candidates"][0]["raw_faiss_rank"] == 2
+    assert groups[1]["candidates"][0]["semantic_mmr_rank"] is None
 
 
 @pytest.mark.regression
