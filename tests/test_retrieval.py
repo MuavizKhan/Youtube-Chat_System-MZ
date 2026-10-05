@@ -274,104 +274,6 @@ def test_mmr_selects_nonduplicate_candidate():
 
 
 @pytest.mark.unit
-def test_facet_aware_anchor_selection_reserves_each_facet():
-    ranked = [
-        (doc(10, 100, 105, "financial"), 0.1),
-        (doc(40, 400, 405, "policy"), 0.2),
-        (doc(80, 800, 805, "operations"), 0.3),
-        (doc(11, 110, 115, "financial neighbor"), 0.4),
-        (doc(41, 410, 415, "policy neighbor"), 0.5),
-    ]
-
-    facet_rankings = {
-        "financial_economic": [ranked[0], ranked[3]],
-        "policy_governance": [ranked[1], ranked[4]],
-        "operational_challenges": [ranked[2]],
-    }
-
-    result = retrieval.select_facet_aware_retrieval_anchors(
-        ranked,
-        facet_rankings,
-        limit=3,
-        min_per_facet=1,
-        max_per_facet=2,
-    )
-
-    assert [item[0].metadata["chunk_id"] for item in result] == [10, 40, 80]
-
-
-@pytest.mark.unit
-def test_facet_aware_anchor_selection_deduplicates_shared_chunk():
-    shared = doc(10, 100, 105, "shared")
-    policy = doc(40, 400, 405, "policy")
-    ranked = [
-        (shared, 0.1),
-        (policy, 0.2),
-    ]
-
-    facet_rankings = {
-        "financial_economic": [(shared, 0.1)],
-        "policy_governance": [(shared, 0.1), (policy, 0.2)],
-    }
-
-    result = retrieval.select_facet_aware_retrieval_anchors(
-        ranked,
-        facet_rankings,
-        limit=3,
-        min_per_facet=1,
-        max_per_facet=2,
-    )
-
-    assert [item[0].metadata["chunk_id"] for item in result] == [10, 40]
-
-
-@pytest.mark.unit
-def test_facet_aware_anchor_selection_fills_global_budget():
-    ranked = [
-        (doc(10, 100, 105, "financial"), 0.1),
-        (doc(40, 400, 405, "policy"), 0.2),
-        (doc(80, 800, 805, "operations"), 0.3),
-        (doc(120, 1200, 1205, "extra"), 0.4),
-    ]
-
-    facet_rankings = {
-        "financial_economic": [ranked[0]],
-        "policy_governance": [ranked[1]],
-        "operational_challenges": [ranked[2]],
-    }
-
-    result = retrieval.select_facet_aware_retrieval_anchors(
-        ranked,
-        facet_rankings,
-        limit=4,
-        min_per_facet=1,
-        max_per_facet=1,
-    )
-
-    assert [item[0].metadata["chunk_id"] for item in result] == [10, 40, 80, 120]
-
-
-@pytest.mark.unit
-def test_facet_aware_anchor_selection_validates_quotas():
-    with pytest.raises(ValueError, match="min_per_facet"):
-        retrieval.select_facet_aware_retrieval_anchors(
-            [(doc(1, 0, 5, "x"), 0.1)],
-            {"facet": [(doc(1, 0, 5, "x"), 0.1)]},
-            limit=1,
-            min_per_facet=0,
-        )
-
-    with pytest.raises(ValueError, match="greater than max"):
-        retrieval.select_facet_aware_retrieval_anchors(
-            [(doc(1, 0, 5, "x"), 0.1)],
-            {"facet": [(doc(1, 0, 5, "x"), 0.1)]},
-            limit=1,
-            min_per_facet=2,
-            max_per_facet=1,
-        )
-
-
-@pytest.mark.unit
 def test_select_diverse_retrieval_anchors_spreads_dense_evidence():
     ranked = [
         (doc(10, 100, 105, "region A"), 0.1),
@@ -407,22 +309,14 @@ def test_select_diverse_retrieval_anchors_fills_remaining_budget():
 
 
 @pytest.mark.unit
-def test_question_context_diversifies_dense_anchors(monkeypatch):
+def test_question_context_soft_reranks_dense_anchors(monkeypatch):
     dense = "Why did the company fail and what challenges caused the problems?"
     ranked = [
-        (doc(10, 100, 105, "financial evidence"), 0.1),
-        (doc(11, 110, 115, "financial neighbor"), 0.2),
-        (doc(40, 400, 405, "policy evidence"), 0.3),
-        (doc(80, 800, 805, "operations evidence"), 0.4),
+        (doc(10, 100, 105, "first region"), 0.1),
+        (doc(11, 110, 115, "first region neighbor"), 0.2),
+        (doc(40, 400, 405, "second region"), 0.3),
+        (doc(80, 800, 805, "third region"), 0.4),
     ]
-
-    facet_rankings = {
-        "financial_economic": ranked[:2],
-        "policy_governance": [ranked[2]],
-        "operational_challenges": [ranked[3]],
-    }
-
-    original_select = retrieval.select_facet_aware_retrieval_anchors
 
     monkeypatch.setattr(
         retrieval,
@@ -433,15 +327,6 @@ def test_question_context_diversifies_dense_anchors(monkeypatch):
         retrieval,
         "lexical_search",
         lambda **kwargs: [],
-    )
-    monkeypatch.setattr(
-        retrieval,
-        "select_facet_aware_retrieval_anchors",
-        lambda ranked_results, actual_facet_rankings, **kwargs: original_select(
-            ranked_results,
-            facet_rankings,
-            **kwargs,
-        ),
     )
     monkeypatch.setattr(
         retrieval,
@@ -458,6 +343,53 @@ def test_question_context_diversifies_dense_anchors(monkeypatch):
     )
 
     assert [item[0].metadata["chunk_id"] for item in result[:3]] == [10, 40, 80]
+
+
+@pytest.mark.unit
+def test_soft_facet_rerank_boosts_facet_supported_candidate_without_hard_quota():
+    ranked = [
+        (doc(1, 10, 15, "global best"), 0.1),
+        (doc(2, 20, 25, "global second"), 0.2),
+        (doc(3, 30, 35, "global third"), 0.3),
+        (doc(4, 40, 45, "facet strong"), 0.4),
+        (doc(5, 50, 55, "global fifth"), 0.5),
+        (doc(6, 60, 65, "global sixth"), 0.6),
+    ]
+
+    facet_rankings = {
+        "financial_economic": [
+            (ranked[3][0], 0.4),
+            (ranked[0][0], 0.1),
+        ],
+    }
+
+    reranked = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        facet_rankings,
+        facet_weight=0.05,
+    )
+
+    chunk_ids = [
+        document.metadata["chunk_id"]
+        for document, _ in reranked
+    ]
+
+    assert chunk_ids.index(4) < chunk_ids.index(5)
+    assert chunk_ids[0] == 1
+
+
+@pytest.mark.unit
+def test_soft_facet_rerank_returns_global_order_without_facets():
+    ranked = [
+        (doc(1, 10, 15, "one"), 0.1),
+        (doc(2, 20, 25, "two"), 0.2),
+        (doc(3, 30, 35, "three"), 0.3),
+    ]
+
+    assert retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {},
+    ) == ranked
 
 
 @pytest.mark.unit
