@@ -377,7 +377,7 @@ def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     )
 
     assert result["dense_question"]
-    assert result["semantic_fetch_k"] == 4
+    assert result["semantic_fetch_k"] == 8
     assert result["query_variants"]
     assert result["semantic_stages"]
     assert result["semantic_fused"]
