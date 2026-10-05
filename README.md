@@ -232,6 +232,18 @@ The evaluator also exposes a non-gating gold-evidence diagnostic. For every cura
 
 This diagnostic is intentionally separate from the quality gate and does not change benchmark pass/fail behavior.
 
+## Phase 8 — Evidence-diversified anchor selection
+
+The evidence-gap diagnostics showed that the remaining failures were often retrieval-selection failures: the indexed transcript contained the required evidence, but a bounded anchor budget could concentrate on neighboring chunks from one transcript region. For evidence-dense questions, the retriever now selects anchors in two passes:
+
+- first prefer high-ranked chunks separated by a small transcript chunk gap, so multiple regions can survive the anchor budget;
+- then fill any remaining slots using the original ranking, so compact evidence regions are not discarded;
+- simple factual questions keep the existing ranking behavior;
+- the final RAG_CONTEXT_MAX_CHUNKS bound and evidence gates remain unchanged.
+
+This change targets evidence coverage without using benchmark-specific phrases or question IDs. The diagnostics remain available to verify whether the diversified anchors reach the required evidence groups.
+
+
 ## Phase 8 — Timestamp-grounded temporal evaluation
 
 Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher Airlines is discussed and what is covered in those sections.

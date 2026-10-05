@@ -1493,6 +1493,71 @@ def is_evidence_dense_question(query: str) -> bool:
     )
 
 
+
+def select_diverse_retrieval_anchors(
+    ranked_results,
+    *,
+    limit: int,
+    min_chunk_gap: int = 3,
+):
+    """Select high-ranked anchors while spreading them across the transcript.
+
+    Dense questions can require evidence from multiple, widely separated
+    transcript regions. A pure top-rank slice can spend most of the anchor
+    budget on neighboring chunks from one region. This greedy selector first
+    prefers candidates that are sufficiently separated from already-selected
+    chunk IDs, then fills any remaining slots with the original ranking.
+
+    The function only changes anchor selection; score computation, evidence
+    gates, and the final context-size limit remain unchanged.
+    """
+
+    if limit <= 0 or not ranked_results:
+        return []
+
+    if min_chunk_gap < 0:
+        raise ValueError("min_chunk_gap cannot be negative.")
+
+    selected = []
+    selected_chunk_ids = []
+    remaining = list(ranked_results)
+
+    def chunk_id(document):
+        value = document.metadata.get("chunk_id")
+        return int(value) if value is not None else None
+
+    # First pass: maximize transcript-region diversity without changing the
+    # relative order of candidates that qualify for the next slot.
+    for item in ranked_results:
+        if len(selected) >= limit:
+            break
+
+        document = item[0]
+        current_id = chunk_id(document)
+
+        if current_id is None:
+            selected.append(item)
+            continue
+
+        if all(
+            abs(current_id - previous_id) >= min_chunk_gap
+            for previous_id in selected_chunk_ids
+        ):
+            selected.append(item)
+            selected_chunk_ids.append(current_id)
+            remaining.remove(item)
+
+    # Second pass: preserve the original ranking when the diversity pass
+    # cannot fill the requested budget. This keeps small/compact evidence
+    # regions from being accidentally excluded.
+    for item in remaining:
+        if len(selected) >= limit:
+            break
+        if item not in selected:
+            selected.append(item)
+
+    return selected[:limit]
+
 def retrieve_question_context(
     vector_store,
     query: str,
@@ -1570,7 +1635,13 @@ def retrieve_question_context(
     )
 
     if has_lexical_evidence:
-        raw_results = combined_results[:anchor_limit]
+        if dense_question:
+            raw_results = select_diverse_retrieval_anchors(
+                combined_results,
+                limit=anchor_limit,
+            )
+        else:
+            raw_results = combined_results[:anchor_limit]
 
         if not expand_context:
             return raw_results
@@ -1594,7 +1665,13 @@ def retrieve_question_context(
     if best_distance > strict_semantic_limit:
         return []
 
-    raw_results = combined_results[:anchor_limit]
+    if dense_question:
+        raw_results = select_diverse_retrieval_anchors(
+            combined_results,
+            limit=anchor_limit,
+        )
+    else:
+        raw_results = combined_results[:anchor_limit]
 
     if not expand_context:
         return raw_results

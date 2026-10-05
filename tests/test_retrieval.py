@@ -164,6 +164,78 @@ def test_mmr_selects_nonduplicate_candidate():
 
 
 @pytest.mark.unit
+def test_select_diverse_retrieval_anchors_spreads_dense_evidence():
+    ranked = [
+        (doc(10, 100, 105, "region A"), 0.1),
+        (doc(11, 110, 115, "region A neighbor"), 0.2),
+        (doc(40, 400, 405, "region B"), 0.3),
+        (doc(41, 410, 415, "region B neighbor"), 0.4),
+        (doc(80, 800, 805, "region C"), 0.5),
+    ]
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=3,
+        min_chunk_gap=3,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result] == [10, 40, 80]
+
+
+@pytest.mark.unit
+def test_select_diverse_retrieval_anchors_fills_remaining_budget():
+    ranked = [
+        (doc(10, 100, 105, "region A"), 0.1),
+        (doc(11, 110, 115, "region A neighbor"), 0.2),
+    ]
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=3,
+        min_chunk_gap=3,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result] == [10, 11]
+
+
+@pytest.mark.unit
+def test_question_context_diversifies_dense_anchors(monkeypatch):
+    dense = "Why did the company fail and what challenges caused the problems?"
+    ranked = [
+        (doc(10, 100, 105, "first region"), 0.1),
+        (doc(11, 110, 115, "first region neighbor"), 0.2),
+        (doc(40, 400, 405, "second region"), 0.3),
+        (doc(80, 800, 805, "third region"), 0.4),
+    ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: ranked,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda vector_store, retrieved_results, **kwargs: retrieved_results,
+    )
+
+    result = retrieval.retrieve_question_context(
+        object(),
+        dense,
+        k=2,
+        fetch_k=4,
+        expand_context=False,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result[:3]] == [10, 40, 80]
+
+
+@pytest.mark.unit
 def test_question_context_uses_overview_path(monkeypatch):
     expected=[(doc(1,0,10,"overview"),0.0)]
     monkeypatch.setattr(retrieval,"retrieve_overview",lambda *a,**k:expected)
