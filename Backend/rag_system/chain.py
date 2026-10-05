@@ -49,8 +49,7 @@ from .config import (
     CONTEXT_MAX_CHUNKS,
     DENSE_ANCHOR_LIMIT,
     DENSE_CONTEXT_MAX_CHUNKS,
-    DENSE_FACET_MAX_ANCHORS,
-    DENSE_FACET_MIN_ANCHORS,
+    DENSE_FACET_RERANK_WEIGHT,
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     MAX_DISTANCE,
@@ -1362,7 +1361,7 @@ def answer_question(
         HF_MODEL_ID,
 
     "retrieval_method": 
-        "question_aware_facet_routed_evidence",
+        "question_aware_soft_facet_rerank",
 
     "retrieval_config":
         {
@@ -1396,11 +1395,8 @@ def answer_question(
             "dense_context_max_chunks":
                 DENSE_CONTEXT_MAX_CHUNKS,
 
-            "dense_facet_min_anchors":
-                DENSE_FACET_MIN_ANCHORS,
-
-            "dense_facet_max_anchors":
-                DENSE_FACET_MAX_ANCHORS,
+            "dense_facet_rerank_weight":
+                DENSE_FACET_RERANK_WEIGHT,
         },
 }
 
