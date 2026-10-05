@@ -348,7 +348,7 @@ DENSE_CONTEXT_MAX_CHUNKS = _get_int(
 # by one or more evidence facets. A value of 0 disables the bonus.
 DENSE_FACET_RERANK_WEIGHT = _get_float(
     "RAG_DENSE_FACET_RERANK_WEIGHT",
-    0.10,
+    0.05,
 )
 
 
