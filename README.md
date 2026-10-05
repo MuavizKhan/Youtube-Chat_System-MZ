@@ -220,35 +220,31 @@ This is a general retrieval improvement. It does not contain benchmark-specific 
 
 The distinction is important: the original query preserves conversational intent, while the focus query improves recall for transcript wording when the same intent is expressed with different language.
 
-## Phase 8 — Adaptive retrieval, multi-facet expansion, and evidence-gap diagnostics
+## Phase 8 — Evidence-query decomposition and lexical facet fusion
 
-The benchmark showed that explanation and multi-part questions can require evidence from several transcript regions. The retriever now treats those questions differently from simple factual lookups:
+The production benchmark showed that multi-facet questions could still miss evidence that was already present in the index. Increasing semantic and context capacity improved coverage, but the remaining gaps clustered around different evidence dimensions such as financial causes, policy constraints, operational challenges, and brand/marketing details.
 
-- evidence-dense questions use dedicated semantic, anchor, and context budgets;
-- the original user question is always preserved;
-- a deterministic content-focused query remains available;
-- three generic evidence-facet queries cover financial/economic, policy/governance, and operational/challenge language;
-- all semantic variants are rank-fused before lexical hybrid fusion;
-- the facet queries contain generic evidence categories rather than benchmark-specific answer phrases;
-- simple factual questions keep the smaller existing retrieval path.
+The next retrieval slice changes the strategy from generic facet expansion to **evidence-query decomposition**:
 
-The dense defaults are bounded by configuration:
+- The original user question remains a semantic query so conversational intent is preserved.
+- A deterministic content-focused query remains available to recover transcript wording hidden by speaker/question boilerplate.
+- Dense questions are classified by broad intent signals such as failure/reasons, challenges/operations, policy/governance, brand/marketing, or business/corporate topics.
+- Three compact facet queries are then planned for the detected intent. The facet vocabulary is generic evidence language, not benchmark-specific answer text.
+- Each facet is embedded independently rather than appended into one oversized semantic query.
+- The lexical retriever now runs against the same facet queries, not only the original user question. This is important because exact transcript terminology such as financial/policy/operational/marketing language can be present even when the user's wording is different.
+- Semantic facet rankings and lexical facet rankings are each fused independently with RRF, then combined through the existing semantic+lexical RRF path.
+- Existing distance gates, evidence gates, diversified anchor selection, and bounded context expansion remain unchanged.
+
+This keeps the strategy deterministic and free of an additional LLM call while making the retrieval system explicitly search for several possible evidence dimensions of a dense question.
+
+The dense capacity defaults remain:
 
 - `RAG_DENSE_SEMANTIC_K=24`
 - `RAG_DENSE_SEMANTIC_FETCH_K=32`
 - `RAG_DENSE_ANCHOR_LIMIT=16`
 - `RAG_DENSE_CONTEXT_MAX_CHUNKS=16`
 
-These settings address the measured failure pattern where evidence existed in the FAISS index but was lost because a single semantic query or the previous 12-chunk downstream budget could not preserve enough independent evidence regions.
-
-
-The evaluator also exposes a non-gating gold-evidence diagnostic. For every curated evidence group it reports whether an exact annotated phrase exists anywhere in the indexed transcript and whether any matching chunk reached the production context. This separates:
-
-- annotation/transcript mismatch (no matching chunk exists in the index);
-- retrieval miss (matching chunks exist but were not retrieved);
-- context-selection miss (matching chunks were retrieved initially but did not survive final context selection).
-
-This diagnostic is intentionally separate from the quality gate and does not change benchmark pass/fail behavior.
+The end-to-end diagnostic now exposes the planned lexical facet queries and their per-query results in addition to the semantic stages, so failures can still be localized without changing production benchmark thresholds.
 
 ## Phase 8 — Evidence-diversified anchor selection
 
