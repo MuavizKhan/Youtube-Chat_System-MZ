@@ -553,7 +553,8 @@ def test_semantic_query_variant_fusion_prefers_shared_evidence():
     ]
     focused = [
         (shared, 0.25),
-        (doc(3, 20, 25, "focused match"), 0.4),    ]
+        (doc(3, 20, 25, "focused match"), 0.4),
+    ]
 
     results = retrieval.fuse_semantic_rankings(
         [original, focused],
