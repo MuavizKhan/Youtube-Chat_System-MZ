@@ -65,17 +65,6 @@ class IndexStatus:
     job_id: str | None = None
 
 
-@dataclass(frozen=True)
-class IndexPreparationResult:
-    """Result returned after synchronous index preparation."""
-
-    video_id: str
-    state: str
-    action: str
-    ready: bool
-    job_id: str | None = None
-
-
 class IndexNotReadyError(FileNotFoundError):
     """
     Raised when chat is requested before a usable index exists.
@@ -480,49 +469,6 @@ def submit_index(
     )
 
     return status
-
-
-# ============================================================
-# SYNCHRONOUS PREPARATION (SERVICE COMPATIBILITY)
-# ============================================================
-
-def prepare_index(
-    video_id: str,
-    languages: list[str] | None = None,
-) -> IndexPreparationResult:
-    """
-    Synchronously create, reuse, or rebuild a video index.
-
-    This remains available to internal callers and tests. The HTTP API
-    uses submit_index so request latency is independent of indexing.
-    """
-
-    canonical_video_id = validate_video_id(
-        video_id
-    )
-
-    _vector_store, action = ensure_index_with_action(
-        canonical_video_id,
-        languages=languages,
-    )
-
-    final_state = get_index_state(
-        canonical_video_id
-    )
-
-    if final_state is not IndexState.VALID:
-        raise RuntimeError(
-            "Index preparation completed, but the index "
-            f"is not ready. Final state: {final_state.value}"
-        )
-
-    return IndexPreparationResult(
-        video_id=canonical_video_id,
-        state="ready",
-        action=action.value,
-        ready=True,
-        job_id=None,
-    )
 
 
 # ============================================================

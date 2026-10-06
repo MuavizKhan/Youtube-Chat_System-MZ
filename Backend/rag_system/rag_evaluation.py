@@ -79,8 +79,3 @@ EVALUATION_CASES = (
         expected_behavior="Return the exact fallback because the question is unrelated to the video.",
     ),
 )
-
-
-def get_evaluation_cases() -> tuple[RAGEvaluationCase, ...]:
-    """Return the immutable end-to-end evaluation set."""
-    return EVALUATION_CASES
