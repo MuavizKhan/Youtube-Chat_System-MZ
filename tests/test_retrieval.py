@@ -228,6 +228,8 @@ def test_query_variants_do_not_add_facets_to_simple_questions():
 @pytest.mark.parametrize("query",[
     "What is this video about?","Give me an overview",
     "Summarise the video","What are the main topics?",
+    "What is the main topic of this video?",
+    "What is the primary topic of the video?",
 ])
 def test_overview_detection(query):
     assert retrieval.is_overview_question(query)
