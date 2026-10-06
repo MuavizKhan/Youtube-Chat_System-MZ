@@ -2255,6 +2255,11 @@ def retrieve_question_context(
         raw_results = select_diverse_retrieval_anchors(
             reranked_results,
             limit=anchor_limit,
+            min_chunk_gap=(
+                DENSE_ANCHOR_MIN_CHUNK_GAP
+                if dense_question
+                else 3
+            ),
         )
     else:
         raw_results = combined_results[:anchor_limit]
