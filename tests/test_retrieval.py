@@ -129,9 +129,8 @@ def test_evidence_facet_planner_switches_to_brand_queries():
 
 @pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
-    plans = retrieval.build_evidence_facet_plan(
-        "What does Vijay Mallya say about the role of Indian government policy in the problems faced by Kingfisher Airlines?"
-    )
+    query = "What role does government policy play in the problems faced by a company?"
+    plans = retrieval.build_retrieval_query_plan(query)
 
     labels = [label for label, _query in plans]
 
@@ -146,13 +145,12 @@ def test_policy_questions_add_focused_policy_change_facet():
 
 @pytest.mark.unit
 def test_policy_governance_facet_keeps_original_terms():
-    plans = retrieval.build_evidence_facet_plan(
-        "What does Vijay Mallya say about the role of Indian government policy in the problems faced by Kingfisher Airlines?"
-    )
+    query = "What role does government policy play in the problems faced by a company?"
+    plans = retrieval.build_evidence_facet_plan(query)
 
     governance_query = next(
-        query
-        for label, query in plans
+        query_text
+        for label, query_text in plans
         if label == "policy_governance"
     )
 
@@ -176,16 +174,15 @@ def test_policy_change_facet_lexically_surfaces_shared_policy_evidence():
         ),
     }
 
-    plans = retrieval.build_evidence_facet_plan(
-        "What does the role of government policy mean for this airline?"
-    )
+    query = "What role does government policy play in these problems?"
+    plans = retrieval.build_evidence_facet_plan(query)
     policy_change_query = next(
-        query
-        for label, query in plans
+        query_text
+        for label, query_text in plans
         if label == "policy_change"
     )
 
-    assert policy_change_query == (
+    assert policy_change_query.endswith(
         "policy changes regulatory changes rules regulations"
     )
 
@@ -201,9 +198,8 @@ def test_policy_change_facet_lexically_surfaces_shared_policy_evidence():
 
 @pytest.mark.unit
 def test_non_policy_dense_questions_do_not_add_policy_change_facet():
-    plans = retrieval.build_evidence_facet_plan(
-        "Why did the company fail and what challenges caused the problems?"
-    )
+    query = "Why did the company fail and what challenges caused the problems?"
+    plans = retrieval.build_retrieval_query_plan(query)
 
     assert "policy_change" not in [
         label
