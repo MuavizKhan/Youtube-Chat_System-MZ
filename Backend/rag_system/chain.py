@@ -48,6 +48,7 @@ from .config import (
     CONTEXT_EXPANSION_CHUNKS,
     CONTEXT_MAX_CHUNKS,
     DENSE_ANCHOR_LIMIT,
+    DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
     DENSE_FACET_RERANK_WEIGHT,
     DENSE_SEMANTIC_FETCH_K,
@@ -1391,6 +1392,9 @@ def answer_question(
 
             "dense_anchor_limit":
                 DENSE_ANCHOR_LIMIT,
+
+            "dense_anchor_min_chunk_gap":
+                DENSE_ANCHOR_MIN_CHUNK_GAP,
 
             "dense_context_max_chunks":
                 DENSE_CONTEXT_MAX_CHUNKS,
