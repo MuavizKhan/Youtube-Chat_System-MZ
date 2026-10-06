@@ -1287,6 +1287,8 @@ OVERVIEW_PATTERNS = (
     r"\bsummarize the video\b",
     r"\bsummarise the video\b",
     r"\bwhat are the main topics\b",
+    r"\bwhat is the main topic of (?:this|the) video\b",
+    r"\bwhat is the primary topic of (?:this|the) video\b",
     r"\bwhat topics are covered\b",
 )
 
