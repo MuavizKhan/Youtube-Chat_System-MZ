@@ -128,6 +128,62 @@ def test_evidence_facet_planner_switches_to_brand_queries():
 
 
 @pytest.mark.unit
+def test_policy_facet_includes_change_and_regulatory_vocabulary():
+    plans = retrieval.build_evidence_facet_plan(
+        "What does Vijay Mallya say about the role of Indian government policy in the problems faced by Kingfisher Airlines?"
+    )
+
+    policy_queries = [
+        query
+        for label, query in plans
+        if label == "policy_governance"
+    ]
+
+    assert len(policy_queries) == 1
+    assert "policy changes" in policy_queries[0]
+    assert "regulatory changes" in policy_queries[0]
+
+
+@pytest.mark.unit
+def test_policy_change_facet_lexically_surfaces_shared_policy_evidence():
+    documents = {
+        "policy_changes": doc(
+            7,
+            70,
+            75,
+            "I asked only for policy changes.",
+        ),
+        "generic_policy": doc(
+            8,
+            80,
+            85,
+            "Government policy affected banks and support.",
+        ),
+    }
+
+    plans = retrieval.build_evidence_facet_plan(
+        "What does the role of government policy mean for this airline?"
+    )
+    policy_query = next(
+        query
+        for label, query in plans
+        if label == "policy_governance"
+    )
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        policy_query,
+        limit=8,
+    )
+
+    assert results
+    assert 7 in [
+        document.metadata["chunk_id"]
+        for document, _score in results
+    ]
+
+
+@pytest.mark.unit
 def test_query_variants_do_not_add_facets_to_simple_questions():
     variants = retrieval.build_retrieval_query_variants(
         "Who is Vijay Mallya?"
