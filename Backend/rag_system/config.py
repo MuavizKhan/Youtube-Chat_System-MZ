@@ -26,7 +26,6 @@ from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-BACKEND_ROOT = PROJECT_ROOT / "Backend"
 
 RAG_ROOT = Path(__file__).resolve().parent
 

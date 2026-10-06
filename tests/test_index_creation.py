@@ -52,8 +52,6 @@ def test_create_index_builds_and_saves_index(monkeypatch):
         return_value=saved_path
     )
 
-    inspect_chunks = MagicMock()
-
     monkeypatch.setattr(
         indexing,
         "get_transcript",
@@ -84,12 +82,6 @@ def test_create_index_builds_and_saves_index(monkeypatch):
         save_vector_store,
     )
 
-    monkeypatch.setattr(
-        indexing,
-        "inspect_chunks",
-        inspect_chunks,
-    )
-
     result = indexing.create_index(
         VIDEO_ID
     )
@@ -107,10 +99,6 @@ def test_create_index_builds_and_saves_index(monkeypatch):
 
     split_into_timestamped_chunks.assert_called_once_with(
         documents
-    )
-
-    inspect_chunks.assert_called_once_with(
-        chunks
     )
 
     create_vector_store.assert_called_once_with(

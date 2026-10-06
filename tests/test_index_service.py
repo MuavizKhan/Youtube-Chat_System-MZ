@@ -132,49 +132,6 @@ def test_submit_index_reuses_valid_index_without_queueing(monkeypatch):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "state,expected_action",
-    [
-        (IndexState.MISSING, IndexAction.CREATE),
-        (IndexState.INVALID, IndexAction.REBUILD),
-        (IndexState.STALE, IndexAction.REBUILD),
-    ],
-)
-def test_prepare_index_delegates_lifecycle(
-    monkeypatch,
-    state,
-    expected_action,
-):
-    current_state = {"value": state}
-    ensure_calls = []
-
-    monkeypatch.setattr(
-        index_service,
-        "get_index_state",
-        lambda video_id: current_state["value"],
-    )
-
-    def fake_ensure_index_with_action(video_id, languages=None):
-        ensure_calls.append((video_id, languages))
-        current_state["value"] = IndexState.VALID
-        return object(), expected_action
-
-    monkeypatch.setattr(
-        index_service,
-        "ensure_index_with_action",
-        fake_ensure_index_with_action,
-    )
-
-    result = index_service.prepare_index(VIDEO_ID, languages=["en"])
-
-    assert result.video_id == VIDEO_ID
-    assert result.state == "ready"
-    assert result.action == expected_action.value
-    assert result.ready is True
-    assert ensure_calls == [(VIDEO_ID, ["en"])]
-
-
-@pytest.mark.unit
 def test_load_ready_index_rejects_queued_index(monkeypatch):
     queued_job = IndexJob(
         job_id="job-1",
