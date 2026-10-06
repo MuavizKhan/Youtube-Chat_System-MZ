@@ -336,7 +336,15 @@ DENSE_SEMANTIC_FETCH_K = _get_int(
 
 DENSE_ANCHOR_LIMIT = _get_int(
     "RAG_DENSE_ANCHOR_LIMIT",
-    16,
+    12,
+)
+
+# Minimum transcript chunk-id separation used by the dense-question
+# diversity pass. A smaller gap allows nearby complementary evidence to
+# survive anchor selection while the final context cap remains bounded.
+DENSE_ANCHOR_MIN_CHUNK_GAP = _get_int(
+    "RAG_DENSE_ANCHOR_MIN_CHUNK_GAP",
+    2,
 )
 
 DENSE_CONTEXT_MAX_CHUNKS = _get_int(
@@ -531,6 +539,20 @@ if DENSE_FACET_RERANK_WEIGHT < 0:
 
     raise RuntimeError(
         "RAG_DENSE_FACET_RERANK_WEIGHT cannot be negative."
+    )
+
+
+if DENSE_ANCHOR_LIMIT <= 0:
+
+    raise RuntimeError(
+        "RAG_DENSE_ANCHOR_LIMIT must be greater than 0."
+    )
+
+
+if DENSE_ANCHOR_MIN_CHUNK_GAP < 0:
+
+    raise RuntimeError(
+        "RAG_DENSE_ANCHOR_MIN_CHUNK_GAP cannot be negative."
     )
 
 
