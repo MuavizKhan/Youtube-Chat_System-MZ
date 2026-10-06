@@ -267,6 +267,19 @@ A value of `0` disables the soft facet bonus. The diagnostic output exposes both
 
 The strategy label is `question_aware_soft_facet_rerank`.
 
+## Phase 8 — Dense anchor context headroom
+
+The focused Q06/Q09 retrieval diagnostic showed that useful evidence could reach the hybrid ranking but still be dropped by dense-question anchor selection because the anchor budget filled the entire final context capacity.
+
+The dense retrieval budget now reserves room for bounded context expansion:
+
+- `RAG_DENSE_ANCHOR_LIMIT` defaults to `12` while `RAG_DENSE_CONTEXT_MAX_CHUNKS` remains `16`, leaving headroom for nearby transcript evidence.
+- `RAG_DENSE_ANCHOR_MIN_CHUNK_GAP` defaults to `2`, allowing adjacent complementary chunks to survive the diversity pass when they are genuinely near a strong anchor.
+- Simple-question retrieval keeps the existing diversity gap of `3`.
+- No gold-question phrases, chunk IDs, or benchmark-specific routing are added.
+
+The change targets evidence-selection capacity and context expansion rather than changing the embedding model, evidence thresholds, or gold annotations.
+
 ## Phase 8 — Evidence-diversified anchor selection
 
 The evidence-gap diagnostics showed that the remaining failures were often retrieval-selection failures: the indexed transcript contained the required evidence, but a bounded anchor budget could concentrate on neighboring chunks from one transcript region. For evidence-dense questions, the retriever now selects anchors in two passes:
