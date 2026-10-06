@@ -1125,7 +1125,9 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
         "losses costs"
     ),
     "policy_governance": (
-        "government policy regulation banks support approval restrictions "
+        "government policy regulation banks support approval restrictions"
+    ),
+    "policy_change": (
         "policy changes regulatory changes rules regulations"
     ),
     "operational_challenges": (
@@ -1171,6 +1173,7 @@ def build_evidence_facet_plan(
         normalized,
     ):
         facet_names = (
+            "policy_change",
             "policy_governance",
             "operational_challenges",
             "financial_economic",

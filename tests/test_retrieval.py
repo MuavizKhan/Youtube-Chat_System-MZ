@@ -128,20 +128,33 @@ def test_evidence_facet_planner_switches_to_brand_queries():
 
 
 @pytest.mark.unit
-def test_policy_facet_includes_change_and_regulatory_vocabulary():
-    plans = retrieval.build_evidence_facet_plan(
-        "What does Vijay Mallya say about the role of Indian government policy in the problems faced by Kingfisher Airlines?"
-    )
+def test_policy_questions_add_focused_policy_change_facet():
+    query = "What role does government policy play in the problems faced by a company?"
+    plans = retrieval.build_retrieval_query_plan(query)
 
-    policy_queries = [
-        query
-        for label, query in plans
-        if label == "policy_governance"
+    labels = [label for label, _query in plans]
+
+    assert labels[:2] == ["original", "focus"]
+    assert labels[2:] == [
+        "policy_change",
+        "policy_governance",
+        "operational_challenges",
+        "financial_economic",
     ]
 
-    assert len(policy_queries) == 1
-    assert "policy changes" in policy_queries[0]
-    assert "regulatory changes" in policy_queries[0]
+
+@pytest.mark.unit
+def test_policy_governance_facet_keeps_original_terms():
+    query = "What role does government policy play in the problems faced by a company?"
+    plans = retrieval.build_evidence_facet_plan(query)
+
+    governance_query = next(
+        query_text
+        for label, query_text in plans
+        if label == "policy_governance"
+    )
+
+    assert "government policy regulation banks support" in governance_query
 
 
 @pytest.mark.unit
@@ -161,25 +174,36 @@ def test_policy_change_facet_lexically_surfaces_shared_policy_evidence():
         ),
     }
 
-    plans = retrieval.build_evidence_facet_plan(
-        "What does the role of government policy mean for this airline?"
+    query = "What role does government policy play in these problems?"
+    plans = retrieval.build_evidence_facet_plan(query)
+    policy_change_query = next(
+        query_text
+        for label, query_text in plans
+        if label == "policy_change"
     )
-    policy_query = next(
-        query
-        for label, query in plans
-        if label == "policy_governance"
+
+    assert policy_change_query.endswith(
+        "policy changes regulatory changes rules regulations"
     )
 
     results = retrieval.lexical_search(
         FakeVectorStore(documents),
-        policy_query,
+        policy_change_query,
         limit=8,
     )
 
     assert results
-    assert 7 in [
-        document.metadata["chunk_id"]
-        for document, _score in results
+    assert results[0][0].metadata["chunk_id"] == 7
+
+
+@pytest.mark.unit
+def test_non_policy_dense_questions_do_not_add_policy_change_facet():
+    query = "Why did the company fail and what challenges caused the problems?"
+    plans = retrieval.build_retrieval_query_plan(query)
+
+    assert "policy_change" not in [
+        label
+        for label, _query in plans
     ]
 
 

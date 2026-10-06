@@ -267,20 +267,22 @@ A value of `0` disables the soft facet bonus. The diagnostic output exposes both
 
 The strategy label is `question_aware_soft_facet_rerank`.
 
-## Phase 8 — Targeted policy-change candidate generation
+## Phase 8 — Focused policy-change evidence facet
 
-The focused Q09 diagnostic isolated a separate failure mode after dense-anchor headroom was fixed: one required policy evidence group never entered candidate generation at all. The existing policy/governance facet emphasized government policy, regulation, banks, support, approval, and restrictions, but did not explicitly represent **policy changes** or **regulatory changes**.
+The Q09 diagnostic showed two separate retrieval weaknesses: the required policy-change evidence was not recovered by the semantic path, while lexical retrieval could surface it only after global fusion. The earlier experiment broadened the generic `policy_governance` facet with change-oriented vocabulary, but that global change perturbed rankings for other dense questions.
 
-The retrieval fix enriches that generic policy facet with change-oriented vocabulary:
+The current retrieval path keeps `policy_governance` unchanged and adds a separate `policy_change` facet only when the question is explicitly policy/government/regulation oriented.
+
+The focused facet contains generic change vocabulary:
 
 - `policy changes`
 - `regulatory changes`
 - `rules`
 - `regulations`
 
-This keeps the change deterministic and model-free. It does not add benchmark-specific chunk IDs or answer phrases, change retrieval thresholds, or bypass the FAISS/lexical evidence gates. The existing original question, content-focused query, facet fusion, anchor selection, and bounded context expansion remain unchanged.
+The focused facet participates in the same semantic retrieval, lexical retrieval, RRF fusion, soft facet reranking, anchor selection, and bounded context expansion already used by dense questions.
 
-The targeted regression tests verify both the planned policy query vocabulary and the lexical path's ability to surface a chunk whose evidence is expressed as a policy-change phrase.
+No benchmark-specific chunk IDs, threshold relaxation, or hard-coded answer text is added. Regression tests verify that policy questions receive the focused facet, non-policy dense questions do not, the original governance facet remains unchanged, and lexical retrieval can surface policy-change evidence.
 
 ## Phase 8 — Dense anchor context headroom
 
