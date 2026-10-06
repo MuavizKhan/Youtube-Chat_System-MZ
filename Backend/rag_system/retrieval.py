@@ -697,8 +697,7 @@ def retrieve_mmr(
         selected_positions
     ):
 
-        original_position = (
-            eligible_positions[
+        original_position = (            eligible_positions[
                 selected_position
             ]
         )
@@ -1125,7 +1124,8 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
         "losses costs"
     ),
     "policy_governance": (
-        "government policy regulation banks support approval restrictions"
+        "government policy changes regulatory changes "
+        "rules regulations banks support approval restrictions"
     ),
     "operational_challenges": (
         "operational challenges payments fees fuel suppliers service costs"
@@ -1397,7 +1397,6 @@ def lexical_search(
     focus_terms = extract_query_focus_terms(query)
     if not focus_terms:
         focus_terms = list(extract_query_terms(query))
-
     if not focus_terms:
         return []
 
@@ -2098,7 +2097,6 @@ def retrieve_question_context(
 
     if is_overview_question(query):
         return retrieve_overview(vector_store)
-
     dense_question = is_evidence_dense_question(query)
 
     semantic_k = (
@@ -2271,4 +2269,3 @@ def retrieve_question_context(
         vector_store,
         raw_results,
     )
-
