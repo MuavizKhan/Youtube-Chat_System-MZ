@@ -1125,8 +1125,8 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
         "losses costs"
     ),
     "policy_governance": (
-        "government policy changes regulatory changes "
-        "rules regulations banks support approval restrictions"
+        "government policy regulation banks support approval restrictions "
+        "policy changes regulatory changes rules regulations"
     ),
     "operational_challenges": (
         "operational challenges payments fees fuel suppliers service costs"
