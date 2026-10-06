@@ -991,8 +991,9 @@ def _group_diagnosis(candidate_diagnostics: list[dict[str, Any]]) -> str:
         "anchor_selection_miss": 2,
         "hybrid_fusion_miss": 3,
         "semantic_fusion_miss": 4,
-        "mmr_selection_miss": 5,
-        "candidate_generation_miss": 6,
+        "faiss_distance_gate_miss": 5,
+        "mmr_selection_miss": 6,
+        "candidate_generation_miss": 7,
     }
     if not candidate_diagnostics:
         return "candidate_generation_miss"
