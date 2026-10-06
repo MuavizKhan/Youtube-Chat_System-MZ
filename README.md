@@ -267,6 +267,21 @@ A value of `0` disables the soft facet bonus. The diagnostic output exposes both
 
 The strategy label is `question_aware_soft_facet_rerank`.
 
+## Phase 8 — Targeted policy-change candidate generation
+
+The focused Q09 diagnostic isolated a separate failure mode after dense-anchor headroom was fixed: one required policy evidence group never entered candidate generation at all. The existing policy/governance facet emphasized government policy, regulation, banks, support, approval, and restrictions, but did not explicitly represent **policy changes** or **regulatory changes**.
+
+The retrieval fix enriches that generic policy facet with change-oriented vocabulary:
+
+- `policy changes`
+- `regulatory changes`
+- `rules`
+- `regulations`
+
+This keeps the change deterministic and model-free. It does not add benchmark-specific chunk IDs or answer phrases, change retrieval thresholds, or bypass the FAISS/lexical evidence gates. The existing original question, content-focused query, facet fusion, anchor selection, and bounded context expansion remain unchanged.
+
+The targeted regression tests verify both the planned policy query vocabulary and the lexical path's ability to surface a chunk whose evidence is expressed as a policy-change phrase.
+
 ## Phase 8 — Dense anchor context headroom
 
 The focused Q06/Q09 retrieval diagnostic showed that useful evidence could reach the hybrid ranking but still be dropped by dense-question anchor selection because the anchor budget filled the entire final context capacity.
