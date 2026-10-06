@@ -841,6 +841,16 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     assert groups[1]["candidates"][0]["raw_faiss_rank"] == 2
     assert groups[1]["candidates"][0]["semantic_mmr_rank"] is None
 
+    # A candidate can be present in raw FAISS results but fail the production
+    # distance gate. The diagnostic severity map must recognize that stage.
+    from Backend.rag_system.evaluation import _group_diagnosis
+
+    assert _group_diagnosis([
+        {
+            "diagnosis": "faiss_distance_gate_miss",
+        },
+    ]) == "faiss_distance_gate_miss"
+
 
 @pytest.mark.regression
 def test_gold_context_benchmark_metrics_and_thresholds_pass():
