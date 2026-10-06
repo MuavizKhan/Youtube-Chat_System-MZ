@@ -36,6 +36,7 @@ from .config import (
     CONTEXT_EXPANSION_CHUNKS,
     CONTEXT_MAX_CHUNKS,
     DENSE_ANCHOR_LIMIT,
+    DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
     DENSE_FACET_RERANK_WEIGHT,
     DENSE_SEMANTIC_FETCH_K,
@@ -2210,6 +2211,11 @@ def retrieve_question_context(
             raw_results = select_diverse_retrieval_anchors(
                 reranked_results,
                 limit=anchor_limit,
+                min_chunk_gap=(
+                    DENSE_ANCHOR_MIN_CHUNK_GAP
+                    if dense_question
+                    else 3
+                ),
             )
         else:
             raw_results = combined_results[:anchor_limit]
