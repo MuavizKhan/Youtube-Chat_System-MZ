@@ -309,6 +309,67 @@ def test_select_diverse_retrieval_anchors_fills_remaining_budget():
 
 
 @pytest.mark.unit
+def test_question_context_uses_dense_anchor_headroom(monkeypatch):
+    dense = "Why did the company fail and what challenges caused the problems?"
+    ranked = [
+        (doc(10, 100, 105, "first region"), 0.1),
+        (doc(24, 240, 245, "supporting region"), 0.2),
+        (doc(26, 260, 265, "nearby supporting region"), 0.3),
+    ]
+    captured = {}
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: ranked,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "DENSE_ANCHOR_LIMIT",
+        12,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "DENSE_ANCHOR_MIN_CHUNK_GAP",
+        2,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "select_diverse_retrieval_anchors",
+        lambda ranked_results, *, limit, min_chunk_gap: (
+            captured.update(
+                limit=limit,
+                min_chunk_gap=min_chunk_gap,
+            )
+            or ranked_results
+        ),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda vector_store, retrieved_results, **kwargs: retrieved_results,
+    )
+
+    retrieval.retrieve_question_context(
+        object(),
+        dense,
+        k=2,
+        fetch_k=4,
+        expand_context=False,
+    )
+
+    assert captured == {
+        "limit": 12,
+        "min_chunk_gap": 2,
+    }
+
+
+@pytest.mark.unit
 def test_question_context_soft_reranks_dense_anchors(monkeypatch):
     dense = "Why did the company fail and what challenges caused the problems?"
     ranked = [
