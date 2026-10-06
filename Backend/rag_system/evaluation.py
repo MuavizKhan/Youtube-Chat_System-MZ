@@ -17,6 +17,9 @@ import math
 from typing import Any
 
 from .config import (
+    DENSE_ANCHOR_LIMIT,
+    DENSE_ANCHOR_MIN_CHUNK_GAP,
+    DENSE_CONTEXT_MAX_CHUNKS,
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
@@ -1320,6 +1323,9 @@ def build_evaluation_summary(
             "fetch_k": MMR_FETCH_K,
             "lambda_mult": MMR_LAMBDA,
             "max_distance": MAX_DISTANCE,
+            "dense_anchor_limit": DENSE_ANCHOR_LIMIT,
+            "dense_anchor_min_chunk_gap": DENSE_ANCHOR_MIN_CHUNK_GAP,
+            "dense_context_max_chunks": DENSE_CONTEXT_MAX_CHUNKS,
         },
         "benchmark_thresholds": BENCHMARK_THRESHOLDS,
         "benchmark_metrics": benchmark_metrics,
