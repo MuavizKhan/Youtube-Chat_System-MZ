@@ -25,6 +25,7 @@ Final Answer + Sources
 
 import time
 import argparse
+import logging
 import re
 from typing import Any
 
@@ -74,6 +75,9 @@ from .retrieval import (
 )
 
 from .index_service import load_ready_index
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
