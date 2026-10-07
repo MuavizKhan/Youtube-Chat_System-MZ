@@ -336,11 +336,158 @@ def test_generation_exhausts_empty_answer_retries(monkeypatch):
 
 @pytest.mark.unit
 def test_rag_chain_falls_back_without_generation(monkeypatch):
-    monkeypatch.setattr(chain,"retrieve_question_context",lambda **k:[])
-    monkeypatch.setattr(chain,"generate_with_huggingface",lambda **k:pytest.fail("generation must not run"))
-    result=chain.build_rag_chain(object(),object()).invoke({"question":"Missing?","video_id":"Gfr50f6ZBvo"})
-    assert result["answer"]==chain.FALLBACK_ANSWER
-    assert result["retrieved_results"]==[] and result["source_groups"]==[]
+    monkeypatch.setattr(
+        chain,
+        "retrieve_with_query_recovery",
+        lambda **k: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_huggingface",
+        lambda **k: pytest.fail("generation must not run"),
+    )
+    result = chain.build_rag_chain(
+        object(),
+        object(),
+    ).invoke(
+        {
+            "question": "Missing?",
+            "video_id": "Gfr50f6ZBvo",
+        }
+    )
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert (
+        result["retrieved_results"] == []
+        and result["source_groups"] == []
+    )
+
+
+@pytest.mark.unit
+def test_query_recovery_keeps_fast_path_when_initial_retrieval_succeeds(monkeypatch):
+    expected = [(doc(1, 0, 10, "direct evidence"), 0.2)]
+    calls = {"understand": 0}
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **k: expected,
+    )
+
+    def forbidden_understanding(**kwargs):
+        calls["understand"] += 1
+        raise AssertionError(
+            "query understanding should not run after successful retrieval"
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        forbidden_understanding,
+    )
+
+    result = chain.retrieve_with_query_recovery(
+        object(),
+        "What happened?",
+        object(),
+    )
+
+    assert result == expected
+    assert calls["understand"] == 0
+
+
+@pytest.mark.unit
+def test_query_recovery_retries_with_reformulated_queries(monkeypatch):
+    empty = []
+    recovered = [(doc(7, 70, 80, "recovered evidence"), 0.4)]
+    attempts = []
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            attempts.append(kwargs["query"])
+            or (empty if len(attempts) == 1 else recovered)
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="causal",
+            standalone_question="reasons people are protesting",
+            search_queries=[
+                "reasons for protest",
+                "protest demands",
+            ],
+        ),
+    )
+
+    result = chain.retrieve_with_query_recovery(
+        object(),
+        "Why are they protesting?",
+        object(),
+    )
+
+    assert result == recovered
+    assert attempts == [
+        "Why are they protesting?",
+        "reasons people are protesting",
+    ]
+
+
+@pytest.mark.unit
+def test_query_recovery_routes_unrecognized_overview_question(monkeypatch):
+    overview = [(doc(1, 0, 10, "overview evidence"), 1.3)]
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="overview",
+            standalone_question="What is the main subject?",
+            search_queries=["main topic"],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda vector_store: overview,
+    )
+
+    result = chain.retrieve_with_query_recovery(
+        object(),
+        "What is the main subject discussed here?",
+        object(),
+    )
+
+    assert result == overview
+
+
+@pytest.mark.unit
+def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: (_ for _ in ()).throw(
+            chain.QueryUnderstandingError("planner unavailable")
+        ),
+    )
+
+    assert chain.retrieve_with_query_recovery(
+        object(),
+        "What happened?",
+        object(),
+    ) == []
 
 
 @pytest.mark.unit
