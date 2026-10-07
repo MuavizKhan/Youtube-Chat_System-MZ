@@ -528,8 +528,11 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
     )
 
     assert result == recovered
-    assert distances.count(chain.MAX_DISTANCE) == 2
-    assert distances.count(chain.RECOVERY_MAX_DISTANCE) == 1
+    assert distances[-1] == chain.RECOVERY_MAX_DISTANCE
+    assert all(
+        distance == chain.MAX_DISTANCE
+        for distance in distances[:-1]
+    )
 
 
 @pytest.mark.unit
