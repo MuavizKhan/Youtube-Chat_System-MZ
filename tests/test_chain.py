@@ -491,6 +491,87 @@ def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
 
 
 @pytest.mark.unit
+def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
+    monkeypatch,
+):
+    recovered = [
+        (doc(7, 70, 80, "relaxed evidence"), 1.5)
+    ]
+    distances = []
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            distances.append(kwargs["max_distance"])
+            or (
+                recovered
+                if kwargs["max_distance"] == chain.RECOVERY_MAX_DISTANCE
+                else []
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="general",
+            standalone_question="important issue",
+            search_queries=["main issue", "central concern"],
+        ),
+    )
+
+    result = chain.retrieve_with_query_recovery(
+        object(),
+        "What seems to be the biggest issue?",
+        object(),
+    )
+
+    assert result == recovered
+    assert distances.count(chain.MAX_DISTANCE) == 2
+    assert distances.count(chain.RECOVERY_MAX_DISTANCE) == 1
+
+
+@pytest.mark.unit
+def test_query_recovery_uses_representative_context_as_final_fallback(
+    monkeypatch,
+):
+    overview = [
+        (doc(1, 0, 10, "opening context"), chain.MAX_DISTANCE),
+        (doc(2, 20, 30, "representative context"), chain.MAX_DISTANCE),
+    ]
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="opinion",
+            standalone_question="which side is good and which is bad",
+            search_queries=[
+                "arguments for each side",
+                "positions of opposing sides",
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda vector_store: overview,
+    )
+
+    assert chain.retrieve_with_query_recovery(
+        object(),
+        "Which side is good and which is bad?",
+        object(),
+    ) == overview
+
+
+@pytest.mark.unit
 def test_generation_rejects_malformed_response():
     fake, _ = client(
         response=SimpleNamespace(
