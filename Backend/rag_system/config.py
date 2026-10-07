@@ -306,6 +306,23 @@ MAX_DISTANCE = _get_float(
     1.30,
 )
 
+# Recovery retrieval is intentionally more permissive than normal retrieval.
+# It is only used after strict retrieval and query reformulation fail.
+RECOVERY_MAX_DISTANCE = _get_float(
+    "RAG_RECOVERY_MAX_DISTANCE",
+    1.60,
+)
+
+RECOVERY_TOP_K = _get_int(
+    "RAG_RECOVERY_TOP_K",
+    6,
+)
+
+RECOVERY_FETCH_K = _get_int(
+    "RAG_RECOVERY_FETCH_K",
+    18,
+)
+
 
 # Optional context expansion around strong retrieval hits.
 # A window of 1 adds at most one chronological neighbor on each side.
@@ -531,6 +548,30 @@ if MAX_DISTANCE < 0:
 
     raise RuntimeError(
         "RAG_MAX_DISTANCE cannot be negative."
+    )
+
+if RECOVERY_MAX_DISTANCE < MAX_DISTANCE:
+
+    raise RuntimeError(
+        "RAG_RECOVERY_MAX_DISTANCE cannot be smaller than RAG_MAX_DISTANCE."
+    )
+
+if RECOVERY_TOP_K <= 0:
+
+    raise RuntimeError(
+        "RAG_RECOVERY_TOP_K must be greater than 0."
+    )
+
+if RECOVERY_FETCH_K <= 0:
+
+    raise RuntimeError(
+        "RAG_RECOVERY_FETCH_K must be greater than 0."
+    )
+
+if RECOVERY_TOP_K > RECOVERY_FETCH_K:
+
+    raise RuntimeError(
+        "RAG_RECOVERY_TOP_K cannot be greater than RAG_RECOVERY_FETCH_K."
     )
 
 
