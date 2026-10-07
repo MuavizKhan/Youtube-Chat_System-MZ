@@ -89,6 +89,108 @@ def client(response=None,error=None):
     return SimpleNamespace(chat=SimpleNamespace(completions=completions)),completions
 
 
+
+
+@pytest.mark.unit
+def test_groq_generation_returns_clean_answer(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="  grounded answer  "
+                )
+            )
+        ]
+    )
+
+    fake, completions = client(response=response)
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    assert chain.generate_with_groq(fake, prompt) == "grounded answer"
+    assert completions.kwargs["model"] == chain.GROQ_MODEL_ID
+    assert completions.kwargs["max_completion_tokens"] == chain.GROQ_MAX_TOKENS
+    assert completions.kwargs["temperature"] == chain.GROQ_TEMPERATURE
+    assert completions.kwargs["reasoning_effort"] == chain.GROQ_REASONING_EFFORT
+    assert completions.kwargs["include_reasoning"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "error_text,expected",
+    [
+        ("401 unauthorized", "authentication failed"),
+        ("403 forbidden", "rejected the inference request"),
+        ("429 rate limit", "rate limit was reached"),
+        ("network timeout", "generation failed"),
+    ],
+)
+def test_groq_generation_translates_errors(error_text, expected):
+    fake, _ = client(error=RuntimeError(error_text))
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "X",
+            "question": "Q",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match=expected):
+        chain.generate_with_groq(fake, prompt)
+
+
+@pytest.mark.unit
+def test_generate_with_llm_dispatches_to_groq(monkeypatch):
+    sentinel = "groq answer"
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(
+        chain,
+        "generate_with_groq",
+        lambda **kwargs: sentinel,
+    )
+
+    assert chain.generate_with_llm(object(), object()) == sentinel
+
+
+@pytest.mark.unit
+def test_build_rag_chain_uses_separate_generation_client(monkeypatch):
+    generation_client = object()
+    observed = {}
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_with_query_recovery",
+        lambda **kwargs: [
+            (doc(1, 0, 10, "evidence"), 0.2)
+        ],
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **kwargs: (
+            observed.update(kwargs) or "grounded answer"
+        ),
+    )
+
+    result = chain.build_rag_chain(
+        object(),
+        object(),
+        generation_client=generation_client,
+    ).invoke(
+        {
+            "question": "What happened?",
+            "video_id": "Gfr50f6ZBvo",
+        }
+    )
+
+    assert result["answer"] == "grounded answer"
+    assert observed["client"] is generation_client
+
 @pytest.mark.unit
 def test_generation_returns_clean_answer():
     response=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="  grounded answer  "))])
@@ -600,10 +702,48 @@ def test_generation_rejects_malformed_response():
 
 
 @pytest.mark.unit
-def test_create_llm_client_requires_token(monkeypatch):
-    monkeypatch.setattr(chain,"HF_TOKEN",None)
-    with pytest.raises(RuntimeError,match="HF_TOKEN was not found"):
+def test_create_llm_client_requires_huggingface_token(monkeypatch):
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "huggingface")
+    monkeypatch.setattr(chain, "HF_TOKEN", None)
+    with pytest.raises(RuntimeError, match="HF_TOKEN was not found"):
         chain.create_llm_client()
+
+
+@pytest.mark.unit
+def test_create_llm_client_selects_groq(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(
+        chain,
+        "create_groq_client",
+        lambda: sentinel,
+    )
+
+    assert chain.create_llm_client() is sentinel
+
+
+@pytest.mark.unit
+def test_create_groq_client_requires_api_key(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_API_KEY", None)
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY was not found"):
+        chain.create_groq_client()
+
+
+@pytest.mark.unit
+def test_create_groq_client_uses_configured_key(monkeypatch):
+    captured = {}
+
+    class FakeGroq:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(chain, "GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setattr(chain, "Groq", FakeGroq)
+
+    client = chain.create_groq_client()
+
+    assert isinstance(client, FakeGroq)
+    assert captured == {"api_key": "gsk_test_key"}
 
 @pytest.mark.unit
 def test_answer_question_uses_index_lifecycle(monkeypatch):
@@ -649,6 +789,11 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
         "create_llm_client",
         lambda: object(),
     )
+    monkeypatch.setattr(
+        chain,
+        "create_huggingface_client",
+        lambda: object(),
+    )
 
     class FakeRagChain:
         def invoke(self, inputs):
@@ -664,7 +809,7 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     monkeypatch.setattr(
         chain,
         "build_rag_chain",
-        lambda vector_store, llm_client: FakeRagChain(),
+        lambda vector_store, llm_client, generation_client: FakeRagChain(),
     )
 
     result = chain.answer_question(
