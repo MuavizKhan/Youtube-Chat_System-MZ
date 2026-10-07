@@ -55,6 +55,9 @@ from .config import (
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     MAX_DISTANCE,
+    RECOVERY_FETCH_K,
+    RECOVERY_MAX_DISTANCE,
+    RECOVERY_TOP_K,
     MMR_FETCH_K,
     MMR_LAMBDA,
     SOURCE_MERGE_GAP_SECONDS,
@@ -1066,13 +1069,16 @@ def retrieve_with_query_recovery(
     llm_client: InferenceClient,
 ):
     """
-    Run normal retrieval first. Only when it returns no evidence, ask the
-    query-understanding model for a structured search plan and retry the
-    existing retrieval strategies.
+    Use a bounded recovery ladder after normal retrieval fails.
 
-    The recovery layer is intentionally bounded and fail-open: if query
-    understanding fails, the original empty result is returned and the
-    normal API fallback remains in control.
+    1. Run the existing strict retriever.
+    2. Ask the LLM for a structured query plan.
+    3. Retry reformulated queries with the normal evidence threshold.
+    4. Retry those queries with a more permissive recovery threshold.
+    5. Use representative transcript context as a final best-effort source.
+
+    The normal path is unchanged. Recovery is only entered after it returns
+    no evidence.
     """
 
     initial_results = retrieve_question_context(
@@ -1111,8 +1117,7 @@ def retrieve_with_query_recovery(
 
         if overview_results:
             logger.info(
-                "Query recovery used overview routing for a previously "
-                "unretrievable question"
+                "Query recovery used overview routing"
             )
             return overview_results
 
@@ -1123,6 +1128,7 @@ def retrieve_with_query_recovery(
 
     seen_queries = set()
 
+    unique_queries = []
     for query in queries:
         normalized = query.strip()
 
@@ -1139,9 +1145,16 @@ def retrieve_with_query_recovery(
         if key == question.strip().casefold():
             continue
 
+        unique_queries.append(normalized)
+
+    # --------------------------------------------------------
+    # Recovery stage 1: keep the original evidence contract.
+    # --------------------------------------------------------
+
+    for query in unique_queries:
         recovered_results = retrieve_question_context(
             vector_store=vector_store,
-            query=normalized,
+            query=query,
             k=TOP_K,
             fetch_k=MMR_FETCH_K,
             lambda_mult=MMR_LAMBDA,
@@ -1153,6 +1166,43 @@ def retrieve_with_query_recovery(
                 "Query recovery found evidence using a reformulated query"
             )
             return recovered_results
+
+    # --------------------------------------------------------
+    # Recovery stage 2: relax retrieval only after strict
+    # retrieval has failed. This is deliberately bounded.
+    # --------------------------------------------------------
+
+    for query in unique_queries:
+        relaxed_results = retrieve_question_context(
+            vector_store=vector_store,
+            query=query,
+            k=RECOVERY_TOP_K,
+            fetch_k=RECOVERY_FETCH_K,
+            lambda_mult=MMR_LAMBDA,
+            max_distance=RECOVERY_MAX_DISTANCE,
+        )
+
+        if relaxed_results:
+            logger.info(
+                "Query recovery found evidence using relaxed retrieval"
+            )
+            return relaxed_results
+
+    # --------------------------------------------------------
+    # Recovery stage 3: preserve usefulness by giving the
+    # generator representative transcript context.
+    # --------------------------------------------------------
+
+    best_effort_results = retrieve_overview(
+        vector_store
+    )
+
+    if best_effort_results:
+        logger.info(
+            "Query recovery used representative transcript context "
+            "as a best-effort fallback"
+        )
+        return best_effort_results
 
     return []
 
