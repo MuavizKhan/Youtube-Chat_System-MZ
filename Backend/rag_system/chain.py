@@ -62,8 +62,14 @@ from .config import (
     HF_RETRY_DELAY_SECONDS,
 )
 
+from .query_understanding import (
+    QueryUnderstandingError,
+    understand_query,
+)
+
 from .retrieval import (
     extract_video_id,
+    retrieve_overview,
     retrieve_question_context,
 )
 
@@ -1050,6 +1056,103 @@ def format_sources(
 
     return sources
 
+def retrieve_with_query_recovery(
+    vector_store,
+    question: str,
+    llm_client: InferenceClient,
+):
+    """
+    Run normal retrieval first. Only when it returns no evidence, ask the
+    query-understanding model for a structured search plan and retry the
+    existing retrieval strategies.
+
+    The recovery layer is intentionally bounded and fail-open: if query
+    understanding fails, the original empty result is returned and the
+    normal API fallback remains in control.
+    """
+
+    initial_results = retrieve_question_context(
+        vector_store=vector_store,
+        query=question,
+        k=TOP_K,
+        fetch_k=MMR_FETCH_K,
+        lambda_mult=MMR_LAMBDA,
+        max_distance=MAX_DISTANCE,
+    )
+
+    if initial_results:
+        return initial_results
+
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+        )
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Query understanding failed during retrieval recovery: %s",
+            error,
+        )
+        return []
+    except Exception:
+        logger.exception(
+            "Unexpected query-understanding failure during retrieval recovery"
+        )
+        return []
+
+    if plan.intent == "overview":
+        overview_results = retrieve_overview(
+            vector_store
+        )
+
+        if overview_results:
+            logger.info(
+                "Query recovery used overview routing for a previously "
+                "unretrievable question"
+            )
+            return overview_results
+
+    queries = [
+        plan.standalone_question,
+        *plan.search_queries,
+    ]
+
+    seen_queries = set()
+
+    for query in queries:
+        normalized = query.strip()
+
+        if not normalized:
+            continue
+
+        key = normalized.casefold()
+
+        if key in seen_queries:
+            continue
+
+        seen_queries.add(key)
+
+        if key == question.strip().casefold():
+            continue
+
+        recovered_results = retrieve_question_context(
+            vector_store=vector_store,
+            query=normalized,
+            k=TOP_K,
+            fetch_k=MMR_FETCH_K,
+            lambda_mult=MMR_LAMBDA,
+            max_distance=MAX_DISTANCE,
+        )
+
+        if recovered_results:
+            logger.info(
+                "Query recovery found evidence using a reformulated query"
+            )
+            return recovered_results
+
+    return []
+
+
 # ============================================================
 # 10. BUILD THE LANGCHAIN RAG CHAIN
 # ============================================================
@@ -1085,15 +1188,12 @@ def build_rag_chain(
     # --------------------------------------------------------
 
     retrieval_runnable = RunnableLambda(
-    lambda inputs: retrieve_question_context(
-        vector_store=vector_store,
-        query=inputs["question"],
-        k=TOP_K,
-        fetch_k=MMR_FETCH_K,
-        lambda_mult=MMR_LAMBDA,
-        max_distance=MAX_DISTANCE,
+        lambda inputs: retrieve_with_query_recovery(
+            vector_store=vector_store,
+            question=inputs["question"],
+            llm_client=llm_client,
+        )
     )
-)
 
 
     # --------------------------------------------------------
