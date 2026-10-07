@@ -68,7 +68,6 @@ from .config import (
 
 from .query_understanding import (
     QueryUnderstandingError,
-    is_likely_follow_up,
     understand_query,
 )
 
@@ -170,15 +169,12 @@ SOURCE / TIMESTAMP RULES
     timestamps separately. Therefore, the answer itself must
     contain ONLY the substantive answer.
 
-20. Conversation history is only for resolving references such as
-    "they", "them", "this", or "that". It is not transcript evidence.
-
-21. Never fabricate a source, timestamp, citation, or reference.
+20. Never fabricate a source, timestamp, citation, or reference.
 
 FINAL RULE
 ----------
 
-22. Return only the answer to the user's question.
+21. Return only the answer to the user's question.
 """
 
 
@@ -1071,71 +1067,8 @@ def retrieve_with_query_recovery(
     vector_store,
     question: str,
     llm_client: InferenceClient,
-    conversation_history: list[dict[str, str]] | None = None,
 ):
-    """
-    Use a bounded recovery ladder, with a small pre-retrieval follow-up
-    resolution step when conversation history is available.
-
-    Ordinary questions keep the existing fast path. Follow-up questions
-    containing lightweight reference signals such as "they" or "this" are
-    first rewritten against the recent conversation, then sent through the
-    existing retriever. All later recovery stages remain unchanged.
-    """
-
-    follow_up_plan = None
-
-    if conversation_history and is_likely_follow_up(question):
-        try:
-            follow_up_plan = understand_query(
-                client=llm_client,
-                question=question,
-                conversation_history=conversation_history,
-            )
-        except QueryUnderstandingError as error:
-            logger.warning(
-                "Follow-up query understanding failed; using normal retrieval: %s",
-                error,
-            )
-        except Exception:
-            logger.exception(
-                "Unexpected follow-up query-understanding failure"
-            )
-
-    if follow_up_plan is not None:
-        resolved_queries = [
-            follow_up_plan.standalone_question,
-            *follow_up_plan.search_queries,
-        ]
-
-        seen_queries = set()
-
-        for query in resolved_queries:
-            normalized = query.strip()
-            key = normalized.casefold()
-
-            if not normalized or key in seen_queries:
-                continue
-
-            seen_queries.add(key)
-
-            if key == question.strip().casefold():
-                continue
-
-            resolved_results = retrieve_question_context(
-                vector_store=vector_store,
-                query=normalized,
-                k=TOP_K,
-                fetch_k=MMR_FETCH_K,
-                lambda_mult=MMR_LAMBDA,
-                max_distance=MAX_DISTANCE,
-            )
-
-            if resolved_results:
-                logger.info(
-                    "Follow-up query resolved against conversation history"
-                )
-                return resolved_results
+    """Run the existing bounded retrieval recovery ladder."""
 
     initial_results = retrieve_question_context(
         vector_store=vector_store,
@@ -1149,26 +1082,22 @@ def retrieve_with_query_recovery(
     if initial_results:
         return initial_results
 
-    plan = follow_up_plan
-
-    if plan is None:
-        try:
-            plan = understand_query(
-                client=llm_client,
-                question=question,
-                conversation_history=conversation_history,
-            )
-        except QueryUnderstandingError as error:
-            logger.warning(
-                "Query understanding failed during retrieval recovery: %s",
-                error,
-            )
-            return []
-        except Exception:
-            logger.exception(
-                "Unexpected query-understanding failure during retrieval recovery"
-            )
-            return []
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+        )
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Query understanding failed during retrieval recovery: %s",
+            error,
+        )
+        return []
+    except Exception:
+        logger.exception(
+            "Unexpected query-understanding failure during retrieval recovery"
+        )
+        return []
 
     if plan.intent == "overview":
         overview_results = retrieve_overview(vector_store)
@@ -1247,8 +1176,6 @@ def retrieve_with_query_recovery(
     return []
 
 
-
-
 # ============================================================
 # 10. BUILD THE LANGCHAIN RAG CHAIN
 # ============================================================
@@ -1288,10 +1215,6 @@ def build_rag_chain(
             vector_store=vector_store,
             question=inputs["question"],
             llm_client=llm_client,
-            conversation_history=inputs.get(
-                "conversation_history",
-                [],
-            ),
         )
     )
 
@@ -1424,6 +1347,44 @@ def build_rag_chain(
     return final_chain
 
 
+def resolve_conversational_question(
+    question: str,
+    conversation_history: list[dict[str, str]] | None,
+    llm_client: InferenceClient,
+) -> str:
+    """Resolve a likely follow-up into the standalone RAG question."""
+
+    if not conversation_history:
+        return question
+
+    from .query_understanding import is_likely_follow_up
+
+    if not is_likely_follow_up(question):
+        return question
+
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+            conversation_history=conversation_history,
+        )
+        resolved = plan.standalone_question.strip()
+
+        if resolved and resolved.casefold() != question.casefold():
+            logger.info("Resolved conversational follow-up before RAG")
+            return resolved
+
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Follow-up resolution failed; using original question: %s",
+            error,
+        )
+    except Exception:
+        logger.exception("Unexpected follow-up resolution failure")
+
+    return question
+
+
 # ============================================================
 # 11. PUBLIC RAG FUNCTION
 # ============================================================
@@ -1509,6 +1470,16 @@ def answer_question(
         llm_client=llm_client,
     )
 
+
+    # --------------------------------------------------------
+    # Resolve follow-up before retrieval and generation
+    # --------------------------------------------------------
+
+    question = resolve_conversational_question(
+        question=question,
+        conversation_history=conversation_history,
+        llm_client=llm_client,
+    )
 
     # --------------------------------------------------------
     # Invoke chain
