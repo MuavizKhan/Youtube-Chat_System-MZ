@@ -202,20 +202,14 @@ VIDEO CONTEXT
 {context}
 
 
-CONVERSATION HISTORY
-=====================
-
-{conversation_history_text}
-
-
 USER QUESTION
 =============
 
 {question}
 
 
-Use conversation history only to resolve references in the current
-question. Answer using only the transcript evidence provided above.
+Answer the user's question using only the transcript evidence
+provided above.
 
 Return only the answer.
 Do not include source labels, citations, references,
@@ -229,30 +223,6 @@ timestamps, or metadata.
 # ============================================================
 # 3. TIMESTAMP FORMATTER
 # ============================================================
-
-def format_conversation_history(
-    conversation_history: list[dict[str, str]] | None,
-) -> str:
-    """Format recent turns for the generation prompt."""
-
-    if not conversation_history:
-        return "No previous conversation."
-
-    lines: list[str] = []
-
-    for turn in conversation_history[-6:]:
-        role = str(turn.get("role", "")).strip().lower()
-        content = str(turn.get("content", "")).strip()
-
-        if role not in {"user", "assistant"} or not content:
-            continue
-
-        label = "User" if role == "user" else "Assistant"
-        lines.append(f"{label}: {content}")
-
-    return "\n".join(lines) or "No previous conversation."
-
-
 
 def format_timestamp(
     seconds: float,
@@ -1549,10 +1519,6 @@ def answer_question(
         {
             "question": question,
             "video_id": video_id,
-            "conversation_history": conversation_history or [],
-            "conversation_history_text": format_conversation_history(
-                conversation_history or []
-            ),
         }
     )
 
