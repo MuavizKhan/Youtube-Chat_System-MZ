@@ -199,6 +199,8 @@ def understand_query(
     if not question:
         raise ValueError("question cannot be empty.")
 
+    from .config import HF_REASONING_EFFORT
+
     response = client.chat.completions.create(
         model=_get_model_id(),
         messages=[
@@ -213,6 +215,9 @@ def understand_query(
         ],
         max_tokens=256,
         temperature=0.0,
+        extra_body={
+            "reasoning_effort": HF_REASONING_EFFORT,
+        },
     )
 
     content = _extract_response_content(response)
