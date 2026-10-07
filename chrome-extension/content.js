@@ -33,6 +33,10 @@ let isRequestInProgress = false;
 
 let activeRequestId = 0;
 
+const MAX_CONVERSATION_HISTORY = 6;
+
+let conversationHistory = [];
+
 let lastVideoId = null;
 
 let indexStatus = "unknown";
@@ -1121,7 +1125,10 @@ function sendMessage() {
             {
                 type: "chat",
                 video_id: requestedVideoId,
-                question
+                question,
+                history: conversationHistory.slice(
+                    -MAX_CONVERSATION_HISTORY
+                )
             },
             (response) => {
                 const runtimeError = chrome.runtime.lastError;
@@ -1170,6 +1177,24 @@ function sendMessage() {
                     answer || "No answer was returned."
                 );
 
+                if (answer) {
+                    conversationHistory.push(
+                        {
+                            role: "user",
+                            content: question
+                        },
+                        {
+                            role: "assistant",
+                            content: answer
+                        }
+                    );
+
+                    conversationHistory =
+                        conversationHistory.slice(
+                            -MAX_CONVERSATION_HISTORY
+                        );
+                }
+
                 renderSources(
                     response.sources || []
                 );
@@ -1215,6 +1240,8 @@ function handleVideoNavigation() {
         if (chatInput) {
             chatInput.value = "";
         }
+
+        conversationHistory = [];
 
         clearSources();
 
