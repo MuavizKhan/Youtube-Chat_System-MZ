@@ -728,3 +728,98 @@ def test_answer_question_propagates_index_lifecycle_error(
 )
 def test_sanitize_generated_answer(raw, expected):
     assert chain.sanitize_generated_answer(raw) == expected
+
+
+@pytest.mark.unit
+def test_format_conversation_history_keeps_recent_turns():
+    history = [
+        {"role": "user", "content": "First question"},
+        {"role": "assistant", "content": "First answer"},
+        {"role": "user", "content": "Why are people protesting?"},
+        {"role": "assistant", "content": "They are protesting for reforms."},
+    ]
+
+    formatted = chain.format_conversation_history(history)
+
+    assert "User: Why are people protesting?" in formatted
+    assert "Assistant: They are protesting for reforms." in formatted
+
+
+@pytest.mark.unit
+def test_query_recovery_resolves_follow_up_before_original_question(monkeypatch):
+    resolved = [
+        (doc(8, 80, 100, "resolved follow-up evidence"), 0.5)
+    ]
+    attempts = []
+    planner_calls = []
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            attempts.append(kwargs["query"])
+            or resolved
+        ),
+    )
+
+    def fake_understand(**kwargs):
+        planner_calls.append(kwargs)
+        return SimpleNamespace(
+            intent="follow_up",
+            standalone_question="Who are the people participating in the protest?",
+            search_queries=[
+                "people participating in the protest",
+            ],
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        fake_understand,
+    )
+
+    history = [
+        {
+            "role": "user",
+            "content": "Why are people protesting?",
+        },
+        {
+            "role": "assistant",
+            "content": "People are protesting to demand reforms.",
+        },
+    ]
+
+    result = chain.retrieve_with_query_recovery(
+        object(),
+        "Who are they people?",
+        object(),
+        conversation_history=history,
+    )
+
+    assert result == resolved
+    assert attempts == [
+        "Who are the people participating in the protest?",
+    ]
+    assert planner_calls[0]["conversation_history"] == history
+
+
+@pytest.mark.unit
+def test_recovery_generation_prompt_contains_conversation_history():
+    prompt = chain.RAG_PROMPT.invoke(
+        {
+            "context": "Transcript evidence",
+            "question": "Who are they?",
+            "conversation_history_text": (
+                "User: Why are people protesting?\\n"
+                "Assistant: They want election reforms."
+            ),
+        }
+    )
+
+    messages = chain.prompt_to_messages(prompt)
+
+    assert (
+        "Why are people protesting?"
+        in messages[1]["content"]
+    )
+    assert "They want election reforms." in messages[1]["content"]
