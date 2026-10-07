@@ -728,3 +728,44 @@ def test_answer_question_propagates_index_lifecycle_error(
 )
 def test_sanitize_generated_answer(raw, expected):
     assert chain.sanitize_generated_answer(raw) == expected
+
+
+
+@pytest.mark.unit
+def test_resolve_conversational_question_returns_standalone_question(monkeypatch):
+    calls = []
+
+    def fake_understand(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            intent="follow_up",
+            standalone_question="Who are the people participating in the protest?",
+            search_queries=["people participating in the protest"],
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        fake_understand,
+    )
+
+    history = [
+        {
+            "role": "user",
+            "content": "Why are people protesting?",
+        },
+        {
+            "role": "assistant",
+            "content": "People are protesting to demand reforms.",
+        },
+    ]
+
+    resolved = chain.resolve_conversational_question(
+        question="Who are they?",
+        conversation_history=history,
+        llm_client=object(),
+    )
+
+    assert resolved == "Who are the people participating in the protest?"
+    assert calls[0]["conversation_history"] == history
+

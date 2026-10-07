@@ -142,7 +142,11 @@ def test_ready_reports_missing_configuration(client,monkeypatch):
 
 @pytest.mark.api
 def test_chat_success_and_request_id(client,monkeypatch):
-    monkeypatch.setattr(app_module,"answer_question",lambda video_reference,question:result())
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        lambda video_reference, question, conversation_history: result(),
+    )
     r=client.post("/chat",json={"video_id":VALID_VIDEO_ID,"question":"What happened?"})
     assert r.status_code==200
     assert r.json()["answer"]=="Test answer."
@@ -222,7 +226,11 @@ def test_cors_preflight(client):
 
 @pytest.mark.api
 def test_rate_limit_contract(client,monkeypatch):
-    monkeypatch.setattr(app_module,"answer_question",lambda video_reference,question:result())
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        lambda video_reference, question, conversation_history: result(),
+    )
     app_module.limiter.enabled=True
     try:
         responses=[
@@ -455,3 +463,59 @@ def test_chat_returns_409_when_index_is_building(client, monkeypatch):
     assert response.json()["state"] == "building"
     assert response.json()["job_id"] == "job-building-1"
     assert response.json()["request_id"]
+
+
+@pytest.mark.api
+def test_chat_forwards_bounded_conversation_history(client, monkeypatch):
+    captured = {}
+
+    def fake_answer_question(
+        video_reference,
+        question,
+        conversation_history,
+    ):
+        captured["video_reference"] = video_reference
+        captured["question"] = question
+        captured["conversation_history"] = conversation_history
+        return result()
+
+    monkeypatch.setattr(
+        app_module,
+        "answer_question",
+        fake_answer_question,
+    )
+
+    history = [
+        {"role": "user", "content": "Why are people protesting?"},
+        {"role": "assistant", "content": "They want election reforms."},
+    ]
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "Who are they?",
+            "conversation_history": history,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["conversation_history"] == history
+
+
+@pytest.mark.api
+def test_chat_rejects_too_many_history_messages(client, monkeypatch):
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "Who are they?",
+            "conversation_history": [
+                {"role": "user", "content": str(index)}
+                for index in range(7)
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"

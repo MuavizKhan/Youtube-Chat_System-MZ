@@ -143,3 +143,46 @@ def test_understand_query_rejects_empty_question():
 
     with pytest.raises(ValueError, match="question cannot be empty"):
         query_understanding.understand_query(fake, "   ")
+
+
+@pytest.mark.unit
+def test_understand_query_uses_conversation_history_for_follow_up():
+    fake, completions = fake_client(
+        '{"intent":"follow_up","standalone_question":"Who are the people who joined the protest?",'
+        '"search_queries":["people who joined the protest"]}'
+    )
+
+    plan = query_understanding.understand_query(
+        fake,
+        "Who are they people?",
+        conversation_history=[
+            {
+                "role": "user",
+                "content": "Why are people protesting?",
+            },
+            {
+                "role": "assistant",
+                "content": "People are protesting to demand election commission reforms.",
+            },
+        ],
+    )
+
+    assert plan.intent == "follow_up"
+    assert plan.standalone_question == "Who are the people who joined the protest?"
+    user_message = completions.kwargs["messages"][1]["content"]
+    assert "Why are people protesting?" in user_message
+    assert "Who are they people?" in user_message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("Who are they?", True),
+        ("What happened here?", True),
+        ("What is the main topic?", False),
+        ("Why are people protesting?", False),
+    ],
+)
+def test_is_likely_follow_up(question, expected):
+    assert query_understanding.is_likely_follow_up(question) is expected

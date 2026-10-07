@@ -141,6 +141,11 @@ chrome.runtime.onMessage.addListener(
                 message.question
             );
 
+        const history =
+            normalizeConversationHistory(
+                message.history
+            );
+
         // ----------------------------------------------------
         // Sender information
         // ----------------------------------------------------
@@ -221,7 +226,8 @@ chrome.runtime.onMessage.addListener(
         handleChatRequest(
             {
                 videoId,
-                question
+                question,
+                history
             },
             sendResponse
         );
@@ -347,7 +353,8 @@ async function handleIndexStatus(videoId, sendResponse) {
 async function handleChatRequest(
     {
         videoId,
-        question
+        question,
+        history
     },
     sendResponse
 ) {
@@ -384,7 +391,10 @@ async function handleChatRequest(
                             videoId,
 
                         question:
-                            question
+                            question,
+
+                        conversation_history:
+                            history
                     }),
 
                     signal:
@@ -618,6 +628,33 @@ function normalizeString(
     }
 
     return value.trim();
+}
+
+
+function normalizeConversationHistory(
+    value
+) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .slice(-6)
+        .map(
+            (turn) => ({
+                role:
+                    turn?.role === "assistant"
+                        ? "assistant"
+                        : "user",
+                content:
+                    normalizeString(
+                        turn?.content
+                    )
+            })
+        )
+        .filter(
+            (turn) => turn.content
+        );
 }
 
 

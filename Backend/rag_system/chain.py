@@ -1068,18 +1068,7 @@ def retrieve_with_query_recovery(
     question: str,
     llm_client: InferenceClient,
 ):
-    """
-    Use a bounded recovery ladder after normal retrieval fails.
-
-    1. Run the existing strict retriever.
-    2. Ask the LLM for a structured query plan.
-    3. Retry reformulated queries with the normal evidence threshold.
-    4. Retry those queries with a more permissive recovery threshold.
-    5. Use representative transcript context as a final best-effort source.
-
-    The normal path is unchanged. Recovery is only entered after it returns
-    no evidence.
-    """
+    """Run the existing bounded retrieval recovery ladder."""
 
     initial_results = retrieve_question_context(
         vector_store=vector_store,
@@ -1111,9 +1100,7 @@ def retrieve_with_query_recovery(
         return []
 
     if plan.intent == "overview":
-        overview_results = retrieve_overview(
-            vector_store
-        )
+        overview_results = retrieve_overview(vector_store)
 
         if overview_results:
             logger.info("Query recovery used overview routing")
@@ -1145,7 +1132,6 @@ def retrieve_with_query_recovery(
 
         unique_queries.append(normalized)
 
-    # Recovery stage 1: preserve the original evidence contract.
     for query in unique_queries:
         recovered_results = retrieve_question_context(
             vector_store=vector_store,
@@ -1162,7 +1148,6 @@ def retrieve_with_query_recovery(
             )
             return recovered_results
 
-    # Recovery stage 2: relax retrieval only after strict recovery fails.
     for query in unique_queries:
         relaxed_results = retrieve_question_context(
             vector_store=vector_store,
@@ -1179,10 +1164,7 @@ def retrieve_with_query_recovery(
             )
             return relaxed_results
 
-    # Recovery stage 3: representative transcript context.
-    best_effort_results = retrieve_overview(
-        vector_store
-    )
+    best_effort_results = retrieve_overview(vector_store)
 
     if best_effort_results:
         logger.info(
@@ -1192,6 +1174,44 @@ def retrieve_with_query_recovery(
         return best_effort_results
 
     return []
+
+
+def resolve_conversational_question(
+    question: str,
+    conversation_history: list[dict[str, str]] | None,
+    llm_client: InferenceClient,
+) -> str:
+    """Resolve a likely follow-up into the standalone RAG question."""
+
+    if not conversation_history:
+        return question
+
+    from .query_understanding import is_likely_follow_up
+
+    if not is_likely_follow_up(question):
+        return question
+
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+            conversation_history=conversation_history,
+        )
+        resolved = plan.standalone_question.strip()
+
+        if resolved and resolved.casefold() != question.casefold():
+            logger.info("Resolved conversational follow-up before RAG")
+            return resolved
+
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Follow-up resolution failed; using original question: %s",
+            error,
+        )
+    except Exception:
+        logger.exception("Unexpected follow-up resolution failure")
+
+    return question
 
 
 # ============================================================
@@ -1365,6 +1385,44 @@ def build_rag_chain(
     return final_chain
 
 
+def resolve_conversational_question(
+    question: str,
+    conversation_history: list[dict[str, str]] | None,
+    llm_client: InferenceClient,
+) -> str:
+    """Resolve a likely follow-up into the standalone RAG question."""
+
+    if not conversation_history:
+        return question
+
+    from .query_understanding import is_likely_follow_up
+
+    if not is_likely_follow_up(question):
+        return question
+
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+            conversation_history=conversation_history,
+        )
+        resolved = plan.standalone_question.strip()
+
+        if resolved and resolved.casefold() != question.casefold():
+            logger.info("Resolved conversational follow-up before RAG")
+            return resolved
+
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Follow-up resolution failed; using original question: %s",
+            error,
+        )
+    except Exception:
+        logger.exception("Unexpected follow-up resolution failure")
+
+    return question
+
+
 # ============================================================
 # 11. PUBLIC RAG FUNCTION
 # ============================================================
@@ -1372,6 +1430,7 @@ def build_rag_chain(
 def answer_question(
     video_reference: str,
     question: str,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> dict:
     """
     Main application entry point.
@@ -1449,6 +1508,16 @@ def answer_question(
         llm_client=llm_client,
     )
 
+
+    # --------------------------------------------------------
+    # Resolve follow-up before retrieval and generation
+    # --------------------------------------------------------
+
+    question = resolve_conversational_question(
+        question=question,
+        conversation_history=conversation_history,
+        llm_client=llm_client,
+    )
 
     # --------------------------------------------------------
     # Invoke chain

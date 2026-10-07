@@ -1,13 +1,11 @@
 """
 query_understanding.py
 
-Adaptive query understanding for retrieval recovery.
+Adaptive query understanding for retrieval and follow-up resolution.
 
-The normal retrieval path remains the first attempt. This module is only
-used when that path returns no usable evidence. It asks the configured
-Hugging Face chat model to produce a small structured query plan that can be
-used to retry the existing retriever without adding another retrieval
-algorithm.
+The normal retrieval path remains the fast path for ordinary questions. This
+module can also use a short conversation history to resolve follow-up
+references such as "they", "them", "this", or "that" before retrieval.
 """
 
 from __future__ import annotations
@@ -70,16 +68,70 @@ Return JSON with exactly these fields:
 Rules:
 1. Preserve the user's meaning.
 2. Do not invent names, events, facts, relationships, or conclusions.
-3. The only information available is the user's current question. There is
-   no conversation history in this step.
-4. If the question contains pronouns such as "they", "he", "she", "this", or
-   "that" and the referent is unknown, do not invent the referent. Preserve
-   the ambiguity.
-5. Search queries should focus on concepts likely to appear in a transcript.
-6. For broad overview requests, set intent to "overview".
-7. Do not answer the question.
-8. Return JSON only.
+3. When conversation history is provided, use it only to resolve references
+   in the current question.
+4. Never invent a referent when the conversation history does not establish
+   one. Preserve the ambiguity instead.
+5. Do not treat conversation history as transcript evidence.
+6. Search queries should focus on concepts likely to appear in a transcript.
+7. For broad overview requests, set intent to "overview".
+8. Do not answer the question.
+9. Return JSON only.
 """
+
+
+def _format_conversation_history(
+    conversation_history: list[dict[str, str]] | None,
+) -> str:
+    """Format a bounded conversation history for the query planner."""
+
+    if not conversation_history:
+        return "No previous conversation."
+
+    lines: list[str] = []
+
+    for turn in conversation_history[-6:]:
+        role = str(turn.get("role", "")).strip().lower()
+        content = str(turn.get("content", "")).strip()
+
+        if role not in {"user", "assistant"} or not content:
+            continue
+
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {content}")
+
+    return "\n".join(lines) or "No previous conversation."
+
+
+def is_likely_follow_up(question: str) -> bool:
+    """Return True for lightweight linguistic signals of a follow-up."""
+
+    normalized = " ".join(question.lower().split())
+
+    if not normalized:
+        return False
+
+    follow_up_patterns = (
+        r"\bthey\b",
+        r"\bthem\b",
+        r"\btheir\b",
+        r"\bhe\b",
+        r"\bshe\b",
+        r"\bhis\b",
+        r"\bher\b",
+        r"\bit\b",
+        r"\bthis\b",
+        r"\bthat\b",
+        r"\bthese\b",
+        r"\bthose\b",
+        r"\bhere\b",
+        r"\bthere\b",
+    )
+
+    return any(
+        re.search(pattern, normalized)
+        for pattern in follow_up_patterns
+    )
 
 
 def _extract_response_content(response: Any) -> str:
@@ -185,13 +237,15 @@ def _normalize_query_plan(plan: QueryPlan) -> QueryPlan:
 def understand_query(
     client: InferenceClient,
     question: str,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> QueryPlan:
     """
     Ask the Hugging Face model to convert an unfamiliar question into a
     structured retrieval plan.
 
     This function intentionally does not call the vector store. It is only
-    responsible for understanding and reformulating the user's wording.
+    responsible for understanding, resolving short follow-ups, and
+    reformulating the user's wording.
     """
 
     question = question.strip()
@@ -210,7 +264,14 @@ def understand_query(
             },
             {
                 "role": "user",
-                "content": question,
+                "content": (
+                    "CONVERSATION HISTORY\n"
+                    "====================\n\n"
+                    f"{_format_conversation_history(conversation_history)}\n\n"
+                    "CURRENT QUESTION\n"
+                    "=================\n\n"
+                    f"{question}"
+                ),
             },
         ],
         max_tokens=256,
