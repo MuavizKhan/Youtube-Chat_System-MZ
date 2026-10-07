@@ -68,6 +68,7 @@ from .config import (
 
 from .query_understanding import (
     QueryUnderstandingError,
+    is_likely_follow_up,
     understand_query,
 )
 
@@ -169,7 +170,10 @@ SOURCE / TIMESTAMP RULES
     timestamps separately. Therefore, the answer itself must
     contain ONLY the substantive answer.
 
-20. Never fabricate a source, timestamp, citation, or reference.
+20. Conversation history is only for resolving references such as
+    "they", "them", "this", or "that". It is not transcript evidence.
+
+21. Never fabricate a source, timestamp, citation, or reference.
 
 FINAL RULE
 ----------
@@ -198,14 +202,20 @@ VIDEO CONTEXT
 {context}
 
 
+CONVERSATION HISTORY
+=====================
+
+{conversation_history}
+
+
 USER QUESTION
 =============
 
 {question}
 
 
-Answer the user's question using only the transcript evidence
-provided above.
+Use conversation history only to resolve references in the current
+question. Answer using only the transcript evidence provided above.
 
 Return only the answer.
 Do not include source labels, citations, references,
@@ -219,6 +229,30 @@ timestamps, or metadata.
 # ============================================================
 # 3. TIMESTAMP FORMATTER
 # ============================================================
+
+def format_conversation_history(
+    conversation_history: list[dict[str, str]] | None,
+) -> str:
+    """Format recent turns for the generation prompt."""
+
+    if not conversation_history:
+        return "No previous conversation."
+
+    lines: list[str] = []
+
+    for turn in conversation_history[-6:]:
+        role = str(turn.get("role", "")).strip().lower()
+        content = str(turn.get("content", "")).strip()
+
+        if role not in {"user", "assistant"} or not content:
+            continue
+
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {content}")
+
+    return "\n".join(lines) or "No previous conversation."
+
+
 
 def format_timestamp(
     seconds: float,
@@ -1067,19 +1101,71 @@ def retrieve_with_query_recovery(
     vector_store,
     question: str,
     llm_client: InferenceClient,
+    conversation_history: list[dict[str, str]] | None = None,
 ):
     """
-    Use a bounded recovery ladder after normal retrieval fails.
+    Use a bounded recovery ladder, with a small pre-retrieval follow-up
+    resolution step when conversation history is available.
 
-    1. Run the existing strict retriever.
-    2. Ask the LLM for a structured query plan.
-    3. Retry reformulated queries with the normal evidence threshold.
-    4. Retry those queries with a more permissive recovery threshold.
-    5. Use representative transcript context as a final best-effort source.
-
-    The normal path is unchanged. Recovery is only entered after it returns
-    no evidence.
+    Ordinary questions keep the existing fast path. Follow-up questions
+    containing lightweight reference signals such as "they" or "this" are
+    first rewritten against the recent conversation, then sent through the
+    existing retriever. All later recovery stages remain unchanged.
     """
+
+    follow_up_plan = None
+
+    if conversation_history and is_likely_follow_up(question):
+        try:
+            follow_up_plan = understand_query(
+                client=llm_client,
+                question=question,
+                conversation_history=conversation_history,
+            )
+        except QueryUnderstandingError as error:
+            logger.warning(
+                "Follow-up query understanding failed; using normal retrieval: %s",
+                error,
+            )
+        except Exception:
+            logger.exception(
+                "Unexpected follow-up query-understanding failure"
+            )
+
+    if follow_up_plan is not None:
+        resolved_queries = [
+            follow_up_plan.standalone_question,
+            *follow_up_plan.search_queries,
+        ]
+
+        seen_queries = set()
+
+        for query in resolved_queries:
+            normalized = query.strip()
+            key = normalized.casefold()
+
+            if not normalized or key in seen_queries:
+                continue
+
+            seen_queries.add(key)
+
+            if key == question.strip().casefold():
+                continue
+
+            resolved_results = retrieve_question_context(
+                vector_store=vector_store,
+                query=normalized,
+                k=TOP_K,
+                fetch_k=MMR_FETCH_K,
+                lambda_mult=MMR_LAMBDA,
+                max_distance=MAX_DISTANCE,
+            )
+
+            if resolved_results:
+                logger.info(
+                    "Follow-up query resolved against conversation history"
+                )
+                return resolved_results
 
     initial_results = retrieve_question_context(
         vector_store=vector_store,
@@ -1093,27 +1179,29 @@ def retrieve_with_query_recovery(
     if initial_results:
         return initial_results
 
-    try:
-        plan = understand_query(
-            client=llm_client,
-            question=question,
-        )
-    except QueryUnderstandingError as error:
-        logger.warning(
-            "Query understanding failed during retrieval recovery: %s",
-            error,
-        )
-        return []
-    except Exception:
-        logger.exception(
-            "Unexpected query-understanding failure during retrieval recovery"
-        )
-        return []
+    plan = follow_up_plan
+
+    if plan is None:
+        try:
+            plan = understand_query(
+                client=llm_client,
+                question=question,
+                conversation_history=conversation_history,
+            )
+        except QueryUnderstandingError as error:
+            logger.warning(
+                "Query understanding failed during retrieval recovery: %s",
+                error,
+            )
+            return []
+        except Exception:
+            logger.exception(
+                "Unexpected query-understanding failure during retrieval recovery"
+            )
+            return []
 
     if plan.intent == "overview":
-        overview_results = retrieve_overview(
-            vector_store
-        )
+        overview_results = retrieve_overview(vector_store)
 
         if overview_results:
             logger.info("Query recovery used overview routing")
@@ -1145,7 +1233,6 @@ def retrieve_with_query_recovery(
 
         unique_queries.append(normalized)
 
-    # Recovery stage 1: preserve the original evidence contract.
     for query in unique_queries:
         recovered_results = retrieve_question_context(
             vector_store=vector_store,
@@ -1162,7 +1249,6 @@ def retrieve_with_query_recovery(
             )
             return recovered_results
 
-    # Recovery stage 2: relax retrieval only after strict recovery fails.
     for query in unique_queries:
         relaxed_results = retrieve_question_context(
             vector_store=vector_store,
@@ -1179,10 +1265,7 @@ def retrieve_with_query_recovery(
             )
             return relaxed_results
 
-    # Recovery stage 3: representative transcript context.
-    best_effort_results = retrieve_overview(
-        vector_store
-    )
+    best_effort_results = retrieve_overview(vector_store)
 
     if best_effort_results:
         logger.info(
@@ -1192,6 +1275,8 @@ def retrieve_with_query_recovery(
         return best_effort_results
 
     return []
+
+
 
 
 # ============================================================
@@ -1233,6 +1318,10 @@ def build_rag_chain(
             vector_store=vector_store,
             question=inputs["question"],
             llm_client=llm_client,
+            conversation_history=inputs.get(
+                "conversation_history",
+                [],
+            ),
         )
     )
 
@@ -1372,6 +1461,7 @@ def build_rag_chain(
 def answer_question(
     video_reference: str,
     question: str,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> dict:
     """
     Main application entry point.
@@ -1459,6 +1549,10 @@ def answer_question(
         {
             "question": question,
             "video_id": video_id,
+            "conversation_history": conversation_history or [],
+            "conversation_history_text": format_conversation_history(
+                conversation_history or []
+            ),
         }
     )
 
