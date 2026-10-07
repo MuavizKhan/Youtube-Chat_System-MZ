@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import subprocess
 import sys
@@ -12,6 +13,8 @@ def run_config_import(extra_env: dict[str, str | None]):
         else:
             env[key] = value
 
+    env["PYTHON_DOTENV_DISABLED"] = "true"
+
     return subprocess.run(
         [
             sys.executable,
@@ -25,7 +28,7 @@ def run_config_import(extra_env: dict[str, str | None]):
         ],
         capture_output=True,
         text=True,
-        cwd=str(os.getcwd()),
+        cwd=str(Path(__file__).resolve().parents[1]),
         env=env,
         check=False,
     )
