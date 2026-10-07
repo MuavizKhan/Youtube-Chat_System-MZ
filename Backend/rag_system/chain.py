@@ -178,7 +178,7 @@ SOURCE / TIMESTAMP RULES
 FINAL RULE
 ----------
 
-21. Return only the answer to the user's question.
+22. Return only the answer to the user's question.
 """
 
 
@@ -205,7 +205,7 @@ VIDEO CONTEXT
 CONVERSATION HISTORY
 =====================
 
-{conversation_history}
+{conversation_history_text}
 
 
 USER QUESTION
