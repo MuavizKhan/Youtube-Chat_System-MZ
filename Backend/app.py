@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
@@ -457,6 +458,17 @@ class IndexStatusResponse(BaseModel):
     job_id: str | None = None
 
 
+class ConversationTurn(BaseModel):
+
+    role: Literal["user", "assistant"]
+
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+    )
+
+
 class ChatRequest(BaseModel):
 
     video_id: str = Field(
@@ -476,6 +488,15 @@ class ChatRequest(BaseModel):
         "Question about the YouTube video."
     ),
 )
+
+    conversation_history: list[ConversationTurn] = Field(
+        default_factory=list,
+        max_length=6,
+        description=(
+            "Recent user/assistant turns used only to resolve "
+            "follow-up references."
+        ),
+    )
 
 
 class SourceResponse(BaseModel):
@@ -713,6 +734,15 @@ def chat(
     video_id = chat_request.video_id.strip()
     question = chat_request.question.strip()
 
+    conversation_history = [
+        {
+            "role": turn.role,
+            "content": turn.content.strip(),
+        }
+        for turn in chat_request.conversation_history
+        if turn.content.strip()
+    ][-6:]
+
     if not video_id:
 
         raise HTTPException(
@@ -751,6 +781,7 @@ def chat(
         result = answer_question(
             video_reference=canonical_video_id,
             question=question,
+            conversation_history=conversation_history,
         )
 
         return result
