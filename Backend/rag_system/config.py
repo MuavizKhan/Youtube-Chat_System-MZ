@@ -397,6 +397,112 @@ if SOURCE_MERGE_GAP_SECONDS < 0:
     )
 
 # ============================================================
+# LLM PROVIDER
+# ============================================================
+
+LLM_PROVIDER = os.getenv(
+    "LLM_PROVIDER",
+    "huggingface",
+).strip().lower()
+
+SUPPORTED_LLM_PROVIDERS = {
+    "huggingface",
+    "groq",
+}
+
+if LLM_PROVIDER not in SUPPORTED_LLM_PROVIDERS:
+
+    raise RuntimeError(
+        "LLM_PROVIDER must be one of: "
+        "huggingface, groq."
+    )
+
+
+# ============================================================
+# GROQ GENERATION
+# ============================================================
+
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY",
+)
+
+GROQ_MODEL_ID = os.getenv(
+    "GROQ_MODEL_ID",
+    "openai/gpt-oss-20b",
+)
+
+GROQ_MAX_TOKENS = _get_int(
+    "GROQ_MAX_TOKENS",
+    1200,
+)
+
+GROQ_TEMPERATURE = _get_float(
+    "GROQ_TEMPERATURE",
+    0.1,
+)
+
+GROQ_REASONING_EFFORT = os.getenv(
+    "GROQ_REASONING_EFFORT",
+    "low",
+).strip().lower()
+
+if GROQ_REASONING_EFFORT not in {
+    "low",
+    "medium",
+    "high",
+}:
+
+    raise RuntimeError(
+        "GROQ_REASONING_EFFORT must be one of: "
+        "low, medium, high for openai/gpt-oss-20b."
+    )
+
+GROQ_MAX_RETRIES = _get_int(
+    "GROQ_MAX_RETRIES",
+    2,
+)
+
+GROQ_RETRY_DELAY_SECONDS = _get_float(
+    "GROQ_RETRY_DELAY_SECONDS",
+    1.0,
+)
+
+if GROQ_MAX_RETRIES < 0:
+
+    raise RuntimeError(
+        "GROQ_MAX_RETRIES cannot be negative."
+    )
+
+if GROQ_RETRY_DELAY_SECONDS < 0:
+
+    raise RuntimeError(
+        "GROQ_RETRY_DELAY_SECONDS cannot be negative."
+    )
+
+if GROQ_MAX_TOKENS <= 0:
+
+    raise RuntimeError(
+        "GROQ_MAX_TOKENS must be greater than 0."
+    )
+
+if not 0.0 <= GROQ_TEMPERATURE <= 2.0:
+
+    raise RuntimeError(
+        "GROQ_TEMPERATURE must be between 0.0 and 2.0."
+    )
+
+if (
+    LLM_PROVIDER == "groq"
+    and not GROQ_API_KEY
+):
+
+    raise RuntimeError(
+        "GROQ_API_KEY must be configured "
+        "when LLM_PROVIDER=groq."
+    )
+
+
+# ============================================================
 # HUGGING FACE GENERATION
 # ============================================================
 
