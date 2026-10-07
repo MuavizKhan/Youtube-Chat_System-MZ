@@ -1176,6 +1176,44 @@ def retrieve_with_query_recovery(
     return []
 
 
+def resolve_conversational_question(
+    question: str,
+    conversation_history: list[dict[str, str]] | None,
+    llm_client: InferenceClient,
+) -> str:
+    """Resolve a likely follow-up into the standalone RAG question."""
+
+    if not conversation_history:
+        return question
+
+    from .query_understanding import is_likely_follow_up
+
+    if not is_likely_follow_up(question):
+        return question
+
+    try:
+        plan = understand_query(
+            client=llm_client,
+            question=question,
+            conversation_history=conversation_history,
+        )
+        resolved = plan.standalone_question.strip()
+
+        if resolved and resolved.casefold() != question.casefold():
+            logger.info("Resolved conversational follow-up before RAG")
+            return resolved
+
+    except QueryUnderstandingError as error:
+        logger.warning(
+            "Follow-up resolution failed; using original question: %s",
+            error,
+        )
+    except Exception:
+        logger.exception("Unexpected follow-up resolution failure")
+
+    return question
+
+
 # ============================================================
 # 10. BUILD THE LANGCHAIN RAG CHAIN
 # ============================================================
