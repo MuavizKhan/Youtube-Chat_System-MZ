@@ -100,7 +100,7 @@ def _format_conversation_history(
         label = "User" if role == "user" else "Assistant"
         lines.append(f"{label}: {content}")
 
-    return "\\n".join(lines) or "No previous conversation."
+    return "\n".join(lines) or "No previous conversation."
 
 
 def is_likely_follow_up(question: str) -> bool:
@@ -112,20 +112,20 @@ def is_likely_follow_up(question: str) -> bool:
         return False
 
     follow_up_patterns = (
-        r"\\bthey\\b",
-        r"\\bthem\\b",
-        r"\\btheir\\b",
-        r"\\bhe\\b",
-        r"\\bshe\\b",
-        r"\\bhis\\b",
-        r"\\bher\\b",
-        r"\\bit\\b",
-        r"\\bthis\\b",
-        r"\\bthat\\b",
-        r"\\bthese\\b",
-        r"\\bthose\\b",
-        r"\\bhere\\b",
-        r"\\bthere\\b",
+        r"\bthey\b",
+        r"\bthem\b",
+        r"\btheir\b",
+        r"\bhe\b",
+        r"\bshe\b",
+        r"\bhis\b",
+        r"\bher\b",
+        r"\bit\b",
+        r"\bthis\b",
+        r"\bthat\b",
+        r"\bthese\b",
+        r"\bthose\b",
+        r"\bhere\b",
+        r"\bthere\b",
     )
 
     return any(
@@ -265,11 +265,11 @@ def understand_query(
             {
                 "role": "user",
                 "content": (
-                    "CONVERSATION HISTORY\\n"
-                    "====================\\n\\n"
-                    f"{_format_conversation_history(conversation_history)}\\n\\n"
-                    "CURRENT QUESTION\\n"
-                    "=================\\n\\n"
+                    "CONVERSATION HISTORY\n"
+                    "====================\n\n"
+                    f"{_format_conversation_history(conversation_history)}\n\n"
+                    "CURRENT QUESTION\n"
+                    "=================\n\n"
                     f"{question}"
                 ),
             },
