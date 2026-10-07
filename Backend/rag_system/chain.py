@@ -15,7 +15,7 @@ Context Formatting
     ↓
 ChatPromptTemplate
     ↓
-Hugging Face Generation
+LLM Generation
     ↓
 StrOutputParser
     ↓
@@ -683,7 +683,7 @@ def create_groq_client() -> Groq:
     )
 
 
-def create_llm_client():
+def create_llm_client() -> InferenceClient | Groq:
     """Create the configured generation client."""
 
     if LLM_PROVIDER == "groq":
@@ -693,7 +693,7 @@ def create_llm_client():
 
 
 # ============================================================
-# 7. LANGCHAIN PROMPT → HUGGING FACE MESSAGES
+# 7. LANGCHAIN PROMPT → CHAT MESSAGES
 # ============================================================
 
 def prompt_to_messages(
@@ -754,7 +754,7 @@ def prompt_to_messages(
     return messages
 
 # response extractor
-def extract_huggingface_answer(response) -> str:
+def extract_chat_completion_answer(response) -> str:
     """
     Extract the user-visible answer from a Hugging Face
     Chat Completions response.
@@ -791,7 +791,7 @@ def extract_huggingface_answer(response) -> str:
     return content.strip()
 
 # capture response diagnostics
-def get_huggingface_response_diagnostics(
+def get_chat_response_diagnostics(
     response,
 ) -> dict[str, object]:
     """
@@ -876,7 +876,7 @@ def sanitize_generated_answer(answer: str) -> str:
 
 
 # ============================================================
-# 9. HUGGING FACE GENERATION
+# 9. MODEL GENERATION
 # ============================================================
 
 def generate_with_huggingface(
@@ -957,7 +957,7 @@ def generate_with_huggingface(
         # Extract visible model answer
         # --------------------------------------------------------
 
-        answer = extract_huggingface_answer(response)
+        answer = extract_chat_completion_answer(response)
 
         if answer:
             return sanitize_generated_answer(answer)
@@ -966,7 +966,7 @@ def generate_with_huggingface(
         # Empty response diagnostics
         # --------------------------------------------------------
 
-        diagnostics = get_huggingface_response_diagnostics(
+        diagnostics = get_chat_response_diagnostics(
             response
         )
 
@@ -1044,12 +1044,12 @@ def generate_with_groq(
                 f"Groq generation failed: {error}"
             ) from error
 
-        answer = extract_huggingface_answer(response)
+        answer = extract_chat_completion_answer(response)
 
         if answer:
             return sanitize_generated_answer(answer)
 
-        diagnostics = get_huggingface_response_diagnostics(response)
+        diagnostics = get_chat_response_diagnostics(response)
 
         if attempt < GROQ_MAX_RETRIES:
             time.sleep(GROQ_RETRY_DELAY_SECONDS)
@@ -1185,7 +1185,7 @@ def format_sources(
 def retrieve_with_query_recovery(
     vector_store,
     question: str,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ):
     """Run the existing bounded retrieval recovery ladder."""
 
@@ -1200,6 +1200,11 @@ def retrieve_with_query_recovery(
 
     if initial_results:
         return initial_results
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when strict retrieval actually needs recovery.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1298,7 +1303,7 @@ def retrieve_with_query_recovery(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1309,6 +1314,12 @@ def resolve_conversational_question(
 
     if not is_likely_follow_up(question):
         return question
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when the question actually needs follow-up
+    # resolution.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1359,7 +1370,7 @@ def build_rag_chain(
         ↓
     Prompt
         ↓
-    Hugging Face
+    LLM provider
         ↓
     Parsed answer
     """
@@ -1511,7 +1522,7 @@ def build_rag_chain(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1522,6 +1533,12 @@ def resolve_conversational_question(
 
     if not is_likely_follow_up(question):
         return question
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when the question actually needs follow-up
+    # resolution.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1614,12 +1631,11 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Create separate clients for query understanding and generation.
+    # Create the generation client.
     # Step 2 migrates generation only; query understanding remains on
-    # Hugging Face until its dedicated provider migration step.
+    # Hugging Face and is created lazily only when needed.
     # --------------------------------------------------------
 
-    query_understanding_client = create_huggingface_client()
     generation_client = create_llm_client()
 
 
@@ -1631,7 +1647,7 @@ def answer_question(
 
         vector_store=vector_store,
 
-        llm_client=query_understanding_client,
+        llm_client=None,
 
         generation_client=generation_client,
     )
@@ -1644,7 +1660,7 @@ def answer_question(
     question = resolve_conversational_question(
         question=question,
         conversation_history=conversation_history,
-        llm_client=query_understanding_client,
+        llm_client=None,
     )
 
     # --------------------------------------------------------
