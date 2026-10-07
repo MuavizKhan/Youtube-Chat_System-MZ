@@ -732,30 +732,15 @@ def test_sanitize_generated_answer(raw, expected):
 
 
 @pytest.mark.unit
-def test_query_recovery_resolves_follow_up_before_original_question(monkeypatch):
-    resolved = [
-        (doc(8, 80, 100, "resolved follow-up evidence"), 0.5)
-    ]
-    attempts = []
-    planner_calls = []
-
-    monkeypatch.setattr(
-        chain,
-        "retrieve_question_context",
-        lambda **kwargs: (
-            attempts.append(kwargs["query"])
-            or resolved
-        ),
-    )
+def test_resolve_conversational_question_returns_standalone_question(monkeypatch):
+    calls = []
 
     def fake_understand(**kwargs):
-        planner_calls.append(kwargs)
+        calls.append(kwargs)
         return SimpleNamespace(
             intent="follow_up",
             standalone_question="Who are the people participating in the protest?",
-            search_queries=[
-                "people participating in the protest",
-            ],
+            search_queries=["people participating in the protest"],
         )
 
     monkeypatch.setattr(
@@ -775,15 +760,12 @@ def test_query_recovery_resolves_follow_up_before_original_question(monkeypatch)
         },
     ]
 
-    result = chain.retrieve_with_query_recovery(
-        object(),
-        "Who are they people?",
-        object(),
+    resolved = chain.resolve_conversational_question(
+        question="Who are they?",
         conversation_history=history,
+        llm_client=object(),
     )
 
-    assert result == resolved
-    assert attempts == [
-        "Who are the people participating in the protest?",
-    ]
-    assert planner_calls[0]["conversation_history"] == history
+    assert resolved == "Who are the people participating in the protest?"
+    assert calls[0]["conversation_history"] == history
+
