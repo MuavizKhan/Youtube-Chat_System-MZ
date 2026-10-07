@@ -447,17 +447,14 @@ GROQ_REASONING_EFFORT = os.getenv(
 ).strip().lower()
 
 if GROQ_REASONING_EFFORT not in {
-    "none",
-    "minimal",
     "low",
     "medium",
     "high",
-    "xhigh",
 }:
 
     raise RuntimeError(
         "GROQ_REASONING_EFFORT must be one of: "
-        "none, minimal, low, medium, high, xhigh."
+        "low, medium, high for openai/gpt-oss-20b."
     )
 
 GROQ_MAX_RETRIES = _get_int(
