@@ -479,6 +479,18 @@ if GROQ_RETRY_DELAY_SECONDS < 0:
         "GROQ_RETRY_DELAY_SECONDS cannot be negative."
     )
 
+if GROQ_MAX_TOKENS <= 0:
+
+    raise RuntimeError(
+        "GROQ_MAX_TOKENS must be greater than 0."
+    )
+
+if not 0.0 <= GROQ_TEMPERATURE <= 2.0:
+
+    raise RuntimeError(
+        "GROQ_TEMPERATURE must be between 0.0 and 2.0."
+    )
+
 if (
     LLM_PROVIDER == "groq"
     and not GROQ_API_KEY
