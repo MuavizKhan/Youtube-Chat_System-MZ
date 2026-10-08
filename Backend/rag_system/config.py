@@ -405,7 +405,7 @@ DENSE_FACET_RERANK_WEIGHT = _get_float(
 # candidates; it never expands the candidate set or bypasses evidence gates.
 RAG_RERANK_ENABLED = _get_bool(
     "RAG_RERANK_ENABLED",
-    True,
+    False,
 )
 
 RAG_RERANK_MODEL = os.getenv(
