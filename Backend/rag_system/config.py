@@ -85,6 +85,30 @@ def _get_float(
         ) from error
 
 
+def _get_bool(
+    name: str,
+    default: bool,
+) -> bool:
+    """Read a boolean environment variable."""
+
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    raise RuntimeError(
+        f"Environment variable '{name}' must be a boolean."
+    )
+
+
 def _get_list(
     name: str,
     default: list[str],
@@ -373,6 +397,35 @@ DENSE_CONTEXT_MAX_CHUNKS = _get_int(
 DENSE_FACET_RERANK_WEIGHT = _get_float(
     "RAG_DENSE_FACET_RERANK_WEIGHT",
     0.05,
+)
+
+
+# Cross-Encoder reranking is applied after semantic/lexical candidate
+# generation and before final anchor selection. It only reorders existing
+# candidates; it never expands the candidate set or bypasses evidence gates.
+RAG_RERANK_ENABLED = _get_bool(
+    "RAG_RERANK_ENABLED",
+    True,
+)
+
+RAG_RERANK_MODEL = os.getenv(
+    "RAG_RERANK_MODEL",
+    "cross-encoder/ms-marco-MiniLM-L6-v2",
+).strip()
+
+RAG_RERANK_CANDIDATE_K = _get_int(
+    "RAG_RERANK_CANDIDATE_K",
+    24,
+)
+
+RAG_RERANK_BATCH_SIZE = _get_int(
+    "RAG_RERANK_BATCH_SIZE",
+    16,
+)
+
+RAG_RERANK_MAX_LENGTH = _get_int(
+    "RAG_RERANK_MAX_LENGTH",
+    512,
 )
 
 
@@ -685,6 +738,34 @@ if DENSE_FACET_RERANK_WEIGHT < 0:
 
     raise RuntimeError(
         "RAG_DENSE_FACET_RERANK_WEIGHT cannot be negative."
+    )
+
+
+if not RAG_RERANK_MODEL:
+
+    raise RuntimeError(
+        "RAG_RERANK_MODEL cannot be empty."
+    )
+
+
+if RAG_RERANK_CANDIDATE_K <= 0:
+
+    raise RuntimeError(
+        "RAG_RERANK_CANDIDATE_K must be greater than 0."
+    )
+
+
+if RAG_RERANK_BATCH_SIZE <= 0:
+
+    raise RuntimeError(
+        "RAG_RERANK_BATCH_SIZE must be greater than 0."
+    )
+
+
+if RAG_RERANK_MAX_LENGTH <= 0:
+
+    raise RuntimeError(
+        "RAG_RERANK_MAX_LENGTH must be greater than 0."
     )
 
 
