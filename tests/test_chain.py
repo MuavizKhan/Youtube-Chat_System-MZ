@@ -164,10 +164,16 @@ def test_build_rag_chain_uses_separate_generation_client(monkeypatch):
 
     monkeypatch.setattr(
         chain,
-        "retrieve_with_query_recovery",
-        lambda **kwargs: [
-            (doc(1, 0, 10, "evidence"), 0.2)
-        ],
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(1, 0, 10, "evidence"), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [1],
+            },
+        ),
     )
     monkeypatch.setattr(
         chain,
@@ -189,6 +195,8 @@ def test_build_rag_chain_uses_separate_generation_client(monkeypatch):
     )
 
     assert result["answer"] == "grounded answer"
+    assert result["retrieval_trace"]["final_stage"] == "initial_strict"
+    assert result["generation_trace"]["generated"] is True
     assert observed["client"] is generation_client
 
 @pytest.mark.unit
@@ -440,8 +448,16 @@ def test_generation_exhausts_empty_answer_retries(monkeypatch):
 def test_rag_chain_falls_back_without_generation(monkeypatch):
     monkeypatch.setattr(
         chain,
-        "retrieve_with_query_recovery",
-        lambda **k: [],
+        "_retrieve_with_query_recovery_trace",
+        lambda **k: (
+            [],
+            {
+                "recovery_used": True,
+                "final_stage": "no_evidence",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [],
+            },
+        ),
     )
     monkeypatch.setattr(
         chain,
@@ -462,6 +478,75 @@ def test_rag_chain_falls_back_without_generation(monkeypatch):
         result["retrieved_results"] == []
         and result["source_groups"] == []
     )
+
+
+@pytest.mark.unit
+def test_retrieval_trace_records_initial_strict_success(monkeypatch):
+    expected = [(doc(4, 10, 20, "evidence"), 0.35)]
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: expected,
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "What happened?",
+        object(),
+    )
+
+    assert results == expected
+    assert trace["recovery_used"] is False
+    assert trace["final_stage"] == "initial_strict"
+    assert trace["final_chunk_ids"] == [4]
+    assert trace["attempts"][0]["stage"] == "initial_strict"
+    assert trace["attempts"][0]["retrieved_chunks"] == 1
+    assert trace["attempts"][0]["best_distance"] == pytest.approx(0.35)
+
+
+@pytest.mark.unit
+def test_retrieval_trace_records_recovery_stage(monkeypatch):
+    recovered = [(doc(8, 80, 90, "recovered"), 0.75)]
+    calls = []
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            calls.append(kwargs["query"])
+            or (
+                []
+                if len(calls) == 1
+                else recovered
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="causal",
+            standalone_question="reasons for the event",
+            search_queries=["event reasons"],
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "Why did it happen?",
+        object(),
+    )
+
+    assert results == recovered
+    assert trace["recovery_used"] is True
+    assert trace["final_stage"] == "rewritten_strict"
+    assert trace["planner_used"] is True
+    assert trace["planner_intent"] == "causal"
+    assert [attempt["stage"] for attempt in trace["attempts"]] == [
+        "initial_strict",
+        "rewritten_strict",
+    ]
 
 
 @pytest.mark.unit
