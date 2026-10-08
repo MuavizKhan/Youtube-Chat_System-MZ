@@ -878,3 +878,150 @@ def test_reciprocal_rank_fusion_prefers_documents_supported_by_both_signals():
     )
 
     assert results[0][0].metadata["chunk_id"] == 2
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_reorders_candidates_and_preserves_distances(monkeypatch):
+    documents = [
+        doc(1, 0, 10, "first candidate"),
+        doc(2, 10, 20, "second candidate"),
+        doc(3, 20, 30, "third candidate"),
+    ]
+    ranked_results = [
+        (documents[0], 0.2),
+        (documents[1], 0.3),
+        (documents[2], 0.4),
+    ]
+
+    class FakeReranker:
+        def predict(self, pairs, batch_size, show_progress_bar):
+            assert len(pairs) == 2
+            assert batch_size == 4
+            assert show_progress_bar is False
+            return np.asarray([0.1, 0.9], dtype=np.float32)
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval,
+        "RAG_RERANK_BATCH_SIZE",
+        4,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "create_cross_encoder_reranker",
+        lambda: FakeReranker(),
+    )
+
+    result = retrieval.rerank_with_cross_encoder(
+        query="Which candidate is relevant?",
+        ranked_results=ranked_results,
+        candidate_k=2,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result] == [2, 1, 3]
+    assert [item[1] for item in result] == [0.3, 0.2, 0.4]
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_is_fail_open(monkeypatch):
+    documents = [
+        doc(1, 0, 10, "first"),
+        doc(2, 10, 20, "second"),
+    ]
+    ranked_results = [
+        (documents[0], 0.2),
+        (documents[1], 0.3),
+    ]
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", True)
+
+    def fail_to_load():
+        raise RuntimeError("reranker unavailable")
+
+    monkeypatch.setattr(
+        retrieval,
+        "create_cross_encoder_reranker",
+        fail_to_load,
+    )
+
+    result = retrieval.rerank_with_cross_encoder(
+        query="test",
+        ranked_results=ranked_results,
+    )
+
+    assert result == ranked_results
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_disabled_skips_model(monkeypatch):
+    documents = [
+        doc(1, 0, 10, "first"),
+        doc(2, 10, 20, "second"),
+    ]
+    ranked_results = [
+        (documents[0], 0.2),
+        (documents[1], 0.3),
+    ]
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+
+    monkeypatch.setattr(
+        retrieval,
+        "create_cross_encoder_reranker",
+        lambda: pytest.fail("reranker should not load"),
+    )
+
+    result = retrieval.rerank_with_cross_encoder(
+        query="test",
+        ranked_results=ranked_results,
+    )
+
+    assert result == ranked_results
+
+
+@pytest.mark.unit
+def test_retrieve_question_context_applies_cross_encoder_before_anchor_selection(
+    monkeypatch,
+):
+    documents = [
+        doc(1, 0, 10, "first"),
+        doc(2, 10, 20, "second"),
+    ]
+    semantic_results = [
+        (documents[0], 0.2),
+        (documents[1], 0.3),
+    ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: semantic_results,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "RAG_RERANK_ENABLED",
+        True,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "rerank_with_cross_encoder",
+        lambda **kwargs: [
+            semantic_results[1],
+            semantic_results[0],
+        ],
+    )
+
+    result = retrieval.retrieve_question_context(
+        FakeVectorStore(documents),
+        "Who is relevant?",
+        k=2,
+        fetch_k=2,
+        expand_context=False,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result] == [2, 1]
