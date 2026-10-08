@@ -53,6 +53,11 @@ from .config import (
     DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
     DENSE_FACET_RERANK_WEIGHT,
+    RAG_RERANK_BATCH_SIZE,
+    RAG_RERANK_CANDIDATE_K,
+    RAG_RERANK_ENABLED,
+    RAG_RERANK_MAX_LENGTH,
+    RAG_RERANK_MODEL,
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     MAX_DISTANCE,
@@ -1719,8 +1724,12 @@ def answer_question(
             else HF_MODEL_ID
         ),
 
-    "retrieval_method": 
-        "question_aware_soft_facet_rerank",
+    "retrieval_method":
+        (
+            "question_aware_cross_encoder_rerank"
+            if RAG_RERANK_ENABLED
+            else "question_aware_soft_facet_rerank"
+        ),
 
     "retrieval_config":
         {
@@ -1759,6 +1768,21 @@ def answer_question(
 
             "dense_facet_rerank_weight":
                 DENSE_FACET_RERANK_WEIGHT,
+
+            "rerank_enabled":
+                RAG_RERANK_ENABLED,
+
+            "rerank_model":
+                RAG_RERANK_MODEL,
+
+            "rerank_candidate_k":
+                RAG_RERANK_CANDIDATE_K,
+
+            "rerank_batch_size":
+                RAG_RERANK_BATCH_SIZE,
+
+            "rerank_max_length":
+                RAG_RERANK_MAX_LENGTH,
         },
 }
 
