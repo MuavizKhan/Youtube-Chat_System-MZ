@@ -15,7 +15,7 @@ Context Formatting
     ↓
 ChatPromptTemplate
     ↓
-Hugging Face Generation
+LLM Generation
     ↓
 StrOutputParser
     ↓
@@ -29,6 +29,7 @@ import logging
 import re
 from typing import Any
 
+from groq import Groq
 from huggingface_hub import InferenceClient
 
 from langchain_core.output_parsers import StrOutputParser
@@ -64,6 +65,14 @@ from .config import (
     TOP_K,
     HF_MAX_RETRIES,
     HF_RETRY_DELAY_SECONDS,
+    GROQ_API_KEY,
+    GROQ_MAX_RETRIES,
+    GROQ_MAX_TOKENS,
+    GROQ_MODEL_ID,
+    GROQ_REASONING_EFFORT,
+    GROQ_RETRY_DELAY_SECONDS,
+    GROQ_TEMPERATURE,
+    LLM_PROVIDER,
 )
 
 from .query_understanding import (
@@ -634,13 +643,11 @@ def build_context(
 
 
 # ============================================================
-# 6. HUGGING FACE CLIENT
+# 6. INFERENCE CLIENTS
 # ============================================================
 
-def create_llm_client() -> InferenceClient:
-    """
-    Create the Hugging Face InferenceClient.
-    """
+def create_huggingface_client() -> InferenceClient:
+    """Create the Hugging Face client used by query understanding."""
 
     if not HF_TOKEN:
 
@@ -660,8 +667,33 @@ def create_llm_client() -> InferenceClient:
     )
 
 
+def create_groq_client() -> Groq:
+    """Create the direct Groq generation client."""
+
+    if not GROQ_API_KEY:
+
+        raise RuntimeError(
+            "GROQ_API_KEY was not found.\n\n"
+            "Set GROQ_API_KEY in the project root .env file."
+        )
+
+
+    return Groq(
+        api_key=GROQ_API_KEY,
+    )
+
+
+def create_llm_client() -> InferenceClient | Groq:
+    """Create the configured generation client."""
+
+    if LLM_PROVIDER == "groq":
+        return create_groq_client()
+
+    return create_huggingface_client()
+
+
 # ============================================================
-# 7. LANGCHAIN PROMPT → HUGGING FACE MESSAGES
+# 7. LANGCHAIN PROMPT → CHAT MESSAGES
 # ============================================================
 
 def prompt_to_messages(
@@ -722,7 +754,7 @@ def prompt_to_messages(
     return messages
 
 # response extractor
-def extract_huggingface_answer(response) -> str:
+def extract_chat_completion_answer(response) -> str:
     """
     Extract the user-visible answer from a Hugging Face
     Chat Completions response.
@@ -759,7 +791,7 @@ def extract_huggingface_answer(response) -> str:
     return content.strip()
 
 # capture response diagnostics
-def get_huggingface_response_diagnostics(
+def get_chat_response_diagnostics(
     response,
 ) -> dict[str, object]:
     """
@@ -844,7 +876,7 @@ def sanitize_generated_answer(answer: str) -> str:
 
 
 # ============================================================
-# 9. HUGGING FACE GENERATION
+# 9. MODEL GENERATION
 # ============================================================
 
 def generate_with_huggingface(
@@ -925,7 +957,7 @@ def generate_with_huggingface(
         # Extract visible model answer
         # --------------------------------------------------------
 
-        answer = extract_huggingface_answer(response)
+        answer = extract_chat_completion_answer(response)
 
         if answer:
             return sanitize_generated_answer(answer)
@@ -934,7 +966,7 @@ def generate_with_huggingface(
         # Empty response diagnostics
         # --------------------------------------------------------
 
-        diagnostics = get_huggingface_response_diagnostics(
+        diagnostics = get_chat_response_diagnostics(
             response
         )
 
@@ -959,6 +991,93 @@ def generate_with_huggingface(
             f"after {HF_MAX_RETRIES + 1} attempts. "
             f"Diagnostics: {diagnostics}"
         )
+
+def generate_with_groq(
+    client: Groq,
+    prompt_value,
+) -> str:
+    """Send the LangChain prompt to Groq and return the visible answer."""
+
+    messages = prompt_to_messages(prompt_value)
+
+    for attempt in range(GROQ_MAX_RETRIES + 1):
+
+        try:
+
+            response = (
+                client
+                .chat
+                .completions
+                .create(
+                    model=GROQ_MODEL_ID,
+                    messages=messages,
+                    max_completion_tokens=GROQ_MAX_TOKENS,
+                    temperature=GROQ_TEMPERATURE,
+                    reasoning_effort=GROQ_REASONING_EFFORT,
+                    include_reasoning=False,
+                )
+            )
+
+        except Exception as error:
+
+            error_text = str(error).lower()
+
+            if "401" in error_text or "unauthorized" in error_text:
+                raise RuntimeError(
+                    "Groq authentication failed.\n\n"
+                    "Check GROQ_API_KEY in .env."
+                ) from error
+
+            if "403" in error_text or "forbidden" in error_text:
+                raise RuntimeError(
+                    "Groq rejected the inference request.\n\n"
+                    "Check API key permissions and the selected model."
+                ) from error
+
+            if "429" in error_text or "rate limit" in error_text:
+                raise RuntimeError(
+                    "Groq rate limit was reached.\n\n"
+                    "Retry after the current rate-limit window."
+                ) from error
+
+            raise RuntimeError(
+                f"Groq generation failed: {error}"
+            ) from error
+
+        answer = extract_chat_completion_answer(response)
+
+        if answer:
+            return sanitize_generated_answer(answer)
+
+        diagnostics = get_chat_response_diagnostics(response)
+
+        if attempt < GROQ_MAX_RETRIES:
+            time.sleep(GROQ_RETRY_DELAY_SECONDS)
+            continue
+
+        raise RuntimeError(
+            "The Groq model returned an empty answer "
+            f"after {GROQ_MAX_RETRIES + 1} attempts. "
+            f"Diagnostics: {diagnostics}"
+        )
+
+
+def generate_with_llm(
+    client,
+    prompt_value,
+) -> str:
+    """Dispatch generation to the configured inference provider."""
+
+    if LLM_PROVIDER == "groq":
+        return generate_with_groq(
+            client=client,
+            prompt_value=prompt_value,
+        )
+
+    return generate_with_huggingface(
+        client=client,
+        prompt_value=prompt_value,
+    )
 
 # ============================================================
 # 9. FORMAT SOURCES
@@ -1066,7 +1185,7 @@ def format_sources(
 def retrieve_with_query_recovery(
     vector_store,
     question: str,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ):
     """Run the existing bounded retrieval recovery ladder."""
 
@@ -1081,6 +1200,11 @@ def retrieve_with_query_recovery(
 
     if initial_results:
         return initial_results
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when strict retrieval actually needs recovery.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1179,7 +1303,7 @@ def retrieve_with_query_recovery(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1190,6 +1314,12 @@ def resolve_conversational_question(
 
     if not is_likely_follow_up(question):
         return question
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when the question actually needs follow-up
+    # resolution.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1221,6 +1351,7 @@ def resolve_conversational_question(
 def build_rag_chain(
     vector_store,
     llm_client: InferenceClient,
+    generation_client=None,
 ):
     """
     Build the executable LangChain RAG pipeline.
@@ -1239,10 +1370,13 @@ def build_rag_chain(
         ↓
     Prompt
         ↓
-    Hugging Face
+    LLM provider
         ↓
     Parsed answer
     """
+
+    if generation_client is None:
+        generation_client = llm_client
 
     # --------------------------------------------------------
     # 1. Retrieval
@@ -1316,8 +1450,8 @@ def build_rag_chain(
 
         RunnableLambda(
             lambda prompt_value:
-                generate_with_huggingface(
-                    client=llm_client,
+                generate_with_llm(
+                    client=generation_client,
                     prompt_value=prompt_value,
                 )
         )
@@ -1388,7 +1522,7 @@ def build_rag_chain(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1399,6 +1533,12 @@ def resolve_conversational_question(
 
     if not is_likely_follow_up(question):
         return question
+
+    # Query understanding remains on Hugging Face for Step 2, but the
+    # client is created only when the question actually needs follow-up
+    # resolution.
+    if llm_client is None:
+        llm_client = create_huggingface_client()
 
     try:
         plan = understand_query(
@@ -1491,10 +1631,12 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Create Hugging Face client
+    # Create the generation client.
+    # Step 2 migrates generation only; query understanding remains on
+    # Hugging Face and is created lazily only when needed.
     # --------------------------------------------------------
 
-    llm_client = create_llm_client()
+    generation_client = create_llm_client()
 
 
     # --------------------------------------------------------
@@ -1505,7 +1647,9 @@ def answer_question(
 
         vector_store=vector_store,
 
-        llm_client=llm_client,
+        llm_client=None,
+
+        generation_client=generation_client,
     )
 
 
@@ -1516,7 +1660,7 @@ def answer_question(
     question = resolve_conversational_question(
         question=question,
         conversation_history=conversation_history,
-        llm_client=llm_client,
+        llm_client=None,
     )
 
     # --------------------------------------------------------
@@ -1569,7 +1713,11 @@ def answer_question(
         len(source_groups),
 
     "model":
-        HF_MODEL_ID,
+        (
+            GROQ_MODEL_ID
+            if LLM_PROVIDER == "groq"
+            else HF_MODEL_ID
+        ),
 
     "retrieval_method": 
         "question_aware_soft_facet_rerank",
