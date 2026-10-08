@@ -623,6 +623,53 @@ def test_query_recovery_retries_with_reformulated_queries(monkeypatch):
 
 
 @pytest.mark.unit
+def test_retrieval_trace_preserves_recovery_after_empty_overview(monkeypatch):
+    recovered = [(doc(9, 90, 100, "recovered"), 0.6)]
+    calls = []
+
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            calls.append(kwargs["query"])
+            or (
+                []
+                if len(calls) == 1
+                else recovered
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda _vector_store: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="overview",
+            standalone_question="main topic",
+            search_queries=["main topic"],
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "What is the main subject?",
+        object(),
+    )
+
+    assert results == recovered
+    assert trace["final_stage"] == "rewritten_strict"
+    assert [attempt["stage"] for attempt in trace["attempts"]] == [
+        "initial_strict",
+        "overview",
+        "rewritten_strict",
+    ]
+
+
+@pytest.mark.unit
 def test_query_recovery_routes_unrecognized_overview_question(monkeypatch):
     overview = [(doc(1, 0, 10, "overview evidence"), 1.3)]
 
