@@ -804,8 +804,8 @@ function mergeSources(
         return;
     }
 
-    sourceHistory.forEach(
-        (source, index) => {
+    sources.forEach(
+        (source) => {
 
             const start = Number(source?.start);
             const endValue = Number(source?.end);
