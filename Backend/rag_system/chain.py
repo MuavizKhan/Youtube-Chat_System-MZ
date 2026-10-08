@@ -1185,7 +1185,7 @@ def format_sources(
 def retrieve_with_query_recovery(
     vector_store,
     question: str,
-    llm_client: InferenceClient | None = None,
+    llm_client: InferenceClient | Groq | None = None,
 ):
     """Run the existing bounded retrieval recovery ladder."""
 
@@ -1201,10 +1201,10 @@ def retrieve_with_query_recovery(
     if initial_results:
         return initial_results
 
-    # Query understanding remains on Hugging Face for Step 2, but the
-    # client is created only when strict retrieval actually needs recovery.
+    # Query understanding uses the same configured provider as generation.
+    # Create it lazily only when strict retrieval actually needs recovery.
     if llm_client is None:
-        llm_client = create_huggingface_client()
+        llm_client = create_llm_client()
 
     try:
         plan = understand_query(
@@ -1303,7 +1303,7 @@ def retrieve_with_query_recovery(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient | None = None,
+    llm_client: InferenceClient | Groq | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1315,11 +1315,11 @@ def resolve_conversational_question(
     if not is_likely_follow_up(question):
         return question
 
-    # Query understanding remains on Hugging Face for Step 2, but the
-    # client is created only when the question actually needs follow-up
+    # Query understanding uses the same configured provider as generation.
+    # Create it lazily only when the question actually needs follow-up
     # resolution.
     if llm_client is None:
-        llm_client = create_huggingface_client()
+        llm_client = create_llm_client()
 
     try:
         plan = understand_query(
@@ -1350,7 +1350,7 @@ def resolve_conversational_question(
 
 def build_rag_chain(
     vector_store,
-    llm_client: InferenceClient,
+    llm_client: InferenceClient | Groq | None,
     generation_client=None,
 ):
     """
@@ -1370,7 +1370,7 @@ def build_rag_chain(
         ↓
     Prompt
         ↓
-    LLM provider
+    Configured LLM provider
         ↓
     Parsed answer
     """
@@ -1522,7 +1522,7 @@ def build_rag_chain(
 def resolve_conversational_question(
     question: str,
     conversation_history: list[dict[str, str]] | None,
-    llm_client: InferenceClient | None = None,
+    llm_client: InferenceClient | Groq | None = None,
 ) -> str:
     """Resolve a likely follow-up into the standalone RAG question."""
 
@@ -1534,11 +1534,11 @@ def resolve_conversational_question(
     if not is_likely_follow_up(question):
         return question
 
-    # Query understanding remains on Hugging Face for Step 2, but the
-    # client is created only when the question actually needs follow-up
+    # Query understanding uses the same configured provider as generation.
+    # Create it lazily only when the question actually needs follow-up
     # resolution.
     if llm_client is None:
-        llm_client = create_huggingface_client()
+        llm_client = create_llm_client()
 
     try:
         plan = understand_query(
@@ -1631,12 +1631,12 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Create the generation client.
-    # Step 2 migrates generation only; query understanding remains on
-    # Hugging Face and is created lazily only when needed.
+    # Create one configured LLM client for both query understanding
+    # and final generation. The provider is selected by LLM_PROVIDER.
     # --------------------------------------------------------
 
-    generation_client = create_llm_client()
+    llm_client = create_llm_client()
+    generation_client = llm_client
 
 
     # --------------------------------------------------------
@@ -1647,7 +1647,7 @@ def answer_question(
 
         vector_store=vector_store,
 
-        llm_client=None,
+        llm_client=llm_client,
 
         generation_client=generation_client,
     )
@@ -1660,7 +1660,7 @@ def answer_question(
     question = resolve_conversational_question(
         question=question,
         conversation_history=conversation_history,
-        llm_client=None,
+        llm_client=llm_client,
     )
 
     # --------------------------------------------------------
