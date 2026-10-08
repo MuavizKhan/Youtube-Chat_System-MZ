@@ -18,6 +18,17 @@ def result():
         "retrieval_config":{
             "top_k":4,"fetch_k":10,"lambda_mult":0.7,"max_distance":1.3
         },
+        "observability":{
+            "total_latency_ms":12.5,
+            "retrieval":{
+                "final_stage":"initial_strict",
+                "retrieval_latency_ms":4.2,
+            },
+            "generation":{
+                "generated":True,
+                "latency_ms":8.1,
+            },
+        },
     }
 
 
@@ -150,6 +161,10 @@ def test_chat_success_and_request_id(client,monkeypatch):
     r=client.post("/chat",json={"video_id":VALID_VIDEO_ID,"question":"What happened?"})
     assert r.status_code==200
     assert r.json()["answer"]=="Test answer."
+    assert (
+        r.json()["observability"]["retrieval"]["final_stage"]
+        == "initial_strict"
+    )
     assert r.headers["X-Request-ID"]
 
 
