@@ -532,7 +532,7 @@ class ChatResponse(BaseModel):
 
     retrieval_method: str
 
-    retrieval_config: dict[str, int | float]
+    retrieval_config: dict[str, int | float | bool | str]
 
 # ============================================================
 # ERROR RESPONSE MODEL

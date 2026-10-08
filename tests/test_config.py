@@ -74,3 +74,78 @@ def test_llm_provider_rejects_unknown_provider():
 
     assert result.returncode != 0
     assert "LLM_PROVIDER must be one of: huggingface, groq." in result.stderr
+
+
+def run_rerank_config_import(extra_env: dict[str, str | None]):
+    env = os.environ.copy()
+
+    for key, value in extra_env.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+
+    env["PYTHON_DOTENV_DISABLED"] = "true"
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import Backend.rag_system.config as config; "
+                "print(config.RAG_RERANK_ENABLED); "
+                "print(config.RAG_RERANK_MODEL); "
+                "print(config.RAG_RERANK_CANDIDATE_K); "
+                "print(config.RAG_RERANK_BATCH_SIZE); "
+                "print(config.RAG_RERANK_MAX_LENGTH)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=env,
+        check=False,
+    )
+
+
+def test_cross_encoder_reranking_configuration_loads():
+    result = run_rerank_config_import(
+        {
+            "RAG_RERANK_ENABLED": "true",
+            "RAG_RERANK_MODEL": "test/reranker",
+            "RAG_RERANK_CANDIDATE_K": "12",
+            "RAG_RERANK_BATCH_SIZE": "8",
+            "RAG_RERANK_MAX_LENGTH": "256",
+        }
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        "True",
+        "test/reranker",
+        "12",
+        "8",
+        "256",
+    ]
+
+
+def test_cross_encoder_reranking_rejects_invalid_boolean():
+    result = run_rerank_config_import(
+        {
+            "RAG_RERANK_ENABLED": "maybe",
+        }
+    )
+
+    assert result.returncode != 0
+    assert "RAG_RERANK_ENABLED" in result.stderr
+
+
+def test_cross_encoder_reranking_rejects_non_positive_candidate_k():
+    result = run_rerank_config_import(
+        {
+            "RAG_RERANK_CANDIDATE_K": "0",
+        }
+    )
+
+    assert result.returncode != 0
+    assert "RAG_RERANK_CANDIDATE_K must be greater than 0." in result.stderr

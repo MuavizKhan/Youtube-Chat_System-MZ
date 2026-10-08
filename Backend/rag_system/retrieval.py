@@ -19,6 +19,7 @@ This file does NOT:
 - call the generation model
 - handle FastAPI
 """
+import logging
 import math
 import re
 from typing import Any
@@ -27,6 +28,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
+from sentence_transformers import CrossEncoder
 
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -39,6 +41,11 @@ from .config import (
     DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
     DENSE_FACET_RERANK_WEIGHT,
+    RAG_RERANK_BATCH_SIZE,
+    RAG_RERANK_CANDIDATE_K,
+    RAG_RERANK_ENABLED,
+    RAG_RERANK_MAX_LENGTH,
+    RAG_RERANK_MODEL,
     DENSE_SEMANTIC_FETCH_K,
     DENSE_SEMANTIC_K,
     EMBEDDING_MODEL,
@@ -49,6 +56,9 @@ from .config import (
     TOP_K,
     VECTOR_STORE_ROOT,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -944,24 +954,27 @@ def diagnose_retrieval_pipeline(
         else min(k + 2, context_max_chunks)
     )
 
-    reranked_results = combined_results
+    cross_encoder_results = rerank_with_cross_encoder(
+        query=query,
+        ranked_results=combined_results,
+    )
 
     if lexical_results:
-        reranked_results = (
+        facet_soft_reranked = (
             rerank_with_soft_facet_support(
-                combined_results,
+                cross_encoder_results,
                 facet_rankings,
             )
             if dense_question and facet_rankings
-            else combined_results
+            else cross_encoder_results
         )
         anchor_results = (
             select_diverse_retrieval_anchors(
-                reranked_results,
+                facet_soft_reranked,
                 limit=anchor_limit,
             )
             if dense_question
-            else reranked_results[:anchor_limit]
+            else facet_soft_reranked[:anchor_limit]
         )
     else:
         semantic_distances = [
@@ -972,21 +985,21 @@ def diagnose_retrieval_pipeline(
         if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
             anchor_results = []
         else:
-            reranked_results = (
+            facet_soft_reranked = (
                 rerank_with_soft_facet_support(
-                    combined_results,
+                    cross_encoder_results,
                     facet_rankings,
                 )
                 if dense_question and facet_rankings
-                else combined_results
+                else cross_encoder_results
             )
             anchor_results = (
                 select_diverse_retrieval_anchors(
-                    reranked_results,
+                    facet_soft_reranked,
                     limit=anchor_limit,
                 )
                 if dense_question
-                else reranked_results[:anchor_limit]
+                else facet_soft_reranked[:anchor_limit]
             )
 
     context_results = expand_retrieval_context(
@@ -998,6 +1011,7 @@ def diagnose_retrieval_pipeline(
     return {
         "query": query,
         "dense_question": dense_question,
+        "reranking_enabled": RAG_RERANK_ENABLED,
         "semantic_k": semantic_k,
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
@@ -1019,7 +1033,10 @@ def diagnose_retrieval_pipeline(
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
-        "facet_soft_reranked": reranked_results,
+        "facet_soft_reranked": facet_soft_reranked
+        if "facet_soft_reranked" in locals()
+        else cross_encoder_results,
+        "cross_encoder_reranked": cross_encoder_results,
         "hybrid_fused": combined_results,
         "anchors": anchor_results,
         "final_context": context_results,
@@ -2036,6 +2053,95 @@ def rerank_with_soft_facet_support(
     ]
 
 
+@lru_cache(maxsize=1)
+def create_cross_encoder_reranker():
+    """Lazily load the configured Cross-Encoder reranker once per process."""
+
+    if not RAG_RERANK_ENABLED:
+        return None
+
+    return CrossEncoder(
+        RAG_RERANK_MODEL,
+        device="cpu",
+        max_length=RAG_RERANK_MAX_LENGTH,
+    )
+
+
+def rerank_with_cross_encoder(
+    query: str,
+    ranked_results,
+    *,
+    candidate_k: int = RAG_RERANK_CANDIDATE_K,
+):
+    """Reorder existing candidates with a Cross-Encoder relevance score.
+
+    The reranker never creates new candidates and never changes their stored
+    FAISS distance. If the optional reranker cannot be loaded or queried, the
+    original ranking is returned unchanged so retrieval remains fail-open.
+    """
+
+    if not ranked_results:
+        return []
+
+    if not query or not query.strip():
+        raise ValueError("query cannot be empty.")
+
+    if candidate_k <= 0:
+        raise ValueError("candidate_k must be greater than 0.")
+
+    if not RAG_RERANK_ENABLED:
+        return list(ranked_results)
+
+    candidates = list(ranked_results[:candidate_k])
+    remainder = list(ranked_results[candidate_k:])
+
+    if len(candidates) <= 1:
+        return candidates + remainder
+
+    try:
+        reranker = create_cross_encoder_reranker()
+
+        if reranker is None:
+            return list(ranked_results)
+
+        pairs = [
+            (
+                query.strip(),
+                document.page_content,
+            )
+            for document, _distance in candidates
+        ]
+
+        scores = np.asarray(
+            reranker.predict(
+                pairs,
+                batch_size=RAG_RERANK_BATCH_SIZE,
+                show_progress_bar=False,
+            ),
+            dtype=np.float32,
+        ).reshape(-1)
+
+        if len(scores) != len(candidates):
+            raise RuntimeError(
+                "Cross-Encoder returned an unexpected number of scores."
+            )
+
+        order = np.argsort(-scores, kind="stable")
+
+        reranked = [
+            candidates[int(position)]
+            for position in order
+        ]
+
+        return reranked + remainder
+
+    except Exception:
+        logger.exception(
+            "Cross-Encoder reranking failed; preserving original retrieval ranking."
+        )
+        return list(ranked_results)
+
+
 def select_diverse_retrieval_anchors(
     ranked_results,
     *,
@@ -2205,14 +2311,19 @@ def retrieve_question_context(
     )
 
     if has_lexical_evidence:
+        cross_encoder_results = rerank_with_cross_encoder(
+            query=query,
+            ranked_results=combined_results,
+        )
+
         if dense_question:
             reranked_results = (
                 rerank_with_soft_facet_support(
-                    combined_results,
+                    cross_encoder_results,
                     facet_rankings,
                 )
                 if facet_rankings
-                else combined_results
+                else cross_encoder_results
             )
             raw_results = select_diverse_retrieval_anchors(
                 reranked_results,
@@ -2224,7 +2335,7 @@ def retrieve_question_context(
                 ),
             )
         else:
-            raw_results = combined_results[:anchor_limit]
+            raw_results = cross_encoder_results[:anchor_limit]
 
         if not expand_context:
             return raw_results
@@ -2249,14 +2360,19 @@ def retrieve_question_context(
     if best_distance > strict_semantic_limit:
         return []
 
+    cross_encoder_results = rerank_with_cross_encoder(
+        query=query,
+        ranked_results=combined_results,
+    )
+
     if dense_question:
         reranked_results = (
             rerank_with_soft_facet_support(
-                combined_results,
+                cross_encoder_results,
                 facet_rankings,
             )
             if facet_rankings
-            else combined_results
+            else cross_encoder_results
         )
         raw_results = select_diverse_retrieval_anchors(
             reranked_results,
@@ -2268,7 +2384,7 @@ def retrieve_question_context(
             ),
         )
     else:
-        raw_results = combined_results[:anchor_limit]
+        raw_results = cross_encoder_results[:anchor_limit]
 
     if not expand_context:
         return raw_results
