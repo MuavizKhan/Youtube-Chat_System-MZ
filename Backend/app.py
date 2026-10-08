@@ -33,7 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Any, Literal
 
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
@@ -534,6 +534,14 @@ class ChatResponse(BaseModel):
 
     retrieval_config: dict[str, int | float | bool | str]
 
+    observability: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Safe retrieval/generation timing and stage diagnostics. "
+            "No transcript text or credentials are included."
+        ),
+    )
+
 # ============================================================
 # ERROR RESPONSE MODEL
 # ============================================================
@@ -782,6 +790,21 @@ def chat(
             video_reference=canonical_video_id,
             question=question,
             conversation_history=conversation_history,
+        )
+
+        observability = result.get("observability", {})
+        logger.info(
+            "Chat RAG trace request_id=%s video_id=%s "
+            "retrieval_stage=%s retrieved_chunks=%s source_segments=%s "
+            "retrieval_ms=%s generation_ms=%s total_ms=%s",
+            request.state.request_id,
+            canonical_video_id,
+            observability.get("retrieval", {}).get("final_stage"),
+            result.get("retrieved_chunks"),
+            result.get("source_segments"),
+            observability.get("retrieval", {}).get("retrieval_latency_ms"),
+            observability.get("generation", {}).get("latency_ms"),
+            observability.get("total_latency_ms"),
         )
 
         return result

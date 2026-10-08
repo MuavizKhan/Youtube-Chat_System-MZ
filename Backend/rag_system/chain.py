@@ -1187,12 +1187,47 @@ def format_sources(
 
     return sources
 
-def retrieve_with_query_recovery(
+def _build_retrieval_attempt_trace(
+    stage: str,
+    results,
+) -> dict[str, object]:
+    """Summarize one retrieval attempt without exposing transcript text."""
+
+    distances = [
+        float(distance)
+        for _document, distance in results
+    ]
+
+    chunk_ids = []
+    for document, _distance in results:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None and chunk_id not in chunk_ids:
+            chunk_ids.append(chunk_id)
+
+    return {
+        "stage": stage,
+        "retrieved_chunks": len(results),
+        "best_distance": (
+            round(min(distances), 6)
+            if distances
+            else None
+        ),
+        "chunk_ids": chunk_ids[:20],
+    }
+
+
+def _retrieve_with_query_recovery_trace(
     vector_store,
     question: str,
     llm_client: InferenceClient | Groq | None = None,
-):
-    """Run the existing bounded retrieval recovery ladder."""
+) -> tuple[list, dict[str, object]]:
+    """Run the bounded recovery ladder and capture stage diagnostics."""
+
+    started = time.perf_counter()
+    attempts = []
+    planner_used = False
+    planner_intent = None
+    planner_latency_ms = 0.0
 
     initial_results = retrieve_question_context(
         vector_store=vector_store,
@@ -1202,108 +1237,227 @@ def retrieve_with_query_recovery(
         lambda_mult=MMR_LAMBDA,
         max_distance=MAX_DISTANCE,
     )
+    attempts.append(
+        _build_retrieval_attempt_trace(
+            "initial_strict",
+            initial_results,
+        )
+    )
 
     if initial_results:
-        return initial_results
+        final_results = initial_results
+        final_stage = "initial_strict"
+    else:
+        if llm_client is None:
+            llm_client = create_llm_client()
 
-    # Query understanding uses the same configured provider as generation.
-    # Create it lazily only when strict retrieval actually needs recovery.
-    if llm_client is None:
-        llm_client = create_llm_client()
+        planner_started = time.perf_counter()
 
-    try:
-        plan = understand_query(
-            client=llm_client,
-            question=question,
-        )
-    except QueryUnderstandingError as error:
-        logger.warning(
-            "Query understanding failed during retrieval recovery: %s",
-            error,
-        )
-        return []
-    except Exception:
-        logger.exception(
-            "Unexpected query-understanding failure during retrieval recovery"
-        )
-        return []
-
-    if plan.intent == "overview":
-        overview_results = retrieve_overview(vector_store)
-
-        if overview_results:
-            logger.info("Query recovery used overview routing")
-            return overview_results
-
-    queries = [
-        plan.standalone_question,
-        *plan.search_queries,
-    ]
-
-    seen_queries = set()
-    unique_queries = []
-
-    for query in queries:
-        normalized = query.strip()
-
-        if not normalized:
-            continue
-
-        key = normalized.casefold()
-
-        if key in seen_queries:
-            continue
-
-        seen_queries.add(key)
-
-        if key == question.strip().casefold():
-            continue
-
-        unique_queries.append(normalized)
-
-    for query in unique_queries:
-        recovered_results = retrieve_question_context(
-            vector_store=vector_store,
-            query=query,
-            k=TOP_K,
-            fetch_k=MMR_FETCH_K,
-            lambda_mult=MMR_LAMBDA,
-            max_distance=MAX_DISTANCE,
-        )
-
-        if recovered_results:
-            logger.info(
-                "Query recovery found evidence using a reformulated query"
+        try:
+            plan = understand_query(
+                client=llm_client,
+                question=question,
             )
-            return recovered_results
-
-    for query in unique_queries:
-        relaxed_results = retrieve_question_context(
-            vector_store=vector_store,
-            query=query,
-            k=RECOVERY_TOP_K,
-            fetch_k=RECOVERY_FETCH_K,
-            lambda_mult=MMR_LAMBDA,
-            max_distance=RECOVERY_MAX_DISTANCE,
-        )
-
-        if relaxed_results:
-            logger.info(
-                "Query recovery found evidence using relaxed retrieval"
+            planner_used = True
+            planner_intent = plan.intent
+            planner_latency_ms = (
+                time.perf_counter() - planner_started
+            ) * 1000
+        except QueryUnderstandingError as error:
+            logger.warning(
+                "Query understanding failed during retrieval recovery: %s",
+                error,
             )
-            return relaxed_results
+            return [], {
+                "recovery_used": True,
+                "final_stage": "planner_failed",
+                "planner_used": False,
+                "planner_intent": None,
+                "planner_latency_ms": round(
+                    (time.perf_counter() - planner_started) * 1000,
+                    2,
+                ),
+                "attempts": attempts,
+                "retrieval_latency_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+                "final_chunk_ids": [],
+            }
+        except Exception:
+            logger.exception(
+                "Unexpected query-understanding failure during retrieval recovery"
+            )
+            return [], {
+                "recovery_used": True,
+                "final_stage": "planner_failed",
+                "planner_used": False,
+                "planner_intent": None,
+                "planner_latency_ms": round(
+                    (time.perf_counter() - planner_started) * 1000,
+                    2,
+                ),
+                "attempts": attempts,
+                "retrieval_latency_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+                "final_chunk_ids": [],
+            }
 
-    best_effort_results = retrieve_overview(vector_store)
+        if plan.intent == "overview":
+            overview_results = retrieve_overview(vector_store)
+            attempts.append(
+                _build_retrieval_attempt_trace(
+                    "overview",
+                    overview_results,
+                )
+            )
 
-    if best_effort_results:
-        logger.info(
-            "Query recovery used representative transcript context "
-            "as a best-effort fallback"
-        )
-        return best_effort_results
+            if overview_results:
+                logger.info("Query recovery used overview routing")
+                final_results = overview_results
+                final_stage = "overview"
+            else:
+                final_results = []
+                final_stage = "overview_empty"
+        else:
+            final_results = []
 
-    return []
+        if not final_results:
+            queries = [
+                plan.standalone_question,
+                *plan.search_queries,
+            ]
 
+            seen_queries = set()
+            unique_queries = []
+
+            for query in queries:
+                normalized = query.strip()
+
+                if not normalized:
+                    continue
+
+                key = normalized.casefold()
+
+                if key in seen_queries:
+                    continue
+
+                seen_queries.add(key)
+
+                if key == question.strip().casefold():
+                    continue
+
+                unique_queries.append(normalized)
+
+            final_stage = "rewritten_strict_exhausted"
+
+            for query in unique_queries:
+                recovered_results = retrieve_question_context(
+                    vector_store=vector_store,
+                    query=query,
+                    k=TOP_K,
+                    fetch_k=MMR_FETCH_K,
+                    lambda_mult=MMR_LAMBDA,
+                    max_distance=MAX_DISTANCE,
+                )
+                attempts.append(
+                    _build_retrieval_attempt_trace(
+                        "rewritten_strict",
+                        recovered_results,
+                    )
+                )
+
+                if recovered_results:
+                    logger.info(
+                        "Query recovery found evidence using a reformulated query"
+                    )
+                    final_results = recovered_results
+                    final_stage = "rewritten_strict"
+                    break
+
+            if not final_results:
+                final_stage = "rewritten_relaxed_exhausted"
+
+                for query in unique_queries:
+                    relaxed_results = retrieve_question_context(
+                        vector_store=vector_store,
+                        query=query,
+                        k=RECOVERY_TOP_K,
+                        fetch_k=RECOVERY_FETCH_K,
+                        lambda_mult=MMR_LAMBDA,
+                        max_distance=RECOVERY_MAX_DISTANCE,
+                    )
+                    attempts.append(
+                        _build_retrieval_attempt_trace(
+                            "rewritten_relaxed",
+                            relaxed_results,
+                        )
+                    )
+
+                    if relaxed_results:
+                        logger.info(
+                            "Query recovery found evidence using relaxed retrieval"
+                        )
+                        final_results = relaxed_results
+                        final_stage = "rewritten_relaxed"
+                        break
+
+            if not final_results:
+                best_effort_results = retrieve_overview(vector_store)
+                attempts.append(
+                    _build_retrieval_attempt_trace(
+                        "best_effort_overview",
+                        best_effort_results,
+                    )
+                )
+
+                if best_effort_results:
+                    logger.info(
+                        "Query recovery used representative transcript context "
+                        "as a best-effort fallback"
+                    )
+                    final_results = best_effort_results
+                    final_stage = "best_effort_overview"
+                else:
+                    final_stage = "no_evidence"
+
+
+    final_chunk_ids = []
+    for document, _distance in final_results:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None and chunk_id not in final_chunk_ids:
+            final_chunk_ids.append(chunk_id)
+
+    return final_results, {
+        "recovery_used": final_stage != "initial_strict",
+        "final_stage": final_stage,
+        "planner_used": planner_used,
+        "planner_intent": planner_intent,
+        "planner_latency_ms": round(planner_latency_ms, 2),
+        "attempts": attempts,
+        "retrieval_latency_ms": round(
+            (time.perf_counter() - started) * 1000,
+            2,
+        ),
+        "final_chunk_ids": final_chunk_ids[:20],
+    }
+
+
+def retrieve_with_query_recovery(
+    vector_store,
+    question: str,
+    llm_client: InferenceClient | Groq | None = None,
+):
+    """Run the existing bounded retrieval recovery ladder."""
+
+    results, _trace = _retrieve_with_query_recovery_trace(
+        vector_store=vector_store,
+        question=question,
+        llm_client=llm_client,
+    )
+    return results
 
 def resolve_conversational_question(
     question: str,
@@ -1388,7 +1542,7 @@ def build_rag_chain(
     # --------------------------------------------------------
 
     retrieval_runnable = RunnableLambda(
-        lambda inputs: retrieve_with_query_recovery(
+        lambda inputs: _retrieve_with_query_recovery_trace(
             vector_store=vector_store,
             question=inputs["question"],
             llm_client=llm_client,
@@ -1427,8 +1581,24 @@ def build_rag_chain(
         RunnablePassthrough
 
         .assign(
-            retrieved_results=
+            retrieval_bundle=
                 retrieval_runnable
+        )
+
+        .assign(
+            retrieved_results=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs["retrieval_bundle"][0]
+                )
+        )
+
+        .assign(
+            retrieval_trace=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs["retrieval_bundle"][1]
+                )
         )
 
         .assign(
@@ -1473,16 +1643,35 @@ def build_rag_chain(
 
     def generate_or_fallback(
         inputs,
-    ) -> str:
+    ) -> dict[str, object]:
+
+        started = time.perf_counter()
 
         if not inputs["retrieved_results"]:
+            return {
+                "answer": FALLBACK_ANSWER,
+                "generation_trace": {
+                    "generated": False,
+                    "fallback_used": True,
+                    "latency_ms": 0.0,
+                },
+            }
 
-            return FALLBACK_ANSWER
-
-
-        return generation_chain.invoke(
+        answer = generation_chain.invoke(
             inputs
         )
+
+        return {
+            "answer": answer,
+            "generation_trace": {
+                "generated": True,
+                "fallback_used": False,
+                "latency_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+            },
+        }
 
 
     # --------------------------------------------------------
@@ -1493,33 +1682,48 @@ def build_rag_chain(
 
         prepared_chain
 
+        .assign(
+            answer_bundle=
+                RunnableLambda(
+                    generate_or_fallback
+                )
+        )
+
         |
 
         RunnableParallel(
 
             answer=
                 RunnableLambda(
-                    generate_or_fallback
+                    lambda inputs:
+                        inputs["answer_bundle"]["answer"]
                 ),
 
             retrieved_results=
                 RunnableLambda(
                     lambda inputs:
-                        inputs[
-                            "retrieved_results"
-                        ]
+                        inputs["retrieved_results"]
                 ),
 
             source_groups=
                 RunnableLambda(
                     lambda inputs:
-                        inputs[
-                            "source_groups"
-                        ]
+                        inputs["source_groups"]
+                ),
+
+            retrieval_trace=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs["retrieval_trace"]
+                ),
+
+            generation_trace=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs["answer_bundle"]["generation_trace"]
                 ),
         )
     )
-
 
     return final_chain
 
@@ -1614,6 +1818,8 @@ def answer_question(
 
 
     question = question.strip()
+    original_question = question
+    request_started = time.perf_counter()
 
 
     # --------------------------------------------------------
@@ -1668,6 +1874,10 @@ def answer_question(
         llm_client=llm_client,
     )
 
+    follow_up_resolved = (
+        question.casefold() != original_question.casefold()
+    )
+
     # --------------------------------------------------------
     # Invoke chain
     # --------------------------------------------------------
@@ -1696,6 +1906,33 @@ def answer_question(
     sources = format_sources(
     source_groups
     )
+
+    observability = {
+        "total_latency_ms": round(
+            (time.perf_counter() - request_started) * 1000,
+            2,
+        ),
+        "original_question_length": len(original_question),
+        "resolved_question_length": len(question),
+        "follow_up_resolved": follow_up_resolved,
+        "retrieval": {
+            **result.get("retrieval_trace", {}),
+            "source_segments": len(source_groups),
+            "source_timestamps": [
+                {
+                    "source_id": source["source_id"],
+                    "start": source["start"],
+                    "end": source["end"],
+                }
+                for source in sources
+            ],
+            "reranker_enabled": RAG_RERANK_ENABLED,
+        },
+        "generation": result.get(
+            "generation_trace",
+            {},
+        ),
+    }
 
     # --------------------------------------------------------
     # Final response
@@ -1784,6 +2021,9 @@ def answer_question(
             "rerank_max_length":
                 RAG_RERANK_MAX_LENGTH,
         },
+
+    "observability":
+        observability,
 }
 
 
