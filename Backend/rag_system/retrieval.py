@@ -19,6 +19,7 @@ This file does NOT:
 - call the generation model
 - handle FastAPI
 """
+import logging
 import math
 import re
 from typing import Any
@@ -55,6 +56,9 @@ from .config import (
     TOP_K,
     VECTOR_STORE_ROOT,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -950,27 +954,27 @@ def diagnose_retrieval_pipeline(
         else min(k + 2, context_max_chunks)
     )
 
-    reranked_results = rerank_with_cross_encoder(
+    cross_encoder_results = rerank_with_cross_encoder(
         query=query,
         ranked_results=combined_results,
     )
 
     if lexical_results:
-        reranked_results = (
+        facet_soft_reranked = (
             rerank_with_soft_facet_support(
-                combined_results,
+                cross_encoder_results,
                 facet_rankings,
             )
             if dense_question and facet_rankings
-            else combined_results
+            else cross_encoder_results
         )
         anchor_results = (
             select_diverse_retrieval_anchors(
-                reranked_results,
+                facet_soft_reranked,
                 limit=anchor_limit,
             )
             if dense_question
-            else reranked_results[:anchor_limit]
+            else facet_soft_reranked[:anchor_limit]
         )
     else:
         semantic_distances = [
@@ -981,21 +985,21 @@ def diagnose_retrieval_pipeline(
         if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
             anchor_results = []
         else:
-            reranked_results = (
+            facet_soft_reranked = (
                 rerank_with_soft_facet_support(
-                    combined_results,
+                    cross_encoder_results,
                     facet_rankings,
                 )
                 if dense_question and facet_rankings
-                else combined_results
+                else cross_encoder_results
             )
             anchor_results = (
                 select_diverse_retrieval_anchors(
-                    reranked_results,
+                    facet_soft_reranked,
                     limit=anchor_limit,
                 )
                 if dense_question
-                else reranked_results[:anchor_limit]
+                else facet_soft_reranked[:anchor_limit]
             )
 
     context_results = expand_retrieval_context(
@@ -1029,8 +1033,10 @@ def diagnose_retrieval_pipeline(
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
-        "facet_soft_reranked": reranked_results,
-        "cross_encoder_reranked": reranked_results,
+        "facet_soft_reranked": facet_soft_reranked
+        if "facet_soft_reranked" in locals()
+        else cross_encoder_results,
+        "cross_encoder_reranked": cross_encoder_results,
         "hybrid_fused": combined_results,
         "anchors": anchor_results,
         "final_context": context_results,
@@ -2317,7 +2323,7 @@ def retrieve_question_context(
                     facet_rankings,
                 )
                 if facet_rankings
-                else combined_results
+                else cross_encoder_results
             )
             raw_results = select_diverse_retrieval_anchors(
                 reranked_results,
@@ -2378,7 +2384,7 @@ def retrieve_question_context(
             ),
         )
     else:
-        raw_results = combined_results[:anchor_limit]
+        raw_results = cross_encoder_results[:anchor_limit]
 
     if not expand_context:
         return raw_results
