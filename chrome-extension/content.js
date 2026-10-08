@@ -37,6 +37,10 @@ const MAX_CONVERSATION_HISTORY = 6;
 
 let conversationHistory = [];
 
+// Keep all evidence segments surfaced during the current video's
+// conversation so a later question does not replace earlier timestamps.
+let sourceHistory = [];
+
 let lastVideoId = null;
 
 let indexStatus = "unknown";
@@ -784,22 +788,68 @@ function clearSources() {
 }
 
 
+function resetSourceHistory() {
+
+    sourceHistory = [];
+
+    clearSources();
+}
+
+
+function mergeSources(
+    sources
+) {
+
+    if (!Array.isArray(sources)) {
+        return;
+    }
+
+    sources.forEach(
+        (source) => {
+
+            const start = Number(source?.start);
+            const endValue = Number(source?.end);
+            const end = Number.isFinite(endValue)
+                ? endValue
+                : start;
+
+            if (
+                !Number.isFinite(start) ||
+                start < 0 ||
+                !Number.isFinite(end) ||
+                end < start
+            ) {
+                return;
+            }
+
+            const alreadyExists =
+                sourceHistory.some(
+                    (existing) =>
+                        existing.start === start &&
+                        existing.end === end
+                );
+
+            if (!alreadyExists) {
+                sourceHistory.push({
+                    start,
+                    end
+                });
+            }
+        }
+    );
+}
+
+
 // ============================================================
 // 12. RENDER SOURCES
 // ============================================================
 
-function renderSources(
-    sources
-) {
+function renderSources() {
 
     clearSources();
 
 
-    if (
-        !Array.isArray(sources) ||
-        sources.length === 0
-    ) {
-
+    if (sourceHistory.length === 0) {
         return;
     }
 
@@ -863,8 +913,7 @@ function renderSources(
 
 
             const sourceId =
-                Number(source.source_id) ||
-                (sources.indexOf(source) + 1);
+                index + 1;
 
 
             sourceButton.textContent =
@@ -1068,8 +1117,6 @@ function sendMessage() {
 
     // Keep simple conversation local.
     if (conversationalGreetings.has(normalizedQuestion)) {
-        clearSources();
-
         appendMessage(question, "user");
         chatInput.value = "";
 
@@ -1093,7 +1140,6 @@ function sendMessage() {
 
     appendMessage(question, "user");
     chatInput.value = "";
-    clearSources();
 
     const aiMessage = appendMessage(
         "Thinking...",
@@ -1195,9 +1241,11 @@ function sendMessage() {
                         );
                 }
 
-                renderSources(
+                mergeSources(
                     response.sources || []
                 );
+
+                renderSources();
 
                 if (chatBody) {
                     chatBody.scrollTop =
@@ -1243,7 +1291,7 @@ function handleVideoNavigation() {
 
         conversationHistory = [];
 
-        clearSources();
+        resetSourceHistory();
 
         if (currentVideoId) {
             createLauncher();
