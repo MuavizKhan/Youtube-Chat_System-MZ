@@ -647,7 +647,7 @@ def build_context(
 # ============================================================
 
 def create_huggingface_client() -> InferenceClient:
-    """Create the Hugging Face client used by query understanding."""
+    """Create the configured Hugging Face client."""
 
     if not HF_TOKEN:
 
@@ -684,7 +684,7 @@ def create_groq_client() -> Groq:
 
 
 def create_llm_client() -> InferenceClient | Groq:
-    """Create the configured generation client."""
+    """Create the configured LLM client used by planning and generation."""
 
     if LLM_PROVIDER == "groq":
         return create_groq_client()
@@ -1585,7 +1585,7 @@ def answer_question(
         ↓
         LangChain prompt
         ↓
-        Hugging Face generation
+        configured LLM generation
         ↓
         answer + source metadata
     """
