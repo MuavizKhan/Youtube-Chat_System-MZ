@@ -343,6 +343,26 @@ Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher A
 
 The machine-readable JSON summary includes `temporal_benchmark`; the evaluator exits non-zero if its thresholds fail. Real-video retrieval quality still needs a smoke run against the indexed benchmark video and the configured embedding environment.
 
+## Phase 8 — Cross-Encoder reranking
+
+The retrieval path now adds a bounded Cross-Encoder reranking stage after semantic + lexical candidate fusion and before final anchor selection.
+
+- RAG_RERANK_ENABLED controls the feature and defaults to true.
+- RAG_RERANK_MODEL defaults to cross-encoder/ms-marco-MiniLM-L6-v2.
+- RAG_RERANK_CANDIDATE_K limits how many already-retrieved candidates are reranked (default 24).
+- RAG_RERANK_BATCH_SIZE controls local inference batching (default 16).
+- RAG_RERANK_MAX_LENGTH bounds the Cross-Encoder input length (default 512).
+
+The reranker is intentionally conservative:
+
+- it cannot create new candidates;
+- it does not change FAISS distances or evidence gates;
+- it runs only on the bounded candidate set already produced by the existing retriever;
+- if the model cannot be loaded or scored, retrieval fails open and preserves the pre-reranking order;
+- existing soft facet reranking, transcript-region diversity, and bounded context expansion remain in place.
+
+The Cross-Encoder is loaded lazily and cached for the process so normal application startup does not initialize the model. The retrieval diagnostics expose both the pre-rerank hybrid ordering and the reranked ordering for stage-level debugging.
+
 ## Production hardening
 
 Phase 7 adds several deployment safeguards without requiring a paid service:
