@@ -14,7 +14,6 @@ import json
 import re
 from typing import Any
 
-from huggingface_hub import InferenceClient
 from pydantic import BaseModel, Field
 
 
@@ -235,13 +234,13 @@ def _normalize_query_plan(plan: QueryPlan) -> QueryPlan:
 
 
 def understand_query(
-    client: InferenceClient,
+    client: Any,
     question: str,
     conversation_history: list[dict[str, str]] | None = None,
 ) -> QueryPlan:
     """
-    Ask the Hugging Face model to convert an unfamiliar question into a
-    structured retrieval plan.
+    Ask the configured inference provider to convert an unfamiliar question
+    into a structured retrieval plan.
 
     This function intentionally does not call the vector store. It is only
     responsible for understanding, resolving short follow-ups, and
@@ -253,33 +252,71 @@ def understand_query(
     if not question:
         raise ValueError("question cannot be empty.")
 
-    from .config import HF_REASONING_EFFORT
-
-    response = client.chat.completions.create(
-        model=_get_model_id(),
-        messages=[
-            {
-                "role": "system",
-                "content": QUERY_UNDERSTANDING_SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": (
-                    "CONVERSATION HISTORY\n"
-                    "====================\n\n"
-                    f"{_format_conversation_history(conversation_history)}\n\n"
-                    "CURRENT QUESTION\n"
-                    "=================\n\n"
-                    f"{question}"
-                ),
-            },
-        ],
-        max_tokens=256,
-        temperature=0.0,
-        extra_body={
-            "reasoning_effort": HF_REASONING_EFFORT,
-        },
+    from .config import (
+        GROQ_MAX_TOKENS,
+        GROQ_MODEL_ID,
+        GROQ_REASONING_EFFORT,
+        HF_MAX_TOKENS,
+        HF_MODEL_ID,
+        HF_REASONING_EFFORT,
+        HF_TEMPERATURE,
+        LLM_PROVIDER,
     )
+
+    messages = [
+        {
+            "role": "system",
+            "content": QUERY_UNDERSTANDING_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": (
+                "CONVERSATION HISTORY\n"
+                "====================\n\n"
+                f"{_format_conversation_history(conversation_history)}\n\n"
+                "CURRENT QUESTION\n"
+                "=================\n\n"
+                f"{question}"
+            ),
+        },
+    ]
+
+    if LLM_PROVIDER == "groq":
+        request_kwargs = {
+            "model": GROQ_MODEL_ID,
+            "messages": messages,
+            "max_completion_tokens": min(256, GROQ_MAX_TOKENS),
+            "temperature": 0.0,
+            "reasoning_effort": GROQ_REASONING_EFFORT,
+            "include_reasoning": False,
+            "response_format": {
+                "type": "json_object",
+            },
+        }
+    else:
+        request_kwargs = {
+            "model": HF_MODEL_ID,
+            "messages": messages,
+            "max_tokens": min(256, HF_MAX_TOKENS),
+            "temperature": HF_TEMPERATURE,
+            "extra_body": {
+                "reasoning_effort": HF_REASONING_EFFORT,
+            },
+        }
+
+    try:
+        response = client.chat.completions.create(
+            **request_kwargs,
+        )
+    except Exception as error:
+        provider_label = (
+            "Groq"
+            if LLM_PROVIDER == "groq"
+            else "Hugging Face"
+        )
+        raise QueryUnderstandingError(
+            f"{provider_label} query understanding failed: {error}"
+        ) from error
 
     content = _extract_response_content(response)
 
@@ -300,17 +337,3 @@ def understand_query(
     return _normalize_query_plan(plan)
 
 
-def _get_model_id() -> str:
-    """
-    Import the configured model lazily so unit tests can exercise this module
-    without importing the application configuration at module import time.
-    """
-
-    from .config import HF_MODEL_ID
-
-    if not HF_MODEL_ID:
-        raise QueryUnderstandingError(
-            "HF_MODEL_ID is not configured."
-        )
-
-    return HF_MODEL_ID

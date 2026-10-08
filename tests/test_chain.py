@@ -784,15 +784,13 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
         raising=False,
     )
 
+    configured_client = object()
+    captured_clients = {}
+
     monkeypatch.setattr(
         chain,
         "create_llm_client",
-        lambda: object(),
-    )
-    monkeypatch.setattr(
-        chain,
-        "create_huggingface_client",
-        lambda: object(),
+        lambda: configured_client,
     )
 
     class FakeRagChain:
@@ -806,10 +804,19 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
                 "source_groups": [],
             }
 
+    def fake_build_rag_chain(
+        vector_store,
+        llm_client,
+        generation_client,
+    ):
+        captured_clients["query"] = llm_client
+        captured_clients["generation"] = generation_client
+        return FakeRagChain()
+
     monkeypatch.setattr(
         chain,
         "build_rag_chain",
-        lambda vector_store, llm_client, generation_client: FakeRagChain(),
+        fake_build_rag_chain,
     )
 
     result = chain.answer_question(
@@ -821,6 +828,8 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert result["video_id"] == "Gfr50f6ZBvo"
     assert calls["load_ready_index"] == 1
     assert calls["load_vector_store"] == 0
+    assert captured_clients["query"] is configured_client
+    assert captured_clients["generation"] is configured_client
 
 @pytest.mark.unit
 def test_answer_question_propagates_index_lifecycle_error(
