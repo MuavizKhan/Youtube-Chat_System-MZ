@@ -453,6 +453,8 @@ def test_question_context_uses_dense_anchor_headroom(monkeypatch):
 
 @pytest.mark.unit
 def test_question_context_soft_reranks_dense_anchors(monkeypatch):
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+
     dense = "Why did the company fail and what challenges caused the problems?"
     ranked = [
         (doc(10, 100, 105, "first region"), 0.1),
@@ -544,6 +546,7 @@ def test_question_context_uses_overview_path(monkeypatch):
 
 @pytest.mark.unit
 def test_question_context_merges_and_deduplicates(monkeypatch):
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
     monkeypatch.setattr(retrieval,"expand_retrieval_context",lambda vector_store,retrieved_results,**kwargs:retrieved_results)
     one,two,duplicate=doc(1,0,10,"one"),doc(2,10,20,"two"),doc(1,20,30,"duplicate")
     monkeypatch.setattr(retrieval,"retrieve_mmr",lambda **k:[(one,0.4),(duplicate,0.5)])
