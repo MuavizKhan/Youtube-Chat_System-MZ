@@ -1322,6 +1322,9 @@ def _retrieve_with_query_recovery_trace(
                 final_results = []
                 final_stage = "overview_empty"
         else:
+            final_results = []
+
+        if not final_results:
             queries = [
                 plan.standalone_question,
                 *plan.search_queries,
@@ -1348,7 +1351,6 @@ def _retrieve_with_query_recovery_trace(
 
                 unique_queries.append(normalized)
 
-            final_results = []
             final_stage = "rewritten_strict_exhausted"
 
             for query in unique_queries:
@@ -1420,6 +1422,7 @@ def _retrieve_with_query_recovery_trace(
                     final_stage = "best_effort_overview"
                 else:
                     final_stage = "no_evidence"
+
 
     final_chunk_ids = []
     for document, _distance in final_results:
