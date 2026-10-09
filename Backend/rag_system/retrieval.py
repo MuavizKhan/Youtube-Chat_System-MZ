@@ -2428,6 +2428,9 @@ def retrieve_temporal_context(
     valid_documents = []
 
     for document in documents:
+        if not document.page_content or not document.page_content.strip():
+            continue
+
         try:
             start = float(document.metadata["start"])
             end = float(document.metadata["end"])
