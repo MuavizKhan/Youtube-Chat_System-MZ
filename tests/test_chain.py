@@ -1055,3 +1055,142 @@ def test_resolve_conversational_question_returns_standalone_question(monkeypatch
     assert resolved == "Who are the people participating in the protest?"
     assert calls[0]["conversation_history"] == history
 
+
+
+
+@pytest.mark.unit
+def test_temporal_trace_bypasses_unbounded_semantic_recovery(monkeypatch):
+    item = (doc(32, 1574.72, 1584.52, "ending transcript"), 1.3)
+    bundle = {
+        "window": {
+            "mode": "explicit_range",
+            "start_seconds": 1535.0,
+            "end_seconds": 1584.52,
+        },
+        "results": [item],
+        "candidates": [item],
+        "coverage_ratio": 0.8,
+        "covered_seconds": 39.6,
+        "window_seconds": 49.52,
+        "minimum_coverage": 0.5,
+        "coverage_sufficient": True,
+        "candidate_chunk_ids": [32],
+    }
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: bundle,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: pytest.fail("temporal route must not use global semantic retrieval"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: pytest.fail("temporal route must not invoke generic query recovery"),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="What is said between 25:35 and 26:25?",
+    )
+
+    assert results == [item]
+    assert trace["route"] == "temporal_window"
+    assert trace["final_stage"] == "temporal_window"
+    assert trace["planner_used"] is False
+    assert trace["temporal_window"]["coverage_ratio"] == 0.8
+
+
+@pytest.mark.unit
+def test_temporal_trace_fails_closed_when_coverage_is_insufficient(monkeypatch):
+    candidate = (doc(30, 1500, 1535.69, "partial ending"), 1.3)
+    bundle = {
+        "window": {
+            "mode": "explicit_range",
+            "start_seconds": 1535.0,
+            "end_seconds": 1584.52,
+        },
+        "results": [],
+        "candidates": [candidate],
+        "coverage_ratio": 0.02,
+        "covered_seconds": 0.69,
+        "window_seconds": 49.52,
+        "minimum_coverage": 0.5,
+        "coverage_sufficient": False,
+        "candidate_chunk_ids": [30],
+    }
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: bundle,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: pytest.fail("must not bypass temporal coverage gate"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: pytest.fail("must not rewrite away the requested time window"),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="What happens during 25:35–26:25?",
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "temporal_window_insufficient_coverage"
+    assert trace["recovery_used"] is False
+    assert trace["planner_used"] is False
+    assert trace["final_chunk_ids"] == []
+    assert trace["attempts"][0]["retrieved_chunks"] == 1
+
+
+
+@pytest.mark.unit
+def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
+    bundle = {
+        "window": {
+            "mode": "point_timestamp",
+            "start_seconds": 570.0,
+            "end_seconds": 630.0,
+        },
+        "results": [],
+        "candidates": [],
+        "coverage_ratio": 0.0,
+        "covered_seconds": 0.0,
+        "window_seconds": 60.0,
+        "minimum_coverage": 0.5,
+        "coverage_sufficient": False,
+        "candidate_chunk_ids": [],
+    }
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: bundle,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: pytest.fail("must not retrieve from outside the requested window"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: pytest.fail("must not invoke unbounded recovery for a time-specific query"),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="What happened at 10:00?",
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "temporal_window_empty"
+    assert trace["recovery_used"] is False
+    assert trace["planner_used"] is False

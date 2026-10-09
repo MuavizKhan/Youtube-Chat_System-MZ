@@ -1028,3 +1028,158 @@ def test_retrieve_question_context_applies_cross_encoder_before_anchor_selection
     )
 
     assert [item[0].metadata["chunk_id"] for item in result] == [2, 1]
+
+
+
+@pytest.mark.unit
+def test_temporal_query_parser_reads_explicit_time_range():
+    window = retrieval.parse_temporal_query_window(
+        "What is said from 25:35–26:25?",
+        video_duration_seconds=2000,
+    )
+
+    assert window == {
+        "mode": "explicit_range",
+        "start_seconds": 1535.0,
+        "end_seconds": 1585.0,
+    }
+
+
+@pytest.mark.unit
+def test_temporal_query_parser_resolves_tail_and_video_end():
+    tail = retrieval.parse_temporal_query_window(
+        "What happens during the final 50 seconds?",
+        video_duration_seconds=210,
+    )
+    ending = retrieval.parse_temporal_query_window(
+        "What happens at the end of the video?",
+        video_duration_seconds=210,
+    )
+
+    assert tail == {
+        "mode": "relative_tail",
+        "start_seconds": 160.0,
+        "end_seconds": 210.0,
+    }
+    assert ending == {
+        "mode": "video_end",
+        "start_seconds": 120.0,
+        "end_seconds": 210.0,
+    }
+
+
+@pytest.mark.unit
+def test_temporal_route_is_not_used_for_general_questions():
+    assert not retrieval.is_temporal_question("What is this video about?")
+    assert retrieval.retrieve_temporal_context(
+        object(),
+        "What is this video about?",
+    ) is None
+
+
+@pytest.mark.unit
+def test_temporal_retrieval_only_returns_chunks_overlapping_requested_window():
+    documents = {
+        "before": doc(0, 0, 60, "opening"),
+        "first_overlap": doc(1, 60, 120, "first target segment"),
+        "second_overlap": doc(2, 120, 180, "second target segment"),
+        "after": doc(3, 180, 240, "closing"),
+    }
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What is said between 01:10 and 02:10?",
+    )
+
+    assert bundle is not None
+    assert bundle["window"] == {
+        "mode": "explicit_range",
+        "start_seconds": 70.0,
+        "end_seconds": 130.0,
+    }
+    assert [document.metadata["chunk_id"] for document, _ in bundle["results"]] == [1, 2]
+    assert bundle["coverage_sufficient"] is True
+    assert bundle["coverage_ratio"] == 1.0
+
+
+@pytest.mark.unit
+def test_temporal_retrieval_fails_closed_when_window_coverage_is_too_sparse():
+    documents = {
+        "old": doc(30, 1500, 1535.69, "earlier transcript"),
+        "empty_gap": doc(31, 1535.69, 1574.72, ""),
+        "ending": doc(32, 1574.72, 1584.52, "ending transcript"),
+    }
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What happens during the final 50 seconds, approximately 25:35–26:25?",
+    )
+
+    assert bundle is not None
+    assert bundle["window"]["mode"] == "explicit_range"
+    assert bundle["coverage_sufficient"] is False
+    assert bundle["coverage_ratio"] < retrieval.TEMPORAL_MIN_WINDOW_COVERAGE
+    assert bundle["results"] == []
+    assert {
+        document.metadata["chunk_id"]
+        for document, _ in bundle["candidates"]
+    } == {30, 32}
+
+
+@pytest.mark.unit
+def test_temporal_end_query_selects_chronological_tail_chunks():
+    documents = {
+        "opening": doc(0, 0, 60, "opening"),
+        "middle": doc(1, 60, 120, "middle"),
+        "ending": doc(2, 120, 180, "ending"),
+    }
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What is said at the end of the video?",
+    )
+
+    assert bundle is not None
+    assert bundle["window"]["mode"] == "video_end"
+    assert [document.metadata["chunk_id"] for document, _ in bundle["results"]] == [1, 2]
+    assert bundle["coverage_ratio"] == 1.0
+
+
+
+@pytest.mark.unit
+def test_temporal_parser_supports_hhmmss_and_point_timestamps():
+    clock_range = retrieval.parse_temporal_query_window(
+        "What happened from 1:02:30 to 1:03:40?",
+        video_duration_seconds=5000,
+    )
+    point = retrieval.parse_temporal_query_window(
+        "What happened at 10:00?",
+        video_duration_seconds=1200,
+    )
+
+    assert clock_range == {
+        "mode": "explicit_range",
+        "start_seconds": 3750.0,
+        "end_seconds": 3820.0,
+    }
+    assert point == {
+        "mode": "point_timestamp",
+        "start_seconds": 570.0,
+        "end_seconds": 630.0,
+    }
+
+
+@pytest.mark.unit
+def test_temporal_retrieval_returns_no_evidence_for_a_window_past_video_end():
+    documents = {
+        "opening": doc(0, 0, 60, "opening"),
+        "middle": doc(1, 60, 120, "middle"),
+        "ending": doc(2, 120, 180, "ending"),
+    }
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What happened at 10:00?",
+    )
+
+    assert bundle is not None
+    assert bundle["results"] == []
+    assert bundle["candidates"] == []
+    assert bundle["coverage_ratio"] == 0.0
+    assert bundle["coverage_sufficient"] is False
