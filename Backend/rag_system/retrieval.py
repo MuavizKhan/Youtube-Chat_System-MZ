@@ -2202,10 +2202,10 @@ def select_diverse_retrieval_anchors(
 # the requested interval, the pipeline returns the normal evidence fallback.
 TEMPORAL_TAIL_WINDOW_SECONDS = 90.0
 TEMPORAL_MIN_WINDOW_COVERAGE = 0.50
-# A boundary chunk should contribute more than a token overlap to a window.
-# This ratio is measured against the smaller of the chunk and requested window,
-# so truly short windows can still be served by a single long transcript chunk.
-TEMPORAL_MIN_CHUNK_OVERLAP_RATIO = 0.10
+# Measure overlap against the chunk's own timestamp span. This prevents a
+# long chunk from passing solely because it fully envelopes a very short query
+# window; a focused neighboring chunk can still satisfy the requested window.
+TEMPORAL_MIN_CHUNK_OVERLAP_RATIO = 0.20
 
 _TEMPORAL_TIME_TOKEN = r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
 _TEMPORAL_RANGE_PATTERN = re.compile(
@@ -2513,11 +2513,13 @@ def retrieve_temporal_context(
         # only a negligible overlap, otherwise one second of overlap can pull a
         # full 50-second chunk into context and make source timestamps misleading.
         chunk_seconds = doc_end - doc_start
-        comparison_seconds = min(chunk_seconds, window_seconds)
-        if comparison_seconds <= 0:
+        if chunk_seconds <= 0:
             continue
 
-        overlap_ratio = overlap_seconds / comparison_seconds
+        # A chunk must contribute a meaningful fraction of its own span.
+        # Using min(chunk_seconds, window_seconds) here lets very long chunks
+        # pass whenever they envelope the entire requested window.
+        overlap_ratio = overlap_seconds / chunk_seconds
         if overlap_ratio < TEMPORAL_MIN_CHUNK_OVERLAP_RATIO:
             continue
 
