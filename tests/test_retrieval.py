@@ -1140,3 +1140,46 @@ def test_temporal_end_query_selects_chronological_tail_chunks():
     assert bundle["window"]["mode"] == "video_end"
     assert [document.metadata["chunk_id"] for document, _ in bundle["results"]] == [1, 2]
     assert bundle["coverage_ratio"] == 1.0
+
+
+
+@pytest.mark.unit
+def test_temporal_parser_supports_hhmmss_and_point_timestamps():
+    clock_range = retrieval.parse_temporal_query_window(
+        "What happened from 1:02:30 to 1:03:40?",
+        video_duration_seconds=5000,
+    )
+    point = retrieval.parse_temporal_query_window(
+        "What happened at 10:00?",
+        video_duration_seconds=1200,
+    )
+
+    assert clock_range == {
+        "mode": "explicit_range",
+        "start_seconds": 3750.0,
+        "end_seconds": 3820.0,
+    }
+    assert point == {
+        "mode": "point_timestamp",
+        "start_seconds": 570.0,
+        "end_seconds": 630.0,
+    }
+
+
+@pytest.mark.unit
+def test_temporal_retrieval_returns_no_evidence_for_a_window_past_video_end():
+    documents = {
+        "opening": doc(0, 0, 60, "opening"),
+        "middle": doc(1, 60, 120, "middle"),
+        "ending": doc(2, 120, 180, "ending"),
+    }
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What happened at 10:00?",
+    )
+
+    assert bundle is not None
+    assert bundle["results"] == []
+    assert bundle["candidates"] == []
+    assert bundle["coverage_ratio"] == 0.0
+    assert bundle["coverage_sufficient"] is False
