@@ -1105,6 +1105,7 @@ def test_temporal_retrieval_only_returns_chunks_overlapping_requested_window():
 def test_temporal_retrieval_fails_closed_when_window_coverage_is_too_sparse():
     documents = {
         "old": doc(30, 1500, 1535.69, "earlier transcript"),
+        "empty_gap": doc(31, 1535.69, 1574.72, ""),
         "ending": doc(32, 1574.72, 1584.52, "ending transcript"),
     }
     bundle = retrieval.retrieve_temporal_context(
