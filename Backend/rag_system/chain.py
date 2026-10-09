@@ -89,6 +89,7 @@ from .retrieval import (
     extract_video_id,
     retrieve_overview,
     retrieve_question_context,
+    retrieve_temporal_context,
 )
 
 from .index_service import load_ready_index
@@ -1229,6 +1230,76 @@ def _retrieve_with_query_recovery_trace(
     planner_intent = None
     planner_latency_ms = 0.0
 
+    # Timestamp-specific requests use bounded temporal retrieval. Do not let
+    # the generic rewrite/overview recovery ladder bypass the requested time.
+    temporal_bundle = retrieve_temporal_context(
+        vector_store=vector_store,
+        query=question,
+    )
+    if temporal_bundle is not None:
+        temporal_results = temporal_bundle["results"]
+        temporal_candidates = temporal_bundle["candidates"]
+        temporal_window = temporal_bundle["window"]
+
+        if temporal_results:
+            final_stage = "temporal_window"
+        elif temporal_candidates:
+            final_stage = "temporal_window_insufficient_coverage"
+        else:
+            final_stage = "temporal_window_empty"
+
+        attempt_results = temporal_candidates or temporal_results
+        temporal_attempt = _build_retrieval_attempt_trace(
+            (
+                "temporal_window_candidates"
+                if temporal_candidates and not temporal_results
+                else "temporal_window"
+            ),
+            attempt_results,
+        )
+        temporal_attempt["coverage_ratio"] = temporal_bundle["coverage_ratio"]
+        temporal_attempt["coverage_sufficient"] = temporal_bundle["coverage_sufficient"]
+
+        temporal_trace = {
+            "recovery_used": False,
+            "final_stage": final_stage,
+            "planner_used": False,
+            "planner_intent": None,
+            "planner_latency_ms": 0.0,
+            "route": "temporal_window",
+            "temporal_window": {
+                **(temporal_window or {}),
+                "window_seconds": temporal_bundle["window_seconds"],
+                "covered_seconds": temporal_bundle["covered_seconds"],
+                "coverage_ratio": temporal_bundle["coverage_ratio"],
+                "minimum_coverage": temporal_bundle["minimum_coverage"],
+                "coverage_sufficient": temporal_bundle["coverage_sufficient"],
+                "candidate_chunk_ids": temporal_bundle["candidate_chunk_ids"],
+            },
+            "attempts": [temporal_attempt],
+            "retrieval_latency_ms": round(
+                (time.perf_counter() - started) * 1000,
+                2,
+            ),
+            "final_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in temporal_results
+                if document.metadata.get("chunk_id") is not None
+            ][:20],
+        }
+
+        logger.info(
+            "Temporal retrieval completed stage=%s start_seconds=%s end_seconds=%s "
+            "coverage=%.3f candidate_chunks=%s selected_chunks=%s",
+            final_stage,
+            (temporal_window or {}).get("start_seconds"),
+            (temporal_window or {}).get("end_seconds"),
+            temporal_bundle["coverage_ratio"],
+            len(temporal_candidates),
+            len(temporal_results),
+        )
+        return temporal_results, temporal_trace
+
     initial_results = retrieve_question_context(
         vector_store=vector_store,
         query=question,
@@ -1963,9 +2034,13 @@ def answer_question(
 
     "retrieval_method":
         (
-            "question_aware_cross_encoder_rerank"
-            if RAG_RERANK_ENABLED
-            else "question_aware_soft_facet_rerank"
+            "timestamp_window"
+            if observability["retrieval"].get("route") == "temporal_window"
+            else (
+                "question_aware_cross_encoder_rerank"
+                if RAG_RERANK_ENABLED
+                else "question_aware_soft_facet_rerank"
+            )
         ),
 
     "retrieval_config":
