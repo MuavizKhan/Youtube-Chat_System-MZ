@@ -2202,10 +2202,13 @@ def select_diverse_retrieval_anchors(
 # the requested interval, the pipeline returns the normal evidence fallback.
 TEMPORAL_TAIL_WINDOW_SECONDS = 90.0
 TEMPORAL_MIN_WINDOW_COVERAGE = 0.50
-# Measure overlap against the chunk's own timestamp span. This prevents a
-# long chunk from passing solely because it fully envelopes a very short query
-# window; a focused neighboring chunk can still satisfy the requested window.
-TEMPORAL_MIN_CHUNK_OVERLAP_RATIO = 0.20
+# Ignore chunks that barely intersect a requested window. The comparison uses
+# the smaller interval to retain genuinely useful chunks at either boundary.
+TEMPORAL_MIN_CHUNK_OVERLAP_RATIO = 0.10
+# If a focused chunk starting inside the requested interval covers nearly all
+# of it, prefer it over a much larger, earlier-starting envelope chunk.
+TEMPORAL_FOCUSED_WINDOW_COVERAGE = 0.90
+TEMPORAL_REDUNDANT_CHUNK_DURATION_RATIO = 2.0
 
 _TEMPORAL_TIME_TOKEN = r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
 _TEMPORAL_RANGE_PATTERN = re.compile(
@@ -2509,17 +2512,15 @@ def retrieve_temporal_context(
         if overlap_seconds <= 0:
             continue
 
-        # Chunks can straddle window boundaries. Ignore chunks that contribute
-        # only a negligible overlap, otherwise one second of overlap can pull a
-        # full 50-second chunk into context and make source timestamps misleading.
+        # Chunks can straddle window boundaries. Ignore only negligible
+        # intersection; focused-window pruning below handles broad chunks that
+        # merely envelope a narrow request.
         chunk_seconds = doc_end - doc_start
-        if chunk_seconds <= 0:
+        comparison_seconds = min(chunk_seconds, window_seconds)
+        if comparison_seconds <= 0:
             continue
 
-        # A chunk must contribute a meaningful fraction of its own span.
-        # Using min(chunk_seconds, window_seconds) here lets very long chunks
-        # pass whenever they envelope the entire requested window.
-        overlap_ratio = overlap_seconds / chunk_seconds
+        overlap_ratio = overlap_seconds / comparison_seconds
         if overlap_ratio < TEMPORAL_MIN_CHUNK_OVERLAP_RATIO:
             continue
 
@@ -2532,6 +2533,65 @@ def retrieve_temporal_context(
             document.metadata.get("chunk_id", 0),
         )
     )
+
+    # Timestamp envelopes can be much wider than the text that best represents
+    # a narrow interval. If a shorter chunk begins inside the window and covers
+    # at least 90% of it, remove a substantially longer chunk that starts before
+    # the window and contributes only redundant overlap. Do not apply this to
+    # broad windows where the focused tail chunk covers only a small fraction.
+    focused_candidates = []
+    for document in candidates:
+        doc_start = float(document.metadata["start"])
+        doc_end = float(document.metadata["end"])
+        overlap_seconds = max(
+            0.0,
+            min(end_seconds, doc_end) - max(start_seconds, doc_start),
+        )
+        if (
+            start_seconds <= doc_start < end_seconds
+            and overlap_seconds / window_seconds
+            >= TEMPORAL_FOCUSED_WINDOW_COVERAGE
+        ):
+            focused_candidates.append(document)
+
+    if focused_candidates:
+        pruned_candidates = []
+        for document in candidates:
+            doc_start = float(document.metadata["start"])
+            doc_end = float(document.metadata["end"])
+            doc_seconds = doc_end - doc_start
+            doc_overlap_start = max(start_seconds, doc_start)
+            doc_overlap_end = min(end_seconds, doc_end)
+            doc_overlap = max(0.0, doc_overlap_end - doc_overlap_start)
+
+            redundant = False
+            if doc_start < start_seconds and doc_end >= end_seconds:
+                for focused in focused_candidates:
+                    if focused is document:
+                        continue
+                    focused_start = float(focused.metadata["start"])
+                    focused_end = float(focused.metadata["end"])
+                    focused_seconds = focused_end - focused_start
+                    shared_seconds = max(
+                        0.0,
+                        min(doc_overlap_end, focused_end)
+                        - max(doc_overlap_start, focused_start),
+                    )
+                    if (
+                        focused_seconds > 0
+                        and doc_seconds
+                        >= focused_seconds * TEMPORAL_REDUNDANT_CHUNK_DURATION_RATIO
+                        and doc_overlap > 0
+                        and shared_seconds / doc_overlap
+                        >= TEMPORAL_FOCUSED_WINDOW_COVERAGE
+                    ):
+                        redundant = True
+                        break
+
+            if not redundant:
+                pruned_candidates.append(document)
+
+        candidates = pruned_candidates
 
     # Preserve coverage across long windows while keeping prompt context bounded.
     selected_candidates = candidates
