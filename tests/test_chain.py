@@ -1149,3 +1149,48 @@ def test_temporal_trace_fails_closed_when_coverage_is_insufficient(monkeypatch):
     assert trace["planner_used"] is False
     assert trace["final_chunk_ids"] == []
     assert trace["attempts"][0]["retrieved_chunks"] == 1
+
+
+
+@pytest.mark.unit
+def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
+    bundle = {
+        "window": {
+            "mode": "point_timestamp",
+            "start_seconds": 570.0,
+            "end_seconds": 630.0,
+        },
+        "results": [],
+        "candidates": [],
+        "coverage_ratio": 0.0,
+        "covered_seconds": 0.0,
+        "window_seconds": 60.0,
+        "minimum_coverage": 0.5,
+        "coverage_sufficient": False,
+        "candidate_chunk_ids": [],
+    }
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: bundle,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: pytest.fail("must not retrieve from outside the requested window"),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: pytest.fail("must not invoke unbounded recovery for a time-specific query"),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="What happened at 10:00?",
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "temporal_window_empty"
+    assert trace["recovery_used"] is False
+    assert trace["planner_used"] is False
