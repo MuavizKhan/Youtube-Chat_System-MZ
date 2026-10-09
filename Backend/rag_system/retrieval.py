@@ -2202,6 +2202,10 @@ def select_diverse_retrieval_anchors(
 # the requested interval, the pipeline returns the normal evidence fallback.
 TEMPORAL_TAIL_WINDOW_SECONDS = 90.0
 TEMPORAL_MIN_WINDOW_COVERAGE = 0.50
+# A boundary chunk should contribute more than a token overlap to a window.
+# This ratio is measured against the smaller of the chunk and requested window,
+# so truly short windows can still be served by a single long transcript chunk.
+TEMPORAL_MIN_CHUNK_OVERLAP_RATIO = 0.10
 
 _TEMPORAL_TIME_TOKEN = r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
 _TEMPORAL_RANGE_PATTERN = re.compile(
@@ -2498,8 +2502,26 @@ def retrieve_temporal_context(
     for document in valid_documents:
         doc_start = float(document.metadata["start"])
         doc_end = float(document.metadata["end"])
-        if doc_start < end_seconds and doc_end > start_seconds:
-            candidates.append(document)
+        overlap_start = max(start_seconds, doc_start)
+        overlap_end = min(end_seconds, doc_end)
+        overlap_seconds = overlap_end - overlap_start
+
+        if overlap_seconds <= 0:
+            continue
+
+        # Chunks can straddle window boundaries. Ignore chunks that contribute
+        # only a negligible overlap, otherwise one second of overlap can pull a
+        # full 50-second chunk into context and make source timestamps misleading.
+        chunk_seconds = doc_end - doc_start
+        comparison_seconds = min(chunk_seconds, window_seconds)
+        if comparison_seconds <= 0:
+            continue
+
+        overlap_ratio = overlap_seconds / comparison_seconds
+        if overlap_ratio < TEMPORAL_MIN_CHUNK_OVERLAP_RATIO:
+            continue
+
+        candidates.append(document)
 
     candidates.sort(
         key=lambda document: (
@@ -2507,15 +2529,6 @@ def retrieve_temporal_context(
             float(document.metadata["end"]),
             document.metadata.get("chunk_id", 0),
         )
-    )
-
-    coverage_ratio, covered_seconds = _temporal_window_coverage(
-        candidates,
-        start_seconds,
-        end_seconds,
-    )
-    coverage_sufficient = (
-        coverage_ratio >= TEMPORAL_MIN_WINDOW_COVERAGE
     )
 
     # Preserve coverage across long windows while keeping prompt context bounded.
@@ -2541,6 +2554,17 @@ def retrieve_temporal_context(
         (document, float(MAX_DISTANCE))
         for document in selected_candidates
     ]
+
+    # Coverage must describe the chunks that actually enter the model context,
+    # not every possible candidate before the bounded context budget is applied.
+    coverage_ratio, covered_seconds = _temporal_window_coverage(
+        selected_candidates,
+        start_seconds,
+        end_seconds,
+    )
+    coverage_sufficient = (
+        coverage_ratio >= TEMPORAL_MIN_WINDOW_COVERAGE
+    )
     results = candidate_results if coverage_sufficient else []
 
     candidate_chunk_ids = []

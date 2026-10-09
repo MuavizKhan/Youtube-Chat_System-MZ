@@ -1121,7 +1121,7 @@ def test_temporal_retrieval_fails_closed_when_window_coverage_is_too_sparse():
     assert {
         document.metadata["chunk_id"]
         for document, _ in bundle["candidates"]
-    } == {30, 32}
+    } == {32}
 
 
 @pytest.mark.unit
@@ -1183,3 +1183,52 @@ def test_temporal_retrieval_returns_no_evidence_for_a_window_past_video_end():
     assert bundle["candidates"] == []
     assert bundle["coverage_ratio"] == 0.0
     assert bundle["coverage_sufficient"] is False
+
+
+
+@pytest.mark.unit
+def test_temporal_retrieval_excludes_negligible_boundary_chunks():
+    documents = {
+        "before_window": doc(30, 1471.92, 1535.69, "earlier transcript"),
+        "overlapping_window": doc(31, 1525.08, 1574.72, "main window transcript"),
+        "end_window": doc(32, 1574.72, 1584.52, "final transcript"),
+    }
+
+    wide = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What is said between 25:35 and 26:25?",
+    )
+    narrow = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What is said between 26:14 and 26:24?",
+    )
+
+    assert wide is not None
+    assert [document.metadata["chunk_id"] for document, _ in wide["results"]] == [31, 32]
+    assert wide["coverage_ratio"] == 1.0
+
+    assert narrow is not None
+    assert [document.metadata["chunk_id"] for document, _ in narrow["results"]] == [32]
+    assert narrow["coverage_ratio"] == pytest.approx(0.928, abs=0.001)
+    assert narrow["coverage_sufficient"] is True
+
+
+@pytest.mark.unit
+def test_temporal_coverage_is_measured_after_context_budget():
+    documents = {
+        "first": doc(0, 0, 30, "first section"),
+        "middle": doc(1, 30, 60, "middle section"),
+        "last": doc(2, 60, 90, "last section"),
+    }
+
+    bundle = retrieval.retrieve_temporal_context(
+        FakeVectorStore(documents),
+        "What happened between 00:00 and 01:30?",
+        max_chunks=1,
+    )
+
+    assert bundle is not None
+    assert bundle["coverage_sufficient"] is False
+    assert bundle["coverage_ratio"] == pytest.approx(1 / 3, abs=0.01)
+    assert bundle["results"] == []
+    assert [document.metadata["chunk_id"] for document, _ in bundle["candidates"]] == [1]
