@@ -67,6 +67,28 @@ def test_prompt_role_mapping():
     assert [m["role"] for m in messages]==["system","user"]
 
 
+@pytest.mark.unit
+def test_prompt_handles_temporal_absence_and_requested_timestamp():
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": (
+            "[SOURCE 1]\nTimestamp: 25:25 - 26:24\n"
+            "Transcript: The passage ends with a question about interpretation."
+        ),
+        "question": (
+            "What is said between 25:35 and 26:25? "
+            "Does either AI declare a winner or announce a score? "
+            "Cite the relevant timestamp."
+        ),
+    })
+    messages = chain.prompt_to_messages(prompt)
+    system_prompt = messages[0]["content"]
+
+    assert "Do not use this fallback solely because a named event" in system_prompt
+    assert "Absence of a statement is answerable" in system_prompt
+    assert "If the user explicitly" in system_prompt
+    assert "timestamp supported" in system_prompt
+
+
 class FakeCompletions:
     def __init__(self, response=None, error=None):
         self.response = response
