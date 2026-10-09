@@ -1187,11 +1187,13 @@ def test_temporal_retrieval_returns_no_evidence_for_a_window_past_video_end():
 
 
 @pytest.mark.unit
-def test_temporal_retrieval_excludes_negligible_boundary_chunks():
+def test_temporal_retrieval_prefers_focused_chunk_for_narrow_window():
+    # Reproduces the observed index: chunk 31's coarse timestamp envelope spans
+    # the full video ending, while chunk 32 contains the focused final segment.
     documents = {
         "before_window": doc(30, 1471.92, 1535.69, "earlier transcript"),
-        "overlapping_window": doc(31, 1525.08, 1574.72, "main window transcript"),
-        "end_window": doc(32, 1574.72, 1584.52, "final transcript"),
+        "overlapping_window": doc(31, 1525.08, 1584.52, "broad chunk including the ending"),
+        "end_window": doc(32, 1574.72, 1584.52, "focused final transcript"),
     }
 
     wide = retrieval.retrieve_temporal_context(
@@ -1209,6 +1211,7 @@ def test_temporal_retrieval_excludes_negligible_boundary_chunks():
 
     assert narrow is not None
     assert [document.metadata["chunk_id"] for document, _ in narrow["results"]] == [32]
+    assert narrow["candidate_chunk_ids"] == [32]
     assert narrow["coverage_ratio"] == pytest.approx(0.928, abs=0.001)
     assert narrow["coverage_sufficient"] is True
 
