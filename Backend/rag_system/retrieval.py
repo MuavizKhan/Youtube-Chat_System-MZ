@@ -2297,7 +2297,11 @@ def parse_temporal_query_window(
         else:
             mode = "explicit_range"
 
-        if video_duration_seconds is not None and video_duration_seconds > 0:
+        if (
+            video_duration_seconds is not None
+            and video_duration_seconds > 0
+            and start < float(video_duration_seconds)
+        ):
             end = min(end, float(video_duration_seconds))
 
         return {
@@ -2337,7 +2341,11 @@ def parse_temporal_query_window(
 
         start = max(0.0, point - 30.0)
         end = point + 30.0
-        if video_duration_seconds is not None and video_duration_seconds > 0:
+        if (
+            video_duration_seconds is not None
+            and video_duration_seconds > 0
+            and point <= float(video_duration_seconds)
+        ):
             end = min(end, float(video_duration_seconds))
 
         return {
