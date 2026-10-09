@@ -2192,6 +2192,365 @@ def select_diverse_retrieval_anchors(
     return selected[:limit]
 
 
+
+# ============================================================
+# TEMPORAL QUERY ROUTING
+# ============================================================
+
+# Timestamp-constrained questions must not be answered from arbitrary
+# transcript regions. If the transcript metadata does not cover enough of
+# the requested interval, the pipeline returns the normal evidence fallback.
+TEMPORAL_TAIL_WINDOW_SECONDS = 90.0
+TEMPORAL_MIN_WINDOW_COVERAGE = 0.50
+
+_TEMPORAL_TIME_TOKEN = r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
+_TEMPORAL_RANGE_PATTERN = re.compile(
+    rf"(?P<start>{_TEMPORAL_TIME_TOKEN})\s*"
+    r"(?:-|–|—|to|through|until|and)\s*"
+    rf"(?P<end>{_TEMPORAL_TIME_TOKEN})",
+    re.IGNORECASE,
+)
+_TEMPORAL_DURATION_PATTERN = re.compile(
+    r"\b(?:last|final|past|previous|preceding)\s+"
+    r"(?:(?P<amount>\d+(?:\.\d+)?)\s*)?"
+    r"(?P<unit>seconds?|secs?|minutes?|mins?)\b",
+    re.IGNORECASE,
+)
+_TEMPORAL_POINT_PATTERN = re.compile(
+    rf"\b(?:at|around|near)\s+(?:approximately\s+)?"
+    rf"(?P<time>{_TEMPORAL_TIME_TOKEN})\b",
+    re.IGNORECASE,
+)
+_TEMPORAL_END_PATTERN = re.compile(
+    r"\b(?:at|near|toward|towards|in)\s+(?:the\s+)?(?:very\s+)?"
+    r"(?:end|ending|closing)\b|"
+    r"\b(?:the\s+)?(?:final|last|closing)\s+"
+    r"(?:part|section|portion|moments?|segment)\b|"
+    r"\b(?:the\s+)?(?:ending|outro)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_timestamp_token(value: str) -> float | None:
+    """Parse MM:SS or HH:MM:SS into seconds."""
+    try:
+        parts = [int(part) for part in value.split(":")]
+    except (TypeError, ValueError):
+        return None
+
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds >= 60:
+            return None
+        return float(minutes * 60 + seconds)
+
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+        if minutes >= 60 or seconds >= 60:
+            return None
+        return float(hours * 3600 + minutes * 60 + seconds)
+
+    return None
+
+
+def is_temporal_question(query: str) -> bool:
+    """Return True for explicit time ranges, timestamp points, or tail queries."""
+    if not query or not query.strip():
+        return False
+
+    return any(
+        pattern.search(query)
+        for pattern in (
+            _TEMPORAL_RANGE_PATTERN,
+            _TEMPORAL_DURATION_PATTERN,
+            _TEMPORAL_POINT_PATTERN,
+            _TEMPORAL_END_PATTERN,
+        )
+    )
+
+
+def parse_temporal_query_window(
+    query: str,
+    video_duration_seconds: float | None = None,
+) -> dict[str, float | str | None] | None:
+    """Resolve temporal wording to a bounded transcript interval.
+
+    Explicit ranges take precedence. Relative tail queries use indexed
+    duration metadata. Questions saying only "at the end" use a conservative
+    90-second window. Point timestamps use a 30-second window on each side.
+    """
+    if not query or not query.strip():
+        return None
+
+    range_match = _TEMPORAL_RANGE_PATTERN.search(query)
+    if range_match:
+        start = _parse_timestamp_token(range_match.group("start"))
+        end = _parse_timestamp_token(range_match.group("end"))
+        if start is None or end is None:
+            return None
+
+        start, end = min(start, end), max(start, end)
+        if start == end:
+            start = max(0.0, start - 30.0)
+            end = end + 30.0
+            mode = "point_timestamp"
+        else:
+            mode = "explicit_range"
+
+        if video_duration_seconds is not None and video_duration_seconds > 0:
+            end = min(end, float(video_duration_seconds))
+
+        return {
+            "mode": mode,
+            "start_seconds": float(start),
+            "end_seconds": float(end),
+        }
+
+    duration_match = _TEMPORAL_DURATION_PATTERN.search(query)
+    if duration_match:
+        amount = float(duration_match.group("amount") or 1.0)
+        unit = duration_match.group("unit").lower()
+        requested_seconds = amount * (
+            60.0 if unit.startswith("min") else 1.0
+        )
+
+        if video_duration_seconds is None or video_duration_seconds <= 0:
+            return {
+                "mode": "relative_tail",
+                "start_seconds": None,
+                "end_seconds": None,
+                "window_seconds": requested_seconds,
+            }
+
+        end = float(video_duration_seconds)
+        return {
+            "mode": "relative_tail",
+            "start_seconds": max(0.0, end - requested_seconds),
+            "end_seconds": end,
+        }
+
+    point_match = _TEMPORAL_POINT_PATTERN.search(query)
+    if point_match:
+        point = _parse_timestamp_token(point_match.group("time"))
+        if point is None:
+            return None
+
+        start = max(0.0, point - 30.0)
+        end = point + 30.0
+        if video_duration_seconds is not None and video_duration_seconds > 0:
+            end = min(end, float(video_duration_seconds))
+
+        return {
+            "mode": "point_timestamp",
+            "start_seconds": start,
+            "end_seconds": end,
+        }
+
+    if _TEMPORAL_END_PATTERN.search(query):
+        if video_duration_seconds is None or video_duration_seconds <= 0:
+            return {
+                "mode": "video_end",
+                "start_seconds": None,
+                "end_seconds": None,
+                "window_seconds": TEMPORAL_TAIL_WINDOW_SECONDS,
+            }
+
+        end = float(video_duration_seconds)
+        return {
+            "mode": "video_end",
+            "start_seconds": max(0.0, end - TEMPORAL_TAIL_WINDOW_SECONDS),
+            "end_seconds": end,
+        }
+
+    return None
+
+
+def _temporal_window_coverage(
+    documents,
+    start_seconds: float,
+    end_seconds: float,
+) -> tuple[float, float]:
+    """Return union coverage ratio and covered seconds for the target interval."""
+    window_seconds = max(0.0, end_seconds - start_seconds)
+    if window_seconds <= 0:
+        return 0.0, 0.0
+
+    intervals = []
+    for document in documents:
+        try:
+            doc_start = float(document.metadata["start"])
+            doc_end = float(document.metadata["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        overlap_start = max(start_seconds, doc_start)
+        overlap_end = min(end_seconds, doc_end)
+        if overlap_end > overlap_start:
+            intervals.append((overlap_start, overlap_end))
+
+    if not intervals:
+        return 0.0, 0.0
+
+    intervals.sort()
+    merged_start, merged_end = intervals[0]
+    covered_seconds = 0.0
+
+    for interval_start, interval_end in intervals[1:]:
+        if interval_start <= merged_end:
+            merged_end = max(merged_end, interval_end)
+        else:
+            covered_seconds += merged_end - merged_start
+            merged_start, merged_end = interval_start, interval_end
+
+    covered_seconds += merged_end - merged_start
+    covered_seconds = min(window_seconds, covered_seconds)
+
+    return covered_seconds / window_seconds, covered_seconds
+
+
+def retrieve_temporal_context(
+    vector_store,
+    query: str,
+    *,
+    max_chunks: int = DENSE_CONTEXT_MAX_CHUNKS,
+) -> dict[str, Any] | None:
+    """Retrieve only transcript chunks overlapping a requested time window.
+
+    None means the question has no recognized temporal intent. A returned
+    dictionary means the temporal route owns the request, even when no
+    sufficient evidence exists; the caller must not fall back to unbounded
+    semantic retrieval in that case.
+    """
+    if not is_temporal_question(query):
+        return None
+
+    documents = get_all_documents(vector_store)
+    valid_documents = []
+
+    for document in documents:
+        try:
+            start = float(document.metadata["start"])
+            end = float(document.metadata["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if end > start:
+            valid_documents.append(document)
+
+    video_duration = max(
+        (
+            float(document.metadata["end"])
+            for document in valid_documents
+        ),
+        default=None,
+    )
+    window = parse_temporal_query_window(query, video_duration)
+
+    if window is None:
+        return {
+            "window": None,
+            "results": [],
+            "candidates": [],
+            "coverage_ratio": 0.0,
+            "covered_seconds": 0.0,
+            "window_seconds": 0.0,
+            "minimum_coverage": TEMPORAL_MIN_WINDOW_COVERAGE,
+            "coverage_sufficient": False,
+            "candidate_chunk_ids": [],
+        }
+
+    start_seconds = window.get("start_seconds")
+    end_seconds = window.get("end_seconds")
+
+    if (
+        not isinstance(start_seconds, (int, float))
+        or not isinstance(end_seconds, (int, float))
+        or float(end_seconds) <= float(start_seconds)
+    ):
+        return {
+            "window": window,
+            "results": [],
+            "candidates": [],
+            "coverage_ratio": 0.0,
+            "covered_seconds": 0.0,
+            "window_seconds": 0.0,
+            "minimum_coverage": TEMPORAL_MIN_WINDOW_COVERAGE,
+            "coverage_sufficient": False,
+            "candidate_chunk_ids": [],
+        }
+
+    start_seconds = float(start_seconds)
+    end_seconds = float(end_seconds)
+    window_seconds = end_seconds - start_seconds
+
+    candidates = []
+    for document in valid_documents:
+        doc_start = float(document.metadata["start"])
+        doc_end = float(document.metadata["end"])
+        if doc_start < end_seconds and doc_end > start_seconds:
+            candidates.append(document)
+
+    candidates.sort(
+        key=lambda document: (
+            float(document.metadata["start"]),
+            float(document.metadata["end"]),
+            document.metadata.get("chunk_id", 0),
+        )
+    )
+
+    coverage_ratio, covered_seconds = _temporal_window_coverage(
+        candidates,
+        start_seconds,
+        end_seconds,
+    )
+    coverage_sufficient = (
+        coverage_ratio >= TEMPORAL_MIN_WINDOW_COVERAGE
+    )
+
+    # Preserve coverage across long windows while keeping prompt context bounded.
+    selected_candidates = candidates
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be greater than 0.")
+    if len(candidates) > max_chunks:
+        if max_chunks == 1:
+            selected_candidates = [candidates[len(candidates) // 2]]
+        else:
+            selected_indices = {
+                round(
+                    index * (len(candidates) - 1) / (max_chunks - 1)
+                )
+                for index in range(max_chunks)
+            }
+            selected_candidates = [
+                candidates[index]
+                for index in sorted(selected_indices)
+            ]
+
+    candidate_results = [
+        (document, float(MAX_DISTANCE))
+        for document in selected_candidates
+    ]
+    results = candidate_results if coverage_sufficient else []
+
+    candidate_chunk_ids = []
+    for document in candidates:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None and chunk_id not in candidate_chunk_ids:
+            candidate_chunk_ids.append(chunk_id)
+
+    return {
+        "window": window,
+        "results": results,
+        "candidates": candidate_results,
+        "coverage_ratio": round(coverage_ratio, 4),
+        "covered_seconds": round(covered_seconds, 2),
+        "window_seconds": round(window_seconds, 2),
+        "minimum_coverage": TEMPORAL_MIN_WINDOW_COVERAGE,
+        "coverage_sufficient": coverage_sufficient,
+        "candidate_chunk_ids": candidate_chunk_ids[:50],
+    }
+
+
 def retrieve_question_context(
     vector_store,
     query: str,
