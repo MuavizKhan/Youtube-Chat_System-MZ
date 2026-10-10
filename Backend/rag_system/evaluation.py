@@ -20,6 +20,7 @@ from .config import (
     DENSE_ANCHOR_LIMIT,
     DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
+    DENSE_LEXICAL_RRF_WEIGHT,
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
@@ -1162,6 +1163,7 @@ def build_end_to_end_retrieval_diagnostics(
                 "reranking_enabled",
                 RAG_RERANK_ENABLED,
             ),
+            "lexical_rrf_weight": pipeline.get("lexical_rrf_weight", 1.0),
             "cross_encoder_reranked_top_chunk_ids": [
                 document.metadata.get("chunk_id")
                 for document, _score in cross_encoder_results[:12]
@@ -1243,7 +1245,8 @@ def diagnose_video(
                 f"\\n{diagnostic['id']} | dense={diagnostic['dense_question']} | "
                 f"semantic_k={diagnostic['semantic_k']} | "
                 f"fetch_k={diagnostic['semantic_fetch_k']} | "
-                f"anchor_limit={diagnostic['anchor_limit']}"
+                f"anchor_limit={diagnostic['anchor_limit']} | "
+                f"lexical_rrf_weight={diagnostic['lexical_rrf_weight']}"
             )
             for group in diagnostic["groups"]:
                 print(
@@ -1355,6 +1358,7 @@ def build_evaluation_summary(
             "dense_anchor_limit": DENSE_ANCHOR_LIMIT,
             "dense_anchor_min_chunk_gap": DENSE_ANCHOR_MIN_CHUNK_GAP,
             "dense_context_max_chunks": DENSE_CONTEXT_MAX_CHUNKS,
+            "dense_lexical_rrf_weight": DENSE_LEXICAL_RRF_WEIGHT,
             "rerank_enabled": RAG_RERANK_ENABLED,
             "rerank_model": RAG_RERANK_MODEL,
             "rerank_candidate_k": RAG_RERANK_CANDIDATE_K,

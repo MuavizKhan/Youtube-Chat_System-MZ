@@ -343,6 +343,17 @@ Part 6 adds a temporal evidence benchmark for Q11, which asks where Kingfisher A
 
 The machine-readable JSON summary includes `temporal_benchmark`; the evaluator exits non-zero if its thresholds fail. Real-video retrieval quality still needs a smoke run against the indexed benchmark video and the configured embedding environment.
 
+## Phase 8 — Dense-question lexical evidence retention
+
+Diagnostics found that exact transcript evidence could be retrieved by the lexical branch but fall below the dense-question anchor cutoff after semantic + lexical fusion. The hybrid RRF now supports `RAG_DENSE_LEXICAL_RRF_WEIGHT` (default `1.25`) to modestly emphasize the *rank contribution* of lexical results for evidence-dense questions.
+
+- The weight is applied to both global hybrid fusion and facet-level hybrid fusion, and the diagnostic path uses the same value.
+- Simple questions retain equal semantic/lexical weighting (`1.0`). Set `RAG_DENSE_LEXICAL_RRF_WEIGHT=1.0` to restore equal weighting for dense questions as well.
+- The weight changes only RRF contribution; it does not change FAISS distances, semantic distance gates, retrieval candidates, context limits, benchmark thresholds, or answer generation.
+- Evaluation JSON records the effective configured value so A/B results can be compared reproducibly.
+
+This is a bounded ranking adjustment, not a hard lexical quota. It should be retained only if the benchmark and real-video checks confirm that improved evidence retention does not create broad precision regressions.
+
 ## Phase 8 — Cross-Encoder reranking
 
 The retrieval path now adds a bounded Cross-Encoder reranking stage after semantic + lexical candidate fusion and before final anchor selection.

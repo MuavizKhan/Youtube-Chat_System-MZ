@@ -41,6 +41,7 @@ from .config import (
     DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
     DENSE_FACET_RERANK_WEIGHT,
+    DENSE_LEXICAL_RRF_WEIGHT,
     RAG_RERANK_BATCH_SIZE,
     RAG_RERANK_CANDIDATE_K,
     RAG_RERANK_ENABLED,
@@ -849,6 +850,9 @@ def diagnose_retrieval_pipeline(
         )
 
     dense_question = is_evidence_dense_question(query)
+    lexical_rrf_weight = (
+        DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
+    )
     semantic_k = (
         DENSE_SEMANTIC_K
         if dense_question
@@ -928,7 +932,8 @@ def diagnose_retrieval_pipeline(
         semantic_results=semantic_results,
         lexical_results=lexical_results,
         lexical_distance=max_distance,
-    )
+        lexical_weight=lexical_rrf_weight,
+    ))
 
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
@@ -941,7 +946,8 @@ def diagnose_retrieval_pipeline(
                     semantic_results=semantic_facet,
                     lexical_results=lexical_facet,
                     lexical_distance=max_distance,
-                )
+                    lexical_weight=lexical_rrf_weight,
+                ))
             )
 
     context_max_chunks = (
@@ -1023,6 +1029,7 @@ def diagnose_retrieval_pipeline(
         "query": query,
         "dense_question": dense_question,
         "reranking_enabled": RAG_RERANK_ENABLED,
+        "lexical_rrf_weight": lexical_rrf_weight,
         "semantic_k": semantic_k,
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
@@ -1609,6 +1616,7 @@ def fuse_semantic_and_lexical_results(
     lexical_results,
     *,
     lexical_distance: float = MAX_DISTANCE,
+    lexical_weight: float = 1.0,
     rrf_k: int = RRF_K,
 ):
     """
@@ -1621,11 +1629,14 @@ def fuse_semantic_and_lexical_results(
 
     The returned tuple keeps the original FAISS distance when a document was
     retrieved semantically. Lexical-only documents receive MAX_DISTANCE so
-    downstream semantic-distance contracts remain conservative.
+    downstream semantic-distance contracts remain conservative. ``lexical_weight``
+    changes only the lexical branch's rank contribution; it never changes distances.
     """
 
     if rrf_k <= 0:
         raise ValueError("rrf_k must be greater than 0.")
+    if not math.isfinite(lexical_weight) or lexical_weight <= 0:
+        raise ValueError("lexical_weight must be finite and greater than 0.")
 
     fused = {}
 
@@ -1640,7 +1651,7 @@ def fuse_semantic_and_lexical_results(
             float(document.metadata.get("end", 0.0)),
         )
 
-    def add_ranked_result(document, distance, rank):
+    def add_ranked_result(document, distance, rank, *, weight: float = 1.0):
         key = identity(document)
         entry = fused.get(key)
 
@@ -1660,7 +1671,7 @@ def fuse_semantic_and_lexical_results(
                 float(distance),
             )
 
-        entry["score"] += 1.0 / (rrf_k + rank)
+        entry["score"] += weight / (rrf_k + rank)
 
     for rank, (document, distance) in enumerate(
         semantic_results,
@@ -1680,6 +1691,7 @@ def fuse_semantic_and_lexical_results(
             document,
             lexical_distance,
             rank,
+            weight=lexical_weight,
         )
 
     ranked = sorted(
@@ -2679,6 +2691,9 @@ def retrieve_question_context(
         return retrieve_overview(vector_store)
 
     dense_question = is_evidence_dense_question(query)
+    lexical_rrf_weight = (
+        DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
+    )
 
     semantic_k = (
         DENSE_SEMANTIC_K
@@ -2745,7 +2760,8 @@ def retrieve_question_context(
         semantic_results=semantic_results,
         lexical_results=lexical_results,
         lexical_distance=max_distance,
-    )
+        lexical_weight=lexical_rrf_weight,
+    ))
 
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
@@ -2758,7 +2774,8 @@ def retrieve_question_context(
                     semantic_results=semantic_facet,
                     lexical_results=lexical_facet,
                     lexical_distance=max_distance,
-                )
+                    lexical_weight=lexical_rrf_weight,
+                ))
             )
 
     if not combined_results:

@@ -76,7 +76,7 @@ def test_llm_provider_rejects_unknown_provider():
     assert "LLM_PROVIDER must be one of: huggingface, groq." in result.stderr
 
 
-def run_rerank_config_import(extra_env: dict[str, str | None]):
+def run_retrieval_config_import(extra_env: dict[str, str | None]):
     env = os.environ.copy()
 
     for key, value in extra_env.items():
@@ -84,6 +84,9 @@ def run_rerank_config_import(extra_env: dict[str, str | None]):
             env.pop(key, None)
         else:
             env[key] = value
+
+    if "RAG_DENSE_LEXICAL_RRF_WEIGHT" not in extra_env:
+        env.pop("RAG_DENSE_LEXICAL_RRF_WEIGHT", None)
 
     env["PYTHON_DOTENV_DISABLED"] = "true"
 
@@ -97,7 +100,8 @@ def run_rerank_config_import(extra_env: dict[str, str | None]):
                 "print(config.RAG_RERANK_MODEL); "
                 "print(config.RAG_RERANK_CANDIDATE_K); "
                 "print(config.RAG_RERANK_BATCH_SIZE); "
-                "print(config.RAG_RERANK_MAX_LENGTH)"
+                "print(config.RAG_RERANK_MAX_LENGTH); "
+                "print(config.DENSE_LEXICAL_RRF_WEIGHT)"
             ),
         ],
         capture_output=True,
@@ -109,13 +113,14 @@ def run_rerank_config_import(extra_env: dict[str, str | None]):
 
 
 def test_cross_encoder_reranking_configuration_loads():
-    result = run_rerank_config_import(
+    result = run_retrieval_config_import(
         {
             "RAG_RERANK_ENABLED": "true",
             "RAG_RERANK_MODEL": "test/reranker",
             "RAG_RERANK_CANDIDATE_K": "12",
             "RAG_RERANK_BATCH_SIZE": "8",
             "RAG_RERANK_MAX_LENGTH": "256",
+            "RAG_DENSE_LEXICAL_RRF_WEIGHT": "1.4",
         }
     )
 
@@ -126,11 +131,37 @@ def test_cross_encoder_reranking_configuration_loads():
         "12",
         "8",
         "256",
+        "1.4",
     ]
 
 
+def test_dense_lexical_rrf_weight_defaults_to_documented_value():
+    result = run_retrieval_config_import(
+        {
+            "RAG_RERANK_ENABLED": "false",
+            "RAG_RERANK_MODEL": "test/reranker",
+            "RAG_RERANK_CANDIDATE_K": "24",
+            "RAG_RERANK_BATCH_SIZE": "16",
+            "RAG_RERANK_MAX_LENGTH": "512",
+        }
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[-1] == "1.25"
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_dense_lexical_rrf_weight_rejects_invalid_values(value):
+    result = run_retrieval_config_import(
+        {"RAG_DENSE_LEXICAL_RRF_WEIGHT": value}
+    )
+
+    assert result.returncode != 0
+    assert "RAG_DENSE_LEXICAL_RRF_WEIGHT must be finite and greater than 0." in result.stderr
+
+
 def test_cross_encoder_reranking_rejects_invalid_boolean():
-    result = run_rerank_config_import(
+    result = run_retrieval_config_import(
         {
             "RAG_RERANK_ENABLED": "maybe",
         }
@@ -141,7 +172,7 @@ def test_cross_encoder_reranking_rejects_invalid_boolean():
 
 
 def test_cross_encoder_reranking_rejects_non_positive_candidate_k():
-    result = run_rerank_config_import(
+    result = run_retrieval_config_import(
         {
             "RAG_RERANK_CANDIDATE_K": "0",
         }
