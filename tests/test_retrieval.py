@@ -558,6 +558,55 @@ def test_select_diverse_retrieval_anchors_spreads_dense_evidence():
 
 
 @pytest.mark.unit
+def test_select_diverse_retrieval_anchors_reserves_distinct_facet_candidates():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(30)
+    ]
+    facet_candidate_rankings = {
+        "policy_change::lexical": [ranked[8]],
+        "operational_challenges::semantic": [ranked[10]],
+    }
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=4,
+        min_chunk_gap=3,
+        facet_candidate_rankings=facet_candidate_rankings,
+    )
+
+    chunk_ids = [item[0].metadata["chunk_id"] for item in result]
+    assert len(result) == 4
+    assert chunk_ids[:2] == [0, 10]
+    assert 80 in chunk_ids
+    assert 100 in chunk_ids
+    assert len(chunk_ids) == len(set(chunk_ids))
+    assert all(
+        abs(left - right) >= 3
+        for index, left in enumerate(chunk_ids)
+        for right in chunk_ids[index + 1:]
+    )
+
+
+@pytest.mark.unit
+def test_facet_anchor_reserve_ignores_candidates_beyond_global_rank_budget():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(20)
+    ]
+    candidate = ranked[12]  # Global rank 13, outside the 3x cutoff for four anchors.
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=4,
+        min_chunk_gap=3,
+        facet_candidate_rankings={"policy_change::lexical": [candidate]},
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in result] == [0, 10, 20, 30]
+
+
+@pytest.mark.unit
 def test_select_diverse_retrieval_anchors_fills_remaining_budget():
     ranked = [
         (doc(10, 100, 105, "region A"), 0.1),
@@ -606,10 +655,11 @@ def test_question_context_uses_dense_anchor_headroom(monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "select_diverse_retrieval_anchors",
-        lambda ranked_results, *, limit, min_chunk_gap: (
+        lambda ranked_results, *, limit, min_chunk_gap, facet_candidate_rankings=None: (
             captured.update(
                 limit=limit,
                 min_chunk_gap=min_chunk_gap,
+                facet_candidate_rankings=facet_candidate_rankings,
             )
             or ranked_results
         ),
@@ -975,7 +1025,13 @@ def test_diagnostics_match_production_anchor_and_context_budgets(
         lambda **kwargs: semantic_result,
     )
 
-    def record_anchor_selection(ranked_results, *, limit, min_chunk_gap=3):
+    def record_anchor_selection(
+        ranked_results,
+        *,
+        limit,
+        min_chunk_gap=3,
+        facet_candidate_rankings=None,
+    ):
         observed_anchor_gaps.append(min_chunk_gap)
         return list(ranked_results[:limit])
 
