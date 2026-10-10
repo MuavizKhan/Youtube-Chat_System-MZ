@@ -99,8 +99,8 @@ def test_query_variants_add_intent_specific_facets_for_dense_questions():
     )
 
     assert len(variants) == 3
-    assert variants[0].startswith("Why did the process fail")
-    assert "process fail challenges caused problems" in variants[1]
+    assert variants[0].startswith("Why did the rocket fail")
+    assert "rocket fail challenges caused problems" in variants[1]
     assert any("causes reasons factors" in variant for variant in variants[2:])
     assert not any(
         "government policy regulation" in variant
@@ -469,7 +469,7 @@ def test_dense_question_runs_facet_lexical_queries(monkeypatch):
 
     results = retrieval.retrieve_question_context(
         object(),
-        "Why did the company fail and what challenges caused the problems?",
+        "Why did the rocket fail and what challenges caused the problems?",
         expand_context=False,
     )
 
