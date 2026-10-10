@@ -248,7 +248,7 @@ The end-to-end diagnostic now exposes the planned lexical facet queries and thei
 
 ## Phase 8 — Soft facet evidence reranking
 
-The hard facet-anchor routing experiment showed that mandatory per-facet quotas can over-prioritize weak facet candidates and reduce the overall evidence quality. This slice keeps the global hybrid ranking as the primary signal and applies only a conservative soft bonus to candidates that are strongly supported by the planned evidence facets.
+The hard facet-anchor routing experiment showed that mandatory per-facet quotas can over-prioritize weak facet candidates and reduce overall evidence quality. This iteration keeps the global hybrid ranking as the primary signal, applies a conservative soft facet bonus, and adds a tightly capped reserve pass: up to two candidates already present in the fused pool can be promoted from strong source-level facet rankings. Unlike hard quotas, the reserve does not require every facet to contribute an anchor.
 
 The dense-question retrieval path now:
 
