@@ -182,3 +182,30 @@ def test_cross_encoder_reranking_rejects_non_positive_candidate_k():
 
     assert result.returncode != 0
     assert "RAG_RERANK_CANDIDATE_K must be greater than 0." in result.stderr
+
+def test_embedding_model_defaults_to_multilingual_model():
+    env = os.environ.copy()
+    env.pop("HF_EMBEDDING_MODEL", None)
+    env["PYTHON_DOTENV_DISABLED"] = "true"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import Backend.rag_system.config as config; "
+                "print(config.EMBEDDING_MODEL)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == (
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+

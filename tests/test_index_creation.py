@@ -6,6 +6,23 @@ from Backend.rag_system import indexing
 
 VIDEO_ID = "Gfr50f6ZBvo"
 
+def test_get_transcript_uses_supported_language_priority(monkeypatch):
+    api = MagicMock()
+    fetched_transcript = MagicMock()
+    api.fetch.return_value = fetched_transcript
+    monkeypatch.setattr(indexing, "YouTubeTranscriptApi", lambda: api)
+
+    assert indexing.PREFERRED_LANGUAGES == ["en", "hi", "ur", "ar"]
+    result = indexing.get_transcript(VIDEO_ID)
+
+    assert result is fetched_transcript
+    api.fetch.assert_called_once_with(
+        VIDEO_ID,
+        languages=["en", "hi", "ur", "ar"],
+    )
+
+
+
 
 def test_create_index_rejects_empty_video_id():
     with pytest.raises(ValueError, match="video_id cannot be empty"):

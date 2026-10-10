@@ -89,6 +89,12 @@ Request:
 
 Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation has failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes return `404 video_not_indexed` until `POST /index` is requested.
 
+## Supported transcript languages
+
+Indexing prefers English captions, then falls back to Hindi, Urdu, and Arabic (in that order) when English is unavailable. The default embedding model is multilingual so English questions can search transcripts in these languages. This uses available YouTube captions; videos without captions in a supported language may still fail to index.
+
+The embedding model change makes existing indexes created with the previous model stale. Let the extension prepare each previously indexed video again before asking questions. To change the model explicitly, set `HF_EMBEDDING_MODEL` in your local `.env`.
+
 ## Local development
 
 ### Backend

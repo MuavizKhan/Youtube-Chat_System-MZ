@@ -277,7 +277,9 @@ if (
 # YOUTUBE / INDEXING
 # ============================================================
 
-PREFERRED_LANGUAGES = ["en"]
+# Preferred transcript language order: English first, then Hindi, Urdu, and Arabic.
+# Add more language codes here when expanding supported transcript languages.
+PREFERRED_LANGUAGES = ["en", "hi", "ur", "ar"]
 
 CHUNK_SIZE = _get_int(
     "RAG_CHUNK_SIZE",
@@ -296,7 +298,7 @@ CHUNK_OVERLAP = _get_int(
 
 EMBEDDING_MODEL = os.getenv(
     "HF_EMBEDDING_MODEL",
-    "sentence-transformers/all-MiniLM-L6-v2",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
 )
 
 
