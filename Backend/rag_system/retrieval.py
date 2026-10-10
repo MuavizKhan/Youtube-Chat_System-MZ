@@ -999,7 +999,7 @@ def diagnose_retrieval_pipeline(
                 select_diverse_retrieval_anchors(
                     facet_soft_reranked,
                     limit=anchor_limit,
-                min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
+                    min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
                 )
                 if dense_question
                 else facet_soft_reranked[:anchor_limit]
