@@ -694,6 +694,116 @@ def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("has_lexical_evidence", [True, False])
+def test_diagnostics_match_production_anchor_and_context_budgets(
+    monkeypatch,
+    has_lexical_evidence,
+):
+    evidence = doc(10, 0, 5, "relevant evidence")
+    semantic_result = [(evidence, 0.1)]
+    lexical_result = [(evidence, 0.2)] if has_lexical_evidence else []
+    observed_anchor_gaps = []
+    observed_context_budgets = []
+
+    monkeypatch.setattr(
+        retrieval,
+        "is_overview_question",
+        lambda _query: False,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "is_evidence_dense_question",
+        lambda _query: True,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "build_retrieval_query_plan",
+        lambda _query: [("original", "test question")],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "build_evidence_facet_plan",
+        lambda _query: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_faiss_candidates_for_diagnostics",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: semantic_result,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "fuse_semantic_rankings",
+        lambda _rankings: semantic_result,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **kwargs: lexical_result,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "fuse_lexical_rankings",
+        lambda _rankings: lexical_result,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "fuse_semantic_and_lexical_results",
+        lambda **kwargs: semantic_result,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "rerank_with_cross_encoder",
+        lambda **kwargs: semantic_result,
+    )
+
+    def record_anchor_selection(ranked_results, *, limit, min_chunk_gap=3):
+        observed_anchor_gaps.append(min_chunk_gap)
+        return list(ranked_results[:limit])
+
+    def record_context_expansion(
+        _vector_store,
+        ranked_results,
+        *,
+        max_chunks,
+    ):
+        observed_context_budgets.append(max_chunks)
+        return list(ranked_results[:max_chunks])
+
+    monkeypatch.setattr(
+        retrieval,
+        "select_diverse_retrieval_anchors",
+        record_anchor_selection,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        record_context_expansion,
+    )
+
+    result = retrieval.diagnose_retrieval_pipeline(
+        object(),
+        "test question",
+    )
+
+    expected_context_budget = (
+        retrieval.DENSE_CONTEXT_MAX_CHUNKS
+        if has_lexical_evidence
+        else retrieval.CONTEXT_MAX_CHUNKS
+    )
+    assert observed_anchor_gaps == [
+        retrieval.DENSE_ANCHOR_MIN_CHUNK_GAP
+    ]
+    assert observed_context_budgets == [expected_context_budget]
+    assert result["anchors"] == semantic_result
+    assert result["final_context"] == semantic_result
+
+
+@pytest.mark.unit
 def test_context_expansion_adds_adjacent_chunks_in_chronological_order():
     documents = {
         f"d{i}": doc(
