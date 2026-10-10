@@ -228,6 +228,42 @@ def extract_video_id(
     )
 
 
+def _validate_retrieval_parameters(
+    query: str,
+    k: int,
+    fetch_k: int,
+    lambda_mult: float,
+    max_distance: float,
+) -> tuple[float, float]:
+    """Validate caller-controlled retrieval parameters before doing any work."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("Query cannot be empty.")
+
+    for name, value in (("k", k), ("fetch_k", fetch_k)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be a positive integer.")
+        if value <= 0:
+            raise ValueError(f"{name} must be greater than 0.")
+
+    try:
+        lambda_value = float(lambda_mult)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("lambda_mult must be between 0.0 and 1.0.") from error
+    if not math.isfinite(lambda_value) or not 0.0 <= lambda_value <= 1.0:
+        raise ValueError("lambda_mult must be between 0.0 and 1.0.")
+
+    try:
+        distance_limit = float(max_distance)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("max_distance must be finite and non-negative.") from error
+    if not math.isfinite(distance_limit):
+        raise ValueError("max_distance must be finite and non-negative.")
+    if distance_limit < 0:
+        raise ValueError("max_distance cannot be negative.")
+
+    return lambda_value, distance_limit
+
+
 # ============================================================
 # 2. CREATE EMBEDDING MODEL
 # ============================================================
@@ -315,455 +351,160 @@ def retrieve_mmr(
     max_distance: float = MAX_DISTANCE,
     expand_context: bool = True,
 ):
+    """Retrieve timestamped YouTube transcript chunks with distance-gated MMR.
+
+    The expand_context argument is retained for API compatibility. Context
+    expansion is owned by retrieve_question_context so budgets remain consistent.
     """
-    Retrieve relevant transcript chunks using MMR.
-
-    Returns:
-
-        [
-            (Document, distance),
-            ...
-        ]
-
-    Lower FAISS distance means greater similarity.
-    """
-
-    # --------------------------------------------------------
-    # Validate query
-    # --------------------------------------------------------
-
-    if not query or not query.strip():
-
-        raise ValueError(
-            "Query cannot be empty."
-        )
-
-
-    # --------------------------------------------------------
-    # Validate MMR configuration
-    # --------------------------------------------------------
-
-    if k <= 0:
-
-        raise ValueError(
-            "k must be greater than 0."
-        )
-
-
-    if fetch_k <= 0:
-
-        raise ValueError(
-            "fetch_k must be greater than 0."
-        )
-
-
+    lambda_mult, max_distance = _validate_retrieval_parameters(
+        query, k, fetch_k, lambda_mult, max_distance
+    )
     if k > fetch_k:
+        raise ValueError("k cannot be greater than fetch_k.")
 
-        raise ValueError(
-            "k cannot be greater than fetch_k."
-        )
-
-
-    if not 0.0 <= lambda_mult <= 1.0:
-
-        raise ValueError(
-            "lambda_mult must be between 0.0 and 1.0."
-        )
-
-
-    if max_distance < 0:
-
-        raise ValueError(
-            "max_distance cannot be negative."
-        )
-
-
-    # --------------------------------------------------------
-    # 1. Create query embedding
-    # --------------------------------------------------------
-
-    query_embedding = (
-        vector_store
-        .embedding_function
-        .embed_query(
-            query.strip()
-        )
-    )
-
-
-    query_vector = np.asarray(
-        query_embedding,
-        dtype=np.float32,
-    ).reshape(
-        1,
-        -1,
-    )
-
-
-    # --------------------------------------------------------
-    # 2. Determine how many vectors exist
-    # --------------------------------------------------------
-
-    total_vectors = (
-        vector_store.index.ntotal
-    )
-
-
-    if total_vectors == 0:
-
+    query_embedding = vector_store.embedding_function.embed_query(query.strip())
+    query_vector = np.asarray(query_embedding, dtype=np.float32).reshape(1, -1)
+    if query_vector.shape[1] == 0 or not np.all(np.isfinite(query_vector)):
+        logger.warning("Skipping retrieval because the query embedding is empty or non-finite.")
         return []
 
-
-    candidate_k = min(
-        fetch_k,
-        total_vectors,
-    )
-
-
-    # --------------------------------------------------------
-    # 3. Search FAISS
-    # --------------------------------------------------------
-
-    distances, indices = (
-        vector_store.index.search(
-
-            np.ascontiguousarray(
-                query_vector
-            ),
-
-            candidate_k,
-        )
-    )
-
-
-    candidate_indices = indices[0]
-
-    candidate_distances = distances[0]
-
-
-    # --------------------------------------------------------
-    # 4. Apply distance threshold
-    # --------------------------------------------------------
-
-    eligible_positions = []
-
-
-    for position, distance in enumerate(
-        candidate_distances
-    ):
-
-        index_id = int(
-            candidate_indices[position]
+    index = vector_store.index
+    index_dimension = getattr(index, "d", None)
+    if isinstance(index_dimension, int) and index_dimension != query_vector.shape[1]:
+        raise ValueError(
+            "Query embedding dimension does not match the stored FAISS index "
+            f"({query_vector.shape[1]} != {index_dimension})."
         )
 
+    total_vectors = int(getattr(index, "ntotal", 0))
+    if total_vectors <= 0:
+        return []
 
-        if index_id < 0:
-            continue
-
-
-        if float(distance) <= max_distance:
-
-            eligible_positions.append(
-                position
-            )
-
-
+    candidate_k = min(fetch_k, total_vectors)
+    distances, indices = index.search(
+        np.ascontiguousarray(query_vector),
+        candidate_k,
+    )
+    candidate_indices = np.asarray(indices[0], dtype=np.int64)
+    candidate_distances = np.asarray(distances[0], dtype=np.float64)
+    eligible_positions = [
+        position
+        for position, distance in enumerate(candidate_distances)
+        if (
+            int(candidate_indices[position]) >= 0
+            and math.isfinite(float(distance))
+            and float(distance) <= max_distance
+        )
+    ]
     if not eligible_positions:
-
         return []
-
-
-    # --------------------------------------------------------
-    # 5. Reconstruct candidate embeddings
-    # --------------------------------------------------------
 
     faiss_candidate_ids = [
-
-        int(
-            candidate_indices[position]
-        )
-
-        for position in eligible_positions
+        int(candidate_indices[position]) for position in eligible_positions
     ]
-
-
-    if hasattr(
-        vector_store.index,
-        "reconstruct_batch",
-    ):
-
-        candidate_embeddings = (
-            vector_store.index.reconstruct_batch(
-
-                np.asarray(
-                    faiss_candidate_ids,
-                    dtype=np.int64,
-                )
+    try:
+        if hasattr(index, "reconstruct_batch"):
+            candidate_embeddings = index.reconstruct_batch(
+                np.asarray(faiss_candidate_ids, dtype=np.int64)
             )
-        )
+        else:
+            candidate_embeddings = np.vstack(
+                [index.reconstruct(vector_id) for vector_id in faiss_candidate_ids]
+            )
+    except Exception:
+        logger.exception("Unable to reconstruct candidate embeddings from the FAISS index.")
+        return []
 
-    else:
-
-        candidate_embeddings = np.vstack(
-            [
-                vector_store.index.reconstruct(
-                    vector_id
-                )
-                for vector_id in faiss_candidate_ids
-            ]
-        )
-
-
-    candidate_embeddings = np.asarray(
-        candidate_embeddings,
-        dtype=np.float32,
-    )
-
-
-    # --------------------------------------------------------
-    # 6. Normalize query and candidates
-    # --------------------------------------------------------
-
-    query_norm = np.linalg.norm(
-        query_vector,
-        axis=1,
-        keepdims=True,
-    )
-
-    query_norm = np.maximum(
-        query_norm,
-        1e-12,
-    )
-
-
-    query_normalized = (
-        query_vector / query_norm
-    )
-
-
-    candidate_norms = np.linalg.norm(
-        candidate_embeddings,
-        axis=1,
-        keepdims=True,
-    )
-
-    candidate_norms = np.maximum(
-        candidate_norms,
-        1e-12,
-    )
-
-
-    candidate_normalized = (
-        candidate_embeddings / candidate_norms
-    )
-
-
-    # --------------------------------------------------------
-    # 7. Query-to-document similarity
-    # --------------------------------------------------------
-
-    query_similarities = (
-
-        candidate_normalized
-        @ query_normalized.T
-
-    ).reshape(-1)
-
-
-    # --------------------------------------------------------
-    # 8. MMR selection
-    # --------------------------------------------------------
-
-    number_to_select = min(
-        k,
-        len(eligible_positions),
-    )
-
-
-    selected_positions = []
-
-    remaining_positions = list(
-        range(
-            len(eligible_positions)
-        )
-    )
-
-
-    # First document:
-    # choose the most relevant candidate.
-
-    first_position = int(
-        np.argmax(
-            query_similarities
-        )
-    )
-
-
-    selected_positions.append(
-        first_position
-    )
-
-    remaining_positions.remove(
-        first_position
-    )
-
-
-    # Remaining documents:
-    # maximize relevance while reducing redundancy.
-
-    while (
-
-        remaining_positions
-
-        and len(selected_positions)
-        < number_to_select
-
+    candidate_embeddings = np.asarray(candidate_embeddings, dtype=np.float32)
+    if candidate_embeddings.ndim == 1 and len(faiss_candidate_ids) == 1:
+        candidate_embeddings = candidate_embeddings.reshape(1, -1)
+    if (
+        candidate_embeddings.ndim != 2
+        or candidate_embeddings.shape[0] != len(eligible_positions)
+        or candidate_embeddings.shape[1] != query_vector.shape[1]
     ):
+        logger.error(
+            "FAISS returned candidate embeddings with an unexpected shape: %s.",
+            candidate_embeddings.shape,
+        )
+        return []
 
+    candidate_norms = np.linalg.norm(candidate_embeddings, axis=1)
+    valid_rows = np.all(np.isfinite(candidate_embeddings), axis=1)
+    valid_rows &= np.isfinite(candidate_norms) & (candidate_norms > 1e-12)
+    if not np.all(valid_rows):
+        candidate_embeddings = candidate_embeddings[valid_rows]
+        eligible_positions = [
+            position
+            for position, is_valid in zip(eligible_positions, valid_rows)
+            if bool(is_valid)
+        ]
+    if not eligible_positions:
+        return []
+
+    query_norm = float(np.linalg.norm(query_vector))
+    if not math.isfinite(query_norm) or query_norm <= 1e-12:
+        logger.warning("Skipping retrieval because the query embedding has zero norm.")
+        return []
+
+    query_normalized = query_vector / query_norm
+    candidate_norms = np.linalg.norm(candidate_embeddings, axis=1, keepdims=True)
+    candidate_normalized = candidate_embeddings / np.maximum(candidate_norms, 1e-12)
+    query_similarities = (candidate_normalized @ query_normalized.T).reshape(-1)
+
+    number_to_select = min(k, len(eligible_positions))
+    selected_positions = [int(np.argmax(query_similarities))]
+    remaining_positions = [
+        position for position in range(len(eligible_positions))
+        if position != selected_positions[0]
+    ]
+    while remaining_positions and len(selected_positions) < number_to_select:
         best_position = None
         best_score = -np.inf
-
-
-        selected_embeddings = (
-            candidate_normalized[
-                selected_positions
-            ]
-        )
-
-
-        for candidate_position in (
-            remaining_positions
-        ):
-
-            relevance = float(
-                query_similarities[
-                    candidate_position
-                ]
-            )
-
-
-            candidate_embedding = (
-                candidate_normalized[
-                    candidate_position
-                ]
-            )
-
-
+        selected_embeddings = candidate_normalized[selected_positions]
+        for candidate_position in remaining_positions:
+            relevance = float(query_similarities[candidate_position])
             redundancy = float(
-
-                np.max(
-
-                    selected_embeddings
-                    @ candidate_embedding
-
-                )
+                np.max(selected_embeddings @ candidate_normalized[candidate_position])
             )
-
-
             mmr_score = (
-
                 lambda_mult * relevance
-
-                -
-
-                (
-                    1.0 - lambda_mult
-                )
-                * redundancy
-
+                - (1.0 - lambda_mult) * redundancy
             )
-
-
             if mmr_score > best_score:
-
                 best_score = mmr_score
-
-                best_position = (
-                    candidate_position
-                )
-
-
+                best_position = candidate_position
         if best_position is None:
-
             break
-
-
-        selected_positions.append(
-            best_position
-        )
-
-        remaining_positions.remove(
-            best_position
-        )
-
-
-    # --------------------------------------------------------
-    # 9. Convert FAISS IDs back into Documents
-    # --------------------------------------------------------
+        selected_positions.append(best_position)
+        remaining_positions.remove(best_position)
 
     results = []
-
-
-    for selected_position in (
-        selected_positions
-    ):
-
-        original_position = (
-            eligible_positions[
-                selected_position
-            ]
-        )
-
-
-        vector_id = int(
-
-            candidate_indices[
-                original_position
-            ]
-        )
-
-
-        distance = float(
-
-            candidate_distances[
-                original_position
-            ]
-        )
-
-
-        docstore_id = (
-            vector_store
-            .index_to_docstore_id
-            .get(vector_id)
-        )
-
-
+    docstore = getattr(vector_store, "docstore", None)
+    index_to_docstore_id = getattr(vector_store, "index_to_docstore_id", {})
+    if docstore is None:
+        return []
+    for selected_position in selected_positions:
+        original_position = eligible_positions[selected_position]
+        vector_id = int(candidate_indices[original_position])
+        docstore_id = index_to_docstore_id.get(vector_id)
         if docstore_id is None:
             continue
-
-
-        document = (
-            vector_store
-            .docstore
-            .search(
-                docstore_id
-            )
-        )
-
-
-        if document is None:
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            logger.warning("Could not load FAISS document %r from the docstore.", docstore_id)
             continue
-
-
-        results.append(
-            (
-                document,
-                distance,
-            )
-        )
-
-
+        if (
+            not isinstance(getattr(document, "page_content", None), str)
+            or not isinstance(getattr(document, "metadata", None), dict)
+        ):
+            logger.warning("Skipping invalid or stale FAISS docstore entry %r.", docstore_id)
+            continue
+        results.append((document, float(candidate_distances[original_position])))
     return results
+
+
 
 
 def retrieve_faiss_candidates_for_diagnostics(
@@ -773,57 +514,164 @@ def retrieve_faiss_candidates_for_diagnostics(
     fetch_k: int,
     max_distance: float,
 ):
-    """Return raw FAISS candidates before MMR for diagnostic inspection only.
+    """Return raw, finite FAISS candidates before applying the production gate.
 
-    Each tuple is (document, distance, faiss_rank). The production retriever
-    performs the same FAISS search internally before MMR; this helper exposes
-    that otherwise-hidden candidate stage without changing production output.
+    Each tuple is (document, distance, faiss_rank). Candidates outside
+    max_distance are intentionally retained here so the diagnostic can explain
+    why production rejected them; invalid vectors and stale docstore entries
+    are not returned.
     """
-
-    if not query or not query.strip():
+    if not isinstance(query, str) or not query.strip():
         raise ValueError("Query cannot be empty.")
-    if fetch_k <= 0:
+    if isinstance(fetch_k, bool) or not isinstance(fetch_k, int) or fetch_k <= 0:
         raise ValueError("fetch_k must be greater than 0.")
-    if max_distance < 0:
+    try:
+        distance_limit = float(max_distance)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("max_distance must be finite and non-negative.") from error
+    if not math.isfinite(distance_limit):
+        raise ValueError("max_distance must be finite and non-negative.")
+    if distance_limit < 0:
         raise ValueError("max_distance cannot be negative.")
 
-    query_embedding = vector_store.embedding_function.embed_query(
-        query.strip()
-    )
-    query_vector = np.asarray(
-        query_embedding,
-        dtype=np.float32,
-    ).reshape(1, -1)
+    query_embedding = vector_store.embedding_function.embed_query(query.strip())
+    query_vector = np.asarray(query_embedding, dtype=np.float32).reshape(1, -1)
+    if query_vector.shape[1] == 0 or not np.all(np.isfinite(query_vector)):
+        logger.warning("Skipping diagnostics because the query embedding is empty or non-finite.")
+        return []
 
-    total_vectors = vector_store.index.ntotal
-    if total_vectors == 0:
+    index = vector_store.index
+    index_dimension = getattr(index, "d", None)
+    if isinstance(index_dimension, int) and index_dimension != query_vector.shape[1]:
+        raise ValueError(
+            "Query embedding dimension does not match the stored FAISS index "
+            f"({query_vector.shape[1]} != {index_dimension})."
+        )
+    total_vectors = int(getattr(index, "ntotal", 0))
+    if total_vectors <= 0:
         return []
 
     candidate_k = min(fetch_k, total_vectors)
-    distances, indices = vector_store.index.search(
+    distances, indices = index.search(
         np.ascontiguousarray(query_vector),
         candidate_k,
     )
+    candidate_distances = np.asarray(distances[0], dtype=np.float64)
+    candidate_indices = np.asarray(indices[0], dtype=np.int64)
+    docstore = getattr(vector_store, "docstore", None)
+    index_to_docstore_id = getattr(vector_store, "index_to_docstore_id", {})
+    if docstore is None or not hasattr(index_to_docstore_id, "get"):
+        return []
 
     results = []
-    for position, distance in enumerate(distances[0]):
-        vector_id = int(indices[0][position])
-        faiss_rank = position + 1
-
-        if vector_id < 0:
+    for position, distance in enumerate(candidate_distances):
+        vector_id = int(candidate_indices[position])
+        if vector_id < 0 or not math.isfinite(float(distance)):
             continue
-
-        docstore_id = vector_store.index_to_docstore_id.get(vector_id)
+        docstore_id = index_to_docstore_id.get(vector_id)
         if docstore_id is None:
             continue
-
-        document = vector_store.docstore.search(docstore_id)
-        if document is None:
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            logger.warning(
+                "Could not load raw FAISS diagnostic candidate %r from the docstore.",
+                docstore_id,
+            )
             continue
-
-        results.append((document, float(distance), faiss_rank))
-
+        if (
+            not isinstance(getattr(document, "page_content", None), str)
+            or not isinstance(getattr(document, "metadata", None), dict)
+        ):
+            logger.warning(
+                "Skipping invalid or stale raw FAISS diagnostic candidate %r.",
+                docstore_id,
+            )
+            continue
+        results.append((document, float(distance), position + 1))
     return results
+
+
+
+
+def _select_final_retrieval_candidates(
+    *,
+    query: str,
+    semantic_results,
+    lexical_results,
+    combined_results,
+    facet_rankings,
+    dense_question: bool,
+    k: int,
+    max_distance: float,
+) -> dict[str, Any]:
+    """Apply the same evidence gate, reranking, and anchor policy in all routes."""
+    context_max_chunks = (
+        DENSE_CONTEXT_MAX_CHUNKS if dense_question else CONTEXT_MAX_CHUNKS
+    )
+    anchor_limit = (
+        min(DENSE_ANCHOR_LIMIT, context_max_chunks)
+        if dense_question
+        else min(k + 2, context_max_chunks)
+    )
+    if not combined_results:
+        return {
+            "cross_encoder_results": [],
+            "facet_soft_reranked": [],
+            "anchors": [],
+            "context_max_chunks": context_max_chunks,
+            "anchor_limit": anchor_limit,
+            "semantic_gate_passed": False,
+        }
+
+    if not lexical_results:
+        semantic_distances = []
+        for _document, distance in semantic_results:
+            try:
+                value = float(distance)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(value):
+                semantic_distances.append(value)
+        strict_semantic_limit = max_distance * 0.92
+        if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
+            # Reject weak semantic-only matches before attempting to load a
+            # reranker. Diagnostic and production now share this exact gate.
+            return {
+                "cross_encoder_results": list(combined_results),
+                "facet_soft_reranked": list(combined_results),
+                "anchors": [],
+                "context_max_chunks": context_max_chunks,
+                "anchor_limit": anchor_limit,
+                "semantic_gate_passed": False,
+            }
+
+    cross_encoder_results = rerank_with_cross_encoder(
+        query=query,
+        ranked_results=combined_results,
+    )
+    facet_soft_reranked = (
+        rerank_with_soft_facet_support(cross_encoder_results, facet_rankings)
+        if dense_question and facet_rankings
+        else cross_encoder_results
+    )
+    anchors = (
+        select_diverse_retrieval_anchors(
+            facet_soft_reranked,
+            limit=anchor_limit,
+            min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
+        )
+        if dense_question
+        else facet_soft_reranked[:anchor_limit]
+    )
+    return {
+        "cross_encoder_results": cross_encoder_results,
+        "facet_soft_reranked": facet_soft_reranked,
+        "anchors": anchors,
+        "context_max_chunks": context_max_chunks,
+        "anchor_limit": anchor_limit,
+        "semantic_gate_passed": True,
+    }
 
 
 def diagnose_retrieval_pipeline(
@@ -835,36 +683,23 @@ def diagnose_retrieval_pipeline(
     lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
 ):
-    """Capture every retrieval stage for end-to-end debugging.
-
-    This function is diagnostic-only. It does not alter the production
-    retrieval path. It exposes raw FAISS candidates, per-variant MMR output,
-    semantic RRF, lexical retrieval, hybrid RRF, anchor selection, and final
-    context expansion so a missing gold chunk can be localized precisely.
-    Anchor-diversity and context-budget settings mirror production retrieval.
-    """
-
+    """Expose retrieval stages while using production's exact final selection path."""
+    lambda_mult, max_distance = _validate_retrieval_parameters(
+        query, k, fetch_k, lambda_mult, max_distance
+    )
     if is_overview_question(query):
         raise ValueError(
             "End-to-end retrieval diagnostics are not defined for overview questions."
         )
 
     dense_question = is_evidence_dense_question(query)
-    lexical_rrf_weight = (
-        DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
-    )
-    semantic_k = (
-        DENSE_SEMANTIC_K
-        if dense_question
-        else k
-    )
+    lexical_rrf_weight = DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
+    semantic_k = DENSE_SEMANTIC_K if dense_question else k
     semantic_fetch_k = (
-        DENSE_SEMANTIC_FETCH_K
-        if dense_question
-        else max(fetch_k, semantic_k * 2)
+        DENSE_SEMANTIC_FETCH_K if dense_question else max(fetch_k, semantic_k * 2)
     )
     lexical_limit = (
-        max(k * 2, 8)
+        max(k * 2, DENSE_ANCHOR_LIMIT, 8)
         if dense_question
         else max(k, min(k * 2, 8))
     )
@@ -873,7 +708,6 @@ def diagnose_retrieval_pipeline(
     semantic_stages = []
     semantic_rankings = []
     semantic_rankings_by_label = {}
-
     for label, query_variant in query_plan:
         raw_candidates = retrieve_faiss_candidates_for_diagnostics(
             vector_store,
@@ -898,19 +732,14 @@ def diagnose_retrieval_pipeline(
         semantic_rankings.append(mmr_results)
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             semantic_rankings_by_label[label] = mmr_results
-
     semantic_results = fuse_semantic_rankings(semantic_rankings)
 
     lexical_queries = [("original", query)]
     if dense_question:
-        lexical_queries.extend(
-            build_evidence_facet_plan(query)
-        )
-
+        lexical_queries.extend(build_evidence_facet_plan(query))
     lexical_stages = []
     lexical_rankings = []
     lexical_rankings_by_label = {}
-
     for label, lexical_query in lexical_queries:
         lexical_results_for_query = lexical_search(
             vector_store=vector_store,
@@ -925,7 +754,6 @@ def diagnose_retrieval_pipeline(
         lexical_rankings.append(lexical_results_for_query)
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = lexical_results_for_query
-
     lexical_results = fuse_lexical_rankings(lexical_rankings)
 
     combined_results = fuse_semantic_and_lexical_results(
@@ -934,97 +762,33 @@ def diagnose_retrieval_pipeline(
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
     )
-
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
         semantic_facet = semantic_rankings_by_label.get(facet_name, [])
         lexical_facet = lexical_rankings_by_label.get(facet_name, [])
-
         if semantic_facet or lexical_facet:
-            facet_rankings[facet_name] = (
-                fuse_semantic_and_lexical_results(
-                    semantic_results=semantic_facet,
-                    lexical_results=lexical_facet,
-                    lexical_distance=max_distance,
-                    lexical_weight=lexical_rrf_weight,
-                )
+            facet_rankings[facet_name] = fuse_semantic_and_lexical_results(
+                semantic_results=semantic_facet,
+                lexical_results=lexical_facet,
+                lexical_distance=max_distance,
+                lexical_weight=lexical_rrf_weight,
             )
 
-    context_max_chunks = (
-        DENSE_CONTEXT_MAX_CHUNKS
-        if dense_question
-        else CONTEXT_MAX_CHUNKS
-    )
-    anchor_limit = (
-        min(DENSE_ANCHOR_LIMIT, context_max_chunks)
-        if dense_question
-        else min(k + 2, context_max_chunks)
-    )
-
-    cross_encoder_results = rerank_with_cross_encoder(
+    selection = _select_final_retrieval_candidates(
         query=query,
-        ranked_results=combined_results,
-    )
-
-    if lexical_results:
-        facet_soft_reranked = (
-            rerank_with_soft_facet_support(
-                cross_encoder_results,
-                facet_rankings,
-            )
-            if dense_question and facet_rankings
-            else cross_encoder_results
-        )
-        anchor_results = (
-            select_diverse_retrieval_anchors(
-                facet_soft_reranked,
-                limit=anchor_limit,
-                min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
-            )
-            if dense_question
-            else facet_soft_reranked[:anchor_limit]
-        )
-    else:
-        semantic_distances = [
-            distance
-            for _document, distance in semantic_results
-        ]
-        strict_semantic_limit = max_distance * 0.92
-        if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
-            anchor_results = []
-        else:
-            facet_soft_reranked = (
-                rerank_with_soft_facet_support(
-                    cross_encoder_results,
-                    facet_rankings,
-                )
-                if dense_question and facet_rankings
-                else cross_encoder_results
-            )
-            anchor_results = (
-                select_diverse_retrieval_anchors(
-                    facet_soft_reranked,
-                    limit=anchor_limit,
-                    min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
-                )
-                if dense_question
-                else facet_soft_reranked[:anchor_limit]
-            )
-
-    # Match production's context budget: the lexical-evidence path uses
-    # the dense-question budget, while the no-lexical fallback uses the
-    # expand_retrieval_context default (CONTEXT_MAX_CHUNKS).
-    diagnostic_context_max_chunks = (
-        context_max_chunks
-        if lexical_results
-        else CONTEXT_MAX_CHUNKS
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        combined_results=combined_results,
+        facet_rankings=facet_rankings,
+        dense_question=dense_question,
+        k=k,
+        max_distance=max_distance,
     )
     context_results = expand_retrieval_context(
         vector_store,
-        anchor_results,
-        max_chunks=diagnostic_context_max_chunks,
+        selection["anchors"],
+        max_chunks=selection["context_max_chunks"],
     )
-
     return {
         "query": query,
         "dense_question": dense_question,
@@ -1033,32 +797,29 @@ def diagnose_retrieval_pipeline(
         "semantic_k": semantic_k,
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
-        "anchor_limit": anchor_limit,
+        "anchor_limit": selection["anchor_limit"],
         "query_plan": query_plan,
-        "query_variants": [
-            query_text
-            for _label, query_text in query_plan
-        ],
+        "query_variants": [query_text for _label, query_text in query_plan],
         "semantic_stages": semantic_stages,
         "semantic_fused": semantic_results,
         "lexical_queries": [
-            {
-                "label": label,
-                "query": lexical_query,
-            }
+            {"label": label, "query": lexical_query}
             for label, lexical_query in lexical_queries
         ],
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
-        "facet_soft_reranked": facet_soft_reranked
-        if "facet_soft_reranked" in locals()
-        else cross_encoder_results,
-        "cross_encoder_reranked": cross_encoder_results,
+        "facet_soft_reranked": selection["facet_soft_reranked"],
+        # When disabled, this field is a pass-through, not an actual model result.
+        "cross_encoder_reranked": selection["cross_encoder_results"],
         "hybrid_fused": combined_results,
-        "anchors": anchor_results,
+        "anchors": selection["anchors"],
         "final_context": context_results,
+        "semantic_gate_passed": selection["semantic_gate_passed"],
     }
+
+
+
 
 # ============================================================
 # 9. QUESTION-AWARE RETRIEVAL
@@ -1133,7 +894,7 @@ def extract_query_focus_terms(
 ) -> list[str]:
     """Extract content-bearing terms after removing speaker/question boilerplate."""
 
-    normalized_query = " ".join(query.strip().lower().split())
+    normalized_query = " ".join(query.strip().casefold().split())
     normalized_query = SPEAKER_ATTRIBUTION_PATTERN.sub(
         " ",
         normalized_query,
@@ -1146,7 +907,7 @@ def extract_query_focus_terms(
         count=1,
     )
 
-    words = re.findall(r"[a-zA-Z0-9]+", normalized_query)
+    words = re.findall(r"[^\W_]+", normalized_query, flags=re.UNICODE)
     return [
         word
         for word in words
@@ -1155,9 +916,29 @@ def extract_query_focus_terms(
 
 
 EVIDENCE_FACET_QUERY_DEFINITIONS = {
+    # General reasoning facets for a wide range of YouTube content.
+    "causal_factors": (
+        "causes reasons factors because due to led to contributed to "
+        "challenges problems constraints barriers limits"
+    ),
+    "mechanism_process": (
+        "process mechanism how it works steps method procedure implementation"
+    ),
+    "impact_outcomes": (
+        "effects impact consequences outcomes results changes"
+    ),
+    "comparison_tradeoffs": (
+        "compared versus differences similarities advantages disadvantages tradeoffs"
+    ),
+    "examples_evidence": (
+        "examples evidence demonstration showed explained instance case study"
+    ),
+    "sequence_timeline": (
+        "before after first then next later eventually timeline sequence"
+    ),
+    # Domain-specific facets are selected only when the question signals that domain.
     "financial_economic": (
-        "financial crisis economic circumstances cash flow money debt "
-        "losses costs"
+        "financial crisis economic circumstances cash flow money debt losses costs"
     ),
     "policy_governance": (
         "government policy regulation banks support approval restrictions"
@@ -1180,8 +961,7 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
 def build_evidence_facet_plan(
     query: str,
 ) -> list[tuple[str, str]]:
-    """Build ordered, intent-specific evidence facets for a dense question."""
-
+    """Build topic-aware facet queries without injecting unrelated domains."""
     original = " ".join(query.strip().split())
     if not original:
         return []
@@ -1192,72 +972,76 @@ def build_evidence_facet_plan(
 
     focus_query = " ".join(focus_terms)
     normalized = original.casefold()
+    facet_names = []
+
+    def add_facet(name: str) -> None:
+        if name not in facet_names:
+            facet_names.append(name)
+
+    if re.search(r"\b(?:brand|branding|advertis\w*|marketing|personality)\b", normalized):
+        add_facet("brand_marketing")
+    if re.search(
+        r"\b(?:policy|government|governance|regulation\w*|regulatory|bank|banks|approval|restriction\w*)\b",
+        normalized,
+    ):
+        add_facet("policy_change")
+        add_facet("policy_governance")
+    if re.search(
+        r"\b(?:financial|finance|economic|economy|money|debt|cash|cost\w*|revenue|profit\w*|loss\w*|funding|budget|price\w*|expense\w*)\b",
+        normalized,
+    ):
+        add_facet("financial_economic")
+    if re.search(
+        r"\b(?:operations?|operational|fuel|suppliers?|payments?|fees|service|maintenance|production|logistics?)\b",
+        normalized,
+    ):
+        add_facet("operational_challenges")
+    if re.search(
+        r"\b(?:businesses|companies|subsidiaries|ownership|investments?|corporate structure|organizations?)\b",
+        normalized,
+    ):
+        add_facet("business_corporate")
 
     if re.search(
-        r"\b(?:brand|branding|advertis|marketing|personality)\b",
+        r"\b(?:why|reason\w*|caus\w*|because|fail\w*|problem\w*|challenge\w*|issue\w*|factor\w*|role of)\b",
         normalized,
     ):
-        facet_names = (
-            "brand_marketing",
-            "business_corporate",
-            "operational_challenges",
-        )
-    elif re.search(
-        r"\b(?:policy|government|regulation|banks?|support|approval|"
-        r"restrictions?)\b",
+        add_facet("causal_factors")
+    if re.search(
+        r"\b(?:how|process|mechanism|steps?|method|procedure|work\w*|made|built|created|developed|implemented|calculated)\b",
+        normalized,
+    ) and not re.match(
+        r"^how\s+(?:many|much|long|old|far|tall|wide|high|heavy|often|soon|fast)\b",
         normalized,
     ):
-        facet_names = (
-            "policy_change",
-            "policy_governance",
-            "operational_challenges",
-            "financial_economic",
-        )
-    elif re.search(
-        r"\b(?:challenge|challenges|problems?|problem|operations?|"
-        r"operational|running)\b",
+        add_facet("mechanism_process")
+    if re.search(
+        r"\b(?:impact|effects?|affect\w*|consequence\w*|outcome\w*|results?)\b",
         normalized,
     ):
-        facet_names = (
-            "operational_challenges",
-            "financial_economic",
-            "policy_governance",
-        )
-    elif re.search(
-        r"\b(?:why|reasons?|cause|causes?|failure|failed|struggled|"
-        r"impact)\b",
+        add_facet("impact_outcomes")
+    if re.search(
+        r"\b(?:compare|compared|comparison|versus|vs\.?|differences?|similarities|advantages?|disadvantages?|tradeoffs?)\b",
         normalized,
     ):
-        facet_names = (
-            "financial_economic",
-            "policy_governance",
-            "operational_challenges",
-        )
-    elif re.search(
-        r"\b(?:businesses|companies|company|corporate|subsidiaries|"
-        r"ownership|investments?)\b",
+        add_facet("comparison_tradeoffs")
+    if re.search(
+        r"\b(?:examples?|evidence|demonstrat\w*|case stud\w*|proof|show(?:s|ed|ing)?)\b",
         normalized,
     ):
-        facet_names = (
-            "business_corporate",
-            "brand_marketing",
-            "financial_economic",
-        )
-    else:
-        facet_names = (
-            "financial_economic",
-            "policy_governance",
-            "operational_challenges",
-        )
+        add_facet("examples_evidence")
+    if re.search(
+        r"\b(?:before|after|first|then|next|later|eventually|timeline|sequence|over time)\b",
+        normalized,
+    ):
+        add_facet("sequence_timeline")
 
     return [
-        (
-            facet_name,
-            f"{focus_query} "
-            f"{EVIDENCE_FACET_QUERY_DEFINITIONS[facet_name]}",
-        )
-        for facet_name in facet_names
+        (name, f"{focus_query} {EVIDENCE_FACET_QUERY_DEFINITIONS[name]}")
+        for name in facet_names[:4]
     ]
+
+
 
 
 def build_evidence_facet_queries(
@@ -1366,8 +1150,9 @@ def extract_query_terms(
     """
 
     words = re.findall(
-        r"[a-zA-Z0-9]+",
-        query.lower(),
+        r"[^\W_]+",
+        query.casefold(),
+        flags=re.UNICODE,
     )
 
     return {
@@ -1380,45 +1165,77 @@ def extract_query_terms(
     }
 
 
+def _normalise_chunk_id(value):
+    """Normalize numeric and textual chunk identifiers without mixed-type sorting."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+        if math.isfinite(numeric) and numeric.is_integer():
+            return ("number", int(numeric))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return ("text", str(value))
+
+
+def _chunk_id_sort_key(value):
+    normalized = _normalise_chunk_id(value)
+    if normalized is None:
+        return (2, "")
+    if normalized[0] == "number":
+        return (0, normalized[1])
+    return (1, normalized[1])
+
+
+def _safe_metadata_float(metadata, key, default=0.0):
+    try:
+        value = float(metadata.get(key, default))
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return float(default)
+    return value if math.isfinite(value) else float(default)
+
+
+def _document_sort_key(document):
+    metadata = getattr(document, "metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    start = _safe_metadata_float(metadata, "start", 0.0)
+    end = _safe_metadata_float(metadata, "end", start)
+    return (start, end, _chunk_id_sort_key(metadata.get("chunk_id")))
+
+
 def get_all_documents(
     vector_store,
 ) -> list:
-    """
-    Read the documents stored inside the FAISS docstore.
-
-    This is used only for lightweight lexical fallback
-    retrieval. It does not rebuild the vector database.
-    """
+    """Return valid transcript Documents, skipping stale persisted docstore IDs."""
+    docstore = getattr(vector_store, "docstore", None)
+    index_to_docstore_id = getattr(vector_store, "index_to_docstore_id", None)
+    if docstore is None or not isinstance(index_to_docstore_id, dict):
+        return []
 
     documents = []
-
     seen_docstore_ids = set()
-
-    for docstore_id in (
-        vector_store
-        .index_to_docstore_id
-        .values()
-    ):
-
-        if docstore_id in seen_docstore_ids:
+    for docstore_id in index_to_docstore_id.values():
+        try:
+            if docstore_id in seen_docstore_ids:
+                continue
+            seen_docstore_ids.add(docstore_id)
+        except TypeError:
+            logger.warning("Skipping an invalid FAISS docstore ID: %r.", docstore_id)
             continue
 
-        seen_docstore_ids.add(
-            docstore_id
-        )
-
-        document = (
-            vector_store
-            .docstore
-            .search(docstore_id)
-        )
-
-        if document is not None:
-
-            documents.append(
-                document
-            )
-
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            logger.warning("Could not load FAISS document %r from the docstore.", docstore_id)
+            continue
+        if (
+            not isinstance(getattr(document, "page_content", None), str)
+            or not isinstance(getattr(document, "metadata", None), dict)
+        ):
+            logger.warning("Skipping invalid or stale FAISS docstore entry %r.", docstore_id)
+            continue
+        documents.append(document)
     return documents
 
 
@@ -1427,18 +1244,19 @@ def lexical_search(
     query: str,
     limit: int = 8,
 ):
-    """Search transcript chunks with content-aware lexical evidence.
+    """Find transcript evidence with Unicode-aware tokens and IDF weighting.
 
-    The lexical path uses query-focus terms plus lightweight inverse-document
-    frequency weighting. This prevents generic question words from outranking
-    rare domain terms and allows a single distinctive term to surface a
-    relevant chunk even when the exact wording differs.
+    A rare technical term or proper noun can independently surface a chunk.
+    Common single-token overlap is not enough evidence for a multi-term query.
     """
+    if not isinstance(query, str) or not query.strip():
+        return []
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        return []
 
     focus_terms = extract_query_focus_terms(query)
     if not focus_terms:
         focus_terms = list(extract_query_terms(query))
-
     if not focus_terms:
         return []
 
@@ -1446,143 +1264,115 @@ def lexical_search(
     if not documents:
         return []
 
-    normalized_focus = " ".join(focus_terms)
-    unique_terms = list(dict.fromkeys(focus_terms))
-    document_frequency = {term: 0 for term in unique_terms}
-
+    unique_terms = list(dict.fromkeys(term.casefold() for term in focus_terms))
+    tokenized_documents = []
     for document in documents:
         text = document.page_content.casefold()
+        tokens = set(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
+        tokenized_documents.append((document, text, tokens))
+
+    document_frequency = {term: 0 for term in unique_terms}
+    for _document, _text, tokens in tokenized_documents:
         for term in unique_terms:
-            if re.search(rf"\b{re.escape(term)}\b", text):
+            if term in tokens:
                 document_frequency[term] += 1
 
-    total_documents = len(documents)
+    total_documents = len(tokenized_documents)
     term_weights = {
-        term: (
-            math.log((total_documents + 1) / (frequency + 1)) + 1.0
-        )
+        term: math.log((total_documents + 1) / (frequency + 1)) + 1.0
         for term, frequency in document_frequency.items()
     }
-
     total_query_weight = sum(term_weights.values()) or 1.0
+    rare_term_frequency_limit = max(1, math.ceil(total_documents * 0.005))
+    normalized_focus = " ".join(focus_terms).casefold()
+
     scored_documents = []
-
-    for document in documents:
-        text = document.page_content.casefold()
-        matched_terms = [
-            term
-            for term in unique_terms
-            if re.search(rf"\b{re.escape(term)}\b", text)
-        ]
-
+    for document, text, tokens in tokenized_documents:
+        matched_terms = [term for term in unique_terms if term in tokens]
         if not matched_terms:
             continue
+        if len(unique_terms) > 1 and len(matched_terms) < 2:
+            has_rare_match = any(
+                document_frequency[term] <= rare_term_frequency_limit
+                for term in matched_terms
+            )
+            if not has_rare_match:
+                continue
 
         weighted_coverage = (
             sum(term_weights[term] for term in matched_terms)
             / total_query_weight
         )
-
-        # Multi-term lexical matches require shared evidence in the same
-        # chunk. This prevents one generic/query-side term from becoming
-        # enough evidence on its own. Single-term queries remain supported.
-        if len(unique_terms) > 1 and len(matched_terms) < 2:
-            continue
-
         raw_coverage = len(matched_terms) / len(unique_terms)
-
         phrase_bonus = 0.0
         for left, right in zip(focus_terms, focus_terms[1:]):
-            if f"{left} {right}" in text:
+            if f"{left} {right}".casefold() in text:
                 phrase_bonus += 0.12
-
         if normalized_focus in text and len(unique_terms) >= 2:
             phrase_bonus += 0.5
-
-        score = (
-            weighted_coverage
-            + (0.20 * raw_coverage)
-            + phrase_bonus
-        )
-
+        score = weighted_coverage + (0.20 * raw_coverage) + phrase_bonus
         scored_documents.append((document, float(score)))
 
     scored_documents.sort(
-        key=lambda item: (
-            -item[1],
-            float(item[0].metadata.get("start", 0.0)),
-            (
-                item[0].metadata.get("chunk_id")
-                if item[0].metadata.get("chunk_id") is not None
-                else 10**9
-            ),
-        )
+        key=lambda item: (-item[1], *_document_sort_key(item[0]))
     )
-
     return scored_documents[:limit]
+
+
 
 
 def fuse_ranked_results(
     ranked_results: list[list[tuple[Any, float]]],
     *,
     rrf_k: int = RRF_K,
+    score_direction: str = "lower",
 ):
-    """Fuse independently ranked result lists with Reciprocal Rank Fusion."""
-
+    """Fuse ranked lists using RRF, preserving the input score semantics."""
     if rrf_k <= 0:
         raise ValueError("rrf_k must be greater than 0.")
+    if score_direction not in {"lower", "higher"}:
+        raise ValueError("score_direction must be 'lower' or 'higher'.")
 
     fused = {}
-
-    def identity(document):
-        chunk_id = document.metadata.get("chunk_id")
-        if chunk_id is not None:
-            return ("chunk", chunk_id)
-
-        return (
-            "time",
-            float(document.metadata.get("start", 0.0)),
-            float(document.metadata.get("end", 0.0)),
-        )
-
     for results in ranked_results:
         for rank, (document, score) in enumerate(results, start=1):
-            key = identity(document)
+            key = _retrieval_document_identity(document)
+            value = float(score)
             entry = fused.get(key)
-
             if entry is None:
                 entry = {
                     "document": document,
-                    "score": float(score),
                     "rrf_score": 0.0,
+                    "best_rank": rank,
+                    "rank_sum": 0,
+                    "raw_score": value,
                 }
                 fused[key] = entry
-            else:
-                entry["score"] = min(
-                    entry["score"],
-                    float(score),
-                )
+            elif math.isfinite(value):
+                current = entry["raw_score"]
+                if not math.isfinite(current):
+                    entry["raw_score"] = value
+                elif score_direction == "lower":
+                    entry["raw_score"] = min(current, value)
+                else:
+                    entry["raw_score"] = max(current, value)
 
             entry["rrf_score"] += 1.0 / (rrf_k + rank)
+            entry["best_rank"] = min(entry["best_rank"], rank)
+            entry["rank_sum"] += rank
 
     ranked = sorted(
         fused.values(),
         key=lambda entry: (
             -entry["rrf_score"],
-            entry["score"],
-            float(entry["document"].metadata.get("start", 0.0)),
-            (
-                entry["document"].metadata.get("chunk_id")
-                if entry["document"].metadata.get("chunk_id") is not None
-                else 10**9
-            ),
+            entry["best_rank"],
+            entry["rank_sum"],
+            *_document_sort_key(entry["document"]),
         ),
     )
+    return [(entry["document"], entry["raw_score"]) for entry in ranked]
 
-    return [
-        (entry["document"], entry["score"])
-        for entry in ranked
-    ]
+
 
 
 def fuse_semantic_rankings(
@@ -1595,6 +1385,7 @@ def fuse_semantic_rankings(
     return fuse_ranked_results(
         ranked_results,
         rrf_k=rrf_k,
+        score_direction="lower",
     )
 
 
@@ -1608,6 +1399,7 @@ def fuse_lexical_rankings(
     return fuse_ranked_results(
         ranked_results,
         rrf_k=rrf_k,
+        score_direction="higher",
     )
 
 
@@ -1619,78 +1411,58 @@ def fuse_semantic_and_lexical_results(
     lexical_weight: float = 1.0,
     rrf_k: int = RRF_K,
 ):
+    """Fuse ranks and preserve actual FAISS distances for semantic hits.
+
+    FAISS distances and lexical scores are on different scales. RRF combines
+    rank positions; lexical-only chunks receive a conservative distance.
     """
-    Fuse semantic and lexical rankings with Reciprocal Rank Fusion.
-
-    Semantic FAISS distances and lexical scores live on different scales,
-    so directly sorting their raw values would be misleading. RRF uses only
-    rank position and therefore combines the two retrieval signals without
-    pretending their scores are comparable.
-
-    The returned tuple keeps the original FAISS distance when a document was
-    retrieved semantically. Lexical-only documents receive MAX_DISTANCE so
-    downstream semantic-distance contracts remain conservative. ``lexical_weight``
-    changes only the lexical branch's rank contribution; it never changes distances.
-    """
-
     if rrf_k <= 0:
         raise ValueError("rrf_k must be greater than 0.")
+    try:
+        lexical_weight = float(lexical_weight)
+        lexical_distance = float(lexical_distance)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("lexical_weight and lexical_distance must be numeric.") from error
     if not math.isfinite(lexical_weight) or lexical_weight <= 0:
         raise ValueError("lexical_weight must be finite and greater than 0.")
+    if not math.isfinite(lexical_distance) or lexical_distance < 0:
+        raise ValueError("lexical_distance must be finite and non-negative.")
 
     fused = {}
 
-    def identity(document):
-        chunk_id = document.metadata.get("chunk_id")
-        if chunk_id is not None:
-            return ("chunk", chunk_id)
-
-        return (
-            "time",
-            float(document.metadata.get("start", 0.0)),
-            float(document.metadata.get("end", 0.0)),
-        )
-
-    def add_ranked_result(document, distance, rank, *, weight: float = 1.0):
-        key = identity(document)
+    def add_ranked_result(document, rank, *, is_semantic, raw_score, weight=1.0):
+        key = _retrieval_document_identity(document)
         entry = fused.get(key)
-
         if entry is None:
             entry = {
                 "document": document,
-                "distance": float(distance),
+                "distance": lexical_distance,
+                "has_semantic": False,
+                "lexical_score": float("-inf"),
                 "score": 0.0,
             }
             fused[key] = entry
 
+        if is_semantic:
+            distance = float(raw_score)
+            if math.isfinite(distance):
+                if not entry["has_semantic"] or distance < entry["distance"]:
+                    entry["distance"] = distance
+                entry["has_semantic"] = True
         else:
-            # Prefer the real FAISS distance when the same chunk is present
-            # in both branches.
-            entry["distance"] = min(
-                entry["distance"],
-                float(distance),
-            )
-
+            lexical_score = float(raw_score)
+            if math.isfinite(lexical_score):
+                entry["lexical_score"] = max(entry["lexical_score"], lexical_score)
         entry["score"] += weight / (rrf_k + rank)
 
-    for rank, (document, distance) in enumerate(
-        semantic_results,
-        start=1,
-    ):
+    for rank, (document, distance) in enumerate(semantic_results, start=1):
+        add_ranked_result(document, rank, is_semantic=True, raw_score=distance)
+    for rank, (document, lexical_score) in enumerate(lexical_results, start=1):
         add_ranked_result(
             document,
-            distance,
             rank,
-        )
-
-    for rank, (document, _lexical_score) in enumerate(
-        lexical_results,
-        start=1,
-    ):
-        add_ranked_result(
-            document,
-            lexical_distance,
-            rank,
+            is_semantic=False,
+            raw_score=lexical_score,
             weight=lexical_weight,
         )
 
@@ -1698,111 +1470,46 @@ def fuse_semantic_and_lexical_results(
         fused.values(),
         key=lambda entry: (
             -entry["score"],
+            0 if entry["has_semantic"] else 1,
             entry["distance"],
-            float(entry["document"].metadata.get("start", 0.0)),
-            (
-                entry["document"].metadata.get("chunk_id")
-                if entry["document"].metadata.get("chunk_id") is not None
-                else 10**9
-            ),
+            -entry["lexical_score"],
+            *_document_sort_key(entry["document"]),
         ),
     )
+    return [(entry["document"], entry["distance"]) for entry in ranked]
 
-    return [
-        (
-            entry["document"],
-            entry["distance"],
-        )
-        for entry in ranked
-    ]
+
 
 
 def retrieve_overview(
     vector_store,
     number_of_chunks: int = 6,
 ):
-    """
-    Retrieve representative transcript sections across
-    the entire video.
+    """Sample representative transcript sections in chronological order."""
+    if (
+        isinstance(number_of_chunks, bool)
+        or not isinstance(number_of_chunks, int)
+        or number_of_chunks <= 0
+    ):
+        raise ValueError("number_of_chunks must be a positive integer.")
 
-    This is used for broad questions such as:
-
-        "What are they talking about?"
-        "What is this video about?"
-
-    It deliberately samples the video chronologically
-    instead of relying on semantic similarity to a vague
-    question.
-    """
-
-    documents = (
-        get_all_documents(
-            vector_store
-        )
-    )
-
+    documents = get_all_documents(vector_store)
     if not documents:
-
         return []
-
-    documents.sort(
-        key=lambda document: float(
-            document.metadata.get(
-                "start",
-                0.0,
-            )
-        )
-    )
-
+    documents.sort(key=_document_sort_key)
     if len(documents) <= number_of_chunks:
-
-        selected_documents = (
-            documents
-        )
-
+        selected_documents = documents
+    elif number_of_chunks == 1:
+        selected_documents = [documents[(len(documents) - 1) // 2]]
     else:
-
-        selected_indices = []
-
-        for i in range(
-            number_of_chunks
-        ):
-
-            position = round(
-                i
-                *
-                (
-                    (
-                        len(documents)
-                        - 1
-                    )
-                    /
-                    (
-                        number_of_chunks
-                        - 1
-                    )
-                )
-            )
-
-            selected_indices.append(
-                position
-            )
-
-        selected_documents = [
-            documents[index]
-            for index in selected_indices
+        selected_indices = [
+            round(i * (len(documents) - 1) / (number_of_chunks - 1))
+            for i in range(number_of_chunks)
         ]
+        selected_documents = [documents[index] for index in selected_indices]
+    return [(document, float(MAX_DISTANCE)) for document in selected_documents]
 
-    # Overview retrieval does not use a meaningful
-    # semantic distance, so we use MAX_DISTANCE as
-    # a neutral API value.
-    return [
-        (
-            document,
-            float(MAX_DISTANCE),
-        )
-        for document in selected_documents
-    ]
+
 
 
 def expand_retrieval_context(
@@ -1811,91 +1518,58 @@ def expand_retrieval_context(
     window: int = CONTEXT_EXPANSION_CHUNKS,
     max_chunks: int = CONTEXT_MAX_CHUNKS,
 ):
-    """
-    Add bounded chronological neighbors around retrieved evidence.
-
-    The original retrieved chunks remain anchors. Neighboring chunks are
-    selected by their sequential chunk_id, then the final set is returned
-    in transcript order. The hard max keeps prompt/context growth bounded.
-    """
-
-    if not retrieved_results:
-        return []
-
+    """Add nearby transcript chunks while preserving anchors and context bounds."""
+    if isinstance(window, bool) or not isinstance(window, int):
+        raise ValueError("window must be a non-negative integer.")
     if window < 0:
         raise ValueError("window cannot be negative.")
-
+    if isinstance(max_chunks, bool) or not isinstance(max_chunks, int):
+        raise ValueError("max_chunks must be a positive integer.")
     if max_chunks <= 0:
         raise ValueError("max_chunks must be greater than 0.")
-
+    if not retrieved_results:
+        return []
     if window == 0:
         return retrieved_results[:max_chunks]
 
     documents = get_all_documents(vector_store)
-
     if not documents:
         return retrieved_results[:max_chunks]
 
-    ordered_documents = sorted(
-        documents,
-        key=lambda document: (
-            float(document.metadata.get("start", 0.0)),
-            float(document.metadata.get("end", 0.0)),
-            document.metadata.get("chunk_id", 0),
-        ),
-    )
-
+    ordered_documents = sorted(documents, key=_document_sort_key)
     positions = {}
     for position, document in enumerate(ordered_documents):
-        chunk_id = document.metadata.get("chunk_id")
-        if chunk_id is not None:
-            positions[chunk_id] = position
+        normalized_id = _normalise_chunk_id(document.metadata.get("chunk_id"))
+        if normalized_id is not None:
+            positions[normalized_id] = position
 
     selected = {}
     anchor_keys = set()
     anchor_positions = []
 
-    def result_key(document):
-        chunk_id = document.metadata.get("chunk_id")
-        if chunk_id is not None:
-            return ("chunk", chunk_id)
-
-        return (
-            "time",
-            float(document.metadata.get("start", 0.0)),
-            float(document.metadata.get("end", 0.0)),
-        )
-
-    def add_document(document, distance, is_anchor=False):
-        key = result_key(document)
-
+    def add_document(document, distance, *, is_anchor=False):
+        key = _retrieval_document_identity(document)
         if is_anchor:
-            anchor_keys.add(key)
-
-        if key not in selected:
-            selected[key] = (
-                document,
-                float(distance),
-            )
+            if key not in anchor_keys:
+                selected[key] = (document, float(distance))
+                anchor_keys.add(key)
+            else:
+                prior_document, prior_distance = selected[key]
+                selected[key] = (prior_document, min(prior_distance, float(distance)))
+        elif key not in selected:
+            # This is a neighbor, not a scored retrieval result.
+            selected[key] = (document, float(MAX_DISTANCE))
 
     for anchor_document, anchor_distance in retrieved_results:
-        add_document(
-            anchor_document,
-            anchor_distance,
-            is_anchor=True,
-        )
-
-        chunk_id = anchor_document.metadata.get("chunk_id")
-        position = positions.get(chunk_id)
-
+        add_document(anchor_document, anchor_distance, is_anchor=True)
+        normalized_id = _normalise_chunk_id(anchor_document.metadata.get("chunk_id"))
+        position = positions.get(normalized_id)
         if position is None:
             continue
 
         anchor_positions.append(position)
-
         start = max(0, position - window)
         end = min(len(ordered_documents), position + window + 1)
-
         for neighbor_position in range(start, end):
             neighbor = ordered_documents[neighbor_position]
             add_document(
@@ -1907,46 +1581,27 @@ def expand_retrieval_context(
     if len(selected) > max_chunks:
         def priority(item):
             key, (document, _distance) = item
-            position = positions.get(
-                document.metadata.get("chunk_id"),
-                10**9,
+            normalized_id = _normalise_chunk_id(document.metadata.get("chunk_id"))
+            position = positions.get(normalized_id, 10**9)
+            neighbor_distance = (
+                min(abs(position - anchor_position) for anchor_position in anchor_positions)
+                if anchor_positions
+                else 10**9
             )
-
-            if anchor_positions:
-                neighbor_distance = min(
-                    abs(position - anchor_position)
-                    for anchor_position in anchor_positions
-                )
-            else:
-                neighbor_distance = 10**9
-
             return (
                 0 if key in anchor_keys else 1,
                 neighbor_distance,
-                float(document.metadata.get("start", 0.0)),
+                *_document_sort_key(document),
             )
-
-        selected_items = sorted(
-            selected.items(),
-            key=priority,
-        )[:max_chunks]
+        selected_items = sorted(selected.items(), key=priority)[:max_chunks]
     else:
         selected_items = list(selected.items())
 
-    expanded_results = [
-        item[1]
-        for item in selected_items
-    ]
-
-    expanded_results.sort(
-        key=lambda item: (
-            float(item[0].metadata.get("start", 0.0)),
-            float(item[0].metadata.get("end", 0.0)),
-            item[0].metadata.get("chunk_id", 0),
-        )
-    )
-
+    expanded_results = [item[1] for item in selected_items]
+    expanded_results.sort(key=lambda item: _document_sort_key(item[0]))
     return expanded_results
+
+
 
 
 # ============================================================
@@ -1954,17 +1609,42 @@ def expand_retrieval_context(
 # ============================================================
 
 def is_evidence_dense_question(query: str) -> bool:
-    """Detect questions that are likely to require several evidence facets."""
+    """Detect multi-evidence questions without treating every 'how' as dense."""
+    if not isinstance(query, str) or not query.strip():
+        return False
 
-    normalized = " ".join(query.strip().lower().split())
+    normalized = " ".join(query.casefold().split())
     focus_terms = extract_query_focus_terms(query)
+    quantitative_how = re.match(
+        r"^how\s+(?:many|much|long|old|far|tall|wide|high|heavy|often|soon|fast|big|large|small)\b",
+        normalized,
+    )
+    compound_or_explanatory = re.search(
+        r"\b(?:and|or|both|why|reason\w*|caus\w*|because|impact|effect\w*|compare|difference)\b",
+        normalized,
+    )
+    if quantitative_how and not compound_or_explanatory:
+        return False
 
     if re.search(
-        r"\b(?:why|how|reasons?|challenges?|problems?|failure|causes?|"
-        r"role of|impact|building .*\b(?:brand|business)\b|"
-        r"policy|government|businesses|companies|multiple|several)\b",
+        r"\b(?:why|reason\w*|caus\w*|because|challenges?|problems?|problem|failure|failed|fail|impact|effects?|affect|role of|multiple|several)\b",
         normalized,
     ):
+        return True
+
+    if re.search(r"\b(?:policy|government|regulation\w*|brand|branding)\b", normalized) and re.search(
+        r"\b(?:role|impact|problem\w*|challenge\w*|reason\w*|cost\w*|effect\w*)\b",
+        normalized,
+    ):
+        return True
+
+    if re.search(r"\bhow\b", normalized) and re.search(
+        r"\b(?:work\w*|process|mechanism|steps?|method|procedure|made|built|created|developed|implemented|calculated|operat\w*)\b",
+        normalized,
+    ):
+        return True
+
+    if re.search(r"\b(?:building|growing)\b.*\b(?:brand|business)\b", normalized):
         return True
 
     return bool(
@@ -1974,16 +1654,28 @@ def is_evidence_dense_question(query: str) -> bool:
 
 
 
-def _retrieval_document_identity(document):
-    chunk_id = document.metadata.get("chunk_id")
-    if chunk_id is not None:
-        return ("chunk", chunk_id)
 
-    return (
-        "time",
-        float(document.metadata.get("start", 0.0)),
-        float(document.metadata.get("end", 0.0)),
-    )
+def _retrieval_document_identity(document):
+    """Return a stable identity for deduplication across query variants."""
+    metadata = getattr(document, "metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    video_id = str(metadata.get("video_id", "") or "")
+    chunk_id = _normalise_chunk_id(metadata.get("chunk_id"))
+    if chunk_id is not None:
+        return ("chunk", video_id, chunk_id)
+
+    start = _safe_metadata_float(metadata, "start", float("nan"))
+    end = _safe_metadata_float(metadata, "end", float("nan"))
+    if math.isfinite(start) and math.isfinite(end):
+        return ("time", video_id, start, end)
+
+    # Legacy or external indexes may omit IDs and timestamps; full text keeps
+    # distinct transcript passages distinct instead of collapsing them to (0, 0).
+    return ("content", video_id, str(getattr(document, "page_content", "")))
+
+
 
 
 def rerank_with_soft_facet_support(
@@ -2004,8 +1696,8 @@ def rerank_with_soft_facet_support(
     if rrf_k <= 0:
         raise ValueError("rrf_k must be greater than 0.")
 
-    if facet_weight < 0:
-        raise ValueError("facet_weight cannot be negative.")
+    if not math.isfinite(facet_weight) or facet_weight < 0:
+        raise ValueError("facet_weight must be finite and non-negative.")
 
     if not ranked_results or not facet_rankings or facet_weight == 0:
         return list(ranked_results)
@@ -2109,6 +1801,8 @@ def rerank_with_cross_encoder(
     if not query or not query.strip():
         raise ValueError("query cannot be empty.")
 
+    if isinstance(candidate_k, bool) or not isinstance(candidate_k, int):
+        raise ValueError("candidate_k must be a positive integer.")
     if candidate_k <= 0:
         raise ValueError("candidate_k must be greater than 0.")
 
@@ -2148,6 +1842,8 @@ def rerank_with_cross_encoder(
             raise RuntimeError(
                 "Cross-Encoder returned an unexpected number of scores."
             )
+        if not np.all(np.isfinite(scores)):
+            raise RuntimeError("Cross-Encoder returned non-finite relevance scores.")
 
         order = np.argsort(-scores, kind="stable")
 
@@ -2173,9 +1869,12 @@ def select_diverse_retrieval_anchors(
 ):
     """Select high-ranked anchors while spreading them across the transcript."""
 
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be a positive integer.")
+    if isinstance(min_chunk_gap, bool) or not isinstance(min_chunk_gap, int):
+        raise ValueError("min_chunk_gap must be a non-negative integer.")
     if limit <= 0 or not ranked_results:
         return []
-
     if min_chunk_gap < 0:
         raise ValueError("min_chunk_gap cannot be negative.")
 
@@ -2184,8 +1883,10 @@ def select_diverse_retrieval_anchors(
     remaining = list(ranked_results)
 
     def chunk_id(document):
-        value = document.metadata.get("chunk_id")
-        return int(value) if value is not None else None
+        normalized = _normalise_chunk_id(document.metadata.get("chunk_id"))
+        if normalized is None or normalized[0] != "number":
+            return None
+        return normalized[1]
 
     for item in ranked_results:
         if len(selected) >= limit:
@@ -2680,36 +2381,23 @@ def retrieve_question_context(
     max_distance: float = MAX_DISTANCE,
     expand_context: bool = True,
 ):
-    """Main question-aware retrieval entry point.
-
-    Dense explanation and multi-part questions receive a wider candidate
-    budget so multiple supporting transcript regions can survive ranking.
-    Final context size remains bounded by CONTEXT_MAX_CHUNKS.
-    """
-
+    """Retrieve transcript evidence for a question about the current YouTube video."""
+    lambda_mult, max_distance = _validate_retrieval_parameters(
+        query, k, fetch_k, lambda_mult, max_distance
+    )
     if is_overview_question(query):
         return retrieve_overview(vector_store)
 
     dense_question = is_evidence_dense_question(query)
-    lexical_rrf_weight = (
-        DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
-    )
-
-    semantic_k = (
-        DENSE_SEMANTIC_K
-        if dense_question
-        else k
-    )
+    lexical_rrf_weight = DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
+    semantic_k = DENSE_SEMANTIC_K if dense_question else k
     semantic_fetch_k = (
-        DENSE_SEMANTIC_FETCH_K
-        if dense_question
-        else max(
-            fetch_k,
-            semantic_k * 2,
-        )
+        DENSE_SEMANTIC_FETCH_K if dense_question else max(fetch_k, semantic_k * 2)
     )
+    # The dense anchor budget is 12 by default. A lexical cutoff of eight could
+    # discard otherwise useful facet evidence before anchor selection.
     lexical_limit = (
-        max(k * 2, 8)
+        max(k * 2, DENSE_ANCHOR_LIMIT, 8)
         if dense_question
         else max(k, min(k * 2, 8))
     )
@@ -2717,7 +2405,6 @@ def retrieve_question_context(
     query_plan = build_retrieval_query_plan(query)
     semantic_rankings = []
     semantic_rankings_by_label = {}
-
     for label, query_variant in query_plan:
         ranking = retrieve_mmr(
             vector_store=vector_store,
@@ -2730,18 +2417,13 @@ def retrieve_question_context(
         semantic_rankings.append(ranking)
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             semantic_rankings_by_label[label] = ranking
-
     semantic_results = fuse_semantic_rankings(semantic_rankings)
 
     lexical_queries = [("original", query)]
     if dense_question:
-        lexical_queries.extend(
-            build_evidence_facet_plan(query)
-        )
-
+        lexical_queries.extend(build_evidence_facet_plan(query))
     lexical_rankings = []
     lexical_rankings_by_label = {}
-
     for label, lexical_query in lexical_queries:
         ranking = lexical_search(
             vector_store=vector_store,
@@ -2751,10 +2433,7 @@ def retrieve_question_context(
         lexical_rankings.append(ranking)
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = ranking
-
-    lexical_results = fuse_lexical_rankings(
-        lexical_rankings
-    )
+    lexical_results = fuse_lexical_rankings(lexical_rankings)
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
@@ -2762,119 +2441,34 @@ def retrieve_question_context(
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
     )
-
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
         semantic_facet = semantic_rankings_by_label.get(facet_name, [])
         lexical_facet = lexical_rankings_by_label.get(facet_name, [])
-
         if semantic_facet or lexical_facet:
-            facet_rankings[facet_name] = (
-                fuse_semantic_and_lexical_results(
-                    semantic_results=semantic_facet,
-                    lexical_results=lexical_facet,
-                    lexical_distance=max_distance,
-                    lexical_weight=lexical_rrf_weight,
-                )
+            facet_rankings[facet_name] = fuse_semantic_and_lexical_results(
+                semantic_results=semantic_facet,
+                lexical_results=lexical_facet,
+                lexical_distance=max_distance,
+                lexical_weight=lexical_rrf_weight,
             )
 
-    if not combined_results:
-        return []
-
-    has_lexical_evidence = bool(lexical_results)
-
-    context_max_chunks = (
-        DENSE_CONTEXT_MAX_CHUNKS
-        if dense_question
-        else CONTEXT_MAX_CHUNKS
-    )
-    anchor_limit = (
-        min(DENSE_ANCHOR_LIMIT, context_max_chunks)
-        if dense_question
-        else min(k + 2, context_max_chunks)
-    )
-
-    if has_lexical_evidence:
-        cross_encoder_results = rerank_with_cross_encoder(
-            query=query,
-            ranked_results=combined_results,
-        )
-
-        if dense_question:
-            reranked_results = (
-                rerank_with_soft_facet_support(
-                    cross_encoder_results,
-                    facet_rankings,
-                )
-                if facet_rankings
-                else cross_encoder_results
-            )
-            raw_results = select_diverse_retrieval_anchors(
-                reranked_results,
-                limit=anchor_limit,
-                min_chunk_gap=(
-                    DENSE_ANCHOR_MIN_CHUNK_GAP
-                    if dense_question
-                    else 3
-                ),
-            )
-        else:
-            raw_results = cross_encoder_results[:anchor_limit]
-
-        if not expand_context:
-            return raw_results
-
-        return expand_retrieval_context(
-            vector_store,
-            raw_results,
-            max_chunks=context_max_chunks,
-        )
-
-    semantic_distances = [
-        distance
-        for _document, distance in semantic_results
-    ]
-
-    if not semantic_distances:
-        return []
-
-    best_distance = min(semantic_distances)
-    strict_semantic_limit = max_distance * 0.92
-
-    if best_distance > strict_semantic_limit:
-        return []
-
-    cross_encoder_results = rerank_with_cross_encoder(
+    selection = _select_final_retrieval_candidates(
         query=query,
-        ranked_results=combined_results,
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        combined_results=combined_results,
+        facet_rankings=facet_rankings,
+        dense_question=dense_question,
+        k=k,
+        max_distance=max_distance,
     )
-
-    if dense_question:
-        reranked_results = (
-            rerank_with_soft_facet_support(
-                cross_encoder_results,
-                facet_rankings,
-            )
-            if facet_rankings
-            else cross_encoder_results
-        )
-        raw_results = select_diverse_retrieval_anchors(
-            reranked_results,
-            limit=anchor_limit,
-            min_chunk_gap=(
-                DENSE_ANCHOR_MIN_CHUNK_GAP
-                if dense_question
-                else 3
-            ),
-        )
-    else:
-        raw_results = cross_encoder_results[:anchor_limit]
-
+    raw_results = selection["anchors"]
     if not expand_context:
         return raw_results
-
     return expand_retrieval_context(
         vector_store,
         raw_results,
+        max_chunks=selection["context_max_chunks"],
     )
 

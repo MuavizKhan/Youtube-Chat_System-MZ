@@ -98,49 +98,45 @@ def test_query_variants_add_intent_specific_facets_for_dense_questions():
         "Why did the company fail and what challenges caused the problems?"
     )
 
-    assert len(variants) == 5
+    assert len(variants) == 3
     assert variants[0].startswith("Why did the company fail")
     assert "company fail challenges caused problems" in variants[1]
-    assert any(
-        "financial crisis economic circumstances" in variant
-        for variant in variants[2:]
+    assert any("causes reasons factors" in variant for variant in variants[2:])
+    assert not any(
+        "government policy regulation" in variant
+        or "financial crisis economic circumstances" in variant
+        or "fuel suppliers service costs" in variant
+        for variant in variants
     )
-    assert any(
-        "government policy regulation banks support" in variant
-        for variant in variants[2:]
-    )
-    assert any(
-        "operational challenges payments fees fuel" in variant
-        for variant in variants[2:]
-    )
+
+
 
 
 @pytest.mark.unit
 def test_evidence_facet_planner_switches_to_brand_queries():
-    queries = retrieval.build_evidence_facet_queries(
+    plans = retrieval.build_evidence_facet_plan(
         "What does Vijay Mallya say about building the Kingfisher brand?"
     )
 
-    assert len(queries) == 3
-    assert any("brand branding advertising marketing" in query for query in queries)
-    assert any("business companies subsidiaries ownership" in query for query in queries)
-    assert any("operational challenges payments fees" in query for query in queries)
+    assert [label for label, _query in plans] == ["brand_marketing"]
+    assert "brand branding advertising marketing" in plans[0][1]
+    assert not any(
+        label in {"financial_economic", "policy_governance", "operational_challenges"}
+        for label, _query in plans
+    )
+
+
 
 
 @pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
     query = "What role does government policy play in the problems faced by a company?"
     plans = retrieval.build_retrieval_query_plan(query)
-
     labels = [label for label, _query in plans]
-
     assert labels[:2] == ["original", "focus"]
-    assert labels[2:] == [
-        "policy_change",
-        "policy_governance",
-        "operational_challenges",
-        "financial_economic",
-    ]
+    assert labels[2:] == ["policy_change", "policy_governance", "causal_factors"]
+
+
 
 
 @pytest.mark.unit
@@ -241,6 +237,55 @@ def test_overview_detection_rejects_specific_question():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [
+        "How many episodes are in this series?",
+        "How long is the interview?",
+        "How old is the speaker?",
+    ],
+)
+def test_quantitative_how_questions_do_not_trigger_dense_retrieval(query):
+    assert not retrieval.is_evidence_dense_question(query)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [
+        "How does the engine work?",
+        "Why did the rocket launch fail?",
+        "What are the effects of this treatment?",
+    ],
+)
+def test_explanatory_youtube_questions_trigger_dense_retrieval(query):
+    assert retrieval.is_evidence_dense_question(query)
+
+
+@pytest.mark.unit
+def test_overview_can_select_one_representative_chunk():
+    documents = {
+        f"d{i}": doc(i, i * 10, i * 10 + 5, f"segment {i}")
+        for i in range(5)
+    }
+    result = retrieval.retrieve_overview(
+        FakeVectorStore(documents),
+        number_of_chunks=1,
+    )
+    assert len(result) == 1
+    assert result[0][0].metadata["chunk_id"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("number_of_chunks", [0, -1])
+def test_overview_rejects_nonpositive_chunk_budget(number_of_chunks):
+    with pytest.raises(ValueError, match="positive integer"):
+        retrieval.retrieve_overview(FakeVectorStore({}), number_of_chunks=number_of_chunks)
+
+
+ 
+
+@pytest.mark.unit
 def test_lexical_search_requires_shared_evidence():
     documents={
         "a":doc(1,0,10,"Alice works at Acme."),
@@ -249,6 +294,60 @@ def test_lexical_search_requires_shared_evidence():
     }
     results=retrieval.lexical_search(FakeVectorStore(documents),"Who is Alice at Acme?")
     assert [d.metadata["chunk_id"] for d,_ in results]==[1]
+
+
+@pytest.mark.unit
+def test_lexical_search_can_retrieve_a_rare_transcript_term_alone():
+    documents = {
+        "rare": doc(1, 0, 5, "Photolithography is a semiconductor technique."),
+        "common1": doc(2, 10, 15, "The process and work method for chips."),
+        "common2": doc(3, 20, 25, "This process and work applies to chips."),
+        "common3": doc(4, 30, 35, "A process works with chips and this method."),
+    }
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "Explain photolithography process work method in chips",
+        limit=8,
+    )
+    assert 1 in [document.metadata["chunk_id"] for document, _score in results]
+
+
+@pytest.mark.unit
+def test_lexical_search_returns_empty_for_nonpositive_limit():
+    store = FakeVectorStore({
+        "a": doc(1, 0, 5, "Alice works at Acme."),
+        "b": doc(2, 10, 15, "Alice mentions Acme."),
+    })
+    assert retrieval.lexical_search(store, "Alice Acme", limit=0) == []
+    assert retrieval.lexical_search(store, "Alice Acme", limit=-1) == []
+
+
+@pytest.mark.unit
+def test_lexical_tokenization_preserves_unicode_terms():
+    assert retrieval.extract_query_terms("café naïve 東京") == {"café", "naïve", "東京"}
+
+
+@pytest.mark.unit
+def test_rank_fusion_does_not_collapse_chunks_without_ids_or_timestamps():
+    first = Document(page_content="first transcript passage", metadata={"video_id": "videoA"})
+    second = Document(page_content="second transcript passage", metadata={"video_id": "videoA"})
+    fused = retrieval.fuse_ranked_results([[(first, 0.1), (second, 0.2)]])
+    assert len(fused) == 2
+    assert {document.page_content for document, _score in fused} == {
+        "first transcript passage", "second transcript passage"
+    }
+
+
+@pytest.mark.unit
+def test_lexical_fusion_preserves_higher_is_better_raw_scores():
+    shared = doc(10, 0, 5, "specific term")
+    fused = retrieval.fuse_lexical_rankings([
+        [(shared, 0.2)],
+        [(shared, 0.9)],
+    ])
+    assert len(fused) == 1
+    assert fused[0][0].metadata["chunk_id"] == 10
+    assert fused[0][1] == pytest.approx(0.9)
 
 
 @pytest.mark.unit
@@ -309,11 +408,15 @@ def test_dense_question_runs_facet_lexical_queries(monkeypatch):
     )
 
     assert results == [(item, 0.5)]
-    assert len(lexical_queries) == 4
+    assert len(lexical_queries) == 2
     assert lexical_queries[0].startswith("Why did the company fail")
-    assert any("financial crisis economic circumstances" in query for query in lexical_queries[1:])
-    assert any("government policy regulation banks support" in query for query in lexical_queries[1:])
-    assert any("operational challenges payments fees fuel" in query for query in lexical_queries[1:])
+    assert "causes reasons factors" in lexical_queries[1]
+    assert not any(
+        "financial crisis economic circumstances" in query
+        or "government policy regulation banks support" in query
+        or "operational challenges payments fees fuel" in query
+        for query in lexical_queries[1:]
+    )
 
 
 @pytest.mark.unit
@@ -353,6 +456,20 @@ def test_mmr_selects_nonduplicate_candidate():
     results=retrieval.retrieve_mmr(store,"alpha",k=2,fetch_k=3,max_distance=1.0)
     assert len(results)==2
     assert {d.metadata["chunk_id"] for d,_ in results}=={0,1}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("limit", [1.5, True])
+def test_anchor_selection_rejects_invalid_limit_types(limit):
+    with pytest.raises(ValueError, match="limit must be a positive integer"):
+        retrieval.select_diverse_retrieval_anchors([], limit=limit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("min_chunk_gap", [1.5, True])
+def test_anchor_selection_rejects_invalid_gap_types(min_chunk_gap):
+    with pytest.raises(ValueError, match="min_chunk_gap must be a non-negative integer"):
+        retrieval.select_diverse_retrieval_anchors([], limit=2, min_chunk_gap=min_chunk_gap)
 
 
 @pytest.mark.unit
@@ -659,6 +776,37 @@ def test_raw_faiss_diagnostic_keeps_distance_for_gate_analysis():
     assert results[0][1] == pytest.approx(1.5)
     assert results[0][2] == 1
 @pytest.mark.unit
+def test_diagnostic_candidate_search_skips_stale_docstore_entries():
+    store = FakeVectorStore({
+        "valid": doc(1, 0, 5, "valid transcript candidate"),
+    })
+    store.index_to_docstore_id = {0: "stale-docstore-id"}
+
+    results = retrieval.retrieve_faiss_candidates_for_diagnostics(
+        store,
+        "transcript question",
+        fetch_k=1,
+        max_distance=1.3,
+    )
+
+    assert results == []
+
+
+@pytest.mark.unit
+def test_diagnostic_candidate_search_rejects_nonfinite_distance_limit():
+    store = FakeVectorStore({
+        "valid": doc(1, 0, 5, "valid transcript candidate"),
+    })
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        retrieval.retrieve_faiss_candidates_for_diagnostics(
+            store,
+            "transcript question",
+            fetch_k=1,
+            max_distance=float("nan"),
+        )
+
+
+@pytest.mark.unit
 def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     documents = {
         "a": doc(1, 0, 10, "Alice failed at Acme."),
@@ -790,17 +938,31 @@ def test_diagnostics_match_production_anchor_and_context_budgets(
         "test question",
     )
 
-    expected_context_budget = (
-        retrieval.DENSE_CONTEXT_MAX_CHUNKS
-        if has_lexical_evidence
-        else retrieval.CONTEXT_MAX_CHUNKS
-    )
+    expected_context_budget = retrieval.DENSE_CONTEXT_MAX_CHUNKS
     assert observed_anchor_gaps == [
         retrieval.DENSE_ANCHOR_MIN_CHUNK_GAP
     ]
     assert observed_context_budgets == [expected_context_budget]
     assert result["anchors"] == semantic_result
     assert result["final_context"] == semantic_result
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("window", [1.5, True])
+def test_context_expansion_rejects_invalid_window_types(window):
+    document = doc(1, 0, 5, "transcript")
+    store = FakeVectorStore({"one": document})
+    with pytest.raises(ValueError, match="window must be a non-negative integer"):
+        retrieval.expand_retrieval_context(store, [(document, 0.1)], window=window)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("max_chunks", [1.5, True])
+def test_context_expansion_rejects_invalid_budget_types(max_chunks):
+    document = doc(1, 0, 5, "transcript")
+    store = FakeVectorStore({"one": document})
+    with pytest.raises(ValueError, match="max_chunks must be a positive integer"):
+        retrieval.expand_retrieval_context(store, [(document, 0.1)], max_chunks=max_chunks)
 
 
 @pytest.mark.unit
@@ -1071,6 +1233,7 @@ def test_question_context_weights_lexical_rrf_only_for_dense_questions(
     item = doc(1, 0, 10, "policy evidence")
     ranked = [(item, 0.2)]
     observed_weights = []
+    observed_lexical_limits = []
 
     monkeypatch.setattr(retrieval, "is_overview_question", lambda _query: False)
     monkeypatch.setattr(retrieval, "is_evidence_dense_question", lambda _query: dense)
@@ -1092,7 +1255,11 @@ def test_question_context_weights_lexical_rrf_only_for_dense_questions(
     )
     monkeypatch.setattr(retrieval, "retrieve_mmr", lambda **_kwargs: ranked)
     monkeypatch.setattr(retrieval, "fuse_semantic_rankings", lambda _rankings: ranked)
-    monkeypatch.setattr(retrieval, "lexical_search", lambda **_kwargs: ranked)
+    def fake_lexical_search(**kwargs):
+        observed_lexical_limits.append(kwargs["limit"])
+        return ranked
+
+    monkeypatch.setattr(retrieval, "lexical_search", fake_lexical_search)
     monkeypatch.setattr(retrieval, "fuse_lexical_rankings", lambda _rankings: ranked)
 
     def capture_fusion(**kwargs):
@@ -1126,6 +1293,9 @@ def test_question_context_weights_lexical_rrf_only_for_dense_questions(
     expected_weight = retrieval.DENSE_LEXICAL_RRF_WEIGHT if dense else 1.0
     assert len(observed_weights) == expected_calls
     assert observed_weights == [expected_weight] * expected_calls
+    if dense:
+        assert observed_lexical_limits
+        assert min(observed_lexical_limits) >= retrieval.DENSE_ANCHOR_LIMIT
 
 
 @pytest.mark.unit
@@ -1168,6 +1338,39 @@ def test_cross_encoder_reranking_reorders_candidates_and_preserves_distances(mon
 
     assert [item[0].metadata["chunk_id"] for item in result] == [2, 1, 3]
     assert [item[1] for item in result] == [0.3, 0.2, 0.4]
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_rejects_noninteger_candidate_budget():
+    with pytest.raises(ValueError, match="candidate_k must be a positive integer"):
+        retrieval.rerank_with_cross_encoder(
+            query="test",
+            ranked_results=[(doc(1, 0, 1, "candidate"), 0.1), (doc(2, 1, 2, "candidate"), 0.2)],
+            candidate_k=1.5,
+        )
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_is_fail_open_on_nonfinite_scores(monkeypatch):
+    documents = [
+        doc(1, 0, 10, "first"),
+        doc(2, 10, 20, "second"),
+    ]
+    ranked_results = [(documents[0], 0.2), (documents[1], 0.3)]
+
+    class NonfiniteReranker:
+        def predict(self, pairs, batch_size, show_progress_bar):
+            return np.asarray([np.nan, 0.9], dtype=np.float32)
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval, "create_cross_encoder_reranker", lambda: NonfiniteReranker()
+    )
+
+    assert retrieval.rerank_with_cross_encoder(
+        query="test question",
+        ranked_results=ranked_results,
+    ) == ranked_results
 
 
 @pytest.mark.unit
