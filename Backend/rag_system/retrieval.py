@@ -1923,12 +1923,24 @@ def select_diverse_retrieval_anchors(
     facet_reserve_limit: int = 2,
     facet_rank_cutoff: int = 24,
 ):
-    """Select high-ranked anchors while spreading them across the transcript."""
+    """Select diverse anchors, then reserve a small budget for facet evidence.
+
+    Facet reserves are limited to candidates already in the fused ranking, within
+    three times the anchor budget, and near the top of a source-level facet list.
+    """
 
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise ValueError("limit must be a positive integer.")
     if isinstance(min_chunk_gap, bool) or not isinstance(min_chunk_gap, int):
         raise ValueError("min_chunk_gap must be a non-negative integer.")
+    if isinstance(facet_reserve_limit, bool) or not isinstance(facet_reserve_limit, int):
+        raise ValueError("facet_reserve_limit must be a non-negative integer.")
+    if isinstance(facet_rank_cutoff, bool) or not isinstance(facet_rank_cutoff, int):
+        raise ValueError("facet_rank_cutoff must be a positive integer.")
+    if facet_reserve_limit < 0:
+        raise ValueError("facet_reserve_limit cannot be negative.")
+    if facet_rank_cutoff <= 0:
+        raise ValueError("facet_rank_cutoff must be greater than 0.")
     if limit <= 0 or not ranked_results:
         return []
     if min_chunk_gap < 0:
