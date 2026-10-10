@@ -347,7 +347,7 @@ The machine-readable JSON summary includes `temporal_benchmark`; the evaluator e
 
 The retrieval path now adds a bounded Cross-Encoder reranking stage after semantic + lexical candidate fusion and before final anchor selection.
 
-- RAG_RERANK_ENABLED controls the feature and defaults to true.
+- `RAG_RERANK_ENABLED` controls the feature and defaults to `false`. Set `RAG_RERANK_ENABLED=true` to opt in to Cross-Encoder reranking.
 - RAG_RERANK_MODEL defaults to cross-encoder/ms-marco-MiniLM-L6-v2.
 - RAG_RERANK_CANDIDATE_K limits how many already-retrieved candidates are reranked (default 24).
 - RAG_RERANK_BATCH_SIZE controls local inference batching (default 16).
@@ -361,7 +361,7 @@ The reranker is intentionally conservative:
 - if the model cannot be loaded or scored, retrieval fails open and preserves the pre-reranking order;
 - existing soft facet reranking, transcript-region diversity, and bounded context expansion remain in place.
 
-The Cross-Encoder is loaded lazily and cached for the process so normal application startup does not initialize the model. The retrieval diagnostics expose both the pre-rerank hybrid ordering and the reranked ordering for stage-level debugging.
+The Cross-Encoder is loaded lazily and cached for the process so normal application startup does not initialize the model. Evaluation summaries record the effective reranker flag, model, candidate limit, batch size, and maximum input length. End-to-end retrieval diagnostics expose the hybrid ordering, Cross-Encoder ranking, facet-soft ranking, selected anchors, and final context so ranking regressions can be localized.
 
 ## Production hardening
 

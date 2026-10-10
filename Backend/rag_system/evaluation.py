@@ -23,6 +23,11 @@ from .config import (
     MAX_DISTANCE,
     MMR_FETCH_K,
     MMR_LAMBDA,
+    RAG_RERANK_BATCH_SIZE,
+    RAG_RERANK_CANDIDATE_K,
+    RAG_RERANK_ENABLED,
+    RAG_RERANK_MAX_LENGTH,
+    RAG_RERANK_MODEL,
     TOP_K,
 )
 
@@ -1082,6 +1087,16 @@ def build_end_to_end_retrieval_diagnostics(
         semantic_fused_map = _rank_map(pipeline["semantic_fused"])
         lexical_map = _rank_map(pipeline["lexical"])
         hybrid_map = _rank_map(pipeline["hybrid_fused"])
+        cross_encoder_results = pipeline.get(
+            "cross_encoder_reranked",
+            pipeline["hybrid_fused"],
+        )
+        facet_soft_results = pipeline.get(
+            "facet_soft_reranked",
+            cross_encoder_results,
+        )
+        cross_encoder_map = _rank_map(cross_encoder_results)
+        facet_soft_map = _rank_map(facet_soft_results)
         anchor_map = _rank_map(pipeline["anchors"])
         context_map = _rank_map(pipeline["final_context"])
 
@@ -1117,6 +1132,8 @@ def build_end_to_end_retrieval_diagnostics(
                     "semantic_fused_rank": semantic_fused_map.get(chunk_id),
                     "lexical_rank": lexical_map.get(chunk_id),
                     "hybrid_fused_rank": hybrid_map.get(chunk_id),
+                    "cross_encoder_rank": cross_encoder_map.get(chunk_id),
+                    "facet_soft_reranked_rank": facet_soft_map.get(chunk_id),
                     "anchor_rank": anchor_map.get(chunk_id),
                     "final_context_rank": context_map.get(chunk_id),
                 }
@@ -1141,6 +1158,18 @@ def build_end_to_end_retrieval_diagnostics(
             "semantic_fetch_k": pipeline["semantic_fetch_k"],
             "lexical_limit": pipeline["lexical_limit"],
             "anchor_limit": pipeline["anchor_limit"],
+            "reranking_enabled": pipeline.get(
+                "reranking_enabled",
+                RAG_RERANK_ENABLED,
+            ),
+            "cross_encoder_reranked_top_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _score in cross_encoder_results[:12]
+            ],
+            "facet_soft_reranked_top_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _score in facet_soft_results[:12]
+            ],
             "semantic_fused_top_chunk_ids": [
                 document.metadata.get("chunk_id")
                 for document, _distance in pipeline["semantic_fused"][:12]
@@ -1326,6 +1355,11 @@ def build_evaluation_summary(
             "dense_anchor_limit": DENSE_ANCHOR_LIMIT,
             "dense_anchor_min_chunk_gap": DENSE_ANCHOR_MIN_CHUNK_GAP,
             "dense_context_max_chunks": DENSE_CONTEXT_MAX_CHUNKS,
+            "rerank_enabled": RAG_RERANK_ENABLED,
+            "rerank_model": RAG_RERANK_MODEL,
+            "rerank_candidate_k": RAG_RERANK_CANDIDATE_K,
+            "rerank_batch_size": RAG_RERANK_BATCH_SIZE,
+            "rerank_max_length": RAG_RERANK_MAX_LENGTH,
         },
         "benchmark_thresholds": BENCHMARK_THRESHOLDS,
         "benchmark_metrics": benchmark_metrics,
