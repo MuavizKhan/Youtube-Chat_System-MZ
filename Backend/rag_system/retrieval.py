@@ -794,6 +794,7 @@ def diagnose_retrieval_pipeline(
         "dense_question": dense_question,
         "reranking_enabled": RAG_RERANK_ENABLED,
         "lexical_rrf_weight": lexical_rrf_weight,
+        "facet_rerank_weight": DENSE_FACET_RERANK_WEIGHT,
         "semantic_k": semantic_k,
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
@@ -1296,7 +1297,14 @@ def lexical_search(
                 document_frequency[term] <= rare_term_frequency_limit
                 for term in matched_terms
             )
-            if not has_rare_match:
+            # A lone rare term can rescue a long, technical question, but a
+            # short multi-concept query needs corroboration. Otherwise an
+            # incidental mention (e.g. "Australia" in a video) can make an
+            # unrelated question look answerable to lexical retrieval.
+            allow_rare_single_match = (
+                len(unique_terms) >= 3 and has_rare_match
+            )
+            if not allow_rare_single_match:
                 continue
 
         weighted_coverage = (
