@@ -2011,17 +2011,23 @@ def select_diverse_retrieval_anchors(
                 or identity in selected_identities
             ):
                 continue
-            proposal = proposals.setdefault(
-                identity,
-                {
-                    "item": item_by_identity[identity],
-                    "global_rank": global_rank,
-                    "facet_ranks": {},
-                },
-            )
-            previous_rank = proposal["facet_ranks"].get(facet_name)
-            if previous_rank is None or facet_rank < previous_rank:
-                proposal["facet_ranks"][facet_name] = facet_rank
+
+            proposal = {
+                "item": item_by_identity[identity],
+                "global_rank": global_rank,
+                "facet_name": facet_name,
+                "facet_rank": facet_rank,
+                "rescue_delta": global_rank - facet_rank,
+            }
+            previous = proposals.get(identity)
+            if previous is None or (
+                proposal["rescue_delta"],
+                -proposal["facet_rank"],
+            ) > (
+                previous["rescue_delta"],
+                -previous["facet_rank"],
+            ):
+                proposals[identity] = proposal
 
     def document_chunk_id(item):
         metadata = getattr(item[0], "metadata", {})
@@ -2035,87 +2041,57 @@ def select_diverse_retrieval_anchors(
     reserved_identities = set()
     reserved_facets = set()
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
+    candidates = sorted(
+        proposals.items(),
+        key=lambda pair: (
+            -pair[1]["rescue_delta"],
+            pair[1]["facet_rank"],
+            pair[1]["global_rank"],
+        ),
+    )
 
-    while len(reserved_identities) < reserve_budget:
-        eligible = []
-        for identity, proposal in proposals.items():
-            if identity in reserved_identities:
+    for identity, proposal in candidates:
+        if len(reserved_identities) >= reserve_budget:
+            break
+        if identity in reserved_identities or proposal["facet_name"] in reserved_facets:
+            continue
+
+        candidate_item = proposal["item"]
+        candidate_chunk_id = document_chunk_id(candidate_item)
+        replacement_indices = sorted(
+            range(len(selected)),
+            key=lambda index: rank_by_identity.get(
+                _retrieval_document_identity(selected[index][0]),
+                len(ranked_results) + index,
+            ),
+            reverse=True,
+        )
+        replacement_index = None
+        for index in replacement_indices:
+            current_identity = _retrieval_document_identity(selected[index][0])
+            if current_identity in reserved_identities:
                 continue
-            available_facets = {
-                name: rank
-                for name, rank in proposal["facet_ranks"].items()
-                if name not in reserved_facets
-            }
-            if not available_facets:
+            remaining_ids = [
+                document_chunk_id(item)
+                for item_index, item in enumerate(selected)
+                if item_index != index
+            ]
+            if candidate_chunk_id is not None and any(
+                previous_id is not None
+                and abs(candidate_chunk_id - previous_id) < min_chunk_gap
+                for previous_id in remaining_ids
+            ):
                 continue
-            best_facet_rank = min(available_facets.values())
-            rescue_delta = max(
-                proposal["global_rank"] - rank
-                for rank in available_facets.values()
-            )
-            eligible.append(
-                (
-                    -rescue_delta,
-                    best_facet_rank,
-                    proposal["global_rank"],
-                    identity,
-                    available_facets,
-                    proposal,
-                )
-            )
-        eligible.sort(key=lambda entry: entry[:3])
-        reserved_this_round = False
-
-        for (
-            _negative_delta,
-            _best_facet_rank,
-            _global_rank,
-            identity,
-            available_facets,
-            proposal,
-        ) in eligible:
-            candidate_item = proposal["item"]
-            candidate_chunk_id = document_chunk_id(candidate_item)
-            replacement_indices = sorted(
-                range(len(selected)),
-                key=lambda index: rank_by_identity.get(
-                    _retrieval_document_identity(selected[index][0]),
-                    len(ranked_results) + index,
-                ),
-                reverse=True,
-            )
-            replacement_index = None
-            for index in replacement_indices:
-                current_identity = _retrieval_document_identity(selected[index][0])
-                if current_identity in reserved_identities:
-                    continue
-                remaining_ids = [
-                    document_chunk_id(item)
-                    for item_index, item in enumerate(selected)
-                    if item_index != index
-                ]
-                if candidate_chunk_id is not None and any(
-                    previous_id is not None
-                    and abs(candidate_chunk_id - previous_id) < min_chunk_gap
-                    for previous_id in remaining_ids
-                ):
-                    continue
-                replacement_index = index
-                break
-
-            if replacement_index is None:
-                continue
-
-            selected.pop(replacement_index)
-            selected.append(candidate_item)
-            selected_identities.add(identity)
-            reserved_identities.add(identity)
-            reserved_facets.update(available_facets)
-            reserved_this_round = True
+            replacement_index = index
             break
 
-        if not reserved_this_round:
-            break
+        if replacement_index is None:
+            continue
+
+        selected.pop(replacement_index)
+        selected.append(candidate_item)
+        reserved_identities.add(identity)
+        reserved_facets.add(proposal["facet_name"])
 
     return selected
 
