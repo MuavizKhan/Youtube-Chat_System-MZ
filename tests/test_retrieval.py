@@ -475,7 +475,7 @@ def test_dense_question_runs_facet_lexical_queries(monkeypatch):
 
     assert results == [(item, 0.5)]
     assert len(lexical_queries) == 2
-    assert lexical_queries[0].startswith("Why did the company fail")
+    assert lexical_queries[0].startswith("Why did the rocket fail")
     assert "causes reasons factors" in lexical_queries[1]
     assert not any(
         "financial crisis economic circumstances" in query
