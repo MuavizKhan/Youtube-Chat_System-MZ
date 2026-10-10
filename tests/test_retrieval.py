@@ -408,11 +408,15 @@ def test_dense_question_runs_facet_lexical_queries(monkeypatch):
     )
 
     assert results == [(item, 0.5)]
-    assert len(lexical_queries) == 4
+    assert len(lexical_queries) == 2
     assert lexical_queries[0].startswith("Why did the company fail")
-    assert any("financial crisis economic circumstances" in query for query in lexical_queries[1:])
-    assert any("government policy regulation banks support" in query for query in lexical_queries[1:])
-    assert any("operational challenges payments fees fuel" in query for query in lexical_queries[1:])
+    assert "causes reasons factors" in lexical_queries[1]
+    assert not any(
+        "financial crisis economic circumstances" in query
+        or "government policy regulation banks support" in query
+        or "operational challenges payments fees fuel" in query
+        for query in lexical_queries[1:]
+    )
 
 
 @pytest.mark.unit
