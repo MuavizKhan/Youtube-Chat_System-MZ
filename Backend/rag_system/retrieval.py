@@ -933,7 +933,7 @@ def diagnose_retrieval_pipeline(
         lexical_results=lexical_results,
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
-    ))
+    )
 
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
@@ -947,7 +947,7 @@ def diagnose_retrieval_pipeline(
                     lexical_results=lexical_facet,
                     lexical_distance=max_distance,
                     lexical_weight=lexical_rrf_weight,
-                ))
+                )
             )
 
     context_max_chunks = (
@@ -2761,7 +2761,7 @@ def retrieve_question_context(
         lexical_results=lexical_results,
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
-    ))
+    )
 
     facet_rankings = {}
     for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
@@ -2775,7 +2775,7 @@ def retrieve_question_context(
                     lexical_results=lexical_facet,
                     lexical_distance=max_distance,
                     lexical_weight=lexical_rrf_weight,
-                ))
+                )
             )
 
     if not combined_results:
