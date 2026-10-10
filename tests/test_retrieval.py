@@ -95,12 +95,12 @@ def test_query_variants_keep_original_and_add_content_focus():
 @pytest.mark.unit
 def test_query_variants_add_intent_specific_facets_for_dense_questions():
     variants = retrieval.build_retrieval_query_variants(
-        "Why did the company fail and what challenges caused the problems?"
+        "Why did the process fail and what challenges caused the problems?"
     )
 
     assert len(variants) == 3
-    assert variants[0].startswith("Why did the company fail")
-    assert "company fail challenges caused problems" in variants[1]
+    assert variants[0].startswith("Why did the process fail")
+    assert "process fail challenges caused problems" in variants[1]
     assert any("causes reasons factors" in variant for variant in variants[2:])
     assert not any(
         "government policy regulation" in variant
@@ -130,7 +130,7 @@ def test_evidence_facet_planner_switches_to_brand_queries():
 
 @pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
-    query = "What role does government policy play in the problems faced by a company?"
+    query = "What role does government policy play in problems faced by people?"
     plans = retrieval.build_retrieval_query_plan(query)
     labels = [label for label, _query in plans]
     assert labels[:2] == ["original", "focus"]
@@ -141,7 +141,7 @@ def test_policy_questions_add_focused_policy_change_facet():
 
 @pytest.mark.unit
 def test_policy_governance_facet_keeps_original_terms():
-    query = "What role does government policy play in the problems faced by a company?"
+    query = "What role does government policy play in problems faced by people?"
     plans = retrieval.build_evidence_facet_plan(query)
 
     governance_query = next(
@@ -190,6 +190,37 @@ def test_policy_change_facet_lexically_surfaces_shared_policy_evidence():
 
     assert results
     assert results[0][0].metadata["chunk_id"] == 7
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Why did the airline fail and what challenges did it face?",
+        "Why did the company struggle, and what problems contributed to the decline?",
+    ],
+)
+def test_business_failure_questions_add_domain_conditioned_cause_facets(query):
+    labels = [label for label, _query in retrieval.build_evidence_facet_plan(query)]
+
+    assert "financial_economic" in labels
+    assert "policy_governance" in labels
+    assert "operational_challenges" in labels
+    assert "causal_factors" in labels
+
+
+@pytest.mark.unit
+def test_nonbusiness_failure_questions_do_not_add_business_facets():
+    labels = [
+        label for label, _query in retrieval.build_evidence_facet_plan(
+            "Why did this process fail and what caused the error?"
+        )
+    ]
+
+    assert "financial_economic" not in labels
+    assert "policy_governance" not in labels
+    assert "operational_challenges" not in labels
+    assert "causal_factors" in labels
 
 
 @pytest.mark.unit
