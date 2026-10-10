@@ -794,6 +794,7 @@ def diagnose_retrieval_pipeline(
         "dense_question": dense_question,
         "reranking_enabled": RAG_RERANK_ENABLED,
         "lexical_rrf_weight": lexical_rrf_weight,
+        "facet_rerank_weight": DENSE_FACET_RERANK_WEIGHT,
         "semantic_k": semantic_k,
         "semantic_fetch_k": semantic_fetch_k,
         "lexical_limit": lexical_limit,
@@ -1001,6 +1002,26 @@ def build_evidence_facet_plan(
         normalized,
     ):
         add_facet("business_corporate")
+
+    # A question about a business/airline struggling, failing, or facing
+    # challenges should explore the common cause categories for that domain.
+    # This is conditional on explicit business context; unrelated science,
+    # software, education, travel, or sports questions do not inherit these
+    # financial/policy/operations facets.
+    business_context = bool(re.search(
+        r"\b(?:business\w*|companies|company|corporate|corporation|firms?|"
+        r"airlines?|startups?|banks?|banking)\b",
+        normalized,
+    ))
+    business_failure_context = bool(re.search(
+        r"\b(?:fail\w*|struggl\w*|challenge\w*|problem\w*|difficult\w*|"
+        r"bankrupt\w*|crisis|declin\w*|surviv\w*)\b",
+        normalized,
+    ))
+    if business_context and business_failure_context:
+        add_facet("financial_economic")
+        add_facet("policy_governance")
+        add_facet("operational_challenges")
 
     if re.search(
         r"\b(?:why|reason\w*|caus\w*|because|fail\w*|problem\w*|challenge\w*|issue\w*|factor\w*|role of)\b",
@@ -1296,7 +1317,14 @@ def lexical_search(
                 document_frequency[term] <= rare_term_frequency_limit
                 for term in matched_terms
             )
-            if not has_rare_match:
+            # A lone rare term can rescue a long, technical question, but a
+            # short multi-concept query needs corroboration. Otherwise an
+            # incidental mention (e.g. "Australia" in a video) can make an
+            # unrelated question look answerable to lexical retrieval.
+            allow_rare_single_match = (
+                len(unique_terms) >= 3 and has_rare_match
+            )
+            if not allow_rare_single_match:
                 continue
 
         weighted_coverage = (

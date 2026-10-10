@@ -401,11 +401,12 @@ DENSE_CONTEXT_MAX_CHUNKS = _get_int(
     16,
 )
 
-# Apply a conservative soft bonus when a candidate is strongly ranked
-# by one or more evidence facets. A value of 0 disables the bonus.
+# Facet support must be strong enough to rescue evidence found by a focused
+# query variant when global fusion dilutes that evidence across unrelated
+# variants. This is a rank bonus, not a hard facet quota. A value of 0 disables it.
 DENSE_FACET_RERANK_WEIGHT = _get_float(
     "RAG_DENSE_FACET_RERANK_WEIGHT",
-    0.05,
+    0.5,
 )
 
 
