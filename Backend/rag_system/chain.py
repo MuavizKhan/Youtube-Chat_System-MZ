@@ -298,6 +298,63 @@ def format_timestamp(
         f"{remaining_seconds:02d}"
     )
 
+_TIMESTAMP_REQUEST_PATTERN = re.compile(
+    r"\b(?:timestamps?|time\s*stamps?|cite|citation|citations)\b",
+    re.IGNORECASE,
+)
+
+_TIMESTAMP_RANGE_IN_ANSWER_PATTERN = re.compile(
+    r"(?<!\d)\d{1,2}:\d{2}\s*(?:-|–|—|to)\s*"
+    r"\d{1,2}:\d{2}(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def append_requested_temporal_timestamp(
+    answer: str,
+    question: str,
+    retrieval_trace: dict[str, Any] | None,
+    *,
+    has_evidence: bool,
+) -> str:
+    """Append a source-grounded temporal range when the user explicitly asks.
+
+    This deterministic formatting step supplements the prompt instruction:
+    the model may summarize the passage correctly but omit a requested citation.
+    It applies only to successful temporal retrieval with source evidence.
+    """
+    if (
+        not answer
+        or not question
+        or not has_evidence
+        or answer.strip() == FALLBACK_ANSWER
+        or not _TIMESTAMP_REQUEST_PATTERN.search(question)
+        or not isinstance(retrieval_trace, dict)
+        or retrieval_trace.get("route") != "temporal_window"
+    ):
+        return answer
+
+    # Avoid duplicating a timestamp range already supplied by the model.
+    if _TIMESTAMP_RANGE_IN_ANSWER_PATTERN.search(answer):
+        return answer
+
+    temporal_window = retrieval_trace.get("temporal_window")
+    if not isinstance(temporal_window, dict):
+        return answer
+
+    start = temporal_window.get("start_seconds")
+    end = temporal_window.get("end_seconds")
+    if (
+        not isinstance(start, (int, float))
+        or not isinstance(end, (int, float))
+        or end <= start
+    ):
+        return answer
+
+    timestamp = f"{format_timestamp(start)}–{format_timestamp(end)}"
+    return f"{answer.rstrip()}\n\nRelevant timestamp: {timestamp}"
+
+
 def merge_overlapping_results(
     retrieved_results,
     merge_gap_seconds: float = SOURCE_MERGE_GAP_SECONDS,
@@ -2030,9 +2087,16 @@ def answer_question(
     # Final response
     # --------------------------------------------------------
 
+    final_answer = append_requested_temporal_timestamp(
+        answer=result["answer"],
+        question=original_question,
+        retrieval_trace=result.get("retrieval_trace"),
+        has_evidence=bool(retrieved_results and sources),
+    )
+
     return {
     "answer":
-        result["answer"],
+        final_answer,
 
     "video_id":
         video_id,
