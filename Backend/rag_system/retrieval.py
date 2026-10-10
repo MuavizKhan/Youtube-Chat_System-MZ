@@ -840,6 +840,7 @@ def diagnose_retrieval_pipeline(
     retrieval path. It exposes raw FAISS candidates, per-variant MMR output,
     semantic RRF, lexical retrieval, hybrid RRF, anchor selection, and final
     context expansion so a missing gold chunk can be localized precisely.
+    Anchor-diversity and context-budget settings mirror production retrieval.
     """
 
     if is_overview_question(query):
@@ -972,6 +973,7 @@ def diagnose_retrieval_pipeline(
             select_diverse_retrieval_anchors(
                 facet_soft_reranked,
                 limit=anchor_limit,
+                min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
             )
             if dense_question
             else facet_soft_reranked[:anchor_limit]
@@ -997,15 +999,24 @@ def diagnose_retrieval_pipeline(
                 select_diverse_retrieval_anchors(
                     facet_soft_reranked,
                     limit=anchor_limit,
+                min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
                 )
                 if dense_question
                 else facet_soft_reranked[:anchor_limit]
             )
 
+    # Match production's context budget: the lexical-evidence path uses
+    # the dense-question budget, while the no-lexical fallback uses the
+    # expand_retrieval_context default (CONTEXT_MAX_CHUNKS).
+    diagnostic_context_max_chunks = (
+        context_max_chunks
+        if lexical_results
+        else CONTEXT_MAX_CHUNKS
+    )
     context_results = expand_retrieval_context(
         vector_store,
         anchor_results,
-        max_chunks=context_max_chunks,
+        max_chunks=diagnostic_context_max_chunks,
     )
 
     return {
