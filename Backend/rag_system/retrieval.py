@@ -237,11 +237,13 @@ def _validate_retrieval_parameters(
 ) -> tuple[float, float]:
     """Validate caller-controlled retrieval parameters before doing any work."""
     if not isinstance(query, str) or not query.strip():
-        raise ValueError("query cannot be empty.")
+        raise ValueError("Query cannot be empty.")
 
     for name, value in (("k", k), ("fetch_k", fetch_k)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be a positive integer.")
+        if value <= 0:
+            raise ValueError(f"{name} must be greater than 0.")
 
     try:
         lambda_value = float(lambda_mult)
@@ -254,8 +256,10 @@ def _validate_retrieval_parameters(
         distance_limit = float(max_distance)
     except (TypeError, ValueError, OverflowError) as error:
         raise ValueError("max_distance must be finite and non-negative.") from error
-    if not math.isfinite(distance_limit) or distance_limit < 0:
+    if not math.isfinite(distance_limit):
         raise ValueError("max_distance must be finite and non-negative.")
+    if distance_limit < 0:
+        raise ValueError("max_distance cannot be negative.")
 
     return lambda_value, distance_limit
 
