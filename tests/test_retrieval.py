@@ -95,7 +95,7 @@ def test_query_variants_keep_original_and_add_content_focus():
 @pytest.mark.unit
 def test_query_variants_add_intent_specific_facets_for_dense_questions():
     variants = retrieval.build_retrieval_query_variants(
-        "Why did the process fail and what challenges caused the problems?"
+        "Why did the rocket fail and what challenges caused the problems?"
     )
 
     assert len(variants) == 3
