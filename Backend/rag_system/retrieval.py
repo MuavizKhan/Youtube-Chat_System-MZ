@@ -1519,12 +1519,16 @@ def expand_retrieval_context(
     max_chunks: int = CONTEXT_MAX_CHUNKS,
 ):
     """Add nearby transcript chunks while preserving anchors and context bounds."""
-    if not retrieved_results:
-        return []
+    if isinstance(window, bool) or not isinstance(window, int):
+        raise ValueError("window must be a non-negative integer.")
     if window < 0:
         raise ValueError("window cannot be negative.")
+    if isinstance(max_chunks, bool) or not isinstance(max_chunks, int):
+        raise ValueError("max_chunks must be a positive integer.")
     if max_chunks <= 0:
         raise ValueError("max_chunks must be greater than 0.")
+    if not retrieved_results:
+        return []
     if window == 0:
         return retrieved_results[:max_chunks]
 
@@ -1797,6 +1801,8 @@ def rerank_with_cross_encoder(
     if not query or not query.strip():
         raise ValueError("query cannot be empty.")
 
+    if isinstance(candidate_k, bool) or not isinstance(candidate_k, int):
+        raise ValueError("candidate_k must be a positive integer.")
     if candidate_k <= 0:
         raise ValueError("candidate_k must be greater than 0.")
 
@@ -1863,9 +1869,12 @@ def select_diverse_retrieval_anchors(
 ):
     """Select high-ranked anchors while spreading them across the transcript."""
 
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be a positive integer.")
+    if isinstance(min_chunk_gap, bool) or not isinstance(min_chunk_gap, int):
+        raise ValueError("min_chunk_gap must be a non-negative integer.")
     if limit <= 0 or not ranked_results:
         return []
-
     if min_chunk_gap < 0:
         raise ValueError("min_chunk_gap cannot be negative.")
 
