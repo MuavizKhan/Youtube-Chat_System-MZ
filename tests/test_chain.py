@@ -17,6 +17,86 @@ def test_format_timestamp(seconds,expected):
 
 
 @pytest.mark.unit
+def test_append_requested_temporal_timestamp_from_retrieval_window():
+    trace = {
+        "route": "temporal_window",
+        "temporal_window": {
+            "start_seconds": 1535.0,
+            "end_seconds": 1584.52,
+        },
+    }
+
+    answer = chain.append_requested_temporal_timestamp(
+        answer="No winner is declared, and no score is announced.",
+        question=(
+            "What is said during the final 50 seconds? "
+            "Cite the relevant timestamp."
+        ),
+        retrieval_trace=trace,
+        has_evidence=True,
+    )
+
+    assert answer.endswith("Relevant timestamp: 25:35–26:24")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,trace,has_evidence,answer",
+    [
+        (
+            "What happened during 25:35–26:25?",
+            {"route": "temporal_window", "temporal_window": {
+                "start_seconds": 1535.0, "end_seconds": 1584.52,
+            }},
+            True,
+            "A factual answer.",
+        ),
+        (
+            "What happened? Cite the relevant timestamp.",
+            {"route": "question_aware", "temporal_window": {
+                "start_seconds": 1535.0, "end_seconds": 1584.52,
+            }},
+            True,
+            "A factual answer.",
+        ),
+        (
+            "What happened during 25:35–26:25? Cite the timestamp.",
+            {"route": "temporal_window", "temporal_window": {
+                "start_seconds": 1535.0, "end_seconds": 1584.52,
+            }},
+            False,
+            "A factual answer.",
+        ),
+    ],
+)
+def test_append_requested_temporal_timestamp_is_guarded(
+    question, trace, has_evidence, answer
+):
+    assert chain.append_requested_temporal_timestamp(
+        answer=answer,
+        question=question,
+        retrieval_trace=trace,
+        has_evidence=has_evidence,
+    ) == answer
+
+
+@pytest.mark.unit
+def test_append_requested_temporal_timestamp_does_not_duplicate_range():
+    trace = {
+        "route": "temporal_window",
+        "temporal_window": {"start_seconds": 1535.0, "end_seconds": 1584.52},
+    }
+    answer = "A factual answer. Relevant timestamp: 25:35–26:24"
+
+    assert chain.append_requested_temporal_timestamp(
+        answer=answer,
+        question="Cite the relevant timestamp for 25:35–26:25.",
+        retrieval_trace=trace,
+        has_evidence=True,
+    ) == answer
+
+
+@pytest.mark.unit
 def test_merge_source_groups():
     groups=chain.merge_overlapping_results([
         (doc(2,40,80,"second"),0.8),
