@@ -1020,7 +1020,13 @@ function escapeHtml(text) {
 
 
 function renderMarkdown(text) {
-    let html = escapeHtml(text);
+    // Clean common formatting artifacts returned by chat models before escaping
+    // and rendering Markdown. Keep this narrow; do not decode arbitrary HTML.
+    const normalizedText = String(text ?? "")
+        .replace(/&#x20;|&#32;/gi, " ")
+        .replace(/^\s*[-*]\s*\\?\s*$/gm, "");
+
+    let html = escapeHtml(normalizedText);
 
     // Convert escaped markdown characters back first.
     html = html.replace(/\\([*_`])/g, "$1");
