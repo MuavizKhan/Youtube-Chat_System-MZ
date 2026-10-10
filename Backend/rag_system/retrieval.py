@@ -880,7 +880,7 @@ def extract_query_focus_terms(
         count=1,
     )
 
-    words = re.findall(r"[^\\W_]+", normalized_query, flags=re.UNICODE)
+    words = re.findall(r"[^\W_]+", normalized_query, flags=re.UNICODE)
     return [
         word
         for word in words
@@ -1123,7 +1123,7 @@ def extract_query_terms(
     """
 
     words = re.findall(
-        r"[^\\W_]+",
+        r"[^\W_]+",
         query.casefold(),
         flags=re.UNICODE,
     )
@@ -1241,7 +1241,7 @@ def lexical_search(
     tokenized_documents = []
     for document in documents:
         text = document.page_content.casefold()
-        tokens = set(re.findall(r"[^\\W_]+", text, flags=re.UNICODE))
+        tokens = set(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
         tokenized_documents.append((document, text, tokens))
 
     document_frequency = {term: 0 for term in unique_terms}
