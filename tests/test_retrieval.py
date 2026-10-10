@@ -459,6 +459,20 @@ def test_mmr_selects_nonduplicate_candidate():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("limit", [1.5, True])
+def test_anchor_selection_rejects_invalid_limit_types(limit):
+    with pytest.raises(ValueError, match="limit must be a positive integer"):
+        retrieval.select_diverse_retrieval_anchors([], limit=limit)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("min_chunk_gap", [1.5, True])
+def test_anchor_selection_rejects_invalid_gap_types(min_chunk_gap):
+    with pytest.raises(ValueError, match="min_chunk_gap must be a non-negative integer"):
+        retrieval.select_diverse_retrieval_anchors([], limit=2, min_chunk_gap=min_chunk_gap)
+
+
+@pytest.mark.unit
 def test_select_diverse_retrieval_anchors_spreads_dense_evidence():
     ranked = [
         (doc(10, 100, 105, "region A"), 0.1),
@@ -934,6 +948,24 @@ def test_diagnostics_match_production_anchor_and_context_budgets(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("window", [1.5, True])
+def test_context_expansion_rejects_invalid_window_types(window):
+    document = doc(1, 0, 5, "transcript")
+    store = FakeVectorStore({"one": document})
+    with pytest.raises(ValueError, match="window must be a non-negative integer"):
+        retrieval.expand_retrieval_context(store, [(document, 0.1)], window=window)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("max_chunks", [1.5, True])
+def test_context_expansion_rejects_invalid_budget_types(max_chunks):
+    document = doc(1, 0, 5, "transcript")
+    store = FakeVectorStore({"one": document})
+    with pytest.raises(ValueError, match="max_chunks must be a positive integer"):
+        retrieval.expand_retrieval_context(store, [(document, 0.1)], max_chunks=max_chunks)
+
+
+@pytest.mark.unit
 def test_context_expansion_adds_adjacent_chunks_in_chronological_order():
     documents = {
         f"d{i}": doc(
@@ -1306,6 +1338,16 @@ def test_cross_encoder_reranking_reorders_candidates_and_preserves_distances(mon
 
     assert [item[0].metadata["chunk_id"] for item in result] == [2, 1, 3]
     assert [item[1] for item in result] == [0.3, 0.2, 0.4]
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_rejects_noninteger_candidate_budget():
+    with pytest.raises(ValueError, match="candidate_k must be a positive integer"):
+        retrieval.rerank_with_cross_encoder(
+            query="test",
+            ranked_results=[(doc(1, 0, 1, "candidate"), 0.1), (doc(2, 1, 2, "candidate"), 0.2)],
+            candidate_k=1.5,
+        )
 
 
 @pytest.mark.unit
