@@ -539,6 +539,25 @@ def test_anchor_selection_rejects_invalid_gap_types(min_chunk_gap):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"facet_reserve_limit": True}, "facet_reserve_limit must be a non-negative integer"),
+        ({"facet_reserve_limit": -1}, "facet_reserve_limit cannot be negative"),
+        ({"facet_rank_cutoff": False}, "facet_rank_cutoff must be a positive integer"),
+        ({"facet_rank_cutoff": 0}, "facet_rank_cutoff must be greater than 0"),
+    ],
+)
+def test_facet_anchor_reserve_validates_configuration(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        retrieval.select_diverse_retrieval_anchors(
+            [],
+            limit=2,
+            **kwargs,
+        )
+
+
+@pytest.mark.unit
 def test_select_diverse_retrieval_anchors_spreads_dense_evidence():
     ranked = [
         (doc(10, 100, 105, "region A"), 0.1),
