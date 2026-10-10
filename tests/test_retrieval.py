@@ -994,6 +994,141 @@ def test_reciprocal_rank_fusion_prefers_documents_supported_by_both_signals():
 
 
 @pytest.mark.unit
+def test_weighted_hybrid_rrf_can_retain_lower_ranked_lexical_evidence():
+    shared = [
+        (doc(100 + rank, rank * 10, rank * 10 + 5, f"shared evidence {rank}"), 0.05 + rank / 100)
+        for rank in range(1, 7)
+    ]
+    semantic_only = [
+        (doc(200 + rank, 1000 + rank * 10, 1005 + rank * 10, f"semantic {rank}"), 0.1 + rank / 100)
+        for rank in range(7, 13)
+    ]
+    lexical_only = [
+        (doc(300 + rank, 2000 + rank * 10, 2005 + rank * 10, f"lexical {rank}"), 1.0)
+        for rank in range(7, 13)
+    ]
+    semantic = shared + semantic_only
+    lexical = [(document, 1.0) for document, _distance in shared] + lexical_only
+    target_chunk_id = lexical_only[-1][0].metadata["chunk_id"]
+
+    equal_weight = retrieval.fuse_semantic_and_lexical_results(
+        semantic,
+        lexical,
+        lexical_distance=1.3,
+        lexical_weight=1.0,
+        rrf_k=60,
+    )
+    weighted = retrieval.fuse_semantic_and_lexical_results(
+        semantic,
+        lexical,
+        lexical_distance=1.3,
+        lexical_weight=1.25,
+        rrf_k=60,
+    )
+
+    equal_ids = [document.metadata["chunk_id"] for document, _distance in equal_weight]
+    weighted_ids = [document.metadata["chunk_id"] for document, _distance in weighted]
+
+    # Six chunks have support from both branches. With equal source weights,
+    # the rank-12 lexical-only candidate falls outside the dense anchor budget;
+    # the bounded lexical contribution lets it survive alongside shared evidence.
+    assert equal_ids.index(target_chunk_id) >= 12
+    assert weighted_ids.index(target_chunk_id) == 11
+
+    target_distance = next(
+        distance
+        for document, distance in weighted
+        if document.metadata["chunk_id"] == target_chunk_id
+    )
+    assert target_distance == pytest.approx(1.3)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("lexical_weight", [0.0, -1.0, float("nan"), float("inf")])
+def test_hybrid_rrf_rejects_invalid_lexical_weight(lexical_weight):
+    with pytest.raises(ValueError, match="lexical_weight"):
+        retrieval.fuse_semantic_and_lexical_results(
+            [],
+            [],
+            lexical_weight=lexical_weight,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("query", "dense", "expected_calls"),
+    [
+        ("Why did the company fail and what challenges caused the problems?", True, 2),
+        ("Who is Vijay Mallya?", False, 1),
+    ],
+)
+def test_question_context_weights_lexical_rrf_only_for_dense_questions(
+    monkeypatch,
+    query,
+    dense,
+    expected_calls,
+):
+    item = doc(1, 0, 10, "policy evidence")
+    ranked = [(item, 0.2)]
+    observed_weights = []
+
+    monkeypatch.setattr(retrieval, "is_overview_question", lambda _query: False)
+    monkeypatch.setattr(retrieval, "is_evidence_dense_question", lambda _query: dense)
+    monkeypatch.setattr(
+        retrieval,
+        "build_retrieval_query_plan",
+        lambda _query: (
+            [("original", query), ("policy_governance", "government policy support")]
+            if dense
+            else [("original", query)]
+        ),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "build_evidence_facet_plan",
+        lambda _query: [("policy_governance", "government policy support")]
+        if dense
+        else [],
+    )
+    monkeypatch.setattr(retrieval, "retrieve_mmr", lambda **_kwargs: ranked)
+    monkeypatch.setattr(retrieval, "fuse_semantic_rankings", lambda _rankings: ranked)
+    monkeypatch.setattr(retrieval, "lexical_search", lambda **_kwargs: ranked)
+    monkeypatch.setattr(retrieval, "fuse_lexical_rankings", lambda _rankings: ranked)
+
+    def capture_fusion(**kwargs):
+        observed_weights.append(kwargs["lexical_weight"])
+        return ranked
+
+    monkeypatch.setattr(
+        retrieval,
+        "fuse_semantic_and_lexical_results",
+        capture_fusion,
+    )
+    monkeypatch.setattr(retrieval, "rerank_with_cross_encoder", lambda **kwargs: ranked)
+    monkeypatch.setattr(retrieval, "rerank_with_soft_facet_support", lambda results, _facets: results)
+    monkeypatch.setattr(
+        retrieval,
+        "select_diverse_retrieval_anchors",
+        lambda results, **_kwargs: results,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda _store, results, **_kwargs: results,
+    )
+
+    retrieval.retrieve_question_context(
+        object(),
+        query,
+        expand_context=False,
+    )
+
+    expected_weight = retrieval.DENSE_LEXICAL_RRF_WEIGHT if dense else 1.0
+    assert len(observed_weights) == expected_calls
+    assert observed_weights == [expected_weight] * expected_calls
+
+
+@pytest.mark.unit
 def test_cross_encoder_reranking_reorders_candidates_and_preserves_distances(monkeypatch):
     documents = [
         doc(1, 0, 10, "first candidate"),

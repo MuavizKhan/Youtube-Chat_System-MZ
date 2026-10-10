@@ -7,8 +7,9 @@ This file contains configuration only.
 Application logic belongs in the other modules.
 """
 
-from pathlib import Path
+import math
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -323,6 +324,14 @@ MMR_LAMBDA = _get_float(
 RRF_K = _get_int(
     "RAG_RRF_K",
     60,
+)
+
+# Slightly emphasize lexical rank for evidence-dense questions, where exact
+# transcript terminology can be missed by semantic retrieval. A value of 1.0
+# restores equal semantic/lexical contributions.
+DENSE_LEXICAL_RRF_WEIGHT = _get_float(
+    "RAG_DENSE_LEXICAL_RRF_WEIGHT",
+    1.25,
 )
 
 MAX_DISTANCE = _get_float(
@@ -700,6 +709,14 @@ if not 0.0 <= MMR_LAMBDA <= 1.0:
 if RRF_K <= 0:
     raise RuntimeError(
         "RAG_RRF_K must be greater than 0."
+    )
+
+if (
+    not math.isfinite(DENSE_LEXICAL_RRF_WEIGHT)
+    or DENSE_LEXICAL_RRF_WEIGHT <= 0
+):
+    raise RuntimeError(
+        "RAG_DENSE_LEXICAL_RRF_WEIGHT must be finite and greater than 0."
     )
 
 

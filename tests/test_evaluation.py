@@ -2,6 +2,7 @@ import pytest
 from langchain_core.documents import Document
 
 from Backend.rag_system.config import (
+    DENSE_LEXICAL_RRF_WEIGHT,
     RAG_RERANK_BATCH_SIZE,
     RAG_RERANK_CANDIDATE_K,
     RAG_RERANK_ENABLED,
@@ -467,6 +468,7 @@ def test_summary_contains_production_context_gold_benchmark():
     assert reranker_config["rerank_candidate_k"] == RAG_RERANK_CANDIDATE_K
     assert reranker_config["rerank_batch_size"] == RAG_RERANK_BATCH_SIZE
     assert reranker_config["rerank_max_length"] == RAG_RERANK_MAX_LENGTH
+    assert reranker_config["dense_lexical_rrf_weight"] == DENSE_LEXICAL_RRF_WEIGHT
 
 
 
