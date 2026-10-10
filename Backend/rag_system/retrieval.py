@@ -2639,6 +2639,7 @@ def retrieve_question_context(
         lexical_results=lexical_results,
         combined_results=combined_results,
         facet_rankings=facet_rankings,
+        facet_candidate_rankings=facet_candidate_rankings,
         dense_question=dense_question,
         k=k,
         max_distance=max_distance,
