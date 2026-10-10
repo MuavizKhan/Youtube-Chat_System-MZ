@@ -1,6 +1,13 @@
 import pytest
 from langchain_core.documents import Document
 
+from Backend.rag_system.config import (
+    RAG_RERANK_BATCH_SIZE,
+    RAG_RERANK_CANDIDATE_K,
+    RAG_RERANK_ENABLED,
+    RAG_RERANK_MAX_LENGTH,
+    RAG_RERANK_MODEL,
+)
 from Backend.rag_system.evaluation import (
     EXPECTED_RETRIEVAL,
     TEST_QUESTIONS,
@@ -454,6 +461,13 @@ def test_summary_contains_production_context_gold_benchmark():
         == pytest.approx(1.0)
     )
 
+    reranker_config = summary["retrieval_config"]
+    assert reranker_config["rerank_enabled"] is RAG_RERANK_ENABLED
+    assert reranker_config["rerank_model"] == RAG_RERANK_MODEL
+    assert reranker_config["rerank_candidate_k"] == RAG_RERANK_CANDIDATE_K
+    assert reranker_config["rerank_batch_size"] == RAG_RERANK_BATCH_SIZE
+    assert reranker_config["rerank_max_length"] == RAG_RERANK_MAX_LENGTH
+
 
 
 def _temporal_document(
@@ -769,19 +783,28 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
             page_content="group one evidence",
             metadata={"chunk_id": 20, "start": 10, "end": 15},
         ),
+        Document(
+            page_content="group two evidence",
+            metadata={"chunk_id": 30, "start": 20, "end": 25},
+        ),
     ]
 
     class FakeStore:
-        index_to_docstore_id = {"a": "a", "b": "b"}
+        index_to_docstore_id = {"a": "a", "b": "b", "c": "c"}
 
         class _Docstore:
             def search(self, key):
-                return {"a": documents[0], "b": documents[1]}.get(key)
+                return {
+                    "a": documents[0],
+                    "b": documents[1],
+                    "c": documents[2],
+                }.get(key)
 
         docstore = _Docstore()
 
     pipeline = {
         "dense_question": True,
+        "reranking_enabled": True,
         "query_variants": ["original", "focused"],
         "semantic_k": 8,
         "semantic_fetch_k": 16,
@@ -795,13 +818,27 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
             },
             {
                 "query": "focused",
-                "raw_candidates": [(documents[1], 0.2, 2)],
+                "raw_candidates": [
+                    (documents[1], 0.2, 2),
+                    (documents[2], 0.3, 3),
+                ],
                 "mmr_results": [],
             },
         ],
         "semantic_fused": [(documents[0], 0.1)],
-        "lexical": [],
-        "hybrid_fused": [(documents[0], 0.1)],
+        "lexical": [(documents[2], 0.9)],
+        "hybrid_fused": [
+            (documents[0], 0.1),
+            (documents[2], 0.3),
+        ],
+        "cross_encoder_reranked": [
+            (documents[2], 0.15),
+            (documents[0], 0.05),
+        ],
+        "facet_soft_reranked": [
+            (documents[0], 0.05),
+            (documents[2], 0.15),
+        ],
         "anchors": [(documents[0], 0.1)],
         "final_context": [(documents[0], 0.1)],
     }
@@ -818,8 +855,12 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     # Use a tiny synthetic gold case through the existing immutable shape.
     synthetic = GoldEvidenceCase(
         question_id="Q01",
-        groups=(("group zero evidence",), ("group one evidence",)),
-        min_group_coverage=0.5,
+        groups=(
+            ("group zero evidence",),
+            ("group one evidence",),
+            ("group two evidence",),
+        ),
+        min_group_coverage=1 / 3,
     )
 
     test_case = {
@@ -834,12 +875,29 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
         [synthetic],
     )
 
-    groups = diagnostics[0]["groups"]
+    diagnostic = diagnostics[0]
+    groups = diagnostic["groups"]
+
+    assert diagnostic["reranking_enabled"] is True
+    assert diagnostic["cross_encoder_reranked_top_chunk_ids"] == [30, 10]
+    assert diagnostic["facet_soft_reranked_top_chunk_ids"] == [10, 30]
+
     assert groups[0]["diagnosis"] == "reached_final_context"
     assert groups[0]["candidates"][0]["semantic_mmr_rank"] == 1
+    assert groups[0]["candidates"][0]["cross_encoder_rank"] == 2
+    assert groups[0]["candidates"][0]["facet_soft_reranked_rank"] == 1
+
     assert groups[1]["diagnosis"] == "mmr_selection_miss"
     assert groups[1]["candidates"][0]["raw_faiss_rank"] == 2
     assert groups[1]["candidates"][0]["semantic_mmr_rank"] is None
+
+    # This gold candidate survives the Cross-Encoder but is downgraded by
+    # facet support before anchor selection removes it from production context.
+    assert groups[2]["diagnosis"] == "anchor_selection_miss"
+    assert groups[2]["candidates"][0]["hybrid_fused_rank"] == 2
+    assert groups[2]["candidates"][0]["cross_encoder_rank"] == 1
+    assert groups[2]["candidates"][0]["facet_soft_reranked_rank"] == 2
+    assert groups[2]["candidates"][0]["anchor_rank"] is None
 
     # A candidate can be present in raw FAISS results but fail the production
     # distance gate. The diagnostic severity map must recognize that stage.
