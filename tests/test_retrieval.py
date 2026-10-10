@@ -762,6 +762,37 @@ def test_raw_faiss_diagnostic_keeps_distance_for_gate_analysis():
     assert results[0][1] == pytest.approx(1.5)
     assert results[0][2] == 1
 @pytest.mark.unit
+def test_diagnostic_candidate_search_skips_stale_docstore_entries():
+    store = FakeVectorStore({
+        "valid": doc(1, 0, 5, "valid transcript candidate"),
+    })
+    store.index_to_docstore_id = {0: "stale-docstore-id"}
+
+    results = retrieval.retrieve_faiss_candidates_for_diagnostics(
+        store,
+        "transcript question",
+        fetch_k=1,
+        max_distance=1.3,
+    )
+
+    assert results == []
+
+
+@pytest.mark.unit
+def test_diagnostic_candidate_search_rejects_nonfinite_distance_limit():
+    store = FakeVectorStore({
+        "valid": doc(1, 0, 5, "valid transcript candidate"),
+    })
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        retrieval.retrieve_faiss_candidates_for_diagnostics(
+            store,
+            "transcript question",
+            fetch_k=1,
+            max_distance=float("nan"),
+        )
+
+
+@pytest.mark.unit
 def test_end_to_end_retrieval_diagnostic_exposes_all_stages():
     documents = {
         "a": doc(1, 0, 10, "Alice failed at Acme."),
@@ -1275,6 +1306,29 @@ def test_cross_encoder_reranking_reorders_candidates_and_preserves_distances(mon
 
     assert [item[0].metadata["chunk_id"] for item in result] == [2, 1, 3]
     assert [item[1] for item in result] == [0.3, 0.2, 0.4]
+
+
+@pytest.mark.unit
+def test_cross_encoder_reranking_is_fail_open_on_nonfinite_scores(monkeypatch):
+    documents = [
+        doc(1, 0, 10, "first"),
+        doc(2, 10, 20, "second"),
+    ]
+    ranked_results = [(documents[0], 0.2), (documents[1], 0.3)]
+
+    class NonfiniteReranker:
+        def predict(self, pairs, batch_size, show_progress_bar):
+            return np.asarray([np.nan, 0.9], dtype=np.float32)
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", True)
+    monkeypatch.setattr(
+        retrieval, "create_cross_encoder_reranker", lambda: NonfiniteReranker()
+    )
+
+    assert retrieval.rerank_with_cross_encoder(
+        query="test question",
+        ranked_results=ranked_results,
+    ) == ranked_results
 
 
 @pytest.mark.unit
