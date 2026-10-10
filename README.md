@@ -252,11 +252,11 @@ The hard facet-anchor routing experiment showed that mandatory per-facet quotas 
 
 The dense-question retrieval path now:
 
-- preserves the global semantic+lexical fused ranking;
-- keeps each evidence facet's fused semantic+lexical ranking as supporting evidence;
+- preserves the global semantic+lexical fused ranking as the primary ranking signal;
 - applies a bounded rank-based facet bonus with diminishing returns across multiple facets;
-- passes the softly reranked candidates through the existing transcript-region diversity selector;
-- keeps simple questions on the existing ranking path;
+- keeps source-level semantic and lexical facet rankings available to the anchor selector;
+- allows up to two strong facet-supported candidates, within the top three anchor budgets globally, to replace lower-ranked anchors when transcript-region spacing permits;
+- leaves simple questions on the existing ranking path;
 - leaves distance gates, evidence gates, semantic/lexical capacity, and context bounds unchanged.
 
 Default:
