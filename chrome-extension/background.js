@@ -631,6 +631,9 @@ function normalizeString(
 }
 
 
+const MAX_CONVERSATION_TURN_CHARS = 1000;
+
+
 function normalizeConversationHistory(
     value
 ) {
@@ -646,10 +649,12 @@ function normalizeConversationHistory(
                     turn?.role === "assistant"
                         ? "assistant"
                         : "user",
+                // Match ChatRequest's per-turn 1000-character limit so a
+                // long assistant answer cannot make every follow-up fail validation.
                 content:
                     normalizeString(
                         turn?.content
-                    )
+                    ).slice(0, MAX_CONVERSATION_TURN_CHARS)
             })
         )
         .filter(
