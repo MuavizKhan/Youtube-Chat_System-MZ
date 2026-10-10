@@ -1,9 +1,9 @@
-from pathlib import Path
-
-import pytest
 import os
 import subprocess
 import sys
+from pathlib import Path
+
+import pytest
 
 
 def run_config_import(extra_env: dict[str, str | None]):
