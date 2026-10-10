@@ -313,6 +313,41 @@ def test_lexical_search_can_retrieve_a_rare_transcript_term_alone():
 
 
 @pytest.mark.unit
+def test_rare_term_alone_does_not_match_short_unrelated_query():
+    documents = {
+        "australia": doc(1, 0, 5, "The video briefly mentions Australia."),
+        "capital": doc(2, 10, 15, "The speaker discusses a capital expenditure."),
+        "other": doc(3, 20, 25, "A separate topic in the interview."),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "What is the capital of Australia?",
+        limit=8,
+    )
+
+    assert 1 not in [document.metadata["chunk_id"] for document, _score in results]
+
+
+@pytest.mark.unit
+def test_facet_support_can_rescue_evidence_diluted_by_global_fusion():
+    ranked = [
+        (doc(i, i * 10, i * 10 + 5, f"global candidate {i}"), 0.2 + i / 100)
+        for i in range(1, 25)
+    ]
+    facet_target = ranked[17]
+
+    result = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {"focused_facet": [facet_target]},
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _score in result]
+    assert chunk_ids.index(18) < 3
+    assert chunk_ids.index(18) < chunk_ids.index(1)
+
+
+@pytest.mark.unit
 def test_lexical_search_returns_empty_for_nonpositive_limit():
     store = FakeVectorStore({
         "a": doc(1, 0, 5, "Alice works at Acme."),
