@@ -697,10 +697,9 @@ def test_question_context_uses_dense_anchor_headroom(monkeypatch):
         expand_context=False,
     )
 
-    assert captured == {
-        "limit": 12,
-        "min_chunk_gap": 2,
-    }
+    assert captured["limit"] == 12
+    assert captured["min_chunk_gap"] == 2
+    assert captured["facet_candidate_rankings"]
 
 
 @pytest.mark.unit
