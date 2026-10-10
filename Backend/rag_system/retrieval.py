@@ -514,57 +514,84 @@ def retrieve_faiss_candidates_for_diagnostics(
     fetch_k: int,
     max_distance: float,
 ):
-    """Return raw FAISS candidates before MMR for diagnostic inspection only.
+    """Return raw, finite FAISS candidates before applying the production gate.
 
-    Each tuple is (document, distance, faiss_rank). The production retriever
-    performs the same FAISS search internally before MMR; this helper exposes
-    that otherwise-hidden candidate stage without changing production output.
+    Each tuple is (document, distance, faiss_rank). Candidates outside
+    max_distance are intentionally retained here so the diagnostic can explain
+    why production rejected them; invalid vectors and stale docstore entries
+    are not returned.
     """
-
-    if not query or not query.strip():
+    if not isinstance(query, str) or not query.strip():
         raise ValueError("Query cannot be empty.")
-    if fetch_k <= 0:
+    if isinstance(fetch_k, bool) or not isinstance(fetch_k, int) or fetch_k <= 0:
         raise ValueError("fetch_k must be greater than 0.")
-    if max_distance < 0:
+    try:
+        distance_limit = float(max_distance)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError("max_distance must be finite and non-negative.") from error
+    if not math.isfinite(distance_limit):
+        raise ValueError("max_distance must be finite and non-negative.")
+    if distance_limit < 0:
         raise ValueError("max_distance cannot be negative.")
 
-    query_embedding = vector_store.embedding_function.embed_query(
-        query.strip()
-    )
-    query_vector = np.asarray(
-        query_embedding,
-        dtype=np.float32,
-    ).reshape(1, -1)
+    query_embedding = vector_store.embedding_function.embed_query(query.strip())
+    query_vector = np.asarray(query_embedding, dtype=np.float32).reshape(1, -1)
+    if query_vector.shape[1] == 0 or not np.all(np.isfinite(query_vector)):
+        logger.warning("Skipping diagnostics because the query embedding is empty or non-finite.")
+        return []
 
-    total_vectors = vector_store.index.ntotal
-    if total_vectors == 0:
+    index = vector_store.index
+    index_dimension = getattr(index, "d", None)
+    if isinstance(index_dimension, int) and index_dimension != query_vector.shape[1]:
+        raise ValueError(
+            "Query embedding dimension does not match the stored FAISS index "
+            f"({query_vector.shape[1]} != {index_dimension})."
+        )
+    total_vectors = int(getattr(index, "ntotal", 0))
+    if total_vectors <= 0:
         return []
 
     candidate_k = min(fetch_k, total_vectors)
-    distances, indices = vector_store.index.search(
+    distances, indices = index.search(
         np.ascontiguousarray(query_vector),
         candidate_k,
     )
+    candidate_distances = np.asarray(distances[0], dtype=np.float64)
+    candidate_indices = np.asarray(indices[0], dtype=np.int64)
+    docstore = getattr(vector_store, "docstore", None)
+    index_to_docstore_id = getattr(vector_store, "index_to_docstore_id", {})
+    if docstore is None or not hasattr(index_to_docstore_id, "get"):
+        return []
 
     results = []
-    for position, distance in enumerate(distances[0]):
-        vector_id = int(indices[0][position])
-        faiss_rank = position + 1
-
-        if vector_id < 0:
+    for position, distance in enumerate(candidate_distances):
+        vector_id = int(candidate_indices[position])
+        if vector_id < 0 or not math.isfinite(float(distance)):
             continue
-
-        docstore_id = vector_store.index_to_docstore_id.get(vector_id)
+        docstore_id = index_to_docstore_id.get(vector_id)
         if docstore_id is None:
             continue
-
-        document = vector_store.docstore.search(docstore_id)
-        if document is None:
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            logger.warning(
+                "Could not load raw FAISS diagnostic candidate %r from the docstore.",
+                docstore_id,
+            )
             continue
-
-        results.append((document, float(distance), faiss_rank))
-
+        if (
+            not isinstance(getattr(document, "page_content", None), str)
+            or not isinstance(getattr(document, "metadata", None), dict)
+        ):
+            logger.warning(
+                "Skipping invalid or stale raw FAISS diagnostic candidate %r.",
+                docstore_id,
+            )
+            continue
+        results.append((document, float(distance), position + 1))
     return results
+
+
 
 
 def _select_final_retrieval_candidates(
@@ -1809,6 +1836,8 @@ def rerank_with_cross_encoder(
             raise RuntimeError(
                 "Cross-Encoder returned an unexpected number of scores."
             )
+        if not np.all(np.isfinite(scores)):
+            raise RuntimeError("Cross-Encoder returned non-finite relevance scores.")
 
         order = np.argsort(-scores, kind="stable")
 
