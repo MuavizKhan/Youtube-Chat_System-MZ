@@ -601,6 +601,7 @@ def _select_final_retrieval_candidates(
     lexical_results,
     combined_results,
     facet_rankings,
+    facet_candidate_rankings,
     dense_question: bool,
     k: int,
     max_distance: float,
@@ -660,6 +661,7 @@ def _select_final_retrieval_candidates(
             facet_soft_reranked,
             limit=anchor_limit,
             min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
+            facet_candidate_rankings=facet_candidate_rankings,
         )
         if dense_question
         else facet_soft_reranked[:anchor_limit]
@@ -672,6 +674,33 @@ def _select_final_retrieval_candidates(
         "anchor_limit": anchor_limit,
         "semantic_gate_passed": True,
     }
+
+
+def _build_facet_rankings(
+    semantic_rankings_by_label,
+    lexical_rankings_by_label,
+    *,
+    lexical_distance: float,
+    lexical_weight: float,
+):
+    """Build merged facet rankings plus source-level lists for anchor reserves."""
+    facet_rankings = {}
+    facet_candidate_rankings = {}
+    for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
+        semantic_facet = semantic_rankings_by_label.get(facet_name, [])
+        lexical_facet = lexical_rankings_by_label.get(facet_name, [])
+        if semantic_facet:
+            facet_candidate_rankings[f"{facet_name}::semantic"] = semantic_facet
+        if lexical_facet:
+            facet_candidate_rankings[f"{facet_name}::lexical"] = lexical_facet
+        if semantic_facet or lexical_facet:
+            facet_rankings[facet_name] = fuse_semantic_and_lexical_results(
+                semantic_results=semantic_facet,
+                lexical_results=lexical_facet,
+                lexical_distance=lexical_distance,
+                lexical_weight=lexical_weight,
+            )
+    return facet_rankings, facet_candidate_rankings
 
 
 def diagnose_retrieval_pipeline(
@@ -762,17 +791,12 @@ def diagnose_retrieval_pipeline(
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
     )
-    facet_rankings = {}
-    for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
-        semantic_facet = semantic_rankings_by_label.get(facet_name, [])
-        lexical_facet = lexical_rankings_by_label.get(facet_name, [])
-        if semantic_facet or lexical_facet:
-            facet_rankings[facet_name] = fuse_semantic_and_lexical_results(
-                semantic_results=semantic_facet,
-                lexical_results=lexical_facet,
-                lexical_distance=max_distance,
-                lexical_weight=lexical_rrf_weight,
-            )
+    facet_rankings, facet_candidate_rankings = _build_facet_rankings(
+        semantic_rankings_by_label,
+        lexical_rankings_by_label,
+        lexical_distance=max_distance,
+        lexical_weight=lexical_rrf_weight,
+    )
 
     selection = _select_final_retrieval_candidates(
         query=query,
@@ -780,6 +804,7 @@ def diagnose_retrieval_pipeline(
         lexical_results=lexical_results,
         combined_results=combined_results,
         facet_rankings=facet_rankings,
+        facet_candidate_rankings=facet_candidate_rankings,
         dense_question=dense_question,
         k=k,
         max_distance=max_distance,
@@ -1894,6 +1919,9 @@ def select_diverse_retrieval_anchors(
     *,
     limit: int,
     min_chunk_gap: int = 3,
+    facet_candidate_rankings: dict[str, list[tuple[Any, float]]] | None = None,
+    facet_reserve_limit: int = 2,
+    facet_rank_cutoff: int = 24,
 ):
     """Select high-ranked anchors while spreading them across the transcript."""
 
@@ -1941,7 +1969,143 @@ def select_diverse_retrieval_anchors(
         if item not in selected:
             selected.append(item)
 
-    return selected[:limit]
+    selected = selected[:limit]
+    if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
+        return selected
+
+    rank_by_identity = {}
+    item_by_identity = {}
+    for global_rank, item in enumerate(ranked_results, start=1):
+        identity = _retrieval_document_identity(item[0])
+        rank_by_identity.setdefault(identity, global_rank)
+        item_by_identity.setdefault(identity, item)
+
+    selected_identities = {
+        _retrieval_document_identity(item[0]) for item in selected
+    }
+    proposals = {}
+    for source_name, facet_results in facet_candidate_rankings.items():
+        facet_name = source_name.rsplit("::", 1)[0]
+        for facet_rank, facet_item in enumerate(
+            facet_results[:facet_rank_cutoff],
+            start=1,
+        ):
+            identity = _retrieval_document_identity(facet_item[0])
+            global_rank = rank_by_identity.get(identity)
+            if (
+                global_rank is None
+                or global_rank <= limit
+                or global_rank > limit * 3
+                or identity in selected_identities
+            ):
+                continue
+            proposal = proposals.setdefault(
+                identity,
+                {
+                    "item": item_by_identity[identity],
+                    "global_rank": global_rank,
+                    "facet_ranks": {},
+                },
+            )
+            previous_rank = proposal["facet_ranks"].get(facet_name)
+            if previous_rank is None or facet_rank < previous_rank:
+                proposal["facet_ranks"][facet_name] = facet_rank
+
+    def document_chunk_id(item):
+        metadata = getattr(item[0], "metadata", {})
+        if not isinstance(metadata, dict):
+            return None
+        normalized = _normalise_chunk_id(metadata.get("chunk_id"))
+        if normalized is None or normalized[0] != "number":
+            return None
+        return normalized[1]
+
+    reserved_identities = set()
+    reserved_facets = set()
+    reserve_budget = min(facet_reserve_limit, len(selected) - 1)
+
+    while len(reserved_identities) < reserve_budget:
+        eligible = []
+        for identity, proposal in proposals.items():
+            if identity in reserved_identities:
+                continue
+            available_facets = {
+                name: rank
+                for name, rank in proposal["facet_ranks"].items()
+                if name not in reserved_facets
+            }
+            if not available_facets:
+                continue
+            best_facet_rank = min(available_facets.values())
+            rescue_delta = max(
+                proposal["global_rank"] - rank
+                for rank in available_facets.values()
+            )
+            eligible.append(
+                (
+                    -rescue_delta,
+                    best_facet_rank,
+                    proposal["global_rank"],
+                    identity,
+                    available_facets,
+                    proposal,
+                )
+            )
+        eligible.sort(key=lambda entry: entry[:3])
+        reserved_this_round = False
+
+        for (
+            _negative_delta,
+            _best_facet_rank,
+            _global_rank,
+            identity,
+            available_facets,
+            proposal,
+        ) in eligible:
+            candidate_item = proposal["item"]
+            candidate_chunk_id = document_chunk_id(candidate_item)
+            replacement_indices = sorted(
+                range(len(selected)),
+                key=lambda index: rank_by_identity.get(
+                    _retrieval_document_identity(selected[index][0]),
+                    len(ranked_results) + index,
+                ),
+                reverse=True,
+            )
+            replacement_index = None
+            for index in replacement_indices:
+                current_identity = _retrieval_document_identity(selected[index][0])
+                if current_identity in reserved_identities:
+                    continue
+                remaining_ids = [
+                    document_chunk_id(item)
+                    for item_index, item in enumerate(selected)
+                    if item_index != index
+                ]
+                if candidate_chunk_id is not None and any(
+                    previous_id is not None
+                    and abs(candidate_chunk_id - previous_id) < min_chunk_gap
+                    for previous_id in remaining_ids
+                ):
+                    continue
+                replacement_index = index
+                break
+
+            if replacement_index is None:
+                continue
+
+            selected.pop(replacement_index)
+            selected.append(candidate_item)
+            selected_identities.add(identity)
+            reserved_identities.add(identity)
+            reserved_facets.update(available_facets)
+            reserved_this_round = True
+            break
+
+        if not reserved_this_round:
+            break
+
+    return selected
 
 
 
