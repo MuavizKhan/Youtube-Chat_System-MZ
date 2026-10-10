@@ -1003,6 +1003,26 @@ def build_evidence_facet_plan(
     ):
         add_facet("business_corporate")
 
+    # A question about a business/airline struggling, failing, or facing
+    # challenges should explore the common cause categories for that domain.
+    # This is conditional on explicit business context; unrelated science,
+    # software, education, travel, or sports questions do not inherit these
+    # financial/policy/operations facets.
+    business_context = bool(re.search(
+        r"\b(?:business\w*|companies|company|corporate|corporation|firms?|"
+        r"airlines?|startups?|banks?|banking)\b",
+        normalized,
+    ))
+    business_failure_context = bool(re.search(
+        r"\b(?:fail\w*|struggl\w*|challenge\w*|problem\w*|difficult\w*|"
+        r"bankrupt\w*|crisis|declin\w*|surviv\w*)\b",
+        normalized,
+    ))
+    if business_context and business_failure_context:
+        add_facet("financial_economic")
+        add_facet("policy_governance")
+        add_facet("operational_challenges")
+
     if re.search(
         r"\b(?:why|reason\w*|caus\w*|because|fail\w*|problem\w*|challenge\w*|issue\w*|factor\w*|role of)\b",
         normalized,
