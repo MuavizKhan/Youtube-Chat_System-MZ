@@ -995,15 +995,21 @@ def test_reciprocal_rank_fusion_prefers_documents_supported_by_both_signals():
 
 @pytest.mark.unit
 def test_weighted_hybrid_rrf_can_retain_lower_ranked_lexical_evidence():
-    semantic = [
-        (doc(100 + rank, rank * 10, rank * 10 + 5, f"semantic {rank}"), 0.1 + rank / 100)
-        for rank in range(1, 13)
+    shared = [
+        (doc(100 + rank, rank * 10, rank * 10 + 5, f"shared evidence {rank}"), 0.05 + rank / 100)
+        for rank in range(1, 7)
     ]
-    lexical = [
-        (doc(200 + rank, 2000 + rank * 10, 2005 + rank * 10, f"lexical {rank}"), 1.0)
-        for rank in range(1, 13)
+    semantic_only = [
+        (doc(200 + rank, 1000 + rank * 10, 1005 + rank * 10, f"semantic {rank}"), 0.1 + rank / 100)
+        for rank in range(7, 13)
     ]
-    target_chunk_id = lexical[-1][0].metadata["chunk_id"]
+    lexical_only = [
+        (doc(300 + rank, 2000 + rank * 10, 2005 + rank * 10, f"lexical {rank}"), 1.0)
+        for rank in range(7, 13)
+    ]
+    semantic = shared + semantic_only
+    lexical = [(document, 1.0) for document, _distance in shared] + lexical_only
+    target_chunk_id = lexical_only[-1][0].metadata["chunk_id"]
 
     equal_weight = retrieval.fuse_semantic_and_lexical_results(
         semantic,
@@ -1023,8 +1029,9 @@ def test_weighted_hybrid_rrf_can_retain_lower_ranked_lexical_evidence():
     equal_ids = [document.metadata["chunk_id"] for document, _distance in equal_weight]
     weighted_ids = [document.metadata["chunk_id"] for document, _distance in weighted]
 
-    # With equal source weights, this rank-12 lexical-only candidate is outside
-    # the dense anchor budget. A bounded 1.25 lexical contribution can retain it.
+    # Six chunks have support from both branches. With equal source weights,
+    # the rank-12 lexical-only candidate falls outside the dense anchor budget;
+    # the bounded lexical contribution lets it survive alongside shared evidence.
     assert equal_ids.index(target_chunk_id) >= 12
     assert weighted_ids.index(target_chunk_id) == 11
 
