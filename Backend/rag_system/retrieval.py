@@ -2621,17 +2621,12 @@ def retrieve_question_context(
         lexical_distance=max_distance,
         lexical_weight=lexical_rrf_weight,
     )
-    facet_rankings = {}
-    for facet_name in EVIDENCE_FACET_QUERY_DEFINITIONS:
-        semantic_facet = semantic_rankings_by_label.get(facet_name, [])
-        lexical_facet = lexical_rankings_by_label.get(facet_name, [])
-        if semantic_facet or lexical_facet:
-            facet_rankings[facet_name] = fuse_semantic_and_lexical_results(
-                semantic_results=semantic_facet,
-                lexical_results=lexical_facet,
-                lexical_distance=max_distance,
-                lexical_weight=lexical_rrf_weight,
-            )
+    facet_rankings, facet_candidate_rankings = _build_facet_rankings(
+        semantic_rankings_by_label,
+        lexical_rankings_by_label,
+        lexical_distance=max_distance,
+        lexical_weight=lexical_rrf_weight,
+    )
 
     selection = _select_final_retrieval_candidates(
         query=query,
