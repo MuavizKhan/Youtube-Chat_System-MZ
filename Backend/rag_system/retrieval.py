@@ -587,14 +587,10 @@ def _select_final_retrieval_candidates(
         if dense_question
         else min(k + 2, context_max_chunks)
     )
-    cross_encoder_results = rerank_with_cross_encoder(
-        query=query,
-        ranked_results=combined_results,
-    )
     if not combined_results:
         return {
-            "cross_encoder_results": cross_encoder_results,
-            "facet_soft_reranked": cross_encoder_results,
+            "cross_encoder_results": [],
+            "facet_soft_reranked": [],
             "anchors": [],
             "context_max_chunks": context_max_chunks,
             "anchor_limit": anchor_limit,
@@ -612,15 +608,21 @@ def _select_final_retrieval_candidates(
                 semantic_distances.append(value)
         strict_semantic_limit = max_distance * 0.92
         if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
+            # Reject weak semantic-only matches before attempting to load a
+            # reranker. Diagnostic and production now share this exact gate.
             return {
-                "cross_encoder_results": cross_encoder_results,
-                "facet_soft_reranked": cross_encoder_results,
+                "cross_encoder_results": list(combined_results),
+                "facet_soft_reranked": list(combined_results),
                 "anchors": [],
                 "context_max_chunks": context_max_chunks,
                 "anchor_limit": anchor_limit,
                 "semantic_gate_passed": False,
             }
 
+    cross_encoder_results = rerank_with_cross_encoder(
+        query=query,
+        ranked_results=combined_results,
+    )
     facet_soft_reranked = (
         rerank_with_soft_facet_support(cross_encoder_results, facet_rankings)
         if dense_question and facet_rankings
