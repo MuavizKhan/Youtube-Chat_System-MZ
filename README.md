@@ -261,7 +261,7 @@ The dense-question retrieval path now:
 
 Default:
 
-- `RAG_DENSE_FACET_RERANK_WEIGHT=0.05`
+- `RAG_DENSE_FACET_RERANK_WEIGHT=0.5`
 
 A value of `0` disables the soft facet bonus. The diagnostic output exposes both the original hybrid ranking and the softly reranked candidate list so changes in anchor selection remain inspectable.
 
