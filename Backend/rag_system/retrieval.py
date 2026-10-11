@@ -841,6 +841,9 @@ def diagnose_retrieval_pipeline(
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
+        # Diagnostic-only exposure: source-level membership is needed to tell
+        # whether a gold chunk was eligible for anchor reserve selection.
+        "facet_candidate_rankings": facet_candidate_rankings,
         "facet_soft_reranked": selection["facet_soft_reranked"],
         # When disabled, this field is a pass-through, not an actual model result.
         "cross_encoder_reranked": selection["cross_encoder_results"],

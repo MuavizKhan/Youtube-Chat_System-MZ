@@ -843,6 +843,10 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
             (documents[0], 0.05),
             (documents[2], 0.15),
         ],
+        "facet_candidate_rankings": {
+            "causal_factors::semantic": [(documents[0], 0.1), (documents[2], 0.2)],
+            "policy_governance::lexical": [(documents[2], 0.9)],
+        },
         "anchors": [(documents[0], 0.1)],
         "final_context": [(documents[0], 0.1)],
     }
@@ -890,8 +894,12 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     assert groups[0]["candidates"][0]["semantic_mmr_rank"] == 1
     assert groups[0]["candidates"][0]["cross_encoder_rank"] == 2
     assert groups[0]["candidates"][0]["facet_soft_reranked_rank"] == 1
+    assert groups[0]["candidates"][0]["facet_candidate_ranks"] == {
+        "causal_factors::semantic": 1
+    }
 
     assert groups[1]["diagnosis"] == "mmr_selection_miss"
+    assert groups[1]["candidates"][0]["facet_candidate_ranks"] == {}
     assert groups[1]["candidates"][0]["raw_faiss_rank"] == 2
     assert groups[1]["candidates"][0]["semantic_mmr_rank"] is None
 
@@ -901,6 +909,10 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     assert groups[2]["candidates"][0]["hybrid_fused_rank"] == 2
     assert groups[2]["candidates"][0]["cross_encoder_rank"] == 1
     assert groups[2]["candidates"][0]["facet_soft_reranked_rank"] == 2
+    assert groups[2]["candidates"][0]["facet_candidate_ranks"] == {
+        "causal_factors::semantic": 2,
+        "policy_governance::lexical": 1,
+    }
     assert groups[2]["candidates"][0]["anchor_rank"] is None
 
     # A candidate can be present in raw FAISS results but fail the production

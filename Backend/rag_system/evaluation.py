@@ -1099,6 +1099,12 @@ def build_end_to_end_retrieval_diagnostics(
         )
         cross_encoder_map = _rank_map(cross_encoder_results)
         facet_soft_map = _rank_map(facet_soft_results)
+        facet_candidate_rank_maps = {
+            source_name: _rank_map(source_results)
+            for source_name, source_results in pipeline.get(
+                "facet_candidate_rankings", {}
+            ).items()
+        }
         anchor_map = _rank_map(pipeline["anchors"])
         context_map = _rank_map(pipeline["final_context"])
 
@@ -1136,6 +1142,11 @@ def build_end_to_end_retrieval_diagnostics(
                     "hybrid_fused_rank": hybrid_map.get(chunk_id),
                     "cross_encoder_rank": cross_encoder_map.get(chunk_id),
                     "facet_soft_reranked_rank": facet_soft_map.get(chunk_id),
+                    "facet_candidate_ranks": {
+                        source_name: ranks[chunk_id]
+                        for source_name, ranks in facet_candidate_rank_maps.items()
+                        if chunk_id in ranks
+                    },
                     "anchor_rank": anchor_map.get(chunk_id),
                     "final_context_rank": context_map.get(chunk_id),
                 }
