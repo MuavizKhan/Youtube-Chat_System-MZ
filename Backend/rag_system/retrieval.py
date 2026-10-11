@@ -1925,8 +1925,10 @@ def select_diverse_retrieval_anchors(
 ):
     """Select diverse anchors, then reserve a small budget for facet evidence.
 
-    Facet reserves are limited to candidates already in the fused ranking, within
-    three times the anchor budget, and near the top of a source-level facet list.
+    Standard reserves remain within three times the anchor budget. A candidate
+    can exceed that boundary only when it ranks in the top three of a semantic
+    facet and remains within five times the anchor budget. All reserves still
+    require membership in the fused ranking and obey the bounded reserve budget.
     """
 
     if isinstance(limit, bool) or not isinstance(limit, int):
@@ -2004,10 +2006,16 @@ def select_diverse_retrieval_anchors(
         ):
             identity = _retrieval_document_identity(facet_item[0])
             global_rank = rank_by_identity.get(identity)
+            strong_semantic_rescue = (
+                source_name.endswith("::semantic")
+                and facet_rank <= min(3, facet_rank_cutoff)
+                and global_rank is not None
+                and global_rank <= limit * 5
+            )
             if (
                 global_rank is None
                 or global_rank <= limit
-                or global_rank > limit * 3
+                or (global_rank > limit * 3 and not strong_semantic_rescue)
                 or identity in selected_identities
             ):
                 continue
