@@ -293,6 +293,10 @@
     padding: 2px 2px 2px 0;
 }
 
+.sources-list[hidden] {
+    display: none;
+}
+
 
 .source-button {
     display: block;
