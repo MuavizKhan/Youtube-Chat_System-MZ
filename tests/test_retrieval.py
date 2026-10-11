@@ -626,6 +626,68 @@ def test_facet_anchor_reserve_ignores_candidates_beyond_global_rank_budget():
 
 
 @pytest.mark.unit
+def test_facet_anchor_rescues_top_semantic_candidate_outside_three_x_global_budget():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(60)
+    ]
+    candidate = ranked[43]  # Global rank 44; inside the five-times cap for 12 anchors.
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings={
+            "operational_challenges::semantic": [candidate],
+        },
+    )
+
+    assert len(result) == 12
+    assert candidate in result
+
+
+@pytest.mark.unit
+def test_facet_anchor_does_not_rescue_semantic_candidate_below_top_three():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(60)
+    ]
+    facet_candidates = ranked[40:44]
+    candidate = facet_candidates[-1]  # Global rank 44, fourth within this facet.
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings={
+            "operational_challenges::semantic": facet_candidates,
+        },
+    )
+
+    assert candidate not in result
+
+
+@pytest.mark.unit
+def test_facet_anchor_does_not_rescue_semantic_candidate_beyond_five_x_global_budget():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(70)
+    ]
+    candidate = ranked[60]  # Global rank 61; outside the five-times cap for 12 anchors.
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings={
+            "operational_challenges::semantic": [candidate],
+        },
+    )
+
+    assert candidate not in result
+
+
+@pytest.mark.unit
 def test_select_diverse_retrieval_anchors_fills_remaining_budget():
     ranked = [
         (doc(10, 100, 105, "region A"), 0.1),
