@@ -61,6 +61,9 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
+# Keep facet reranking subordinate to the fused ranking signal.
+MAX_FACET_BONUS_RATIO = 0.10
+
 
 # ============================================================
 # YOUTUBE VIDEO ID VALIDATION
@@ -1795,10 +1798,14 @@ def rerank_with_soft_facet_support(
             facet_support += decay * support_score
             decay *= 0.5
 
-        soft_score = (
-            base_score
-            + facet_weight * facet_support
+        # Facet support should break close ranking decisions, not overwhelm
+        # the fused ranking. Without a relative cap, a high facet score can
+        # push a strong direct/lexical candidate far down the list.
+        facet_bonus = min(
+            facet_weight * facet_support,
+            base_score * MAX_FACET_BONUS_RATIO,
         )
+        soft_score = base_score + facet_bonus
 
         scored.append(
             (
