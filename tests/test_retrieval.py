@@ -836,6 +836,45 @@ def test_soft_facet_rerank_boosts_facet_supported_candidate_without_hard_quota()
 
 
 @pytest.mark.unit
+def test_soft_facet_bonus_cannot_push_global_rank_24_behind_rank_33():
+    ranked = [
+        (doc(index, index * 10, index * 10 + 5, f"candidate {index}"), 0.1)
+        for index in range(1, 41)
+    ]
+    candidate_at_rank_33 = ranked[32]
+
+    reranked = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {"financial_economic": [candidate_at_rank_33]},
+        rrf_k=60,
+        facet_weight=0.5,
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _ in reranked]
+    # A deep candidate cannot receive the uncapped rescue reserved for the
+    # top facet matches within the normal shortlist.
+    assert chunk_ids.index(33) >= 24
+    assert chunk_ids.index(24) < chunk_ids.index(33)
+
+
+@pytest.mark.unit
+def test_strong_facet_match_within_shortlist_retains_rescue_behavior():
+    ranked = [
+        (doc(i, i * 10, i * 10 + 5, f"global candidate {i}"), 0.2 + i / 100)
+        for i in range(1, 25)
+    ]
+    facet_target = ranked[17]  # Global rank 18, facet rank 1.
+
+    result = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {"focused_facet": [facet_target]},
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _score in result]
+    assert chunk_ids.index(18) < 3
+
+
+@pytest.mark.unit
 def test_soft_facet_rerank_returns_global_order_without_facets():
     ranked = [
         (doc(1, 10, 15, "one"), 0.1),
