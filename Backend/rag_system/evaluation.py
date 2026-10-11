@@ -1204,6 +1204,7 @@ def build_end_to_end_retrieval_diagnostics(
                 document.metadata.get("chunk_id")
                 for document, _distance in pipeline["final_context"]
             ],
+            "anchor_selection_trace": pipeline.get("anchor_selection_trace", {}),
             "groups": groups,
         })
 

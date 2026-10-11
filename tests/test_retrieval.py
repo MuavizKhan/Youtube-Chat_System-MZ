@@ -633,6 +633,7 @@ def test_facet_anchor_rescues_top_semantic_candidate_outside_three_x_global_budg
     ]
     candidate = ranked[43]  # Global rank 44; inside the five-times cap for 12 anchors.
 
+    trace = {}
     result = retrieval.select_diverse_retrieval_anchors(
         ranked,
         limit=12,
@@ -640,10 +641,31 @@ def test_facet_anchor_rescues_top_semantic_candidate_outside_three_x_global_budg
         facet_candidate_rankings={
             "operational_challenges::semantic": [candidate],
         },
+        diagnostic_trace=trace,
     )
 
     assert len(result) == 12
     assert candidate in result
+    assert trace["initial_diverse_anchor_chunk_ids"] == [
+        item[0].metadata["chunk_id"] for item in ranked[:12]
+    ]
+    assert trace["facet_candidate_sources"] == [
+        {
+            "chunk_id": candidate[0].metadata["chunk_id"],
+            "global_rank": 44,
+            "initially_selected": False,
+            "sources": [
+                {
+                    "source": "operational_challenges::semantic",
+                    "rank": 1,
+                    "global_rank": 44,
+                    "chunk_id": candidate[0].metadata["chunk_id"],
+                }
+            ],
+        }
+    ]
+    assert trace["reserve_proposals"][0]["chunk_id"] == candidate[0].metadata["chunk_id"]
+    assert trace["reserve_replacements"][0]["candidate_chunk_id"] == candidate[0].metadata["chunk_id"]
 
 
 @pytest.mark.unit
