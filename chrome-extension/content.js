@@ -993,19 +993,25 @@ function escapeHtml(text) {
 
 
 function renderMarkdown(text) {
-    // Clean common formatting artifacts returned by chat models before escaping
-    // and rendering Markdown. Keep this narrow; do not decode arbitrary HTML.
+    // Normalize common provider artifacts before parsing Markdown. Do not decode
+    // arbitrary HTML: the text is escaped below before any formatting is added.
     const normalizedText = String(text ?? "")
+        .replace(/\r\n?/g, "\n")
         .replace(/&#x20;|&#32;/gi, " ")
-        .replace(/^\s*[-*]\s*\\?\s*$/gm, "");
+        .replace(/^[ \t]*\\[ \t]*$/gm, "")
+        .replace(/^[ \t]*[-*][ \t]*\\?[ \t]*$/gm, "")
+        // Models sometimes insert blank lines between bullets, which should not
+        // create vertical gaps inside a single list.
+        .replace(/\n[ \t]*\n(?=[ \t]*[-*]\s+)/g, "\n")
+        .replace(/\n{3,}/g, "\n\n");
 
     let html = escapeHtml(normalizedText);
 
-    // Convert escaped markdown characters back first.
-    html = html.replace(/\\([*_`])/g, "$1");
+    // Convert escaped Markdown characters back first.
+    html = html.replace(/\\\\([*_\x60])/g, "$1");
 
     // Remove empty Markdown bullet lines.
-    html = html.replace(/^\s*[-*]\s*$/gm, "");
+    html = html.replace(/^[ \t]*[-*][ \t]*$/gm, "");
 
     // Bold: **text**
     html = html.replace(
@@ -1027,7 +1033,7 @@ function renderMarkdown(text) {
 
     // Bullet points
     html = html.replace(
-        /^\s*[-*]\s+(.+)$/gm,
+        /^[ \t]*[-*][ \t]+(.+)$/gm,
         "<li>$1</li>"
     );
 
@@ -1037,11 +1043,12 @@ function renderMarkdown(text) {
         "<ul>$1</ul>"
     );
 
-    // Markdown line breaks.
-    html = html.replace(
-        /\n/g,
-        "<br>"
-    );
+    // Convert newlines to line breaks, then remove those introduced between
+    // list elements. Each list item should occupy only its natural line height.
+    html = html.replace(/\n/g, "<br>");
+    html = html.replace(/<\/li>(?:<br\s*\/?>(?:\s*)?)+<li>/g, "</li><li>");
+    html = html.replace(/<ul>(?:<br\s*\/?>(?:\s*)?)+/g, "<ul>");
+    html = html.replace(/(?:<br\s*\/?>(?:\s*)?)+<\/ul>/g, "</ul>");
 
     return html;
 }
