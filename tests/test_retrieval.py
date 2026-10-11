@@ -836,6 +836,28 @@ def test_soft_facet_rerank_boosts_facet_supported_candidate_without_hard_quota()
 
 
 @pytest.mark.unit
+def test_soft_facet_bonus_cannot_push_global_rank_24_behind_rank_33():
+    ranked = [
+        (doc(index, index * 10, index * 10 + 5, f"candidate {index}"), 0.1)
+        for index in range(1, 41)
+    ]
+    candidate_at_rank_33 = ranked[32]
+
+    reranked = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {"financial_economic": [candidate_at_rank_33]},
+        rrf_k=60,
+        facet_weight=0.5,
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _ in reranked]
+    # A candidate originally at rank 33 may move within the near-rank window,
+    # but its facet bonus must not lift it above the original rank-24 candidate.
+    assert chunk_ids.index(33) >= 24
+    assert chunk_ids.index(24) < chunk_ids.index(33)
+
+
+@pytest.mark.unit
 def test_soft_facet_rerank_returns_global_order_without_facets():
     ranked = [
         (doc(1, 10, 15, "one"), 0.1),
