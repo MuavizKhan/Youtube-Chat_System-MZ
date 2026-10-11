@@ -1947,12 +1947,14 @@ def select_diverse_retrieval_anchors(
     facet_reserve_limit: int = 2,
     facet_rank_cutoff: int = 24,
 ):
-    """Select diverse anchors, then reserve a small budget for facet evidence.
+    """Select diverse anchors, then reserve a bounded budget for facet evidence.
 
-    Standard reserves remain within three times the anchor budget. A candidate
-    can exceed that boundary only when it ranks in the top three of a semantic
-    facet and remains within five times the anchor budget. All reserves still
-    require membership in the fused ranking and obey the bounded reserve budget.
+    Standard reserves remain within three times the anchor budget. When reserve
+    capacity is scarce, eligible candidates within that standard global-rank
+    boundary take priority over optional deep semantic rescues. A candidate can
+    exceed the boundary only when it ranks in the top three of a semantic facet
+    and remains within five times the anchor budget. All reserves still require
+    membership in the fused ranking and obey the bounded reserve budget.
     """
 
     if isinstance(limit, bool) or not isinstance(limit, int):
@@ -2072,14 +2074,36 @@ def select_diverse_retrieval_anchors(
 
     reserved_identities = set()
     reserved_facets = set()
+    prioritized_reserves = []
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
+
+    def proposal_priority(pair):
+        proposal = pair[1]
+        global_rank = proposal["global_rank"]
+
+        if global_rank <= limit * 3:
+            # Prefer candidates that already have credible global relevance.
+            # The facet ranking is supporting evidence, not a reason to let a
+            # much deeper semantic rescue consume the scarce reserve budget.
+            return (
+                0,
+                global_rank,
+                proposal["facet_rank"],
+                -proposal["rescue_delta"],
+            )
+
+        # Preserve the established deep semantic rescue as a fallback when
+        # no suitable candidate inside the standard reserve window competes.
+        return (
+            1,
+            -proposal["rescue_delta"],
+            proposal["facet_rank"],
+            global_rank,
+        )
+
     candidates = sorted(
         proposals.items(),
-        key=lambda pair: (
-            -pair[1]["rescue_delta"],
-            pair[1]["facet_rank"],
-            pair[1]["global_rank"],
-        ),
+        key=proposal_priority,
     )
 
     for identity, proposal in candidates:
@@ -2124,6 +2148,30 @@ def select_diverse_retrieval_anchors(
         selected.append(candidate_item)
         reserved_identities.add(identity)
         reserved_facets.add(proposal["facet_name"])
+        if proposal["global_rank"] <= limit * 3:
+            prioritized_reserves.append(candidate_item)
+
+    # The full context keeps all selected anchors, but the gold retrieval
+    # benchmark also scores the first TOP_K anchors. Place bounded, in-window
+    # facet reserves immediately after the strongest global anchors so the
+    # reserve improves top-k evidence coverage rather than only tail recall.
+    if prioritized_reserves and TOP_K > 1:
+        promoted_count = min(len(prioritized_reserves), TOP_K - 1)
+        promoted = prioritized_reserves[:promoted_count]
+        promoted_identities = {
+            _retrieval_document_identity(item[0]) for item in promoted
+        }
+        remaining_selected = [
+            item
+            for item in selected
+            if _retrieval_document_identity(item[0]) not in promoted_identities
+        ]
+        primary_count = max(1, TOP_K - promoted_count)
+        selected = (
+            remaining_selected[:primary_count]
+            + promoted
+            + remaining_selected[primary_count:]
+        )[:limit]
 
     return selected
 

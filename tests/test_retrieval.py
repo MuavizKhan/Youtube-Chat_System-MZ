@@ -647,6 +647,41 @@ def test_facet_anchor_rescues_top_semantic_candidate_outside_three_x_global_budg
 
 
 @pytest.mark.unit
+def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(60)
+    ]
+    financial_candidate = ranked[21]  # Global rank 22.
+    policy_candidate = ranked[23]  # Global rank 24.
+    deep_semantic_candidate = ranked[43]  # Global rank 44.
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings={
+            "financial_economic::lexical": [financial_candidate],
+            "policy_governance::lexical": [policy_candidate],
+            "operational_challenges::semantic": [deep_semantic_candidate],
+        },
+    )
+
+    selected_chunk_ids = {
+        item[0].metadata["chunk_id"]
+        for item in result
+    }
+    assert len(result) == 12
+    assert [item[0].metadata["chunk_id"] for item in result[:2]] == [0, 10]
+    assert financial_candidate[0].metadata["chunk_id"] in selected_chunk_ids
+    assert policy_candidate[0].metadata["chunk_id"] in selected_chunk_ids
+    assert deep_semantic_candidate[0].metadata["chunk_id"] not in selected_chunk_ids
+    # In-window facet reserves must affect top-k recall, not just the anchor tail.
+    assert financial_candidate in result[:4]
+    assert policy_candidate in result[:4]
+
+
+@pytest.mark.unit
 def test_facet_anchor_does_not_rescue_semantic_candidate_below_top_three():
     ranked = [
         (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
