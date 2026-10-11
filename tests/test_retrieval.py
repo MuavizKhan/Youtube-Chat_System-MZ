@@ -1207,6 +1207,7 @@ def test_diagnostics_match_production_anchor_and_context_budgets(
         limit,
         min_chunk_gap=3,
         facet_candidate_rankings=None,
+        diagnostic_trace=None,
     ):
         observed_anchor_gaps.append(min_chunk_gap)
         return list(ranked_results[:limit])
