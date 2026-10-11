@@ -848,83 +848,53 @@ function renderSources() {
 
     clearSources();
 
-
     if (sourceHistory.length === 0) {
         return;
     }
 
+    const sourcesToggle =
+        document.createElement("button");
 
-    const title =
-        document.createElement(
-            "div"
-        );
-
-
-    title.className =
-        "sources-title";
-
-
-    title.textContent =
-        "Video sources";
-
-
-    sourcesContainer.appendChild(
-        title
-    );
-
+    sourcesToggle.type = "button";
+    sourcesToggle.className = "sources-toggle";
+    sourcesToggle.textContent =
+        "Video sources · " + sourceHistory.length;
+    sourcesToggle.setAttribute("aria-expanded", "false");
+    sourcesToggle.setAttribute("aria-controls", "chat-sources-list");
 
     const list =
-        document.createElement(
-            "div"
-        );
+        document.createElement("div");
 
-
-    list.className =
-        "sources-list";
-
+    list.id = "chat-sources-list";
+    list.className = "sources-list";
+    list.hidden = true;
 
     sourceHistory.forEach(
         (source, index) => {
 
             const sourceButton =
-                document.createElement(
-                    "button"
-                );
+                document.createElement("button");
 
-
-            sourceButton.type =
-                "button";
-
-
-            sourceButton.className =
-                "source-button";
-
+            sourceButton.type = "button";
+            sourceButton.className = "source-button";
 
             const start =
-                Number(
-                    source.start
-                ) || 0;
+                Number(source.start) || 0;
 
+            const endValue = Number(source.end);
+            const end = Number.isFinite(endValue)
+                ? endValue
+                : start;
 
-            const end =
-                Number(
-                    source.end
-                ) || start;
-
-
-            const sourceId =
-                index + 1;
-
+            const sourceId = index + 1;
 
             sourceButton.textContent =
                 "Source " + sourceId + " · " +
                 formatTimestamp(start) + " → " +
                 formatTimestamp(end);
 
-
             sourceButton.title =
                 "Jump to this evidence segment";
-
 
             sourceButton.setAttribute(
                 "aria-label",
@@ -933,32 +903,35 @@ function renderSources() {
                 formatTimestamp(end) + ". Jump to this part of the video."
             );
 
-
             sourceButton.addEventListener(
                 "click",
                 () => {
-
-                    seekToTimestamp(
-                        start
-                    );
+                    seekToTimestamp(start);
                 }
             );
 
-
-            list.appendChild(
-                sourceButton
-            );
+            list.appendChild(sourceButton);
         }
     );
 
+    sourcesToggle.addEventListener(
+        "click",
+        () => {
+            const expanded =
+                sourcesToggle.getAttribute("aria-expanded") !== "true";
 
-    sourcesContainer.appendChild(
-        list
+            sourcesToggle.setAttribute(
+                "aria-expanded",
+                String(expanded)
+            );
+
+            list.hidden = !expanded;
+        }
     );
 
-
-    sourcesContainer.hidden =
-        false;
+    sourcesContainer.appendChild(sourcesToggle);
+    sourcesContainer.appendChild(list);
+    sourcesContainer.hidden = false;
 }
 
 

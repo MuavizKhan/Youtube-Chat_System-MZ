@@ -248,35 +248,53 @@
    ============================================================ */
 
 .chat-sources {
-    padding: 10px 12px;
-
+    flex: 0 0 auto;
+    padding: 6px 12px;
     background: #ffffff;
-
     border-top: 1px solid #e5e7eb;
 }
 
 
-.sources-title {
-    margin-bottom: 8px;
-
+.sources-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 5px 2px;
+    border: 0;
+    background: transparent;
     color: #374151;
-
     font-size: 12px;
-
     font-weight: 700;
-
+    text-align: left;
     text-transform: uppercase;
-
     letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.sources-toggle::after {
+    content: "▸";
+    margin-left: 8px;
+    font-size: 14px;
+}
+
+.sources-toggle[aria-expanded="true"]::after {
+    content: "▾";
 }
 
 
 .sources-list {
     display: grid;
-
     grid-template-columns: 1fr;
-
     gap: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px 2px 2px 0;
+}
+
+.sources-list[hidden] {
+    display: none;
 }
 
 
