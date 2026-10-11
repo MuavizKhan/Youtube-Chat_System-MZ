@@ -41,3 +41,24 @@ def test_expanded_source_list_has_bounded_internal_scrolling():
     assert "max-height: 160px" in source_rules
     assert "overflow-y: auto" in source_rules
     assert ".sources-list[hidden] {\n    display: none;" in css
+
+
+def test_markdown_renderer_compacts_blank_lines_and_list_item_breaks():
+    content = CONTENT_JS.read_text(encoding="utf-8")
+    start = content.index("function renderMarkdown(text)")
+    end = content.index("// REQUEST STATE RESET", start)
+    renderer = content[start:end]
+
+    assert r'.replace(/^[ \t]*\\[ \t]*$/gm, "")' in renderer
+    assert r'.replace(/\n[ \t]*\n(?=[ \t]*[-*]\s+)/g, "\n")' in renderer
+    assert r'html = html.replace(/<\/li>(?:<br\s*\/?>(?:\s*)?)+<li>/g, "</li><li>");' in renderer
+    assert r'html = html.replace(/<ul>(?:<br\s*\/?>(?:\s*)?)+/g, "<ul>");' in renderer
+
+
+def test_assistant_lists_use_compact_vertical_spacing():
+    css = STYLE_CSS.read_text(encoding="utf-8")
+
+    assert ".chat-message.assistant ul {" in css
+    assert "margin: 0.35em 0 0.4em;" in css
+    assert ".chat-message.assistant li {" in css
+    assert "margin: 0 0 0.2em;" in css
