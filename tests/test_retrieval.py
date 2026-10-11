@@ -851,10 +851,27 @@ def test_soft_facet_bonus_cannot_push_global_rank_24_behind_rank_33():
     )
 
     chunk_ids = [document.metadata["chunk_id"] for document, _ in reranked]
-    # A candidate originally at rank 33 may move within the near-rank window,
-    # but its facet bonus must not lift it above the original rank-24 candidate.
+    # A deep candidate cannot receive the uncapped rescue reserved for the
+    # top facet matches within the normal shortlist.
     assert chunk_ids.index(33) >= 24
     assert chunk_ids.index(24) < chunk_ids.index(33)
+
+
+@pytest.mark.unit
+def test_strong_facet_match_within_shortlist_retains_rescue_behavior():
+    ranked = [
+        (doc(i, i * 10, i * 10 + 5, f"global candidate {i}"), 0.2 + i / 100)
+        for i in range(1, 25)
+    ]
+    facet_target = ranked[17]  # Global rank 18, facet rank 1.
+
+    result = retrieval.rerank_with_soft_facet_support(
+        ranked,
+        {"focused_facet": [facet_target]},
+    )
+
+    chunk_ids = [document.metadata["chunk_id"] for document, _score in result]
+    assert chunk_ids.index(18) < 3
 
 
 @pytest.mark.unit
