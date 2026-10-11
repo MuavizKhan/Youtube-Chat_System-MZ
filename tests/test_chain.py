@@ -97,6 +97,59 @@ def test_append_requested_temporal_timestamp_does_not_duplicate_range():
 
 
 @pytest.mark.unit
+def test_append_relevant_source_timestamps_uses_three_strongest_in_chronological_order():
+    answer = chain.append_relevant_source_timestamps(
+        answer="A grounded answer.",
+        sources=[
+            {"start": 400, "end": 430, "distance": 0.2},
+            {"start": 120, "end": 160, "distance": 0.1},
+            {"start": 10, "end": 20, "distance": 0.3},
+            {"start": 60, "end": 70, "distance": 0.4},
+        ],
+        has_evidence=True,
+    )
+
+    assert answer.endswith(
+        "Relevant timestamps: 00:10–00:20, 02:00–02:40, 06:40–07:10"
+    )
+
+
+@pytest.mark.unit
+def test_append_relevant_source_timestamps_skips_fallback_missing_evidence_and_invalid_ranges():
+    sources = [{"start": 10, "end": 20, "distance": 0.1}]
+
+    assert chain.append_relevant_source_timestamps(
+        answer=chain.FALLBACK_ANSWER,
+        sources=sources,
+        has_evidence=True,
+    ) == chain.FALLBACK_ANSWER
+    assert chain.append_relevant_source_timestamps(
+        answer="A grounded answer.",
+        sources=sources,
+        has_evidence=False,
+    ) == "A grounded answer."
+    assert chain.append_relevant_source_timestamps(
+        answer="A grounded answer.",
+        sources=[
+            {"start": float("nan"), "end": 20, "distance": 0.1},
+            {"start": 20, "end": 20, "distance": 0.1},
+            {"start": 30},
+        ],
+        has_evidence=True,
+    ) == "A grounded answer."
+
+
+@pytest.mark.unit
+def test_append_relevant_source_timestamps_does_not_duplicate_existing_range():
+    answer = "A grounded answer. Relevant timestamp: 00:10–00:20"
+    assert chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[{"start": 10, "end": 20, "distance": 0.1}],
+        has_evidence=True,
+    ) == answer
+
+
+@pytest.mark.unit
 def test_merge_source_groups():
     groups=chain.merge_overlapping_results([
         (doc(2,40,80,"second"),0.8),
@@ -165,8 +218,8 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
 
     assert "Do not use this fallback solely because a named event" in system_prompt
     assert "Absence of a statement is answerable" in system_prompt
-    assert "If the user explicitly" in system_prompt
-    assert "timestamp supported" in system_prompt
+    assert "application appends a separate" in system_prompt
+    assert "timestamp ranges remain part of the answer" in system_prompt
 
 
 class FakeCompletions:
@@ -1027,6 +1080,8 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
         lambda: configured_client,
     )
 
+    source_doc = doc(1, 10, 20, "evidence")
+
     class FakeRagChain:
         def invoke(self, inputs):
             assert inputs["video_id"] == "Gfr50f6ZBvo"
@@ -1034,8 +1089,15 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
 
             return {
                 "answer": "grounded answer",
-                "retrieved_results": [],
-                "source_groups": [],
+                "retrieved_results": [(source_doc, 0.25)],
+                "source_groups": [
+                    {
+                        "documents": [source_doc],
+                        "start": 10.0,
+                        "end": 20.0,
+                        "distance": 0.25,
+                    }
+                ],
             }
 
     def fake_build_rag_chain(
@@ -1058,7 +1120,9 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
         question="What happened?",
     )
 
-    assert result["answer"] == "grounded answer"
+    assert result["answer"] == (
+        "grounded answer\n\nRelevant timestamps: 00:10–00:20"
+    )
     assert result["video_id"] == "Gfr50f6ZBvo"
     assert calls["load_ready_index"] == 1
     assert calls["load_vector_store"] == 0
