@@ -396,7 +396,7 @@ def append_relevant_source_timestamps(
         f"{format_timestamp(item['start'])}–{format_timestamp(item['end'])}"
         for item in selected
     )
-    return f"{answer.rstrip()}\\n\\nRelevant timestamps: {ranges}"
+    return f"{answer.rstrip()}\n\nRelevant timestamps: {ranges}"
 
 
 def append_requested_temporal_timestamp(
