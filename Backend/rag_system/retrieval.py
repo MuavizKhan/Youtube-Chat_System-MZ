@@ -1947,12 +1947,14 @@ def select_diverse_retrieval_anchors(
     facet_reserve_limit: int = 2,
     facet_rank_cutoff: int = 24,
 ):
-    """Select diverse anchors, then reserve a small budget for facet evidence.
+    """Select diverse anchors, then reserve a bounded budget for facet evidence.
 
-    Standard reserves remain within three times the anchor budget. A candidate
-    can exceed that boundary only when it ranks in the top three of a semantic
-    facet and remains within five times the anchor budget. All reserves still
-    require membership in the fused ranking and obey the bounded reserve budget.
+    Standard reserves remain within three times the anchor budget. When reserve
+    capacity is scarce, eligible candidates within that standard global-rank
+    boundary take priority over optional deep semantic rescues. A candidate can
+    exceed the boundary only when it ranks in the top three of a semantic facet
+    and remains within five times the anchor budget. All reserves still require
+    membership in the fused ranking and obey the bounded reserve budget.
     """
 
     if isinstance(limit, bool) or not isinstance(limit, int):
@@ -2073,13 +2075,33 @@ def select_diverse_retrieval_anchors(
     reserved_identities = set()
     reserved_facets = set()
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
+    def proposal_priority(pair):
+        proposal = pair[1]
+        global_rank = proposal["global_rank"]
+
+        if global_rank <= limit * 3:
+            # Prefer candidates that already have credible global relevance.
+            # The facet ranking is supporting evidence, not a reason to let a
+            # much deeper semantic rescue consume the scarce reserve budget.
+            return (
+                0,
+                global_rank,
+                proposal["facet_rank"],
+                -proposal["rescue_delta"],
+            )
+
+        # Preserve the established deep semantic rescue as a fallback when
+        # no suitable candidate inside the standard reserve window competes.
+        return (
+            1,
+            -proposal["rescue_delta"],
+            proposal["facet_rank"],
+            global_rank,
+        )
+
     candidates = sorted(
         proposals.items(),
-        key=lambda pair: (
-            -pair[1]["rescue_delta"],
-            pair[1]["facet_rank"],
-            pair[1]["global_rank"],
-        ),
+        key=proposal_priority,
     )
 
     for identity, proposal in candidates:
