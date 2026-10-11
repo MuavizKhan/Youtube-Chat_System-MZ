@@ -40,3 +40,4 @@ def test_expanded_source_list_has_bounded_internal_scrolling():
 
     assert "max-height: 160px" in source_rules
     assert "overflow-y: auto" in source_rules
+    assert ".sources-list[hidden] {\n    display: none;" in css
