@@ -2030,6 +2030,7 @@ def select_diverse_retrieval_anchors(
         diagnostic_trace["facet_candidate_sources"] = []
         diagnostic_trace["reserve_proposals"] = []
         diagnostic_trace["reserve_replacements"] = []
+        diagnostic_trace["reserve_rejections"] = []
     if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
         return selected
 
@@ -2154,10 +2155,29 @@ def select_diverse_retrieval_anchors(
         key=proposal_priority,
     )
 
-    for identity, proposal in candidates:
+    for candidate_position, (identity, proposal) in enumerate(candidates):
         if len(reserved_identities) >= reserve_budget:
+            if diagnostic_trace is not None:
+                for _, pending_proposal in candidates[candidate_position:]:
+                    diagnostic_trace["reserve_rejections"].append({
+                        "candidate_chunk_id": pending_proposal["item"][0].metadata.get("chunk_id"),
+                        "candidate_global_rank": pending_proposal["global_rank"],
+                        "facet_name": pending_proposal["facet_name"],
+                        "reason": "reserve_budget_reached",
+                    })
             break
         if identity in reserved_identities or proposal["facet_name"] in reserved_facets:
+            if diagnostic_trace is not None:
+                diagnostic_trace["reserve_rejections"].append({
+                    "candidate_chunk_id": proposal["item"][0].metadata.get("chunk_id"),
+                    "candidate_global_rank": proposal["global_rank"],
+                    "facet_name": proposal["facet_name"],
+                    "reason": (
+                        "facet_already_reserved"
+                        if proposal["facet_name"] in reserved_facets
+                        else "identity_already_reserved"
+                    ),
+                })
             continue
 
         candidate_item = proposal["item"]
@@ -2171,6 +2191,7 @@ def select_diverse_retrieval_anchors(
             reverse=True,
         )
         replacement_index = None
+        blocking_chunk_ids = []
         for index in replacement_indices:
             current_identity = _retrieval_document_identity(selected[index][0])
             if current_identity in reserved_identities:
@@ -2180,16 +2201,32 @@ def select_diverse_retrieval_anchors(
                 for item_index, item in enumerate(selected)
                 if item_index != index
             ]
-            if candidate_chunk_id is not None and any(
-                previous_id is not None
-                and abs(candidate_chunk_id - previous_id) < min_chunk_gap
+            conflicting_ids = [
+                previous_id
                 for previous_id in remaining_ids
-            ):
+                if candidate_chunk_id is not None
+                and previous_id is not None
+                and abs(candidate_chunk_id - previous_id) < min_chunk_gap
+            ]
+            if conflicting_ids:
+                blocking_chunk_ids.extend(conflicting_ids)
                 continue
             replacement_index = index
             break
 
         if replacement_index is None:
+            if diagnostic_trace is not None:
+                diagnostic_trace["reserve_rejections"].append({
+                    "candidate_chunk_id": candidate_item[0].metadata.get("chunk_id"),
+                    "candidate_global_rank": proposal["global_rank"],
+                    "facet_name": proposal["facet_name"],
+                    "reason": (
+                        "chunk_gap_conflict"
+                        if blocking_chunk_ids
+                        else "no_eligible_replacement"
+                    ),
+                    "blocking_chunk_ids": list(dict.fromkeys(blocking_chunk_ids)),
+                })
             continue
 
         replaced_item = selected[replacement_index]
@@ -2202,6 +2239,7 @@ def select_diverse_retrieval_anchors(
                 "replaced_global_rank": rank_by_identity.get(
                     _retrieval_document_identity(replaced_item[0])
                 ),
+                "reason": "replacement_selected",
             })
         selected.pop(replacement_index)
         selected.append(candidate_item)
