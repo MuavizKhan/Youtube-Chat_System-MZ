@@ -611,6 +611,7 @@ def _select_final_retrieval_candidates(
     dense_question: bool,
     k: int,
     max_distance: float,
+    diagnostic_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply the same evidence gate, reranking, and anchor policy in all routes."""
     context_max_chunks = (
@@ -668,6 +669,11 @@ def _select_final_retrieval_candidates(
             limit=anchor_limit,
             min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
             facet_candidate_rankings=facet_candidate_rankings,
+            **(
+                {"diagnostic_trace": diagnostic_trace}
+                if diagnostic_trace is not None
+                else {}
+            ),
         )
         if dense_question
         else facet_soft_reranked[:anchor_limit]
@@ -804,6 +810,7 @@ def diagnose_retrieval_pipeline(
         lexical_weight=lexical_rrf_weight,
     )
 
+    anchor_selection_trace: dict[str, Any] = {}
     selection = _select_final_retrieval_candidates(
         query=query,
         semantic_results=semantic_results,
@@ -814,6 +821,7 @@ def diagnose_retrieval_pipeline(
         dense_question=dense_question,
         k=k,
         max_distance=max_distance,
+        diagnostic_trace=anchor_selection_trace,
     )
     context_results = expand_retrieval_context(
         vector_store,
@@ -841,6 +849,7 @@ def diagnose_retrieval_pipeline(
         "lexical_stages": lexical_stages,
         "lexical": lexical_results,
         "facet_rankings": facet_rankings,
+        "anchor_selection_trace": anchor_selection_trace,
         "facet_soft_reranked": selection["facet_soft_reranked"],
         # When disabled, this field is a pass-through, not an actual model result.
         "cross_encoder_reranked": selection["cross_encoder_results"],
@@ -1946,6 +1955,7 @@ def select_diverse_retrieval_anchors(
     facet_candidate_rankings: dict[str, list[tuple[Any, float]]] | None = None,
     facet_reserve_limit: int = 2,
     facet_rank_cutoff: int = 24,
+    diagnostic_trace: dict[str, Any] | None = None,
 ):
     """Select diverse anchors, then reserve a bounded budget for facet evidence.
 
@@ -2010,6 +2020,13 @@ def select_diverse_retrieval_anchors(
             selected.append(item)
 
     selected = selected[:limit]
+    if diagnostic_trace is not None:
+        diagnostic_trace["initial_diverse_anchor_chunk_ids"] = [
+            chunk_id(item[0]) for item in selected
+        ]
+        diagnostic_trace["facet_candidate_sources"] = []
+        diagnostic_trace["reserve_proposals"] = []
+        diagnostic_trace["reserve_replacements"] = []
     if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
         return selected
 
@@ -2024,6 +2041,7 @@ def select_diverse_retrieval_anchors(
         _retrieval_document_identity(item[0]) for item in selected
     }
     proposals = {}
+    facet_sources_by_identity = {}
     for source_name, facet_results in facet_candidate_rankings.items():
         facet_name = source_name.rsplit("::", 1)[0]
         for facet_rank, facet_item in enumerate(
@@ -2032,6 +2050,12 @@ def select_diverse_retrieval_anchors(
         ):
             identity = _retrieval_document_identity(facet_item[0])
             global_rank = rank_by_identity.get(identity)
+            facet_sources_by_identity.setdefault(identity, []).append({
+                "source": source_name,
+                "rank": facet_rank,
+                "global_rank": global_rank,
+                "chunk_id": facet_item[0].metadata.get("chunk_id"),
+            })
             strong_semantic_rescue = (
                 source_name.endswith("::semantic")
                 and facet_rank <= min(3, facet_rank_cutoff)
@@ -2062,6 +2086,27 @@ def select_diverse_retrieval_anchors(
                 -previous["facet_rank"],
             ):
                 proposals[identity] = proposal
+
+    if diagnostic_trace is not None:
+        diagnostic_trace["facet_candidate_sources"] = [
+            {
+                "chunk_id": sources[0]["chunk_id"],
+                "global_rank": rank_by_identity.get(identity),
+                "initially_selected": identity in selected_identities,
+                "sources": sources,
+            }
+            for identity, sources in facet_sources_by_identity.items()
+        ]
+        diagnostic_trace["reserve_proposals"] = [
+            {
+                "chunk_id": proposal["item"][0].metadata.get("chunk_id"),
+                "global_rank": proposal["global_rank"],
+                "facet_name": proposal["facet_name"],
+                "facet_rank": proposal["facet_rank"],
+                "initially_selected": identity in selected_identities,
+            }
+            for identity, proposal in proposals.items()
+        ]
 
     def document_chunk_id(item):
         metadata = getattr(item[0], "metadata", {})
@@ -2144,6 +2189,17 @@ def select_diverse_retrieval_anchors(
         if replacement_index is None:
             continue
 
+        replaced_item = selected[replacement_index]
+        if diagnostic_trace is not None:
+            diagnostic_trace["reserve_replacements"].append({
+                "candidate_chunk_id": candidate_item[0].metadata.get("chunk_id"),
+                "candidate_global_rank": proposal["global_rank"],
+                "facet_name": proposal["facet_name"],
+                "replaced_chunk_id": replaced_item[0].metadata.get("chunk_id"),
+                "replaced_global_rank": rank_by_identity.get(
+                    _retrieval_document_identity(replaced_item[0])
+                ),
+            })
         selected.pop(replacement_index)
         selected.append(candidate_item)
         reserved_identities.add(identity)
