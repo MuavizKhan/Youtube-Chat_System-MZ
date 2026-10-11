@@ -883,8 +883,8 @@ function renderSources() {
         "sources-list";
 
 
-    sources.forEach(
-        (source) => {
+    sourceHistory.forEach(
+        (source, index) => {
 
             const sourceButton =
                 document.createElement(
