@@ -1,6 +1,6 @@
 # YouTube Video Chat System
 
-A Chrome extension and FastAPI backend that let a user ask questions about a YouTube video's transcript. Answers are grounded in retrieved transcript chunks, with timestamped source segments returned separately for navigation.
+A Chrome extension and FastAPI backend that let a user ask questions about a YouTube video's transcript. Answers are grounded in retrieved transcript chunks and include relevant timestamp ranges drawn from the strongest retrieved source segments; clickable timestamped source segments are also returned for navigation.
 
 ## Product flow
 
@@ -10,7 +10,7 @@ A Chrome extension and FastAPI backend that let a user ask questions about a You
 4. The worker fetches the transcript, creates timestamp-aware chunks and embeddings, and persists a per-video FAISS index.
 5. The extension polls the durable status endpoint and shows whether the video is queued, preparing, ready, or failed.
 6. The user opens the chat and asks questions. Chat only uses an already-valid index; it does not build an index as part of the question request.
-7. Answers include source segments with start/end timestamps.
+7. Answers include relevant plain-text timestamp ranges plus source segments with clickable start/end timestamps.
 
 ## Architecture
 
