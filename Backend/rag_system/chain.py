@@ -26,6 +26,7 @@ Final Answer + Sources
 import time
 import argparse
 import logging
+import math
 import re
 from typing import Any
 
@@ -193,17 +194,17 @@ SOURCE / TIMESTAMP RULES
     Source 1
     [1]
 
-17. Do not invent timestamps or citations. If the user explicitly
-    asks for the relevant timestamp, include the concise timestamp supported
-    by the supplied source metadata. Otherwise, do not add citations or
-    timestamp ranges.
+17. Do not invent timestamps or citations. The application appends a separate
+    "Relevant timestamps" line to every substantive answer using up to three
+    of the strongest retrieved source segments. Do not calculate or invent
+    timestamp values yourself.
 
 18. Do NOT mention the retrieval system, vector database,
     embeddings, prompts, or internal implementation.
 
-19. The application displays video sources and clickable timestamps separately,
-    so omit timestamps unless the user explicitly requests them. When requested,
-    use only timestamp information supported by the supplied source metadata.
+19. The application also displays clickable video sources separately. Plain-text
+    timestamp ranges remain part of the answer and are generated from source
+    metadata, not from guesses.
 
 20. Never fabricate a source, timestamp, citation, or reference.
 
@@ -243,9 +244,10 @@ USER QUESTION
 Answer the user's question using only the transcript evidence
 provided above.
 
-Return only the answer.
-Do not include source labels, citations, references,
-timestamps, or metadata.
+Return only the substantive answer text.
+Do not include source labels, citations, references, timestamps, or metadata
+yourself; the application appends verified source timestamp ranges after
+generation.
 """,
         ),
     ]
@@ -308,6 +310,93 @@ _TIMESTAMP_RANGE_IN_ANSWER_PATTERN = re.compile(
     r"\d{1,2}:\d{2}(?!\d)",
     re.IGNORECASE,
 )
+
+
+def append_relevant_source_timestamps(
+    answer: str,
+    sources: list[dict[str, Any]],
+    *,
+    has_evidence: bool,
+    max_ranges: int = 3,
+) -> str:
+    """Append source-grounded timestamp ranges to a substantive answer.
+
+    Selects the strongest source segments by retrieval distance, then presents
+    up to max_ranges ranges in chronological order. This is deterministic so
+    timestamp display does not depend on the LLM following prompt advice.
+    """
+    if (
+        not answer
+        or not answer.strip()
+        or answer.strip() == FALLBACK_ANSWER
+        or not has_evidence
+        or not isinstance(sources, (list, tuple))
+        or not sources
+        or max_ranges < 1
+    ):
+        return answer
+
+    # An answer that already contains a time range needs no extra suffix.
+    if _TIMESTAMP_RANGE_IN_ANSWER_PATTERN.search(answer):
+        return answer
+
+    candidates = []
+    seen_ranges = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+
+        try:
+            start = float(source.get("start"))
+            end = float(source.get("end"))
+        except (TypeError, ValueError):
+            continue
+
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(end)
+            or start < 0
+            or end <= start
+        ):
+            continue
+
+        interval = (start, end)
+        if interval in seen_ranges:
+            continue
+        seen_ranges.add(interval)
+
+        try:
+            distance = float(source.get("distance"))
+        except (TypeError, ValueError):
+            distance = math.inf
+        if not math.isfinite(distance):
+            distance = math.inf
+
+        candidates.append({
+            "start": start,
+            "end": end,
+            "distance": distance,
+        })
+
+    if not candidates:
+        return answer
+
+    # A smaller retrieval distance is the stronger available source signal.
+    candidates.sort(
+        key=lambda item: (
+            item["distance"],
+            item["start"],
+            item["end"],
+        )
+    )
+    selected = candidates[:max_ranges]
+    selected.sort(key=lambda item: (item["start"], item["end"]))
+
+    ranges = ", ".join(
+        f"{format_timestamp(item['start'])}–{format_timestamp(item['end'])}"
+        for item in selected
+    )
+    return f"{answer.rstrip()}\\n\\nRelevant timestamps: {ranges}"
 
 
 def append_requested_temporal_timestamp(
@@ -2087,11 +2176,17 @@ def answer_question(
     # Final response
     # --------------------------------------------------------
 
+    has_evidence = bool(retrieved_results and sources)
     final_answer = append_requested_temporal_timestamp(
         answer=result["answer"],
         question=original_question,
         retrieval_trace=result.get("retrieval_trace"),
-        has_evidence=bool(retrieved_results and sources),
+        has_evidence=has_evidence,
+    )
+    final_answer = append_relevant_source_timestamps(
+        answer=final_answer,
+        sources=sources,
+        has_evidence=has_evidence,
     )
 
     return {
