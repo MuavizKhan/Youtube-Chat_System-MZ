@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,10 +13,8 @@ def test_render_sources_iterates_accumulated_source_history():
 
     # Render from the same collection populated by mergeSources, and provide
     # an index for the visible "Source N" label.
-    assert re.search(
-        r"sourceHistory\\.forEach\\(\\s*\\(\\s*source\\s*,\\s*index\\s*\\)\\s*=>",
-        renderer,
-    )
+    assert "sourceHistory.forEach(" in renderer
+    assert "(source, index) =>" in renderer
     assert "sources.forEach(" not in renderer
     assert "const sourceId =" in renderer
     assert "index + 1" in renderer
