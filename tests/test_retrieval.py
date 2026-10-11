@@ -704,6 +704,69 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
 
 
 @pytest.mark.unit
+def test_facet_anchor_reserve_trace_records_rejection_reasons_without_changing_selection():
+    ranked = [
+        (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
+        for i in range(30)
+    ]
+    # The first reserve must replace chunk 0; the next candidate then conflicts
+    # with that protected reserve. Later candidates exercise facet and budget
+    # rejection paths without changing the selection policy.
+    ranked[14] = (doc(1, 700, 705, "first facet reserve"), ranked[14][1])
+    ranked[15] = (doc(2, 750, 755, "chunk-gap conflict"), ranked[15][1])
+    ranked[16] = (doc(150, 800, 805, "duplicate facet reserve"), ranked[16][1])
+    ranked[17] = (doc(160, 850, 855, "second facet reserve"), ranked[17][1])
+    ranked[18] = (doc(170, 900, 905, "reserve budget overflow"), ranked[18][1])
+
+    facet_rankings = {
+        "financial_economic::lexical": [ranked[14]],
+        "policy_governance::lexical": [ranked[15]],
+        "financial_economic::semantic": [ranked[16]],
+        "causal_factors::lexical": [ranked[17]],
+        "operational_challenges::lexical": [ranked[18]],
+    }
+
+    trace = {}
+    traced_result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings=facet_rankings,
+        diagnostic_trace=trace,
+    )
+    untraced_result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_candidate_rankings=facet_rankings,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in traced_result] == [
+        item[0].metadata["chunk_id"] for item in untraced_result
+    ]
+    assert any(
+        item["candidate_chunk_id"] == 2
+        and item["reason"] == "chunk_gap_conflict"
+        and 1 in item["blocking_chunk_ids"]
+        for item in trace["reserve_rejections"]
+    )
+    assert any(
+        item["candidate_chunk_id"] == 150
+        and item["reason"] == "facet_already_reserved"
+        for item in trace["reserve_rejections"]
+    )
+    assert any(
+        item["candidate_chunk_id"] == 170
+        and item["reason"] == "reserve_budget_reached"
+        for item in trace["reserve_rejections"]
+    )
+    assert all(
+        item["reason"] == "replacement_selected"
+        for item in trace["reserve_replacements"]
+    )
+
+
+@pytest.mark.unit
 def test_facet_anchor_does_not_rescue_semantic_candidate_below_top_three():
     ranked = [
         (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
