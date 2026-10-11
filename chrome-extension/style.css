@@ -229,6 +229,19 @@
     border-bottom-left-radius: 4px;
 }
 
+.chat-message.assistant ul {
+    margin: 0.35em 0 0.4em;
+    padding-left: 20px;
+}
+
+.chat-message.assistant li {
+    margin: 0 0 0.2em;
+}
+
+.chat-message.assistant li:last-child {
+    margin-bottom: 0;
+}
+
 
 .chat-message.system {
     margin-right: auto;
