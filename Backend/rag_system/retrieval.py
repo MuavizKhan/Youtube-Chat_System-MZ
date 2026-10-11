@@ -2075,6 +2075,7 @@ def select_diverse_retrieval_anchors(
     reserved_identities = set()
     reserved_facets = set()
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
+
     def proposal_priority(pair):
         proposal = pair[1]
         global_rank = proposal["global_rank"]
