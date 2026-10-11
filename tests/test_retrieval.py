@@ -672,9 +672,13 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
         for item in result
     }
     assert len(result) == 12
+    assert [item[0].metadata["chunk_id"] for item in result[:2]] == [0, 10]
     assert financial_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert policy_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert deep_semantic_candidate[0].metadata["chunk_id"] not in selected_chunk_ids
+    # In-window facet reserves must affect top-k recall, not just the anchor tail.
+    assert financial_candidate in result[:4]
+    assert policy_candidate in result[:4]
 
 
 @pytest.mark.unit
