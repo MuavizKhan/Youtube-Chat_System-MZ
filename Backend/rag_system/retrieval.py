@@ -61,7 +61,10 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
-# Keep facet reranking subordinate to the fused ranking signal.
+# Strong top-facet matches can still rescue evidence within the normal shortlist.
+MAX_STRONG_FACET_RANK = 3
+MAX_UNCAPPED_FACET_RESCUE_GLOBAL_RANK = 24
+# Deeper/weaker facet matches can only nudge their original fused score.
 MAX_FACET_BONUS_RATIO = 0.10
 
 
@@ -1763,7 +1766,7 @@ def rerank_with_soft_facet_support(
         for rank, item in enumerate(ranked_results, start=1)
     }
 
-    facet_scores: dict[tuple, list[float]] = {}
+    facet_scores: dict[tuple, list[tuple[float, int]]] = {}
 
     for candidates in facet_rankings.values():
         for rank, (document, _distance) in enumerate(
@@ -1772,7 +1775,7 @@ def rerank_with_soft_facet_support(
         ):
             identity = _retrieval_document_identity(document)
             facet_scores.setdefault(identity, []).append(
-                1.0 / (rrf_k + rank)
+                (1.0 / (rrf_k + rank), rank)
             )
 
     scored = []
@@ -1784,9 +1787,14 @@ def rerank_with_soft_facet_support(
         identity = _retrieval_document_identity(item[0])
         base_score = global_scores[identity]
 
+        facet_rank_entries = facet_scores.get(identity, [])
         support_scores = sorted(
-            facet_scores.get(identity, []),
+            (score for score, _rank in facet_rank_entries),
             reverse=True,
+        )
+        has_strong_facet_support = any(
+            rank <= MAX_STRONG_FACET_RANK
+            for _score, rank in facet_rank_entries
         )
 
         # Diminishing returns prevent a chunk shared by several facets from
@@ -1798,13 +1806,22 @@ def rerank_with_soft_facet_support(
             facet_support += decay * support_score
             decay *= 0.5
 
-        # Facet support should break close ranking decisions, not overwhelm
-        # the fused ranking. Without a relative cap, a high facet score can
-        # push a strong direct/lexical candidate far down the list.
-        facet_bonus = min(
-            facet_weight * facet_support,
-            base_score * MAX_FACET_BONUS_RATIO,
-        )
+        proposed_bonus = facet_weight * facet_support
+        if (
+            global_rank <= MAX_UNCAPPED_FACET_RESCUE_GLOBAL_RANK
+            and has_strong_facet_support
+        ):
+            # Preserve the established rescue behavior for a strong facet match
+            # already near the global shortlist. The failure was caused by
+            # weaker/deeper facet bonuses swamping stronger global candidates.
+            facet_bonus = proposed_bonus
+        else:
+            # Outside that trusted region, facet support should break close
+            # ranking decisions, not overwhelm the fused ranking.
+            facet_bonus = min(
+                proposed_bonus,
+                base_score * MAX_FACET_BONUS_RATIO,
+            )
         soft_score = base_score + facet_bonus
 
         scored.append(
