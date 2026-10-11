@@ -845,6 +845,12 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
         ],
         "anchors": [(documents[0], 0.1)],
         "final_context": [(documents[0], 0.1)],
+        "anchor_selection_trace": {
+            "initial_diverse_anchor_chunk_ids": [10, 20],
+            "facet_candidate_sources": [],
+            "reserve_proposals": [],
+            "reserve_replacements": [],
+        },
     }
 
     monkeypatch.setattr(
@@ -883,6 +889,7 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
     groups = diagnostic["groups"]
 
     assert diagnostic["reranking_enabled"] is True
+    assert diagnostic["anchor_selection_trace"]["initial_diverse_anchor_chunk_ids"] == [10, 20]
     assert diagnostic["cross_encoder_reranked_top_chunk_ids"] == [30, 10]
     assert diagnostic["facet_soft_reranked_top_chunk_ids"] == [10, 30]
 
