@@ -2051,6 +2051,7 @@ def select_diverse_retrieval_anchors(
     # three-times global-rank window. This remains a narrow exception to the
     # usual one-reserve-per-facet rule.
     strong_lexical_candidates_by_facet: dict[str, set[Any]] = {}
+    strong_lexical_rescue_lifts_by_facet: dict[str, dict[Any, int]] = {}
     for source_name, facet_results in facet_candidate_rankings.items():
         if not source_name.endswith("::lexical"):
             continue
@@ -2071,11 +2072,26 @@ def select_diverse_retrieval_anchors(
             strong_lexical_candidates_by_facet.setdefault(
                 facet_name, set()
             ).add(identity)
+            strong_lexical_rescue_lifts_by_facet.setdefault(
+                facet_name, {}
+            ).setdefault(identity, global_rank - facet_rank)
 
     multi_candidate_lexical_facets = {
         facet_name
         for facet_name, identities in strong_lexical_candidates_by_facet.items()
         if len(identities) >= 2
+    }
+
+    # More than one facet can satisfy the multi-candidate condition for the
+    # same question. Rank those groups by their average global-to-facet rank
+    # lift before comparing individual global ranks. The mean keeps a group
+    # with three eligible candidates from receiving an automatic advantage
+    # over a group with two. A larger lift means facet ranking identifies
+    # candidates that the shared fused ranking has comparatively under-ranked.
+    multi_candidate_lexical_facet_strength = {
+        facet_name: sum(lifts.values()) / len(lifts)
+        for facet_name, lifts in strong_lexical_rescue_lifts_by_facet.items()
+        if facet_name in multi_candidate_lexical_facets and lifts
     }
 
     proposals = {}
@@ -2174,12 +2190,24 @@ def select_diverse_retrieval_anchors(
         global_rank = proposal["global_rank"]
 
         if global_rank <= limit * 3:
-            # A small set of independently strong lexical passages from one
-            # facet can cover different parts of a multi-part question. Give
-            # that set priority, while keeping ordinary in-window candidates
-            # ahead of any deep semantic rescue.
+            if is_multi_candidate_lexical_reserve(identity, proposal):
+                # Prefer the qualifying facet group whose candidates show
+                # the strongest average lift over their global fused ranks.
+                # Global rank remains the tie-breaker within a group.
+                return (
+                    0,
+                    -multi_candidate_lexical_facet_strength.get(
+                        proposal["facet_name"], 0.0
+                    ),
+                    global_rank,
+                    proposal["facet_rank"],
+                    -proposal["rescue_delta"],
+                )
+
+            # Keep ordinary in-window candidates ahead of deep semantic rescue,
+            # but behind a qualifying multi-candidate lexical facet group.
             return (
-                0 if is_multi_candidate_lexical_reserve(identity, proposal) else 1,
+                1,
                 global_rank,
                 proposal["facet_rank"],
                 -proposal["rescue_delta"],
