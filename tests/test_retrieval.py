@@ -715,7 +715,9 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
     # Competing policy candidates rank better globally, but the financial
     # candidates have a larger average global-to-facet rank lift.
     ranked[14] = (doc(125, 700, 705, "policy candidate rank 3"), ranked[14][1])
-    ranked[15] = (doc(9, 750, 755, "policy candidate rank 1"), ranked[15][1])
+    ranked[15] = (doc(9, 750, 755, "overlapping lexical candidate"), ranked[15][1])
+    ranked[16] = (doc(208, 800, 805, "causal candidate"), ranked[16][1])
+    ranked[17] = (doc(210, 825, 830, "operational candidate"), ranked[17][1])
     ranked[19] = (doc(106, 850, 855, "policy candidate rank 2"), ranked[19][1])
     ranked[21] = (doc(69, 900, 905, "global financial crisis"), ranked[21][1])
     ranked[23] = (doc(179, 1000, 1005, "government policies that did not help"), ranked[23][1])
@@ -736,6 +738,17 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
                 ranked[15],  # Facet rank 1; global rank 16; lift 15.
                 ranked[19],  # Facet rank 2; global rank 20; lift 18.
                 ranked[14],  # Facet rank 3; global rank 15; lift 12.
+            ],
+            # Chunk 9 overlaps multiple facet lists, as it does in Q10.
+            "causal_factors::lexical": [
+                ranked[0],   # Already selected; preserves ranks 2 and 3.
+                ranked[15],  # Facet rank 2; global rank 16; lift 14.
+                ranked[16],  # Facet rank 3; global rank 17; lift 14.
+            ],
+            "operational_challenges::lexical": [
+                ranked[17],  # Facet rank 1; global rank 18; lift 17.
+                ranked[0],   # Already selected.
+                ranked[15],  # Facet rank 3; global rank 16; lift 13.
             ],
         },
         diagnostic_trace=trace,
