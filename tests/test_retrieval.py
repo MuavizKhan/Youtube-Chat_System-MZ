@@ -909,12 +909,17 @@ def test_facet_anchor_reserve_trace_records_rejection_reasons_without_changing_s
     ranked[17] = (doc(160, 850, 855, "second facet reserve"), ranked[17][1])
     ranked[18] = (doc(170, 900, 905, "reserve budget overflow"), ranked[18][1])
 
+    # Only the first reserve is a strong top-three lexical candidate.
+    # Put the later candidates at facet rank four so this test continues to
+    # exercise chunk-gap, same-facet, and exhausted-budget diagnostics rather
+    # than the new strong-lexical priority policy.
+    selected_prefix = [ranked[0], ranked[1], ranked[2]]
     facet_rankings = {
         "financial_economic::lexical": [ranked[14]],
-        "policy_governance::lexical": [ranked[15]],
+        "policy_governance::lexical": [*selected_prefix, ranked[15]],
         "financial_economic::semantic": [ranked[16]],
-        "causal_factors::lexical": [ranked[17]],
-        "operational_challenges::lexical": [ranked[18]],
+        "causal_factors::lexical": [*selected_prefix, ranked[17]],
+        "operational_challenges::lexical": [*selected_prefix, ranked[18]],
     }
 
     trace = {}
