@@ -2051,6 +2051,7 @@ def select_diverse_retrieval_anchors(
         diagnostic_trace["reserve_replacements"] = []
         diagnostic_trace["reserve_rejections"] = []
         diagnostic_trace["multi_candidate_lexical_facet_priority"] = []
+        diagnostic_trace["strong_lexical_candidate_priority"] = []
     if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
         return selected
 
@@ -2072,6 +2073,7 @@ def select_diverse_retrieval_anchors(
     # usual one-reserve-per-facet rule.
     strong_lexical_candidates_by_facet: dict[str, set[Any]] = {}
     strong_lexical_rescue_lifts_by_facet: dict[str, dict[Any, int]] = {}
+    strong_lexical_rescue_by_identity: dict[Any, dict[str, Any]] = {}
     for source_name, facet_results in facet_candidate_rankings.items():
         if not source_name.endswith("::lexical"):
             continue
@@ -2089,12 +2091,53 @@ def select_diverse_retrieval_anchors(
                 or identity in selected_identities
             ):
                 continue
+
+            rescue_delta = global_rank - facet_rank
             strong_lexical_candidates_by_facet.setdefault(
                 facet_name, set()
             ).add(identity)
             strong_lexical_rescue_lifts_by_facet.setdefault(
                 facet_name, {}
-            ).setdefault(identity, global_rank - facet_rank)
+            ).setdefault(identity, rescue_delta)
+
+            # Track strong lexical evidence independently of whether its facet
+            # has multiple qualifying candidates. A top-three lexical result
+            # inside the existing global reserve window is a meaningful,
+            # bounded signal even when it is the only such result in its facet.
+            previous = strong_lexical_rescue_by_identity.get(identity)
+            if previous is None or (
+                rescue_delta,
+                -facet_rank,
+            ) > (
+                previous["rescue_delta"],
+                -previous["facet_rank"],
+            ):
+                strong_lexical_rescue_by_identity[identity] = {
+                    "facet_name": facet_name,
+                    "facet_rank": facet_rank,
+                    "global_rank": global_rank,
+                    "rescue_delta": rescue_delta,
+                }
+
+    if diagnostic_trace is not None:
+        diagnostic_trace["strong_lexical_candidate_priority"] = [
+            {
+                "chunk_id": item_by_identity[identity][0].metadata.get("chunk_id"),
+                "facet_name": candidate["facet_name"],
+                "facet_rank": candidate["facet_rank"],
+                "global_rank": candidate["global_rank"],
+                "rescue_delta": candidate["rescue_delta"],
+            }
+            for identity, candidate in sorted(
+                strong_lexical_rescue_by_identity.items(),
+                key=lambda item: (
+                    -item[1]["rescue_delta"],
+                    item[1]["facet_rank"],
+                    item[1]["global_rank"],
+                    item[1]["facet_name"],
+                ),
+            )
+        ]
 
     multi_candidate_lexical_facets = {
         facet_name
@@ -2232,9 +2275,9 @@ def select_diverse_retrieval_anchors(
 
         if global_rank <= limit * 3:
             if is_multi_candidate_lexical_reserve(identity, proposal):
-                # Prefer the qualifying facet group whose candidates show
-                # the strongest average lift over their global fused ranks.
-                # Global rank remains the tie-breaker within a group.
+                # Preserve group-level priority for facets that surface several
+                # distinct, strong lexical candidates. Global rank remains the
+                # tie-breaker within a qualifying group.
                 return (
                     0,
                     -multi_candidate_lexical_facet_strength.get(
@@ -2245,19 +2288,34 @@ def select_diverse_retrieval_anchors(
                     -proposal["rescue_delta"],
                 )
 
-            # Keep ordinary in-window candidates ahead of deep semantic rescue,
-            # but behind a qualifying multi-candidate lexical facet group.
+            strong_lexical_candidate = strong_lexical_rescue_by_identity.get(identity)
+            if strong_lexical_candidate is not None:
+                # A single strong lexical facet match must not lose to a
+                # globally higher-ranked but weakly supported reserve. This
+                # priority is deliberately limited to top-three lexical facet
+                # results inside the existing three-times global-rank window.
+                return (
+                    1,
+                    -strong_lexical_candidate["rescue_delta"],
+                    strong_lexical_candidate["facet_rank"],
+                    global_rank,
+                    proposal["facet_rank"],
+                    -proposal["rescue_delta"],
+                )
+
+            # Ordinary in-window reserves remain eligible but follow strong
+            # lexical facet evidence when the reserve budget is scarce.
             return (
-                1,
+                2,
                 global_rank,
                 proposal["facet_rank"],
                 -proposal["rescue_delta"],
             )
 
-        # Preserve the established deep semantic rescue as a fallback when
-        # no suitable candidate inside the standard reserve window competes.
+        # Preserve deep semantic rescue as a bounded fallback after candidates
+        # inside the standard global-rank window.
         return (
-            2,
+            3,
             -proposal["rescue_delta"],
             proposal["facet_rank"],
             global_rank,

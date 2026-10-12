@@ -792,6 +792,64 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
 
 
 @pytest.mark.unit
+def test_single_strong_lexical_facet_candidate_precedes_weaker_in_window_reserve():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    # A globally earlier weak match competes with a single strong lexical
+    # facet match. Use generic facet labels so this policy is not domain-bound.
+    ranked[14] = (doc(150, 700, 705, "weak topic evidence"), ranked[14][1])
+    ranked[17] = (doc(180, 800, 805, "strong topic evidence"), ranked[17][1])
+
+    # The selected chunks in the first and third positions preserve the
+    # strong candidate's facet rank of 2; the weak candidate is facet rank 12.
+    # Only one reserve is available, making the priority decision observable.
+    topic_facet = [
+        ranked[0],
+        ranked[17],
+        ranked[1],
+        *ranked[2:10],
+        ranked[14],
+    ]
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "generic_topic::lexical": topic_facet,
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert len(result) == 12
+    assert 180 in selected_ids
+    assert 150 not in selected_ids
+    assert 180 in {item[0].metadata["chunk_id"] for item in result[:4]}
+    assert any(
+        item["candidate_chunk_id"] == 150
+        and item["reason"] == "reserve_budget_reached"
+        for item in trace["reserve_rejections"]
+    )
+
+    priority = {
+        item["chunk_id"]: item
+        for item in trace["strong_lexical_candidate_priority"]
+    }
+    assert priority[180]["facet_name"] == "generic_topic"
+    assert priority[180]["facet_rank"] == 2
+    assert priority[180]["global_rank"] == 18
+    assert priority[180]["rescue_delta"] == 16
+
+
+@pytest.mark.unit
 def test_multiple_strong_lexical_candidates_from_one_facet_can_use_reserve_budget():
     ranked = [
         (
@@ -846,12 +904,17 @@ def test_facet_anchor_reserve_trace_records_rejection_reasons_without_changing_s
     ranked[17] = (doc(160, 850, 855, "second facet reserve"), ranked[17][1])
     ranked[18] = (doc(170, 900, 905, "reserve budget overflow"), ranked[18][1])
 
+    # Only the first reserve is a strong top-three lexical candidate.
+    # Put the later candidates at facet rank four so this test continues to
+    # exercise chunk-gap, same-facet, and exhausted-budget diagnostics rather
+    # than the new strong-lexical priority policy.
+    selected_prefix = [ranked[0], ranked[1], ranked[2]]
     facet_rankings = {
         "financial_economic::lexical": [ranked[14]],
-        "policy_governance::lexical": [ranked[15]],
+        "policy_governance::lexical": [*selected_prefix, ranked[15]],
         "financial_economic::semantic": [ranked[16]],
-        "causal_factors::lexical": [ranked[17]],
-        "operational_challenges::lexical": [ranked[18]],
+        "causal_factors::lexical": [*selected_prefix, ranked[17]],
+        "operational_challenges::lexical": [*selected_prefix, ranked[18]],
     }
 
     trace = {}
