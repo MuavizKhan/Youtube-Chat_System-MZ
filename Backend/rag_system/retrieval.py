@@ -2044,6 +2044,40 @@ def select_diverse_retrieval_anchors(
     selected_identities = {
         _retrieval_document_identity(item[0]) for item in selected
     }
+
+    # A single broad facet can contain multiple distinct answer-bearing passages.
+    # Recognize that case only when at least two different candidates are each
+    # in the top three of the same lexical facet source and inside the normal
+    # three-times global-rank window. This remains a narrow exception to the
+    # usual one-reserve-per-facet rule.
+    strong_lexical_candidates_by_facet: dict[str, set[Any]] = {}
+    for source_name, facet_results in facet_candidate_rankings.items():
+        if not source_name.endswith("::lexical"):
+            continue
+        facet_name = source_name.rsplit("::", 1)[0]
+        for facet_rank, facet_item in enumerate(
+            facet_results[:min(3, facet_rank_cutoff)],
+            start=1,
+        ):
+            identity = _retrieval_document_identity(facet_item[0])
+            global_rank = rank_by_identity.get(identity)
+            if (
+                global_rank is None
+                or global_rank <= limit
+                or global_rank > limit * 3
+                or identity in selected_identities
+            ):
+                continue
+            strong_lexical_candidates_by_facet.setdefault(
+                facet_name, set()
+            ).add(identity)
+
+    multi_candidate_lexical_facets = {
+        facet_name
+        for facet_name, identities in strong_lexical_candidates_by_facet.items()
+        if len(identities) >= 2
+    }
+
     proposals = {}
     facet_sources_by_identity = {}
     for source_name, facet_results in facet_candidate_rankings.items():
@@ -2126,16 +2160,26 @@ def select_diverse_retrieval_anchors(
     prioritized_reserves = []
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
 
+    def is_multi_candidate_lexical_reserve(identity, proposal):
+        return (
+            proposal["global_rank"] <= limit * 3
+            and proposal["facet_name"] in multi_candidate_lexical_facets
+            and identity in strong_lexical_candidates_by_facet.get(
+                proposal["facet_name"], set()
+            )
+        )
+
     def proposal_priority(pair):
-        proposal = pair[1]
+        identity, proposal = pair
         global_rank = proposal["global_rank"]
 
         if global_rank <= limit * 3:
-            # Prefer candidates that already have credible global relevance.
-            # The facet ranking is supporting evidence, not a reason to let a
-            # much deeper semantic rescue consume the scarce reserve budget.
+            # A small set of independently strong lexical passages from one
+            # facet can cover different parts of a multi-part question. Give
+            # that set priority, while keeping ordinary in-window candidates
+            # ahead of any deep semantic rescue.
             return (
-                0,
+                0 if is_multi_candidate_lexical_reserve(identity, proposal) else 1,
                 global_rank,
                 proposal["facet_rank"],
                 -proposal["rescue_delta"],
@@ -2144,7 +2188,7 @@ def select_diverse_retrieval_anchors(
         # Preserve the established deep semantic rescue as a fallback when
         # no suitable candidate inside the standard reserve window competes.
         return (
-            1,
+            2,
             -proposal["rescue_delta"],
             proposal["facet_rank"],
             global_rank,
@@ -2166,16 +2210,20 @@ def select_diverse_retrieval_anchors(
                         "reason": "reserve_budget_reached",
                     })
             break
-        if identity in reserved_identities or proposal["facet_name"] in reserved_facets:
+        same_facet_already_reserved = proposal["facet_name"] in reserved_facets
+        if identity in reserved_identities or (
+            same_facet_already_reserved
+            and not is_multi_candidate_lexical_reserve(identity, proposal)
+        ):
             if diagnostic_trace is not None:
                 diagnostic_trace["reserve_rejections"].append({
                     "candidate_chunk_id": proposal["item"][0].metadata.get("chunk_id"),
                     "candidate_global_rank": proposal["global_rank"],
                     "facet_name": proposal["facet_name"],
                     "reason": (
-                        "facet_already_reserved"
-                        if proposal["facet_name"] in reserved_facets
-                        else "identity_already_reserved"
+                        "identity_already_reserved"
+                        if identity in reserved_identities
+                        else "facet_already_reserved"
                     ),
                 })
             continue
