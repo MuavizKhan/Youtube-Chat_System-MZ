@@ -720,6 +720,7 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
     ranked[21] = (doc(69, 900, 905, "global financial crisis"), ranked[21][1])
     ranked[23] = (doc(179, 1000, 1005, "government policies that did not help"), ranked[23][1])
 
+    trace = {}
     result = retrieval.select_diverse_retrieval_anchors(
         ranked,
         limit=12,
@@ -737,6 +738,7 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
                 ranked[14],  # Facet rank 3; global rank 15; lift 12.
             ],
         },
+        diagnostic_trace=trace,
     )
 
     selected_ids = {item[0].metadata["chunk_id"] for item in result}
@@ -744,6 +746,15 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
     assert 179 in selected_ids
     assert 125 not in selected_ids
     assert 9 not in selected_ids
+
+    facet_priority = trace["multi_candidate_lexical_facet_priority"]
+    assert facet_priority[0]["facet_name"] == "financial_economic"
+    assert facet_priority[0]["mean_rescue_delta"] == 21.0
+    policy_priority = next(
+        item for item in facet_priority
+        if item["facet_name"] == "policy_governance"
+    )
+    assert policy_priority["mean_rescue_delta"] == 15.0
 
 
 @pytest.mark.unit
