@@ -704,6 +704,73 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
 
 
 @pytest.mark.unit
+def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    # Competing policy candidates rank better globally, but the financial
+    # candidates have a larger average global-to-facet rank lift.
+    ranked[14] = (doc(125, 700, 705, "policy candidate rank 3"), ranked[14][1])
+    ranked[15] = (doc(9, 750, 755, "overlapping lexical candidate"), ranked[15][1])
+    ranked[16] = (doc(208, 800, 805, "causal candidate"), ranked[16][1])
+    ranked[17] = (doc(210, 825, 830, "operational candidate"), ranked[17][1])
+    ranked[19] = (doc(106, 850, 855, "policy candidate rank 2"), ranked[19][1])
+    ranked[21] = (doc(69, 900, 905, "global financial crisis"), ranked[21][1])
+    ranked[23] = (doc(179, 1000, 1005, "government policies that did not help"), ranked[23][1])
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            "financial_economic::lexical": [
+                ranked[21],  # Facet rank 1; global rank 22; lift 21.
+                ranked[0],   # Facet rank 2; already selected globally.
+                ranked[23],  # Facet rank 3; global rank 24; lift 21.
+            ],
+            "policy_governance::lexical": [
+                ranked[15],  # Facet rank 1; global rank 16; lift 15.
+                ranked[19],  # Facet rank 2; global rank 20; lift 18.
+                ranked[14],  # Facet rank 3; global rank 15; lift 12.
+            ],
+            # Chunk 9 overlaps multiple facet lists, as it does in Q10.
+            "causal_factors::lexical": [
+                ranked[0],   # Already selected; preserves ranks 2 and 3.
+                ranked[15],  # Facet rank 2; global rank 16; lift 14.
+                ranked[16],  # Facet rank 3; global rank 17; lift 14.
+            ],
+            "operational_challenges::lexical": [
+                ranked[17],  # Facet rank 1; global rank 18; lift 17.
+                ranked[0],   # Already selected.
+                ranked[15],  # Facet rank 3; global rank 16; lift 13.
+            ],
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert 69 in selected_ids
+    assert 179 in selected_ids
+    assert 125 not in selected_ids
+    assert 9 not in selected_ids
+
+    facet_priority = trace["multi_candidate_lexical_facet_priority"]
+    assert facet_priority[0]["facet_name"] == "financial_economic"
+    assert facet_priority[0]["mean_rescue_delta"] == 21.0
+    policy_priority = next(
+        item for item in facet_priority
+        if item["facet_name"] == "policy_governance"
+    )
+    assert policy_priority["mean_rescue_delta"] == 15.0
+
+
+@pytest.mark.unit
 def test_multiple_strong_lexical_candidates_from_one_facet_can_use_reserve_budget():
     ranked = [
         (
