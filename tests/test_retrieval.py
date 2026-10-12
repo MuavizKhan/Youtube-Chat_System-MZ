@@ -704,6 +704,46 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
 
 
 @pytest.mark.unit
+def test_multiple_strong_lexical_candidates_from_one_facet_can_use_reserve_budget():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    # Model the Q10 shape: two high-quality lexical candidates from one facet
+    # compete with earlier-ranked singleton-facet candidates for two reserves.
+    ranked[14] = (doc(125, 700, 705, "policy candidate"), ranked[14][1])
+    ranked[16] = (doc(208, 800, 805, "causal candidate"), ranked[16][1])
+    ranked[21] = (doc(69, 900, 905, "global financial crisis"), ranked[21][1])
+    ranked[23] = (doc(179, 1000, 1005, "government policies that did not help"), ranked[23][1])
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            # The already-selected chunk at rank 2 preserves the target's
+            # source-level facet ranks of 1 and 3.
+            "financial_economic::lexical": [ranked[21], ranked[0], ranked[23]],
+            "policy_governance::lexical": [ranked[14]],
+            "causal_factors::lexical": [ranked[16]],
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert 69 in selected_ids
+    assert 179 in selected_ids
+    assert 125 not in selected_ids
+    assert 208 not in selected_ids
+    assert len(trace["reserve_replacements"]) == 2
+
+
+@pytest.mark.unit
 def test_facet_anchor_reserve_trace_records_rejection_reasons_without_changing_selection():
     ranked = [
         (doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"), 0.1 + i / 100)
