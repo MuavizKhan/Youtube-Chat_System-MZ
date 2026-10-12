@@ -2031,6 +2031,7 @@ def select_diverse_retrieval_anchors(
         diagnostic_trace["reserve_proposals"] = []
         diagnostic_trace["reserve_replacements"] = []
         diagnostic_trace["reserve_rejections"] = []
+        diagnostic_trace["multi_candidate_lexical_facet_priority"] = []
     if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
         return selected
 
@@ -2093,6 +2094,27 @@ def select_diverse_retrieval_anchors(
         for facet_name, lifts in strong_lexical_rescue_lifts_by_facet.items()
         if facet_name in multi_candidate_lexical_facets and lifts
     }
+
+    if diagnostic_trace is not None:
+        diagnostic_trace["multi_candidate_lexical_facet_priority"] = [
+            {
+                "facet_name": facet_name,
+                "mean_rescue_delta": round(strength, 3),
+                "candidate_chunk_ids": [
+                    item_by_identity[identity][0].metadata.get("chunk_id")
+                    for identity in sorted(
+                        strong_lexical_candidates_by_facet[facet_name],
+                        key=lambda candidate_identity: rank_by_identity.get(
+                            candidate_identity, float("inf")
+                        ),
+                    )
+                ],
+            }
+            for facet_name, strength in sorted(
+                multi_candidate_lexical_facet_strength.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ]
 
     proposals = {}
     facet_sources_by_identity = {}
