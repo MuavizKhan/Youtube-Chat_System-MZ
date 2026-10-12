@@ -800,34 +800,30 @@ def test_single_strong_lexical_facet_candidate_precedes_weaker_in_window_reserve
         )
         for i in range(30)
     ]
-    # Three competing candidates sit inside the existing global-rank window:
-    # a strong policy-change match at global rank 18, a weak rank-12 match at
-    # global rank 15, and a strong policy-governance match at global rank 14.
-    ranked[13] = (doc(140, 650, 655, "policy governance evidence"), ranked[13][1])
-    ranked[14] = (doc(150, 700, 705, "weak policy change evidence"), ranked[14][1])
-    ranked[17] = (doc(180, 800, 805, "strong policy change evidence"), ranked[17][1])
+    # A globally earlier weak match competes with a single strong lexical
+    # facet match. Use generic facet labels so this policy is not domain-bound.
+    ranked[14] = (doc(150, 700, 705, "weak topic evidence"), ranked[14][1])
+    ranked[17] = (doc(180, 800, 805, "strong topic evidence"), ranked[17][1])
 
-    # Only one non-initial candidate qualifies in policy_change's top three.
-    # The weak candidate appears at facet rank 12, so this is not a multi-
-    # candidate-facet case and must exercise the new general strong-match tier.
-    policy_change = [
+    # The selected chunks in the first and third positions preserve the
+    # strong candidate's facet rank of 2; the weak candidate is facet rank 12.
+    # Only one reserve is available, making the priority decision observable.
+    topic_facet = [
         ranked[0],
         ranked[17],
         ranked[1],
         *ranked[2:10],
         ranked[14],
     ]
-    policy_governance = [ranked[0], ranked[13]]
 
     trace = {}
     result = retrieval.select_diverse_retrieval_anchors(
         ranked,
         limit=12,
         min_chunk_gap=3,
-        facet_reserve_limit=2,
+        facet_reserve_limit=1,
         facet_candidate_rankings={
-            "policy_change::lexical": policy_change,
-            "policy_governance::lexical": policy_governance,
+            "generic_topic::lexical": topic_facet,
         },
         diagnostic_trace=trace,
     )
@@ -835,23 +831,22 @@ def test_single_strong_lexical_facet_candidate_precedes_weaker_in_window_reserve
     selected_ids = {item[0].metadata["chunk_id"] for item in result}
     assert len(result) == 12
     assert 180 in selected_ids
-    assert 140 in selected_ids
     assert 150 not in selected_ids
-    # Reserved evidence should be promoted early enough to affect top-k recall.
-    assert {140, 180}.issubset(
-        {item[0].metadata["chunk_id"] for item in result[:4]}
+    assert 180 in {item[0].metadata["chunk_id"] for item in result[:4]}
+    assert any(
+        item["candidate_chunk_id"] == 150
+        and item["reason"] == "reserve_budget_reached"
+        for item in trace["reserve_rejections"]
     )
 
     priority = {
         item["chunk_id"]: item
         for item in trace["strong_lexical_candidate_priority"]
     }
-    assert priority[180]["facet_name"] == "policy_change"
+    assert priority[180]["facet_name"] == "generic_topic"
     assert priority[180]["facet_rank"] == 2
     assert priority[180]["global_rank"] == 18
     assert priority[180]["rescue_delta"] == 16
-    assert priority[140]["facet_name"] == "policy_governance"
-    assert priority[140]["rescue_delta"] == 12
 
 
 @pytest.mark.unit
