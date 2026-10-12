@@ -997,7 +997,8 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
         "brand branding advertising marketing personality identity"
     ),
     "business_corporate": (
-        "business companies subsidiaries ownership investments"
+        "businesses companies subsidiaries ownership investments "
+        "brands products teams franchises ventures"
     ),
 }
 
@@ -1696,6 +1697,24 @@ def is_evidence_dense_question(query: str) -> bool:
     )
     if quantitative_how and not compound_or_explanatory:
         return False
+
+    # Broad entity-list questions need more than the generic focus query:
+    # several answer-bearing chunks may describe different companies, brands,
+    # products, teams, or ventures. Route these through the relevant business
+    # facet even when phrased as a simple "what" question.
+    entity_inventory_request = (
+        re.search(r"\b(?:what|which|list|name|identify)\b", normalized)
+        and re.search(
+            r"\b(?:business\w*|companies|company|brands?|products?|organizations?|entities|teams|franchises|ventures)\b",
+            normalized,
+        )
+        and re.search(
+            r"\b(?:discuss\w*|mention\w*|talk\w*|own\w*|operate\w*|associate\w*|involved|connected|cover\w*|feature\w*)\b",
+            normalized,
+        )
+    )
+    if entity_inventory_request:
+        return True
 
     if re.search(
         r"\b(?:why|reason\w*|caus\w*|because|challenges?|problems?|problem|failure|failed|fail|impact|effects?|affect|role of|multiple|several)\b",
