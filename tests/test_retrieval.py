@@ -792,6 +792,69 @@ def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
 
 
 @pytest.mark.unit
+def test_single_strong_lexical_facet_candidate_precedes_weaker_in_window_reserve():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    # Three competing candidates sit inside the existing global-rank window:
+    # a strong policy-change match at global rank 18, a weak rank-12 match at
+    # global rank 15, and a strong policy-governance match at global rank 14.
+    ranked[13] = (doc(140, 650, 655, "policy governance evidence"), ranked[13][1])
+    ranked[14] = (doc(150, 700, 705, "weak policy change evidence"), ranked[14][1])
+    ranked[17] = (doc(180, 800, 805, "strong policy change evidence"), ranked[17][1])
+
+    # Only one non-initial candidate qualifies in policy_change's top three.
+    # The weak candidate appears at facet rank 12, so this is not a multi-
+    # candidate-facet case and must exercise the new general strong-match tier.
+    policy_change = [
+        ranked[0],
+        ranked[17],
+        ranked[1],
+        *ranked[2:10],
+        ranked[14],
+    ]
+    policy_governance = [ranked[0], ranked[13]]
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            "policy_change::lexical": policy_change,
+            "policy_governance::lexical": policy_governance,
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert len(result) == 12
+    assert 180 in selected_ids
+    assert 140 in selected_ids
+    assert 150 not in selected_ids
+    # Reserved evidence should be promoted early enough to affect top-k recall.
+    assert {140, 180}.issubset(
+        {item[0].metadata["chunk_id"] for item in result[:4]}
+    )
+
+    priority = {
+        item["chunk_id"]: item
+        for item in trace["strong_lexical_candidate_priority"]
+    }
+    assert priority[180]["facet_name"] == "policy_change"
+    assert priority[180]["facet_rank"] == 2
+    assert priority[180]["global_rank"] == 18
+    assert priority[180]["rescue_delta"] == 16
+    assert priority[140]["facet_name"] == "policy_governance"
+    assert priority[140]["rescue_delta"] == 12
+
+
+@pytest.mark.unit
 def test_multiple_strong_lexical_candidates_from_one_facet_can_use_reserve_budget():
     ranked = [
         (
