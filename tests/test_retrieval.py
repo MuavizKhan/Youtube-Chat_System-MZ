@@ -129,6 +129,27 @@ def test_evidence_facet_planner_switches_to_brand_queries():
 
 
 @pytest.mark.unit
+def test_entity_inventory_questions_route_through_business_corporate_facet():
+    query = (
+        "What businesses or companies does Vijay Mallya discuss "
+        "in the interview?"
+    )
+
+    assert retrieval.is_evidence_dense_question(query)
+
+    plans = retrieval.build_retrieval_query_plan(query)
+    labels = [label for label, _query in plans]
+    assert labels[:2] == ["original", "focus"]
+    assert labels[2:] == ["business_corporate"]
+
+    business_query = plans[-1][1]
+    assert business_query.endswith(
+        "businesses companies subsidiaries ownership investments "
+        "brands products teams franchises ventures"
+    )
+
+
+@pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
     query = "What role does government policy play in problems faced by people?"
     plans = retrieval.build_retrieval_query_plan(query)
