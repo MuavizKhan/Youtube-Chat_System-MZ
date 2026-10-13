@@ -464,6 +464,53 @@ def test_lexical_facet_fusion_prefers_shared_evidence():
     assert results[0][0].metadata["chunk_id"] == 2
 
 
+
+@pytest.mark.unit
+def test_question_context_passes_original_query_lexical_candidates_to_anchor_selection(monkeypatch):
+    original_question = "Why did the company fail and what debt reasons contributed to it?"
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    lexical_target = ranked[17]
+
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **kwargs: ranked if kwargs["query"] == original_question else [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda vector_store, query, limit: (
+            [lexical_target] if query == original_question else []
+        ),
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "fuse_semantic_and_lexical_results",
+        lambda semantic_results, lexical_results, **kwargs: semantic_results,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda _store, results, **kwargs: results,
+    )
+
+    results = retrieval.retrieve_question_context(
+        object(),
+        original_question,
+        expand_context=False,
+    )
+
+    assert len(results) == 12
+    assert lexical_target in results
+
+
 @pytest.mark.unit
 def test_dense_question_runs_facet_lexical_queries(monkeypatch):
     item = doc(1, 0, 10, "evidence")
@@ -722,6 +769,223 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
     # In-window facet reserves must affect top-k recall, not just the anchor tail.
     assert financial_candidate in result[:4]
     assert policy_candidate in result[:4]
+
+
+
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_works_without_facet_rankings():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    target = ranked[17]
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        original_query_lexical_results=[target],
+    )
+
+    assert len(result) == 12
+    assert target in result
+
+
+@pytest.mark.unit
+def test_original_query_lexical_candidate_can_use_bounded_reserve_without_facet_membership():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    ranked[13] = (
+        doc(130, 650, 655, "ordinary facet reserve"),
+        ranked[13][1],
+    )
+    ranked[17] = (
+        doc(170, 850, 855, "numeric debt evidence"),
+        ranked[17][1],
+    )
+
+    # The first eligible original-query candidate is eighth in that lexical
+    # ranking and global rank 18. It is deliberately absent from facet lists.
+    original_query_lexical = [*ranked[:7], ranked[17], ranked[22]]
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "generic_topic::semantic": [
+                ranked[0],
+                ranked[1],
+                ranked[2],
+                ranked[13],
+            ],
+        },
+        original_query_lexical_results=original_query_lexical,
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert len(result) == 12
+    assert 170 in selected_ids
+    assert 130 not in selected_ids
+    assert 170 in {item[0].metadata["chunk_id"] for item in result[:4]}
+    priority = trace["original_query_lexical_priority"]
+    assert priority[0] == {
+        "chunk_id": 170,
+        "original_lexical_rank": 8,
+        "global_rank": 18,
+        "added_as_reserve": True,
+    }
+    assert any(
+        item["candidate_chunk_id"] == 130
+        and item["reason"] == "reserve_budget_reached"
+        for item in trace["reserve_rejections"]
+    )
+    replacement = next(
+        item for item in trace["reserve_replacements"]
+        if item["candidate_chunk_id"] == 170
+    )
+    assert replacement["source"] == "original_query_lexical"
+    assert replacement["original_query_lexical_rank"] == 8
+
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_does_not_override_strong_facet_priority():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    ranked[16] = (
+        doc(160, 800, 805, "original lexical competitor"),
+        ranked[16][1],
+    )
+    ranked[17] = (
+        doc(180, 850, 855, "strong facet evidence"),
+        ranked[17][1],
+    )
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "generic_topic::lexical": [
+                ranked[0],
+                ranked[17],
+                ranked[1],
+            ],
+        },
+        original_query_lexical_results=[ranked[16]],
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert 180 in selected_ids
+    assert 160 not in selected_ids
+    assert any(
+        item["candidate_chunk_id"] == 160
+        and item["reason"] == "reserve_budget_reached"
+        for item in trace["reserve_rejections"]
+    )
+
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_respects_existing_global_rank_window():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(60)
+    ]
+    outside_window = ranked[39]  # Global rank 40, beyond 3 * 12.
+    in_window_facet_candidate = ranked[13]  # Global rank 14.
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "generic_topic::semantic": [in_window_facet_candidate],
+        },
+        original_query_lexical_results=[outside_window],
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert outside_window[0].metadata["chunk_id"] not in selected_ids
+    assert all(
+        item["chunk_id"] != outside_window[0].metadata["chunk_id"]
+        for item in trace["original_query_lexical_priority"]
+    )
+
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_obeys_chunk_gap_gate_and_can_try_next_candidate():
+    selected_chunk_ids = [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33]
+    ranked = [
+        (doc(chunk_id, rank * 50, rank * 50 + 5, f"anchor {rank}"), 0.1 + rank / 100)
+        for rank, chunk_id in enumerate(selected_chunk_ids)
+    ]
+    ranked.extend(
+        [
+            (doc(100, 650, 655, "ordinary candidate"), 0.3),
+            (doc(110, 700, 705, "candidate 14"), 0.31),
+            (doc(120, 750, 755, "candidate 15"), 0.32),
+            (doc(130, 800, 805, "candidate 16"), 0.33),
+            (doc(140, 850, 855, "candidate 17"), 0.34),
+            (doc(16, 900, 905, "chunk-gap-conflicting evidence"), 0.35),
+            (doc(160, 950, 955, "second lexical candidate"), 0.36),
+        ]
+    )
+    blocked_target = ranked[17]
+    fallback_target = ranked[18]
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "generic_topic::semantic": [ranked[12]],
+        },
+        original_query_lexical_results=[blocked_target, fallback_target],
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert 16 not in selected_ids
+    assert 160 in selected_ids
+    assert any(
+        item["candidate_chunk_id"] == 16
+        and item["reason"] == "chunk_gap_conflict"
+        for item in trace["reserve_rejections"]
+    )
+    assert any(
+        item["candidate_chunk_id"] == 160
+        and item["source"] == "original_query_lexical"
+        and item["reason"] == "replacement_selected"
+        for item in trace["reserve_replacements"]
+    )
 
 
 @pytest.mark.unit
@@ -1461,6 +1725,7 @@ def test_diagnostics_match_production_anchor_and_context_budgets(
         limit,
         min_chunk_gap=3,
         facet_candidate_rankings=None,
+        original_query_lexical_results=None,
         diagnostic_trace=None,
     ):
         observed_anchor_gaps.append(min_chunk_gap)

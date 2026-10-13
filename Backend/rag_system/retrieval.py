@@ -611,6 +611,7 @@ def _select_final_retrieval_candidates(
     dense_question: bool,
     k: int,
     max_distance: float,
+    original_query_lexical_results: list[tuple[Any, float]] | None = None,
     diagnostic_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply the same evidence gate, reranking, and anchor policy in all routes."""
@@ -669,6 +670,11 @@ def _select_final_retrieval_candidates(
             limit=anchor_limit,
             min_chunk_gap=DENSE_ANCHOR_MIN_CHUNK_GAP,
             facet_candidate_rankings=facet_candidate_rankings,
+            **(
+                {"original_query_lexical_results": original_query_lexical_results}
+                if original_query_lexical_results
+                else {}
+            ),
             **(
                 {"diagnostic_trace": diagnostic_trace}
                 if diagnostic_trace is not None
@@ -781,6 +787,7 @@ def diagnose_retrieval_pipeline(
     lexical_stages = []
     lexical_rankings = []
     lexical_rankings_by_label = {}
+    original_query_lexical_results = []
     for label, lexical_query in lexical_queries:
         lexical_results_for_query = lexical_search(
             vector_store=vector_store,
@@ -793,6 +800,8 @@ def diagnose_retrieval_pipeline(
             "results": lexical_results_for_query,
         })
         lexical_rankings.append(lexical_results_for_query)
+        if label == "original":
+            original_query_lexical_results = lexical_results_for_query
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = lexical_results_for_query
     lexical_results = fuse_lexical_rankings(lexical_rankings)
@@ -821,6 +830,7 @@ def diagnose_retrieval_pipeline(
         dense_question=dense_question,
         k=k,
         max_distance=max_distance,
+        original_query_lexical_results=original_query_lexical_results,
         diagnostic_trace=anchor_selection_trace,
     )
     context_results = expand_retrieval_context(
@@ -1977,9 +1987,11 @@ def select_diverse_retrieval_anchors(
     facet_candidate_rankings: dict[str, list[tuple[Any, float]]] | None = None,
     facet_reserve_limit: int = 2,
     facet_rank_cutoff: int = 24,
+    original_query_lexical_results: list[tuple[Any, float]] | None = None,
     diagnostic_trace: dict[str, Any] | None = None,
 ):
-    """Select diverse anchors, then reserve a bounded budget for facet evidence.
+    """Select diverse anchors, then reserve bounded slots for facet and original-query
+    evidence.
 
     Standard reserves remain within three times the anchor budget. When reserve
     capacity is scarce, eligible candidates within that standard global-rank
@@ -2052,8 +2064,16 @@ def select_diverse_retrieval_anchors(
         diagnostic_trace["reserve_rejections"] = []
         diagnostic_trace["multi_candidate_lexical_facet_priority"] = []
         diagnostic_trace["strong_lexical_candidate_priority"] = []
-    if not facet_candidate_rankings or facet_reserve_limit == 0 or len(selected) < 2:
+        diagnostic_trace["original_query_lexical_priority"] = []
+    if (
+        facet_reserve_limit == 0
+        or len(selected) < 2
+        or (not facet_candidate_rankings and not original_query_lexical_results)
+    ):
         return selected
+
+    if facet_candidate_rankings is None:
+        facet_candidate_rankings = {}
 
     rank_by_identity = {}
     item_by_identity = {}
@@ -2065,6 +2085,30 @@ def select_diverse_retrieval_anchors(
     selected_identities = {
         _retrieval_document_identity(item[0]) for item in selected
     }
+
+    # Keep original-query lexical evidence eligible for one bounded reserve lane.
+    # Candidates remain subject to the fused-rank window, anchor exclusion, and
+    # the same chunk-gap/replacement checks as facet-derived candidates.
+    original_query_lexical_candidates = []
+    for original_lexical_rank, original_item in enumerate(
+        original_query_lexical_results or [],
+        start=1,
+    ):
+        identity = _retrieval_document_identity(original_item[0])
+        global_rank = rank_by_identity.get(identity)
+        if (
+            global_rank is None
+            or global_rank <= limit
+            or global_rank > limit * 3
+            or identity in selected_identities
+        ):
+            continue
+        original_query_lexical_candidates.append({
+            "identity": identity,
+            "item": item_by_identity[identity],
+            "original_lexical_rank": original_lexical_rank,
+            "global_rank": global_rank,
+        })
 
     # A single broad facet can contain multiple distinct answer-bearing passages.
     # Recognize that case only when at least two different candidates are each
@@ -2225,7 +2269,37 @@ def select_diverse_retrieval_anchors(
             ):
                 proposals[identity] = proposal
 
+    # Add original-query candidates only when facet sources did not already
+    # nominate them. The shared reserve-facet guard caps this lane at one
+    # successful reserve while still allowing a later candidate to try if the
+    # best lexical candidate is rejected by chunk-gap/replacement constraints.
+    original_query_source_additions = set()
+    for source_candidate in original_query_lexical_candidates:
+        identity = source_candidate["identity"]
+        if identity in proposals:
+            continue
+        query_rank = source_candidate["original_lexical_rank"]
+        proposals[identity] = {
+            "item": source_candidate["item"],
+            "global_rank": source_candidate["global_rank"],
+            "facet_name": "original_query_lexical",
+            "facet_rank": query_rank,
+            "rescue_delta": source_candidate["global_rank"] - query_rank,
+            "source_name": "original_query_lexical",
+            "original_query_lexical_rank": query_rank,
+        }
+        original_query_source_additions.add(identity)
+
     if diagnostic_trace is not None:
+        diagnostic_trace["original_query_lexical_priority"] = [
+            {
+                "chunk_id": candidate["item"][0].metadata.get("chunk_id"),
+                "original_lexical_rank": candidate["original_lexical_rank"],
+                "global_rank": candidate["global_rank"],
+                "added_as_reserve": candidate["identity"] in original_query_source_additions,
+            }
+            for candidate in original_query_lexical_candidates
+        ]
         diagnostic_trace["facet_candidate_sources"] = [
             {
                 "chunk_id": sources[0]["chunk_id"],
@@ -2241,6 +2315,10 @@ def select_diverse_retrieval_anchors(
                 "global_rank": proposal["global_rank"],
                 "facet_name": proposal["facet_name"],
                 "facet_rank": proposal["facet_rank"],
+                "source": proposal.get("source_name", "facet"),
+                "original_query_lexical_rank": proposal.get(
+                    "original_query_lexical_rank"
+                ),
                 "initially_selected": identity in selected_identities,
             }
             for identity, proposal in proposals.items()
@@ -2303,10 +2381,22 @@ def select_diverse_retrieval_anchors(
                     -proposal["rescue_delta"],
                 )
 
+            if proposal.get("source_name") == "original_query_lexical":
+                # Original-query lexical evidence follows established strong
+                # facet policies but precedes ordinary in-window facet reserves.
+                # Keep candidates in the original lexical ranking order.
+                return (
+                    2,
+                    proposal["original_query_lexical_rank"],
+                    global_rank,
+                    proposal["facet_rank"],
+                    -proposal["rescue_delta"],
+                )
+
             # Ordinary in-window reserves remain eligible but follow strong
-            # lexical facet evidence when the reserve budget is scarce.
+            # facet and original-query lexical evidence when budget is scarce.
             return (
-                2,
+                3,
                 global_rank,
                 proposal["facet_rank"],
                 -proposal["rescue_delta"],
@@ -2315,7 +2405,7 @@ def select_diverse_retrieval_anchors(
         # Preserve deep semantic rescue as a bounded fallback after candidates
         # inside the standard global-rank window.
         return (
-            3,
+            4,
             -proposal["rescue_delta"],
             proposal["facet_rank"],
             global_rank,
@@ -2334,6 +2424,10 @@ def select_diverse_retrieval_anchors(
                         "candidate_chunk_id": pending_proposal["item"][0].metadata.get("chunk_id"),
                         "candidate_global_rank": pending_proposal["global_rank"],
                         "facet_name": pending_proposal["facet_name"],
+                        "source": pending_proposal.get("source_name", "facet"),
+                        "original_query_lexical_rank": pending_proposal.get(
+                            "original_query_lexical_rank"
+                        ),
                         "reason": "reserve_budget_reached",
                     })
             break
@@ -2347,6 +2441,10 @@ def select_diverse_retrieval_anchors(
                     "candidate_chunk_id": proposal["item"][0].metadata.get("chunk_id"),
                     "candidate_global_rank": proposal["global_rank"],
                     "facet_name": proposal["facet_name"],
+                    "source": proposal.get("source_name", "facet"),
+                    "original_query_lexical_rank": proposal.get(
+                        "original_query_lexical_rank"
+                    ),
                     "reason": (
                         "identity_already_reserved"
                         if identity in reserved_identities
@@ -2395,6 +2493,10 @@ def select_diverse_retrieval_anchors(
                     "candidate_chunk_id": candidate_item[0].metadata.get("chunk_id"),
                     "candidate_global_rank": proposal["global_rank"],
                     "facet_name": proposal["facet_name"],
+                    "source": proposal.get("source_name", "facet"),
+                    "original_query_lexical_rank": proposal.get(
+                        "original_query_lexical_rank"
+                    ),
                     "reason": (
                         "chunk_gap_conflict"
                         if blocking_chunk_ids
@@ -2410,6 +2512,10 @@ def select_diverse_retrieval_anchors(
                 "candidate_chunk_id": candidate_item[0].metadata.get("chunk_id"),
                 "candidate_global_rank": proposal["global_rank"],
                 "facet_name": proposal["facet_name"],
+                "source": proposal.get("source_name", "facet"),
+                "original_query_lexical_rank": proposal.get(
+                    "original_query_lexical_rank"
+                ),
                 "replaced_chunk_id": replaced_item[0].metadata.get("chunk_id"),
                 "replaced_global_rank": rank_by_identity.get(
                     _retrieval_document_identity(replaced_item[0])
@@ -2956,6 +3062,7 @@ def retrieve_question_context(
         lexical_queries.extend(build_evidence_facet_plan(query))
     lexical_rankings = []
     lexical_rankings_by_label = {}
+    original_query_lexical_results = []
     for label, lexical_query in lexical_queries:
         ranking = lexical_search(
             vector_store=vector_store,
@@ -2963,6 +3070,8 @@ def retrieve_question_context(
             limit=lexical_limit,
         )
         lexical_rankings.append(ranking)
+        if label == "original":
+            original_query_lexical_results = ranking
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = ranking
     lexical_results = fuse_lexical_rankings(lexical_rankings)
@@ -2990,6 +3099,7 @@ def retrieve_question_context(
         dense_question=dense_question,
         k=k,
         max_distance=max_distance,
+        original_query_lexical_results=original_query_lexical_results,
     )
     raw_results = selection["anchors"]
     if not expand_context:
