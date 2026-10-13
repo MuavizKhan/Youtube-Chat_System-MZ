@@ -2110,6 +2110,18 @@ def select_diverse_retrieval_anchors(
             "global_rank": global_rank,
         })
 
+    # Rank source candidates by how far fusion demoted them relative to the
+    # original lexical channel. A strong original lexical rank alone is not
+    # sufficient: it can still favor a non-answering neighbor over a candidate
+    # whose evidence signal was more severely diluted during fusion.
+    original_query_lexical_candidates.sort(
+        key=lambda candidate: (
+            -(candidate["global_rank"] - candidate["original_lexical_rank"]),
+            candidate["original_lexical_rank"],
+            candidate["global_rank"],
+        )
+    )
+
     # A single broad facet can contain multiple distinct answer-bearing passages.
     # Recognize that case only when at least two different candidates are each
     # in the top three of the same lexical facet source and inside the normal
@@ -2296,7 +2308,10 @@ def select_diverse_retrieval_anchors(
                 "chunk_id": candidate["item"][0].metadata.get("chunk_id"),
                 "original_lexical_rank": candidate["original_lexical_rank"],
                 "global_rank": candidate["global_rank"],
-                "added_as_reserve": candidate["identity"] in original_query_source_additions,
+                "rescue_delta": (
+                    candidate["global_rank"] - candidate["original_lexical_rank"]
+                ),
+                "eligible_proposal": candidate["identity"] in original_query_source_additions,
             }
             for candidate in original_query_lexical_candidates
         ]
@@ -2384,13 +2399,13 @@ def select_diverse_retrieval_anchors(
             if proposal.get("source_name") == "original_query_lexical":
                 # Original-query lexical evidence follows established strong
                 # facet policies but precedes ordinary in-window facet reserves.
-                # Keep candidates in the original lexical ranking order.
+                # Prefer the biggest source-to-fusion rank lift, then lexical rank.
                 return (
                     2,
+                    -proposal["rescue_delta"],
                     proposal["original_query_lexical_rank"],
                     global_rank,
                     proposal["facet_rank"],
-                    -proposal["rescue_delta"],
                 )
 
             # Ordinary in-window reserves remain eligible but follow strong
