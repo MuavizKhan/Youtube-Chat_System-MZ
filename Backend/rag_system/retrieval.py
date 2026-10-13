@@ -1990,7 +1990,8 @@ def select_diverse_retrieval_anchors(
     original_query_lexical_results: list[tuple[Any, float]] | None = None,
     diagnostic_trace: dict[str, Any] | None = None,
 ):
-    """Select diverse anchors, then reserve bounded slots for facet and original-query evidence.
+    """Select diverse anchors, then reserve bounded slots for facet and original-query
+    evidence.
 
     Standard reserves remain within three times the anchor budget. When reserve
     capacity is scarce, eligible candidates within that standard global-rank
@@ -2070,6 +2071,9 @@ def select_diverse_retrieval_anchors(
         or (not facet_candidate_rankings and not original_query_lexical_results)
     ):
         return selected
+
+    if facet_candidate_rankings is None:
+        facet_candidate_rankings = {}
 
     rank_by_identity = {}
     item_by_identity = {}

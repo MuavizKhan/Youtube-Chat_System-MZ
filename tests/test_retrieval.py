@@ -772,6 +772,30 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
 
 
 
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_works_without_facet_rankings():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+    target = ranked[17]
+
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        original_query_lexical_results=[target],
+    )
+
+    assert len(result) == 12
+    assert target in result
+
+
 @pytest.mark.unit
 def test_original_query_lexical_candidate_can_use_bounded_reserve_without_facet_membership():
     ranked = [
