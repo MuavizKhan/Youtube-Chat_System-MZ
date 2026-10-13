@@ -1047,6 +1047,44 @@ def test_original_query_lexical_reserve_obeys_chunk_gap_gate_and_can_try_next_ca
 
 
 @pytest.mark.unit
+def test_stronger_single_facet_candidate_competes_with_multi_candidate_facet_group():
+    ranked = [
+        (
+            doc(i * 1000, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    # Model the Q04/Q05-shaped competition: two policy candidates qualify as
+    # a multi-candidate lexical facet, but one financial candidate has a larger
+    # individual rank lift and should not be starved by the group-level tier.
+    ranked[19] = (doc(106, 950, 955, "policy evidence one"), ranked[19][1])
+    ranked[21] = (doc(125, 1050, 1055, "policy evidence two"), ranked[21][1])
+    ranked[25] = (doc(69, 1250, 1255, "financial crisis evidence"), ranked[25][1])
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            "policy_governance::lexical": [ranked[19], ranked[21]],
+            "financial_economic::lexical": [ranked[25]],
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    assert 69 in selected_ids[:4]
+    assert 125 in selected_ids[:4]
+    assert 106 not in selected_ids
+
+    replacements = trace["reserve_replacements"]
+    assert [item["candidate_chunk_id"] for item in replacements] == [69, 125]
+
+
+@pytest.mark.unit
 def test_competing_multi_candidate_facets_prioritize_higher_average_rank_lift():
     ranked = [
         (
