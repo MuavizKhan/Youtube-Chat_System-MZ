@@ -816,7 +816,7 @@ def test_original_query_lexical_candidate_can_use_bounded_reserve_without_facet_
 
     # The first eligible original-query candidate is eighth in that lexical
     # ranking and global rank 18. It is deliberately absent from facet lists.
-    original_query_lexical = [*ranked[:7], ranked[17], ranked[22]]
+    original_query_lexical = [*ranked[:7], ranked[17]]
     trace = {}
     result = retrieval.select_diverse_retrieval_anchors(
         ranked,
@@ -845,7 +845,8 @@ def test_original_query_lexical_candidate_can_use_bounded_reserve_without_facet_
         "chunk_id": 170,
         "original_lexical_rank": 8,
         "global_rank": 18,
-        "added_as_reserve": True,
+        "rescue_delta": 10,
+        "eligible_proposal": True,
     }
     assert any(
         item["candidate_chunk_id"] == 130
@@ -858,6 +859,63 @@ def test_original_query_lexical_candidate_can_use_bounded_reserve_without_facet_
     )
     assert replacement["source"] == "original_query_lexical"
     assert replacement["original_query_lexical_rank"] == 8
+
+
+
+@pytest.mark.unit
+def test_original_query_lexical_reserve_prefers_largest_source_to_fusion_rank_lift():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    # Chunk 9 ranks better in the original lexical list but is less demoted
+    # by fusion than chunk 124. Chunk 124 contains the labelled amount evidence.
+    ranked[22] = (
+        doc(9, 1100, 1105, "4,999 crores amount evidence"),
+        ranked[22][1],
+    )
+    ranked[28] = (
+        doc(124, 1400, 1405, "4,999 crores amount evidence duplicate"),
+        ranked[28][1],
+    )
+
+    original_query_lexical = [
+        *ranked[:7],  # already-selected candidates preserve lexical rank offsets
+        ranked[22],   # lexical rank 8; global rank 23; lift 15
+        ranked[0],    # lexical rank 9; already selected
+        ranked[1],    # lexical rank 10; already selected
+        ranked[28],   # lexical rank 11; global rank 29; lift 18
+    ]
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=1,
+        facet_reserve_limit=1,
+        original_query_lexical_results=original_query_lexical,
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = {item[0].metadata["chunk_id"] for item in result}
+    assert 124 in selected_ids
+    assert 9 not in selected_ids
+    assert 124 in {item[0].metadata["chunk_id"] for item in result[:4]}
+
+    priorities = trace["original_query_lexical_priority"]
+    assert [item["chunk_id"] for item in priorities] == [124, 9]
+    assert priorities[0]["original_lexical_rank"] == 11
+    assert priorities[0]["rescue_delta"] == 18
+    assert priorities[1]["original_lexical_rank"] == 8
+    assert priorities[1]["rescue_delta"] == 15
+    replacement = next(
+        item for item in trace["reserve_replacements"]
+        if item["candidate_chunk_id"] == 124
+    )
+    assert replacement["source"] == "original_query_lexical"
+    assert replacement["original_query_lexical_rank"] == 11
 
 
 @pytest.mark.unit
