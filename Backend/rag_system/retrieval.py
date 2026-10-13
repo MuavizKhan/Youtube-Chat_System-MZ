@@ -2367,29 +2367,27 @@ def select_diverse_retrieval_anchors(
         global_rank = proposal["global_rank"]
 
         if global_rank <= limit * 3:
-            if is_multi_candidate_lexical_reserve(identity, proposal):
-                # Preserve group-level priority for facets that surface several
-                # distinct, strong lexical candidates. Global rank remains the
-                # tie-breaker within a qualifying group.
-                return (
-                    0,
-                    -multi_candidate_lexical_facet_strength.get(
-                        proposal["facet_name"], 0.0
-                    ),
-                    global_rank,
-                    proposal["facet_rank"],
-                    -proposal["rescue_delta"],
-                )
-
             strong_lexical_candidate = strong_lexical_rescue_by_identity.get(identity)
             if strong_lexical_candidate is not None:
-                # A single strong lexical facet match must not lose to a
-                # globally higher-ranked but weakly supported reserve. This
-                # priority is deliberately limited to top-three lexical facet
-                # results inside the existing three-times global-rank window.
+                # Strong lexical evidence from different facets competes by its
+                # individual source-to-fusion rank lift. Multi-candidate facets
+                # remain eligible for multiple reserves, but group membership
+                # is a tie-breaker rather than an unconditional priority tier.
+                multi_candidate_reserve = is_multi_candidate_lexical_reserve(
+                    identity,
+                    proposal,
+                )
                 return (
                     1,
                     -strong_lexical_candidate["rescue_delta"],
+                    0 if multi_candidate_reserve else 1,
+                    (
+                        -multi_candidate_lexical_facet_strength.get(
+                            proposal["facet_name"], 0.0
+                        )
+                        if multi_candidate_reserve
+                        else 0.0
+                    ),
                     strong_lexical_candidate["facet_rank"],
                     global_rank,
                     proposal["facet_rank"],
@@ -2397,8 +2395,8 @@ def select_diverse_retrieval_anchors(
                 )
 
             if proposal.get("source_name") == "original_query_lexical":
-                # Original-query lexical evidence follows established strong
-                # facet policies but precedes ordinary in-window facet reserves.
+                # Original-query lexical evidence follows strong facet lexical
+                # evidence and precedes ordinary in-window facet reserves.
                 # Prefer the biggest source-to-fusion rank lift, then lexical rank.
                 return (
                     2,
@@ -2425,7 +2423,6 @@ def select_diverse_retrieval_anchors(
             proposal["facet_rank"],
             global_rank,
         )
-
     candidates = sorted(
         proposals.items(),
         key=proposal_priority,
