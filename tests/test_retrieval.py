@@ -2050,7 +2050,7 @@ def test_context_expansion_honors_hard_maximum_and_keeps_anchors():
 
 
 @pytest.mark.unit
-def test_context_expansion_prefers_neighbors_of_higher_ranked_anchors_when_budget_is_tied():
+def test_context_expansion_distributes_limited_neighbor_slots_across_anchors():
     documents = {
         f"d{i}": doc(i, i * 10, i * 10 + 5, f"segment {i}")
         for i in range(11)
@@ -2069,12 +2069,12 @@ def test_context_expansion_prefers_neighbors_of_higher_ranked_anchors_when_budge
 
     chunk_ids = {item[0].metadata["chunk_id"] for item in results}
 
-    # Both anchors survive. The two remaining slots go to neighbors of the
-    # first-ranked anchor, even though those neighbors occur later in the video.
+    # Both anchors survive, and one expansion slot is shared with each anchor
+    # before either anchor gets a second neighbor.
     assert len(chunk_ids) == 4
-    assert {1, 8, 9, 10}.issubset(chunk_ids)
-    assert 0 not in chunk_ids
+    assert {0, 1, 8, 9}.issubset(chunk_ids)
     assert 2 not in chunk_ids
+    assert 10 not in chunk_ids
 
 
 @pytest.mark.unit
