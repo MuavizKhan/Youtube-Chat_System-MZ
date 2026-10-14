@@ -163,6 +163,27 @@ def test_entity_inventory_questions_route_through_business_corporate_facet():
 
 
 @pytest.mark.unit
+def test_entity_inventory_brand_product_facet_gets_bounded_distance_headroom():
+    default_distance = 1.3
+
+    assert retrieval._semantic_distance_limit_for_variant(
+        "business_brands_products",
+        default_distance,
+    ) == pytest.approx(1.495)
+
+    for other_label in (
+        "original",
+        "business_corporate",
+        "business_teams_franchises",
+        "financial_economic",
+    ):
+        assert retrieval._semantic_distance_limit_for_variant(
+            other_label,
+            default_distance,
+        ) == default_distance
+
+
+@pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
     query = "What role does government policy play in problems faced by people?"
     plans = retrieval.build_retrieval_query_plan(query)
@@ -1222,6 +1243,57 @@ def test_single_strong_lexical_facet_candidate_precedes_weaker_in_window_reserve
     assert priority[180]["facet_rank"] == 2
     assert priority[180]["global_rank"] == 18
     assert priority[180]["rescue_delta"] == 16
+
+
+@pytest.mark.unit
+def test_brand_product_facet_reserve_prefers_largest_source_to_fusion_rank_lift():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    # Reproduce the observed Q03-shaped competition without using video-specific
+    # IDs or text: candidate A ranks 7th in the facet and 13th globally (lift 6),
+    # while candidate B ranks 11th in the facet and 31st globally (lift 20).
+    ranked[12] = (
+        doc(280, 700, 705, "earlier global brand candidate"),
+        ranked[12][1],
+    )
+    ranked[30] = (
+        doc(770, 1600, 1605, "higher facet-relative brand candidate"),
+        ranked[30][1],
+    )
+
+    lexical_facet = [
+        *ranked[:6],
+        ranked[12],
+    ]
+    semantic_facet = [
+        *ranked[:6],
+        *ranked[6:10],
+        ranked[30],
+    ]
+
+    trace = {}
+    selected = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "business_brands_products::lexical": lexical_facet,
+            "business_brands_products::semantic": semantic_facet,
+        },
+        diagnostic_trace=trace,
+    )
+    selected_ids = {item[0].metadata["chunk_id"] for item in selected}
+
+    assert len(selected) == 12
+    assert 770 in selected_ids
+    assert 280 not in selected_ids
+    assert trace["reserve_replacements"][0]["candidate_chunk_id"] == 770
 
 
 @pytest.mark.unit
