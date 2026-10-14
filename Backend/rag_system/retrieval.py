@@ -1678,14 +1678,14 @@ def expand_retrieval_context(
             # This is a neighbor, not a scored retrieval result.
             selected[key] = (document, float(MAX_DISTANCE))
 
-    for anchor_document, anchor_distance in retrieved_results:
+    for anchor_rank, (anchor_document, anchor_distance) in enumerate(retrieved_results, start=1):
         add_document(anchor_document, anchor_distance, is_anchor=True)
         normalized_id = _normalise_chunk_id(anchor_document.metadata.get("chunk_id"))
         position = positions.get(normalized_id)
         if position is None:
             continue
 
-        anchor_positions.append(position)
+        anchor_positions.append((anchor_rank, position))
         start = max(0, position - window)
         end = min(len(ordered_documents), position + window + 1)
         for neighbor_position in range(start, end):
@@ -1701,14 +1701,20 @@ def expand_retrieval_context(
             key, (document, _distance) = item
             normalized_id = _normalise_chunk_id(document.metadata.get("chunk_id"))
             position = positions.get(normalized_id, 10**9)
-            neighbor_distance = (
-                min(abs(position - anchor_position) for anchor_position in anchor_positions)
-                if anchor_positions
-                else 10**9
-            )
+            if anchor_positions:
+                neighbor_distance, nearest_anchor_rank = min(
+                    (
+                        abs(position - anchor_position),
+                        anchor_rank,
+                    )
+                    for anchor_rank, anchor_position in anchor_positions
+                )
+            else:
+                neighbor_distance, nearest_anchor_rank = 10**9, 10**9
             return (
                 0 if key in anchor_keys else 1,
                 neighbor_distance,
+                nearest_anchor_rank,
                 *_document_sort_key(document),
             )
         selected_items = sorted(selected.items(), key=priority)[:max_chunks]

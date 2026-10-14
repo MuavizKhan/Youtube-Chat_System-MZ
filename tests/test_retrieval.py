@@ -2050,6 +2050,34 @@ def test_context_expansion_honors_hard_maximum_and_keeps_anchors():
 
 
 @pytest.mark.unit
+def test_context_expansion_prefers_neighbors_of_higher_ranked_anchors_when_budget_is_tied():
+    documents = {
+        f"d{i}": doc(i, i * 10, i * 10 + 5, f"segment {i}")
+        for i in range(11)
+    }
+    store = FakeVectorStore(documents)
+
+    results = retrieval.expand_retrieval_context(
+        store,
+        [
+            (documents["d9"], 0.1),
+            (documents["d1"], 0.2),
+        ],
+        window=1,
+        max_chunks=4,
+    )
+
+    chunk_ids = {item[0].metadata["chunk_id"] for item in results}
+
+    # Both anchors survive. The two remaining slots go to neighbors of the
+    # first-ranked anchor, even though those neighbors occur later in the video.
+    assert len(chunk_ids) == 4
+    assert {1, 8, 9, 10}.issubset(chunk_ids)
+    assert 0 not in chunk_ids
+    assert 2 not in chunk_ids
+
+
+@pytest.mark.unit
 def test_context_expansion_can_be_disabled():
     documents = {
         f"d{i}": doc(

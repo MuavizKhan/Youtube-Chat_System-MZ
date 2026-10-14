@@ -33,6 +33,7 @@ class GoldEvidenceCase:
     question_id: str
     groups: tuple[tuple[str, ...], ...]
     min_group_coverage: float
+    min_context_group_coverage: float | None = None
 
 
 GOLD_EVIDENCE_CASES = (
@@ -177,6 +178,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=2 / 3,
+        min_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q10",

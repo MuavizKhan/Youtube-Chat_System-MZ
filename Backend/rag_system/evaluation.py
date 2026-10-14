@@ -484,6 +484,11 @@ def _build_gold_context_result_record(
         len(matched_group_indexes)
         / len(gold_case.groups)
     )
+    required_group_coverage = (
+        gold_case.min_context_group_coverage
+        if gold_case.min_context_group_coverage is not None
+        else gold_case.min_group_coverage
+    )
 
     context_size = len(results)
     relevance_ratio = (
@@ -493,10 +498,7 @@ def _build_gold_context_result_record(
     )
 
     hit = bool(matched_group_indexes)
-    passed = (
-        group_coverage
-        >= gold_case.min_group_coverage
-    )
+    passed = group_coverage >= required_group_coverage
 
     return {
         "id": test_case["id"],
@@ -504,7 +506,7 @@ def _build_gold_context_result_record(
         "gold_groups": len(gold_case.groups),
         "matched_gold_groups": len(matched_group_indexes),
         "group_coverage": group_coverage,
-        "required_group_coverage": gold_case.min_group_coverage,
+        "required_group_coverage": required_group_coverage,
         "context_chunks": context_size,
         "relevant_context_chunks": relevant_documents,
         "evidence_presence": hit,
