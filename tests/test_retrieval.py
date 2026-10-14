@@ -163,6 +163,29 @@ def test_entity_inventory_questions_route_through_business_corporate_facet():
 
 
 @pytest.mark.unit
+def test_entity_inventory_brand_product_facet_gets_bounded_distance_headroom():
+    default_distance = 1.3
+
+    assert retrieval._semantic_distance_limit_for_variant(
+        "business_brands_products",
+        default_distance,
+    ) == pytest.approx(1.495)
+
+    assert retrieval._semantic_distance_limit_for_variant(
+        "business_corporate",
+        default_distance,
+    ) == default_distance
+    assert retrieval._semantic_distance_limit_for_variant(
+        "business_teams_franchises",
+        default_distance,
+    ) == default_distance
+    assert retrieval._semantic_distance_limit_for_variant(
+        "financial_economic",
+        default_distance,
+    ) == default_distance
+
+
+@pytest.mark.unit
 def test_policy_questions_add_focused_policy_change_facet():
     query = "What role does government policy play in problems faced by people?"
     plans = retrieval.build_retrieval_query_plan(query)
