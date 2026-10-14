@@ -140,12 +140,25 @@ def test_entity_inventory_questions_route_through_business_corporate_facet():
     plans = retrieval.build_retrieval_query_plan(query)
     labels = [label for label, _query in plans]
     assert labels[:2] == ["original", "focus"]
-    assert labels[2:] == ["business_corporate"]
+    assert labels[2:] == [
+        "business_corporate",
+        "business_brands_products",
+        "business_teams_franchises",
+    ]
 
-    business_query = plans[-1][1]
-    assert business_query.endswith(
-        "businesses companies subsidiaries ownership investments "
-        "brands products teams franchises ventures"
+    corporate_query = plans[2][1]
+    assert corporate_query.endswith(
+        "businesses companies subsidiaries ownership investments corporate groups"
+    )
+
+    brand_product_query = plans[3][1]
+    assert brand_product_query.endswith(
+        "brands brand names products product names consumer brands product lines"
+    )
+
+    teams_query = plans[4][1]
+    assert teams_query.endswith(
+        "teams sports teams franchises clubs leagues ownership"
     )
 
 
@@ -228,6 +241,8 @@ def test_business_failure_questions_add_domain_conditioned_cause_facets(query):
     assert "policy_governance" in labels
     assert "operational_challenges" in labels
     assert "causal_factors" in labels
+    assert "business_brands_products" not in labels
+    assert "business_teams_franchises" not in labels
 
 
 @pytest.mark.unit
