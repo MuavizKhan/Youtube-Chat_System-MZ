@@ -1007,8 +1007,13 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
         "brand branding advertising marketing personality identity"
     ),
     "business_corporate": (
-        "businesses companies subsidiaries ownership investments "
-        "brands products teams franchises ventures"
+        "businesses companies subsidiaries ownership investments corporate groups"
+    ),
+    "business_brands_products": (
+        "brands brand names products product names consumer brands product lines"
+    ),
+    "business_teams_franchises": (
+        "teams sports teams franchises clubs leagues ownership"
     ),
 }
 
@@ -1056,6 +1061,22 @@ def build_evidence_facet_plan(
         normalized,
     ):
         add_facet("business_corporate")
+
+        # Entity-inventory questions often ask about affiliated brands, products,
+        # teams, or franchises as well as legal/corporate entities. Separate
+        # semantic queries avoid blending these distinct entity types into one
+        # broad embedding, while keeping extra fan-out scoped to inventory asks.
+        entity_inventory_question = (
+            bool(re.search(r"\b(?:what|which|name|list|identify)\b", normalized))
+            and bool(re.search(r"\b(?:businesses|companies|subsidiaries|organizations?)\b", normalized))
+            and not bool(re.search(
+                r"\b(?:why|reason\w*|caus\w*|fail\w*|struggl\w*|challenge\w*|problem\w*|policy|regulation\w*|financial|finance|economic|debt|cash|cost\w*)\b",
+                normalized,
+            ))
+        )
+        if entity_inventory_question:
+            add_facet("business_brands_products")
+            add_facet("business_teams_franchises")
 
     # A question about a business/airline struggling, failing, or facing
     # challenges should explore the common cause categories for that domain.
