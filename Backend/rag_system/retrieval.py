@@ -67,6 +67,11 @@ MAX_UNCAPPED_FACET_RESCUE_GLOBAL_RANK = 24
 # Deeper/weaker facet matches can only nudge their original fused score.
 MAX_FACET_BONUS_RATIO = 0.10
 
+# Entity-inventory brand/product queries may be semantically distant despite
+# containing relevant named entities. Keep extra candidate headroom local to
+# that focused facet; all other semantic queries use the configured threshold.
+ENTITY_INVENTORY_BRAND_DISTANCE_MULTIPLIER = 1.15
+
 # ============================================================
 # YOUTUBE VIDEO ID VALIDATION
 # ============================================================
@@ -510,6 +515,17 @@ def retrieve_mmr(
     return results
 
 
+def _semantic_distance_limit_for_variant(label: str, max_distance: float) -> float:
+    """Return a bounded distance cutoff for a focused query variant.
+
+    Only the brand/product facet used by entity-inventory questions gets extra
+    headroom; other variants retain the configured semantic distance limit.
+    """
+    if label == "business_brands_products":
+        return float(max_distance) * ENTITY_INVENTORY_BRAND_DISTANCE_MULTIPLIER
+    return float(max_distance)
+
+
 def retrieve_faiss_candidates_for_diagnostics(
     vector_store,
     query: str,
@@ -753,11 +769,12 @@ def diagnose_retrieval_pipeline(
     semantic_rankings = []
     semantic_rankings_by_label = {}
     for label, query_variant in query_plan:
+        variant_max_distance = _semantic_distance_limit_for_variant(label, max_distance)
         raw_candidates = retrieve_faiss_candidates_for_diagnostics(
             vector_store,
             query_variant,
             fetch_k=semantic_fetch_k,
-            max_distance=max_distance,
+            max_distance=variant_max_distance,
         )
         mmr_results = retrieve_mmr(
             vector_store=vector_store,
@@ -765,12 +782,12 @@ def diagnose_retrieval_pipeline(
             k=semantic_k,
             fetch_k=semantic_fetch_k,
             lambda_mult=lambda_mult,
-            max_distance=max_distance,
+            max_distance=variant_max_distance,
         )
         semantic_stages.append({
             "label": label,
             "query": query_variant,
-            "max_distance": max_distance,
+            "max_distance": variant_max_distance,
             "raw_candidates": raw_candidates,
             "mmr_results": mmr_results,
         })
@@ -2425,6 +2442,19 @@ def select_diverse_retrieval_anchors(
                     proposal["facet_rank"],
                 )
 
+            # For entity-inventory brand/product evidence, multiple candidates
+            # can share a facet. Prefer the source that fusion demoted most
+            # relative to its own facet rank, rather than automatically taking
+            # the candidate with the better global rank. This is scoped to that
+            # inventory-only facet; other facets keep the established ordering.
+            if proposal["facet_name"] == "business_brands_products":
+                return (
+                    3,
+                    -proposal["rescue_delta"],
+                    proposal["facet_rank"],
+                    global_rank,
+                )
+
             # Ordinary in-window reserves remain eligible but follow strong
             # facet and original-query lexical evidence when budget is scarce.
             return (
@@ -3075,13 +3105,14 @@ def retrieve_question_context(
     semantic_rankings = []
     semantic_rankings_by_label = {}
     for label, query_variant in query_plan:
+        variant_max_distance = _semantic_distance_limit_for_variant(label, max_distance)
         ranking = retrieve_mmr(
             vector_store=vector_store,
             query=query_variant,
             k=semantic_k,
             fetch_k=semantic_fetch_k,
             lambda_mult=lambda_mult,
-            max_distance=max_distance,
+            max_distance=variant_max_distance,
         )
         semantic_rankings.append(ranking)
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
