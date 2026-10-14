@@ -29,6 +29,7 @@ from Backend.rag_system.evaluation import (
     _build_temporal_result_record,
     evaluate_retrieval_result,
     _build_gold_result_record,
+    _build_gold_context_result_record,
 )
 from Backend.rag_system.gold_evidence import (
     GOLD_EVIDENCE_CASES,
@@ -65,6 +66,13 @@ def test_gold_evidence_annotations_cover_content_cases():
         0.0 < case.min_group_coverage <= 1.0
         for case in GOLD_EVIDENCE_CASES
     )
+    assert all(
+        case.min_context_group_coverage is None
+        or 0.0 < case.min_context_group_coverage <= 1.0
+        for case in GOLD_EVIDENCE_CASES
+    )
+    assert get_gold_evidence_case("Q09").min_group_coverage == pytest.approx(2 / 3)
+    assert get_gold_evidence_case("Q09").min_context_group_coverage == 1.0
 
 
 @pytest.mark.regression
@@ -931,6 +939,60 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
             "diagnosis": "faiss_distance_gate_miss",
         },
     ]) == "faiss_distance_gate_miss"
+
+
+@pytest.mark.regression
+def test_q09_requires_complete_production_context_without_changing_anchor_threshold():
+    test_case = {
+        "id": "Q09",
+        "type": "specific_detail",
+        "question": "What does Vijay Mallya say about Indian government policy?",
+    }
+    partial = [
+        (
+            Document(
+                page_content="I asked only for policy changes.",
+                metadata={"chunk_id": 110},
+            ),
+            0.2,
+        ),
+        (
+            Document(
+                page_content="He said the banks will support you.",
+                metadata={"chunk_id": 106},
+            ),
+            0.3,
+        ),
+    ]
+
+    raw_result = _build_gold_result_record(test_case, partial)
+    partial_context_result = _build_gold_context_result_record(test_case, partial)
+
+    assert raw_result["group_coverage"] == pytest.approx(2 / 3)
+    assert raw_result["passed"] is True
+    assert partial_context_result["group_coverage"] == pytest.approx(2 / 3)
+    assert partial_context_result["required_group_coverage"] == 1.0
+    assert partial_context_result["passed"] is False
+
+    complete_context = partial + [
+        (
+            Document(
+                page_content=(
+                    "The price of crude affected aviation turbine fuel and "
+                    "ad valorum sales tax."
+                ),
+                metadata={"chunk_id": 82},
+            ),
+            0.4,
+        ),
+    ]
+    complete_context_result = _build_gold_context_result_record(
+        test_case,
+        complete_context,
+    )
+
+    assert complete_context_result["group_coverage"] == 1.0
+    assert complete_context_result["passed"] is True
 
 
 @pytest.mark.regression
