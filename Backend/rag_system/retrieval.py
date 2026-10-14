@@ -1697,27 +1697,74 @@ def expand_retrieval_context(
             )
 
     if len(selected) > max_chunks:
-        def priority(item):
-            key, (document, _distance) = item
-            normalized_id = _normalise_chunk_id(document.metadata.get("chunk_id"))
-            position = positions.get(normalized_id, 10**9)
-            if anchor_positions:
-                neighbor_distance, nearest_anchor_rank = min(
-                    (
-                        abs(position - anchor_position),
-                        anchor_rank,
-                    )
-                    for anchor_rank, anchor_position in anchor_positions
-                )
-            else:
-                neighbor_distance, nearest_anchor_rank = 10**9, 10**9
-            return (
-                0 if key in anchor_keys else 1,
-                neighbor_distance,
-                nearest_anchor_rank,
-                *_document_sort_key(document),
+        # Preserve anchors first, then allocate limited neighbor slots fairly
+        # across anchors. A single high-ranked anchor must not consume every
+        # expansion slot while lower-ranked anchors have useful adjacent text.
+        anchor_rank_by_key = {}
+        for anchor_rank, (anchor_document, _distance) in enumerate(
+            retrieved_results, start=1
+        ):
+            anchor_rank_by_key.setdefault(
+                _retrieval_document_identity(anchor_document), anchor_rank
             )
-        selected_items = sorted(selected.items(), key=priority)[:max_chunks]
+
+        selected_items = [
+            (key, item)
+            for key, item in selected.items()
+            if key in anchor_keys
+        ]
+        selected_items.sort(
+            key=lambda item: (
+                anchor_rank_by_key.get(item[0], 10**9),
+                *_document_sort_key(item[1][0]),
+            )
+        )
+
+        if len(selected_items) > max_chunks:
+            selected_items = selected_items[:max_chunks]
+        else:
+            remaining_slots = max_chunks - len(selected_items)
+            neighbors_by_anchor = []
+            for anchor_rank, anchor_position in anchor_positions:
+                candidates = []
+                start = max(0, anchor_position - window)
+                end = min(len(ordered_documents), anchor_position + window + 1)
+                for neighbor_position in range(start, end):
+                    if neighbor_position == anchor_position:
+                        continue
+                    neighbor = ordered_documents[neighbor_position]
+                    key = _retrieval_document_identity(neighbor)
+                    if key not in selected or key in anchor_keys:
+                        continue
+                    candidates.append(
+                        (
+                            abs(neighbor_position - anchor_position),
+                            *_document_sort_key(neighbor),
+                            key,
+                            selected[key],
+                        )
+                    )
+                candidates.sort(key=lambda item: item[:-2])
+                neighbors_by_anchor.append(candidates)
+
+            chosen_neighbor_keys = set()
+            while remaining_slots > 0:
+                progressed = False
+                for candidates in neighbors_by_anchor:
+                    while candidates:
+                        candidate = candidates.pop(0)
+                        key = candidate[-2]
+                        if key in chosen_neighbor_keys:
+                            continue
+                        selected_items.append((key, candidate[-1]))
+                        chosen_neighbor_keys.add(key)
+                        remaining_slots -= 1
+                        progressed = True
+                        break
+                    if remaining_slots == 0:
+                        break
+                if not progressed:
+                    break
     else:
         selected_items = list(selected.items())
 
