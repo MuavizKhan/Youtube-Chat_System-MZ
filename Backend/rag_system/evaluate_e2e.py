@@ -47,6 +47,7 @@ def evaluate_video(video_reference: str) -> dict:
                 "retrieved_chunks": result["retrieved_chunks"],
                 "source_segments": result["source_segments"],
                 "sources": result["sources"],
+                "observability": result.get("observability", {}),
             }
         )
 
