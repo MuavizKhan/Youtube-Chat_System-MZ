@@ -12,6 +12,8 @@ This module stores job metadata and leases; it does not perform indexing.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -87,8 +89,19 @@ class IndexJobStore:
 
         return connection
 
+    @contextmanager
+    def _managed_connection(self) -> Iterator[sqlite3.Connection]:
+        """Manage a connection's transaction and always close the connection."""
+        connection = self._connect()
+
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS index_jobs (
@@ -141,7 +154,7 @@ class IndexJobStore:
         )
 
     def get(self, video_id: str) -> IndexJob | None:
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             row = connection.execute(
                 """
                 SELECT *
@@ -172,7 +185,7 @@ class IndexJobStore:
             else None
         )
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             connection.execute(
                 "BEGIN IMMEDIATE"
             )
@@ -263,7 +276,7 @@ class IndexJobStore:
         if limit <= 0:
             return []
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             rows = connection.execute(
                 """
                 SELECT *
@@ -284,7 +297,7 @@ class IndexJobStore:
         """Return expired building leases to the queued state."""
         now = time.time()
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE index_jobs
@@ -323,7 +336,7 @@ class IndexJobStore:
         now = time.time()
         lease_until = now + self.lease_seconds
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             connection.execute(
                 "BEGIN IMMEDIATE"
             )
@@ -403,7 +416,7 @@ class IndexJobStore:
         now = time.time()
         lease_until = now + self.lease_seconds
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE index_jobs
@@ -435,7 +448,7 @@ class IndexJobStore:
     ) -> bool:
         now = time.time()
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE index_jobs
@@ -471,7 +484,7 @@ class IndexJobStore:
     ) -> bool:
         now = time.time()
 
-        with self._connect() as connection:
+        with self._managed_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE index_jobs
