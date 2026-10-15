@@ -88,6 +88,7 @@ from .query_understanding import (
 
 from .retrieval import (
     extract_video_id,
+    passes_strong_semantic_gate,
     retrieve_overview,
     retrieve_question_context,
     retrieve_temporal_context,
@@ -1401,6 +1402,7 @@ def _retrieve_with_query_recovery_trace(
     planner_used = False
     planner_intent = None
     planner_latency_ms = 0.0
+    weak_recovery_candidates_rejected = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -1607,15 +1609,31 @@ def _retrieve_with_query_recovery_trace(
                     lambda_mult=MMR_LAMBDA,
                     max_distance=MAX_DISTANCE,
                 )
-                attempts.append(
-                    _build_retrieval_attempt_trace(
-                        "rewritten_strict",
-                        recovered_results,
-                        query=query,
-                    )
+                attempt_trace = _build_retrieval_attempt_trace(
+                    "rewritten_strict",
+                    recovered_results,
+                    query=query,
                 )
+                semantic_gate_passed = passes_strong_semantic_gate(
+                    recovered_results,
+                    MAX_DISTANCE,
+                )
+                attempt_trace["semantic_gate_passed"] = semantic_gate_passed
+                attempt_trace["accepted_for_generation"] = bool(
+                    recovered_results and semantic_gate_passed
+                )
+                if recovered_results and not semantic_gate_passed:
+                    weak_recovery_candidates_rejected = True
+                    attempt_trace["rejection_reason"] = "weak_semantic_support"
+                    logger.info(
+                        "Rejecting rewritten strict retrieval without strong "
+                        "semantic support query=%r candidates=%s",
+                        query,
+                        len(recovered_results),
+                    )
+                attempts.append(attempt_trace)
 
-                if recovered_results:
+                if recovered_results and semantic_gate_passed:
                     logger.info(
                         "Query recovery found evidence using a reformulated query"
                     )
@@ -1635,15 +1653,31 @@ def _retrieve_with_query_recovery_trace(
                         lambda_mult=MMR_LAMBDA,
                         max_distance=RECOVERY_MAX_DISTANCE,
                     )
-                    attempts.append(
-                        _build_retrieval_attempt_trace(
-                            "rewritten_relaxed",
-                            relaxed_results,
-                            query=query,
-                        )
+                    attempt_trace = _build_retrieval_attempt_trace(
+                        "rewritten_relaxed",
+                        relaxed_results,
+                        query=query,
                     )
+                    semantic_gate_passed = passes_strong_semantic_gate(
+                        relaxed_results,
+                        RECOVERY_MAX_DISTANCE,
+                    )
+                    attempt_trace["semantic_gate_passed"] = semantic_gate_passed
+                    attempt_trace["accepted_for_generation"] = bool(
+                        relaxed_results and semantic_gate_passed
+                    )
+                    if relaxed_results and not semantic_gate_passed:
+                        weak_recovery_candidates_rejected = True
+                        attempt_trace["rejection_reason"] = "weak_semantic_support"
+                        logger.info(
+                            "Rejecting rewritten relaxed retrieval without strong "
+                            "semantic support query=%r candidates=%s",
+                            query,
+                            len(relaxed_results),
+                        )
+                    attempts.append(attempt_trace)
 
-                    if relaxed_results:
+                    if relaxed_results and semantic_gate_passed:
                         logger.info(
                             "Query recovery found evidence using relaxed retrieval"
                         )
@@ -1651,7 +1685,11 @@ def _retrieve_with_query_recovery_trace(
                         final_stage = "rewritten_relaxed"
                         break
 
-            if not final_results:
+            if not final_results and weak_recovery_candidates_rejected:
+                # Do not replace candidates rejected for weak relevance with
+                # arbitrary overview chunks; doing so would bypass the gate.
+                final_stage = "no_evidence_weak_recovery_rejected"
+            elif not final_results:
                 best_effort_results = retrieve_overview(vector_store)
                 attempts.append(
                     _build_retrieval_attempt_trace(
