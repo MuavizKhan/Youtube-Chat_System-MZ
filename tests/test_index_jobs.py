@@ -1,3 +1,4 @@
+import sqlite3
 import threading
 import time
 
@@ -13,6 +14,67 @@ from Backend.rag_system.index_jobs import (
 
 
 VIDEO_ID = "Gfr50f6ZBvo"
+
+
+@pytest.mark.unit
+def test_job_store_closes_connection_after_successful_operation(
+    tmp_path,
+    monkeypatch,
+):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    original_connect = store._connect
+    connections = []
+
+    def tracked_connect():
+        connection = original_connect()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(store, "_connect", tracked_connect)
+
+    assert store.get(VIDEO_ID) is None
+    assert len(connections) == 1
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
+
+
+@pytest.mark.unit
+def test_job_store_closes_connection_and_rolls_back_after_error(tmp_path):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    connection = None
+
+    with pytest.raises(RuntimeError, match="simulated operation failure"):
+        with store._managed_connection() as managed_connection:
+            connection = managed_connection
+            managed_connection.execute("BEGIN IMMEDIATE")
+            managed_connection.execute(
+                """
+                INSERT INTO index_jobs (
+                    video_id, job_id, status, action, languages_json,
+                    attempt, error, created_at, updated_at, lease_until, worker_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    VIDEO_ID,
+                    "test-job",
+                    JOB_QUEUED,
+                    "create",
+                    None,
+                    0,
+                    None,
+                    time.time(),
+                    time.time(),
+                    0.0,
+                    None,
+                ),
+            )
+            raise RuntimeError("simulated operation failure")
+
+    assert connection is not None
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    assert store.get(VIDEO_ID) is None
 
 
 @pytest.mark.unit
@@ -75,7 +137,7 @@ def test_job_store_recovers_expired_building_job(tmp_path):
     store.enqueue(VIDEO_ID, action="create")
     store.claim(VIDEO_ID, "worker-a")
 
-    with store._connect() as connection:
+    with store._managed_connection() as connection:
         connection.execute(
             "UPDATE index_jobs SET lease_until = ?, updated_at = ? WHERE video_id = ?",
             (time.time() - 1, time.time(), VIDEO_ID),
