@@ -882,12 +882,78 @@ def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
     ) == []
 
 
+@pytest.mark.regression
+def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
+    monkeypatch,
+):
+    candidate = doc(173, 11595, 11675, "Australia capital city")
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append((kwargs["query"], kwargs["max_distance"]))
+        if kwargs["query"] == "Australia capital city":
+            # Production gives lexical-only fused candidates the cutoff as a
+            # conservative placeholder distance; recovery must not treat that
+            # placeholder as strong semantic support.
+            return [(candidate, kwargs["max_distance"])]
+        return []
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="capital of Australia",
+            search_queries=["Australia capital city"],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda _vector_store: pytest.fail(
+            "weak rejected recovery candidates must not be replaced by overview context"
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "What is the capital of Australia?",
+        object(),
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "no_evidence_weak_recovery_rejected"
+    assert trace["final_chunk_ids"] == []
+    assert len(calls) == 5
+
+    rejected_attempts = [
+        attempt
+        for attempt in trace["attempts"]
+        if attempt["retrieved_chunks"] > 0
+    ]
+    assert [attempt["stage"] for attempt in rejected_attempts] == [
+        "rewritten_strict",
+        "rewritten_relaxed",
+    ]
+    assert [attempt["query"] for attempt in rejected_attempts] == [
+        "Australia capital city",
+        "Australia capital city",
+    ]
+    assert all(
+        attempt["semantic_gate_passed"] is False
+        and attempt["accepted_for_generation"] is False
+        and attempt["rejection_reason"] == "weak_semantic_support"
+        for attempt in rejected_attempts
+    )
+
+
 @pytest.mark.unit
 def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
     monkeypatch,
 ):
     recovered = [
-        (doc(7, 70, 80, "relaxed evidence"), 1.5)
+        (doc(7, 70, 80, "relaxed evidence"), 1.4)
     ]
     distances = []
 
