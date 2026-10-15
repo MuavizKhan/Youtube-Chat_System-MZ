@@ -82,6 +82,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=2 / 3,
+        min_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q04",
