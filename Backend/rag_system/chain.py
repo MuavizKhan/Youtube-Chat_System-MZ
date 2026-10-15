@@ -1358,6 +1358,7 @@ def format_sources(
 def _build_retrieval_attempt_trace(
     stage: str,
     results,
+    query: str | None = None,
 ) -> dict[str, object]:
     """Summarize one retrieval attempt without exposing transcript text."""
 
@@ -1372,7 +1373,7 @@ def _build_retrieval_attempt_trace(
         if chunk_id is not None and chunk_id not in chunk_ids:
             chunk_ids.append(chunk_id)
 
-    return {
+    attempt = {
         "stage": stage,
         "retrieved_chunks": len(results),
         "best_distance": (
@@ -1382,6 +1383,10 @@ def _build_retrieval_attempt_trace(
         ),
         "chunk_ids": chunk_ids[:20],
     }
+    if query is not None:
+        attempt["query"] = query
+
+    return attempt
 
 
 def _retrieve_with_query_recovery_trace(
@@ -1423,6 +1428,7 @@ def _retrieve_with_query_recovery_trace(
                 else "temporal_window"
             ),
             attempt_results,
+            query=question,
         )
         temporal_attempt["coverage_ratio"] = temporal_bundle["coverage_ratio"]
         temporal_attempt["coverage_sufficient"] = temporal_bundle["coverage_sufficient"]
@@ -1479,6 +1485,7 @@ def _retrieve_with_query_recovery_trace(
         _build_retrieval_attempt_trace(
             "initial_strict",
             initial_results,
+            query=question,
         )
     )
 
@@ -1604,6 +1611,7 @@ def _retrieve_with_query_recovery_trace(
                     _build_retrieval_attempt_trace(
                         "rewritten_strict",
                         recovered_results,
+                        query=query,
                     )
                 )
 
@@ -1631,6 +1639,7 @@ def _retrieve_with_query_recovery_trace(
                         _build_retrieval_attempt_trace(
                             "rewritten_relaxed",
                             relaxed_results,
+                            query=query,
                         )
                     )
 
