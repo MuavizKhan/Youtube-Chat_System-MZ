@@ -974,14 +974,107 @@ def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
     )
 
 
+@pytest.mark.regression
+def test_query_recovery_rejects_relaxed_anchors_above_normal_distance_ceiling(
+    monkeypatch,
+):
+    question = "What is the capital of Australia?"
+    rewritten_strict_candidate = (doc(174, 11675, 11755, "Australia capital city"), chain.MAX_DISTANCE)
+    relaxed_candidates = [
+        (doc(cid, cid * 10, cid * 10 + 5, "unrelated airline discussion"), distance)
+        for cid, distance in [
+            (25, 1.407618),
+            (83, 1.42),
+            (152, 1.43),
+            (124, 1.44),
+            (9, 1.45),
+            (87, 1.46),
+        ]
+    ]
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs.copy())
+        query = kwargs["query"]
+        cutoff = kwargs["max_distance"]
+
+        if query == question:
+            return []
+        if query == "capital of Australia":
+            if cutoff == chain.RECOVERY_MAX_DISTANCE:
+                return relaxed_candidates
+            return []
+        if query == "Australia capital city":
+            if cutoff == chain.RECOVERY_MAX_DISTANCE:
+                # At the relaxed cutoff this represents lexical-only fusion:
+                # the sentinel is the configured relaxed distance, not a score.
+                return [(rewritten_strict_candidate[0], cutoff)]
+            return [rewritten_strict_candidate]
+        return []
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "anchors above the normal distance ceiling must be rejected before expansion"
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="capital of Australia",
+            search_queries=["Australia capital city"],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda _vector_store: pytest.fail(
+            "weak rejected recovery candidates must not trigger overview fallback"
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        question,
+        object(),
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "no_evidence_weak_recovery_rejected"
+    assert trace["final_chunk_ids"] == []
+    relaxed_attempts = [
+        attempt for attempt in trace["attempts"]
+        if attempt["stage"] == "rewritten_relaxed"
+        and attempt["retrieved_chunks"] > 0
+    ]
+    assert relaxed_attempts
+    australia_attempt = next(
+        attempt for attempt in relaxed_attempts
+        if attempt["query"] == "capital of Australia"
+    )
+    assert australia_attempt["best_distance"] == pytest.approx(1.407618)
+    assert australia_attempt["semantic_gate_distance_ceiling"] == chain.MAX_DISTANCE
+    assert australia_attempt["semantic_gate_passed"] is False
+    assert australia_attempt["accepted_for_generation"] is False
+    assert australia_attempt["context_expansion_performed"] is False
+    assert australia_attempt["expanded_context_chunks"] == 0
+    assert australia_attempt["rejection_reason"] == "weak_semantic_support"
+
+
 @pytest.mark.unit
 def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
     monkeypatch,
 ):
+    # Relaxed recovery may admit evidence above the 0.92 * normal cutoff,
+    # but not beyond the normal cutoff itself.
     recovered = [
         (
             doc(7, 70, 80, "relaxed evidence"),
-            chain.RECOVERY_MAX_DISTANCE * 0.90,
+            chain.MAX_DISTANCE * 0.95,
         )
     ]
     neighbor = (doc(8, 80, 90, "neighbor context"), chain.MAX_DISTANCE)
