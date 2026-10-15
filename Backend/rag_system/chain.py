@@ -2144,6 +2144,8 @@ def answer_question(
     sources = format_sources(
     source_groups
     )
+    candidate_retrieved_chunks = len(retrieved_results)
+    candidate_source_segments = len(source_groups)
 
     observability = {
         "total_latency_ms": round(
@@ -2189,6 +2191,51 @@ def answer_question(
         has_evidence=has_evidence,
     )
 
+    # A fallback means the generated answer did not identify usable evidence.
+    # Do not expose nearby/recovery candidates as clickable supporting sources.
+    fallback_answer_returned = final_answer.strip() == FALLBACK_ANSWER
+    evidence_suppressed = fallback_answer_returned and bool(
+        candidate_retrieved_chunks or candidate_source_segments
+    )
+
+    response_sources = sources
+    response_retrieved_chunks = candidate_retrieved_chunks
+    response_source_segments = candidate_source_segments
+    if fallback_answer_returned:
+        response_sources = []
+        response_retrieved_chunks = 0
+        response_source_segments = 0
+
+    if evidence_suppressed:
+        logger.info(
+            "Suppressing retrieval sources for fallback answer "
+            "candidate_chunks=%s candidate_source_segments=%s",
+            candidate_retrieved_chunks,
+            candidate_source_segments,
+        )
+
+    # Keep the distinction between internal candidates and evidence returned
+    # with the answer visible in diagnostics.
+    observability["retrieval"].update(
+        {
+            "candidate_retrieved_chunks": candidate_retrieved_chunks,
+            "candidate_source_segments": candidate_source_segments,
+            "source_segments": response_source_segments,
+            "source_timestamps": [
+                {
+                    "source_id": source["source_id"],
+                    "start": source["start"],
+                    "end": source["end"],
+                }
+                for source in response_sources
+            ],
+            "response_evidence_suppressed": evidence_suppressed,
+            "response_evidence_suppression_reason": (
+                "fallback_answer" if evidence_suppressed else None
+            ),
+        }
+    )
+
     return {
     "answer":
         final_answer,
@@ -2197,13 +2244,13 @@ def answer_question(
         video_id,
 
     "sources":
-        sources,
+        response_sources,
 
     "retrieved_chunks":
-        len(retrieved_results),
+        response_retrieved_chunks,
 
     "source_segments":
-        len(source_groups),
+        response_source_segments,
 
     "model":
         (
