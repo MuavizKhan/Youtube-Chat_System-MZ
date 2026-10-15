@@ -613,6 +613,39 @@ def retrieve_faiss_candidates_for_diagnostics(
 
 
 
+SEMANTIC_DISTANCE_GATE_RATIO = 0.92
+
+
+def passes_strong_semantic_gate(
+    results,
+    max_distance: float,
+) -> bool:
+    """Return whether at least one result passes the strong semantic gate.
+
+    Lexical-only fused candidates use max_distance as a conservative placeholder
+    rather than a measured FAISS distance, so they cannot pass this stricter
+    relevance check on their own.
+    """
+    try:
+        strict_limit = float(max_distance) * SEMANTIC_DISTANCE_GATE_RATIO
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    if not math.isfinite(strict_limit) or strict_limit < 0:
+        return False
+
+    distances = []
+    for item in results:
+        try:
+            distance = float(item[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            continue
+        if math.isfinite(distance):
+            distances.append(distance)
+
+    return bool(distances and min(distances) <= strict_limit)
+
+
 def _select_final_retrieval_candidates(
     *,
     query: str,
@@ -646,27 +679,20 @@ def _select_final_retrieval_candidates(
             "semantic_gate_passed": False,
         }
 
-    if not lexical_results:
-        semantic_distances = []
-        for _document, distance in semantic_results:
-            try:
-                value = float(distance)
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if math.isfinite(value):
-                semantic_distances.append(value)
-        strict_semantic_limit = max_distance * 0.92
-        if not semantic_distances or min(semantic_distances) > strict_semantic_limit:
-            # Reject weak semantic-only matches before attempting to load a
-            # reranker. Diagnostic and production now share this exact gate.
-            return {
-                "cross_encoder_results": list(combined_results),
-                "facet_soft_reranked": list(combined_results),
-                "anchors": [],
-                "context_max_chunks": context_max_chunks,
-                "anchor_limit": anchor_limit,
-                "semantic_gate_passed": False,
-            }
+    if not lexical_results and not passes_strong_semantic_gate(
+        semantic_results,
+        max_distance,
+    ):
+        # Reject weak semantic-only matches before attempting to load a
+        # reranker. Diagnostic and production now share this exact gate.
+        return {
+            "cross_encoder_results": list(combined_results),
+            "facet_soft_reranked": list(combined_results),
+            "anchors": [],
+            "context_max_chunks": context_max_chunks,
+            "anchor_limit": anchor_limit,
+            "semantic_gate_passed": False,
+        }
 
     cross_encoder_results = rerank_with_cross_encoder(
         query=query,

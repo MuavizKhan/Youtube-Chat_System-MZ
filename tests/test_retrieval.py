@@ -1684,6 +1684,26 @@ def test_question_context_accepts_strong_semantic_match(monkeypatch):
 
 
 @pytest.mark.unit
+def test_strong_semantic_gate_rejects_lexical_distance_sentinel():
+    relevant = doc(1, 0, 10, "semantic result")
+    lexical_only = doc(2, 20, 30, "lexical-only result")
+
+    assert retrieval.passes_strong_semantic_gate(
+        [(relevant, 1.0)],
+        max_distance=1.3,
+    )
+    assert retrieval.passes_strong_semantic_gate(
+        [(relevant, 1.196)],
+        max_distance=1.3,
+    )
+    assert not retrieval.passes_strong_semantic_gate(
+        [(lexical_only, 1.3)],
+        max_distance=1.3,
+    )
+    assert not retrieval.passes_strong_semantic_gate([], max_distance=1.3)
+
+
+@pytest.mark.unit
 def test_semantic_query_variant_fusion_prefers_shared_evidence():
     shared = doc(2, 10, 15, "shared topic")
     original = [
