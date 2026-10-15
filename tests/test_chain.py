@@ -887,18 +887,32 @@ def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
     monkeypatch,
 ):
     candidate = doc(173, 11595, 11675, "Australia capital city")
+    expanded_neighbor = doc(174, 11675, 11755, "unrelated neighboring transcript text")
     calls = []
 
     def fake_retrieve(**kwargs):
-        calls.append((kwargs["query"], kwargs["max_distance"]))
+        calls.append(kwargs.copy())
         if kwargs["query"] == "Australia capital city":
-            # Production gives lexical-only fused candidates the cutoff as a
-            # conservative placeholder distance; recovery must not treat that
-            # placeholder as strong semantic support.
-            return [(candidate, kwargs["max_distance"])]
+            anchor = (candidate, kwargs["max_distance"])
+            if (
+                kwargs.get("expand_context") is False
+                and kwargs.get("allow_overview") is False
+            ):
+                # Recovery must gate the scored anchor before context expansion.
+                return [anchor]
+            # This simulates the old false positive: an unscored neighbor carries
+            # MAX_DISTANCE (1.3), which falls inside the relaxed gate (1.472).
+            return [anchor, (expanded_neighbor, chain.MAX_DISTANCE)]
         return []
 
     monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "weak recovery anchors must be rejected before context expansion"
+        ),
+    )
     monkeypatch.setattr(
         chain,
         "understand_query",
@@ -926,6 +940,16 @@ def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
     assert trace["final_stage"] == "no_evidence_weak_recovery_rejected"
     assert trace["final_chunk_ids"] == []
     assert len(calls) == 5
+    recovery_calls = [
+        call for call in calls
+        if call["query"] != "What is the capital of Australia?"
+    ]
+    assert len(recovery_calls) == 4
+    assert all(
+        call.get("expand_context") is False
+        and call.get("allow_overview") is False
+        for call in recovery_calls
+    )
 
     rejected_attempts = [
         attempt
@@ -944,6 +968,8 @@ def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
         attempt["semantic_gate_passed"] is False
         and attempt["accepted_for_generation"] is False
         and attempt["rejection_reason"] == "weak_semantic_support"
+        and attempt["context_expansion_performed"] is False
+        and attempt["expanded_context_chunks"] == 0
         for attempt in rejected_attempts
     )
 
@@ -958,7 +984,10 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
             chain.RECOVERY_MAX_DISTANCE * 0.90,
         )
     ]
+    neighbor = (doc(8, 80, 90, "neighbor context"), chain.MAX_DISTANCE)
+    expanded_context = [*recovered, neighbor]
     distances = []
+    expansion_calls = []
 
     monkeypatch.setattr(
         chain,
@@ -970,6 +999,13 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
                 if kwargs["max_distance"] == chain.RECOVERY_MAX_DISTANCE
                 else []
             )
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, query, anchors: (
+            expansion_calls.append((query, anchors)) or expanded_context
         ),
     )
     monkeypatch.setattr(
@@ -988,7 +1024,8 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
         object(),
     )
 
-    assert result == recovered
+    assert result == expanded_context
+    assert expansion_calls == [("important issue", recovered)]
     assert distances[-1] == chain.RECOVERY_MAX_DISTANCE
     assert all(
         distance == chain.MAX_DISTANCE

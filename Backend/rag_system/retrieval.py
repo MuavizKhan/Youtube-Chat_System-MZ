@@ -1799,6 +1799,18 @@ def expand_retrieval_context(
     return expanded_results
 
 
+def expand_question_context(vector_store, query: str, anchor_results):
+    """Expand validated retrieval anchors with the normal query-specific budget."""
+    context_max_chunks = (
+        DENSE_CONTEXT_MAX_CHUNKS
+        if is_evidence_dense_question(query)
+        else CONTEXT_MAX_CHUNKS
+    )
+    return expand_retrieval_context(
+        vector_store,
+        anchor_results,
+        max_chunks=context_max_chunks,
+    )
 
 
 # ============================================================
@@ -3158,12 +3170,13 @@ def retrieve_question_context(
     lambda_mult: float = MMR_LAMBDA,
     max_distance: float = MAX_DISTANCE,
     expand_context: bool = True,
+    allow_overview: bool = True,
 ):
     """Retrieve transcript evidence for a question about the current YouTube video."""
     lambda_mult, max_distance = _validate_retrieval_parameters(
         query, k, fetch_k, lambda_mult, max_distance
     )
-    if is_overview_question(query):
+    if allow_overview and is_overview_question(query):
         return retrieve_overview(vector_store)
 
     dense_question = is_evidence_dense_question(query)

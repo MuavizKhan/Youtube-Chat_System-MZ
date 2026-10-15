@@ -88,6 +88,7 @@ from .query_understanding import (
 
 from .retrieval import (
     extract_video_id,
+    expand_question_context,
     passes_strong_semantic_gate,
     retrieve_overview,
     retrieve_question_context,
@@ -1601,43 +1602,53 @@ def _retrieve_with_query_recovery_trace(
             final_stage = "rewritten_strict_exhausted"
 
             for query in unique_queries:
-                recovered_results = retrieve_question_context(
+                recovered_anchors = retrieve_question_context(
                     vector_store=vector_store,
                     query=query,
                     k=TOP_K,
                     fetch_k=MMR_FETCH_K,
                     lambda_mult=MMR_LAMBDA,
                     max_distance=MAX_DISTANCE,
+                    expand_context=False,
+                    allow_overview=False,
                 )
                 attempt_trace = _build_retrieval_attempt_trace(
                     "rewritten_strict",
-                    recovered_results,
+                    recovered_anchors,
                     query=query,
                 )
                 semantic_gate_passed = passes_strong_semantic_gate(
-                    recovered_results,
+                    recovered_anchors,
                     MAX_DISTANCE,
                 )
                 attempt_trace["semantic_gate_passed"] = semantic_gate_passed
                 attempt_trace["accepted_for_generation"] = bool(
-                    recovered_results and semantic_gate_passed
+                    recovered_anchors and semantic_gate_passed
                 )
-                if recovered_results and not semantic_gate_passed:
+                attempt_trace["context_expansion_performed"] = False
+                attempt_trace["expanded_context_chunks"] = 0
+                if recovered_anchors and not semantic_gate_passed:
                     weak_recovery_candidates_rejected = True
                     attempt_trace["rejection_reason"] = "weak_semantic_support"
                     logger.info(
                         "Rejecting rewritten strict retrieval without strong "
                         "semantic support query=%r candidates=%s",
                         query,
-                        len(recovered_results),
+                        len(recovered_anchors),
                     )
                 attempts.append(attempt_trace)
 
-                if recovered_results and semantic_gate_passed:
+                if recovered_anchors and semantic_gate_passed:
+                    final_results = expand_question_context(
+                        vector_store,
+                        query,
+                        recovered_anchors,
+                    )
+                    attempt_trace["context_expansion_performed"] = True
+                    attempt_trace["expanded_context_chunks"] = len(final_results)
                     logger.info(
                         "Query recovery found evidence using a reformulated query"
                     )
-                    final_results = recovered_results
                     final_stage = "rewritten_strict"
                     break
 
@@ -1645,43 +1656,53 @@ def _retrieve_with_query_recovery_trace(
                 final_stage = "rewritten_relaxed_exhausted"
 
                 for query in unique_queries:
-                    relaxed_results = retrieve_question_context(
+                    relaxed_anchors = retrieve_question_context(
                         vector_store=vector_store,
                         query=query,
                         k=RECOVERY_TOP_K,
                         fetch_k=RECOVERY_FETCH_K,
                         lambda_mult=MMR_LAMBDA,
                         max_distance=RECOVERY_MAX_DISTANCE,
+                        expand_context=False,
+                        allow_overview=False,
                     )
                     attempt_trace = _build_retrieval_attempt_trace(
                         "rewritten_relaxed",
-                        relaxed_results,
+                        relaxed_anchors,
                         query=query,
                     )
                     semantic_gate_passed = passes_strong_semantic_gate(
-                        relaxed_results,
+                        relaxed_anchors,
                         RECOVERY_MAX_DISTANCE,
                     )
                     attempt_trace["semantic_gate_passed"] = semantic_gate_passed
                     attempt_trace["accepted_for_generation"] = bool(
-                        relaxed_results and semantic_gate_passed
+                        relaxed_anchors and semantic_gate_passed
                     )
-                    if relaxed_results and not semantic_gate_passed:
+                    attempt_trace["context_expansion_performed"] = False
+                    attempt_trace["expanded_context_chunks"] = 0
+                    if relaxed_anchors and not semantic_gate_passed:
                         weak_recovery_candidates_rejected = True
                         attempt_trace["rejection_reason"] = "weak_semantic_support"
                         logger.info(
                             "Rejecting rewritten relaxed retrieval without strong "
                             "semantic support query=%r candidates=%s",
                             query,
-                            len(relaxed_results),
+                            len(relaxed_anchors),
                         )
                     attempts.append(attempt_trace)
 
-                    if relaxed_results and semantic_gate_passed:
+                    if relaxed_anchors and semantic_gate_passed:
+                        final_results = expand_question_context(
+                            vector_store,
+                            query,
+                            relaxed_anchors,
+                        )
+                        attempt_trace["context_expansion_performed"] = True
+                        attempt_trace["expanded_context_chunks"] = len(final_results)
                         logger.info(
                             "Query recovery found evidence using relaxed retrieval"
                         )
-                        final_results = relaxed_results
                         final_stage = "rewritten_relaxed"
                         break
 
