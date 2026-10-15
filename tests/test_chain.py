@@ -658,6 +658,7 @@ def test_retrieval_trace_records_initial_strict_success(monkeypatch):
     assert trace["attempts"][0]["stage"] == "initial_strict"
     assert trace["attempts"][0]["retrieved_chunks"] == 1
     assert trace["attempts"][0]["best_distance"] == pytest.approx(0.35)
+    assert trace["attempts"][0]["query"] == "What happened?"
 
 
 @pytest.mark.unit
@@ -702,6 +703,8 @@ def test_retrieval_trace_records_recovery_stage(monkeypatch):
         "initial_strict",
         "rewritten_strict",
     ]
+    assert trace["attempts"][0]["query"] == "Why did it happen?"
+    assert trace["attempts"][1]["query"] == "reasons for the event"
 
 
 @pytest.mark.unit
