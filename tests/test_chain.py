@@ -1129,6 +1129,86 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert captured_clients["query"] is configured_client
     assert captured_clients["generation"] is configured_client
 
+@pytest.mark.regression
+def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch):
+    source_documents = [
+        doc(173, 11595.279, 11675.0, "unrelated transcript section one"),
+        doc(174, 11675.0, 11755.0, "unrelated transcript section two"),
+        doc(175, 11755.0, 11835.16, "unrelated transcript section three"),
+    ]
+    retrieval_result = {
+        "answer": chain.FALLBACK_ANSWER,
+        "retrieved_results": [
+            (source_document, 1.3)
+            for source_document in source_documents
+        ],
+        "source_groups": [
+            {
+                "documents": source_documents,
+                "start": 11595.279,
+                "end": 11835.16,
+                "distance": 1.3,
+            }
+        ],
+        "retrieval_trace": {
+            "final_stage": "rewritten_relaxed",
+            "final_chunk_ids": [173, 174, 175],
+        },
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+        },
+    }
+
+    monkeypatch.setattr(
+        chain,
+        "extract_video_id",
+        lambda _reference: "Gfr50f6ZBvo",
+    )
+    monkeypatch.setattr(
+        chain,
+        "load_ready_index",
+        lambda _video_id: object(),
+    )
+    monkeypatch.setattr(
+        chain,
+        "create_llm_client",
+        lambda: object(),
+    )
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            return retrieval_result
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+
+    result = chain.answer_question(
+        video_reference="Gfr50f6ZBvo",
+        question="What is the capital of Australia?",
+    )
+
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["sources"] == []
+    assert result["retrieved_chunks"] == 0
+    assert result["source_segments"] == 0
+
+    retrieval_trace = result["observability"]["retrieval"]
+    assert retrieval_trace["candidate_retrieved_chunks"] == 3
+    assert retrieval_trace["candidate_source_segments"] == 1
+    assert retrieval_trace["final_chunk_ids"] == [173, 174, 175]
+    assert retrieval_trace["source_segments"] == 0
+    assert retrieval_trace["source_timestamps"] == []
+    assert retrieval_trace["response_evidence_suppressed"] is True
+    assert (
+        retrieval_trace["response_evidence_suppression_reason"]
+        == "fallback_answer"
+    )
+
+
 @pytest.mark.unit
 def test_answer_question_propagates_index_lifecycle_error(
     monkeypatch,
