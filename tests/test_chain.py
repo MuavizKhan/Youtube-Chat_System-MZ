@@ -1005,6 +1005,10 @@ def test_query_recovery_rejects_relaxed_anchors_above_normal_distance_ceiling(
                 return relaxed_candidates
             return []
         if query == "Australia capital city":
+            if cutoff == chain.RECOVERY_MAX_DISTANCE:
+                # At the relaxed cutoff this represents lexical-only fusion:
+                # the sentinel is the configured relaxed distance, not a score.
+                return [(rewritten_strict_candidate[0], cutoff)]
             return [rewritten_strict_candidate]
         return []
 
