@@ -1738,6 +1738,37 @@ def test_strong_semantic_gate_rejects_lexical_distance_sentinel():
 
 
 @pytest.mark.unit
+def test_strong_semantic_gate_applies_absolute_ceiling_to_relaxed_cutoff():
+    semantic_anchor = doc(3, 30, 40, "candidate from relaxed retrieval")
+
+    # Keep some relaxation headroom: this is above 0.92 * 1.3 but below 1.3.
+    assert retrieval.passes_strong_semantic_gate(
+        [(semantic_anchor, 1.25)],
+        max_distance=1.6,
+        absolute_distance_ceiling=1.3,
+    )
+
+    # E06's observed relaxed best distance must fail the absolute ceiling.
+    assert not retrieval.passes_strong_semantic_gate(
+        [(semantic_anchor, 1.407618)],
+        max_distance=1.6,
+        absolute_distance_ceiling=1.3,
+    )
+
+    # Without the optional ceiling, existing relaxed behavior remains unchanged.
+    assert retrieval.passes_strong_semantic_gate(
+        [(semantic_anchor, 1.407618)],
+        max_distance=1.6,
+    )
+
+    assert not retrieval.passes_strong_semantic_gate(
+        [(semantic_anchor, 1.25)],
+        max_distance=1.6,
+        absolute_distance_ceiling=float("nan"),
+    )
+
+
+@pytest.mark.unit
 def test_semantic_query_variant_fusion_prefers_shared_evidence():
     shared = doc(2, 10, 15, "shared topic")
     original = [

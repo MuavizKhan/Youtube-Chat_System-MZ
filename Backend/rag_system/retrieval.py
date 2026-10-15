@@ -619,12 +619,15 @@ SEMANTIC_DISTANCE_GATE_RATIO = 0.92
 def passes_strong_semantic_gate(
     results,
     max_distance: float,
+    *,
+    absolute_distance_ceiling: float | None = None,
 ) -> bool:
     """Return whether at least one result passes the strong semantic gate.
 
     Lexical-only fused candidates use max_distance as a conservative placeholder
     rather than a measured FAISS distance, so they cannot pass this stricter
-    relevance check on their own.
+    relevance check on their own. An optional absolute ceiling keeps a relaxed
+    retrieval cutoff from weakening the semantic-support requirement too far.
     """
     try:
         strict_limit = float(max_distance) * SEMANTIC_DISTANCE_GATE_RATIO
@@ -633,6 +636,15 @@ def passes_strong_semantic_gate(
 
     if not math.isfinite(strict_limit) or strict_limit < 0:
         return False
+
+    if absolute_distance_ceiling is not None:
+        try:
+            ceiling = float(absolute_distance_ceiling)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if not math.isfinite(ceiling) or ceiling < 0:
+            return False
+        strict_limit = min(strict_limit, ceiling)
 
     distances = []
     for item in results:

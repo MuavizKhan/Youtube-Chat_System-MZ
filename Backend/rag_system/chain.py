@@ -1674,8 +1674,10 @@ def _retrieve_with_query_recovery_trace(
                     semantic_gate_passed = passes_strong_semantic_gate(
                         relaxed_anchors,
                         RECOVERY_MAX_DISTANCE,
+                        absolute_distance_ceiling=MAX_DISTANCE,
                     )
                     attempt_trace["semantic_gate_passed"] = semantic_gate_passed
+                    attempt_trace["semantic_gate_distance_ceiling"] = MAX_DISTANCE
                     attempt_trace["accepted_for_generation"] = bool(
                         relaxed_anchors and semantic_gate_passed
                     )
