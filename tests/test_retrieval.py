@@ -502,6 +502,40 @@ def test_lexical_facet_fusion_prefers_shared_evidence():
 
 
 @pytest.mark.unit
+def test_expand_question_context_uses_query_specific_context_budget(monkeypatch):
+    anchor_results = [(doc(1, 0, 10, "validated anchor"), 0.4)]
+    calls = []
+
+    monkeypatch.setattr(
+        retrieval,
+        "is_evidence_dense_question",
+        lambda query: query == "dense question",
+    )
+
+    def fake_expand(vector_store, retrieved_results, **kwargs):
+        calls.append((vector_store, retrieved_results, kwargs["max_chunks"]))
+        return retrieved_results
+
+    monkeypatch.setattr(retrieval, "expand_retrieval_context", fake_expand)
+
+    assert retrieval.expand_question_context(
+        "store",
+        "dense question",
+        anchor_results,
+    ) == anchor_results
+    assert retrieval.expand_question_context(
+        "store",
+        "simple question",
+        anchor_results,
+    ) == anchor_results
+    assert [call[2] for call in calls] == [
+        retrieval.DENSE_CONTEXT_MAX_CHUNKS,
+        retrieval.CONTEXT_MAX_CHUNKS,
+    ]
+    assert all(call[1] is anchor_results for call in calls)
+
+
+@pytest.mark.unit
 def test_question_context_passes_original_query_lexical_candidates_to_anchor_selection(monkeypatch):
     original_question = "Why did the company fail and what debt reasons contributed to it?"
     ranked = [
