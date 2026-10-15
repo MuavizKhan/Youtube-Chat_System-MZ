@@ -953,7 +953,10 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
     monkeypatch,
 ):
     recovered = [
-        (doc(7, 70, 80, "relaxed evidence"), 1.4)
+        (
+            doc(7, 70, 80, "relaxed evidence"),
+            chain.RECOVERY_MAX_DISTANCE * 0.90,
+        )
     ]
     distances = []
 
