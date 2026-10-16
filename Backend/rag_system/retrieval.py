@@ -2407,6 +2407,7 @@ def select_diverse_retrieval_anchors(
                 "item": item_by_identity[identity],
                 "global_rank": global_rank,
                 "facet_name": facet_name,
+                "facet_source_name": source_name,
                 "facet_rank": facet_rank,
                 "rescue_delta": global_rank - facet_rank,
             }
@@ -2490,9 +2491,22 @@ def select_diverse_retrieval_anchors(
     reserved_identities = set()
     reserved_facets = set()
     prioritized_reserves = []
+    protected_anchor_promotions = []
+    protected_anchor_identities = set()
     reserve_budget = min(facet_reserve_limit, len(selected) - 1)
 
     def is_multi_candidate_lexical_reserve(identity, proposal):
+        # A second original-query lexical reserve must demonstrate a
+        # substantial rank lift; the first-reserve policy remains unchanged.
+        if proposal.get("source_name") == "original_query_lexical":
+            return (
+                proposal["global_rank"] <= limit * 3
+                and proposal.get(
+                    "original_query_lexical_rank", limit + 1
+                ) <= limit
+                and proposal.get("rescue_delta", 0) >= limit
+            )
+
         return (
             proposal["global_rank"] <= limit * 3
             and proposal["facet_name"] in multi_candidate_lexical_facets
@@ -2631,7 +2645,10 @@ def select_diverse_retrieval_anchors(
         blocking_chunk_ids = []
         for index in replacement_indices:
             current_identity = _retrieval_document_identity(selected[index][0])
-            if current_identity in reserved_identities:
+            if (
+                current_identity in reserved_identities
+                or current_identity in protected_anchor_identities
+            ):
                 continue
             remaining_ids = [
                 document_chunk_id(item)
@@ -2671,6 +2688,63 @@ def select_diverse_retrieval_anchors(
             continue
 
         replaced_item = selected[replacement_index]
+        replaced_identity = _retrieval_document_identity(replaced_item[0])
+        candidate_source_name = proposal.get("facet_source_name")
+        replaced_source_rank = None
+
+        # Compare ranks only within the exact same source; facet ranks from
+        # different sources are not directly comparable.
+        if candidate_source_name is not None:
+            for source_entry in facet_sources_by_identity.get(
+                replaced_identity, []
+            ):
+                if source_entry.get("source") == candidate_source_name:
+                    replaced_source_rank = source_entry.get("rank")
+                    break
+
+        replaced_global_rank = rank_by_identity.get(replaced_identity)
+
+        # If a reserve is worse in both global and same-source facet rank,
+        # retain and protect the existing anchor instead of displacing it.
+        candidate_is_weaker_on_both_ranks = (
+            proposal["facet_name"] != "business_brands_products"
+            and candidate_source_name is not None
+            and replaced_source_rank is not None
+            and replaced_global_rank is not None
+            and proposal["global_rank"] > replaced_global_rank
+            and proposal["facet_rank"] > replaced_source_rank
+        )
+
+        if candidate_is_weaker_on_both_ranks:
+            protected_anchor_identities.add(replaced_identity)
+            if all(
+                _retrieval_document_identity(item[0]) != replaced_identity
+                for item in protected_anchor_promotions
+            ):
+                protected_anchor_promotions.append(replaced_item)
+
+            if diagnostic_trace is not None:
+                diagnostic_trace["reserve_rejections"].append({
+                    "candidate_chunk_id": candidate_item[0].metadata.get(
+                        "chunk_id"
+                    ),
+                    "candidate_global_rank": proposal["global_rank"],
+                    "facet_name": proposal["facet_name"],
+                    "source": proposal.get("source_name", "facet"),
+                    "original_query_lexical_rank": proposal.get(
+                        "original_query_lexical_rank"
+                    ),
+                    "reason": "weaker_than_replacement_in_global_and_facet_rank",
+                    "replaced_chunk_id": replaced_item[0].metadata.get(
+                        "chunk_id"
+                    ),
+                    "replaced_global_rank": replaced_global_rank,
+                    "facet_source_name": candidate_source_name,
+                    "candidate_facet_rank": proposal["facet_rank"],
+                    "replaced_facet_rank": replaced_source_rank,
+                })
+            continue
+
         if diagnostic_trace is not None:
             diagnostic_trace["reserve_replacements"].append({
                 "candidate_chunk_id": candidate_item[0].metadata.get("chunk_id"),
@@ -2697,9 +2771,21 @@ def select_diverse_retrieval_anchors(
     # benchmark also scores the first TOP_K anchors. Place bounded, in-window
     # facet reserves immediately after the strongest global anchors so the
     # reserve improves top-k evidence coverage rather than only tail recall.
-    if prioritized_reserves and TOP_K > 1:
-        promoted_count = min(len(prioritized_reserves), TOP_K - 1)
-        promoted = prioritized_reserves[:promoted_count]
+    # Protected, stronger anchors take precedence over ordinary reserve promotions.
+    # Deduplicate because a protected anchor remains in the selected list.
+    promotion_candidates = []
+    promotion_candidate_identities = set()
+
+    for item in [*protected_anchor_promotions, *prioritized_reserves]:
+        identity = _retrieval_document_identity(item[0])
+        if identity in promotion_candidate_identities:
+            continue
+        promotion_candidate_identities.add(identity)
+        promotion_candidates.append(item)
+
+    if promotion_candidates and TOP_K > 1:
+        promoted_count = min(len(promotion_candidates), TOP_K - 1)
+        promoted = promotion_candidates[:promoted_count]
         promoted_identities = {
             _retrieval_document_identity(item[0]) for item in promoted
         }
