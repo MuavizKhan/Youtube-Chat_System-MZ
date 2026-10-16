@@ -345,11 +345,17 @@ def _build_gold_result_record(
         >= gold_case.min_group_coverage
     )
 
+    all_group_indexes = set(range(len(gold_case.groups)))
+
     return {
         "id": test_case["id"],
         "question": test_case["question"],
         "gold_groups": len(gold_case.groups),
         "matched_gold_groups": len(matched_group_indexes),
+        "matched_gold_group_indexes": sorted(matched_group_indexes),
+        "missing_gold_group_indexes": sorted(
+            all_group_indexes - matched_group_indexes
+        ),
         "group_coverage": group_coverage,
         "required_group_coverage": gold_case.min_group_coverage,
         "retrieved": len(top_results),
@@ -404,12 +410,17 @@ def _build_gold_context_result_record(
 
     hit = bool(matched_group_indexes)
     passed = group_coverage >= required_group_coverage
+    all_group_indexes = set(range(len(gold_case.groups)))
 
     return {
         "id": test_case["id"],
         "question": test_case["question"],
         "gold_groups": len(gold_case.groups),
         "matched_gold_groups": len(matched_group_indexes),
+        "matched_gold_group_indexes": sorted(matched_group_indexes),
+        "missing_gold_group_indexes": sorted(
+            all_group_indexes - matched_group_indexes
+        ),
         "group_coverage": group_coverage,
         "required_group_coverage": required_group_coverage,
         "context_chunks": context_size,
