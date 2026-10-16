@@ -208,8 +208,8 @@ ENGLISH_WORKSHOP_QUESTIONS = (
     },
     {
         "id": "EW02",
-        "type": "explanation",
-        "question": "How does the speaker suggest structuring an explanation of your work?",
+        "type": "specific_detail",
+        "question": "What short structure does the speaker offer for explaining work?",
     },
     {
         "id": "EW03",
