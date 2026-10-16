@@ -417,3 +417,18 @@ CI checks dependency consistency, compiles the Python source, validates Chrome e
 ## Project quality policy
 
 Changes should be made on a phase branch, tested in CI, reviewed in a pull request, and merged only when required checks pass. Passing automated tests is necessary but does not replace testing against real YouTube videos, the configured model provider, and the intended deployment environment.
+
+## Phase 10.3 — Caption-verified pilot corpus
+
+The video-scoped benchmark registry now contains five videos: the existing Kingfisher English regression anchor, a second long-form English workshop, a long-form English AI engineering discussion, a Hindi history lesson, and an Arabic science/education episode. Each new entry records the YouTube video ID and URL, caption language/track type, transcript-source URL, transcript word count and runtime, four transcript-phrase gold cases, and one unrelated retrieval control. The new annotations use video-local IDs and do not alter production retrieval or relax existing Kingfisher thresholds.
+
+Caption/source records:
+- [English workshop — How to Improve Your English for Your Career](https://prepublish.ai/youtube-transcript/pOnl-Zndcls), English auto-generated captions, 54:40.
+- [English AI engineering discussion — Ex-Apple dev reveals his Agentic Engineering Workflow](https://prepublish.ai/youtube-transcript/A-JBaNvv3Tk), English auto-generated captions, 1:11:05.
+- [Hindi history lesson — Rajasthan peasant movement](https://prepublish.ai/youtube-transcript/INpnuL7qnzY), Hindi auto-generated captions, 40:20. The search-indexed caption excerpt exposed the phrases used for the gold annotations, but a full-page fetch was unavailable during curation; this limitation is recorded in the registry metadata.
+- [Arabic episode — الدحيح | هل الصمت التام راحة؟](https://prepublish.ai/youtube-transcript/fAd2nKfrDB8), Arabic captions published by the channel, 24:03.
+
+**Urdu remains an explicit sourcing blocker, not a benchmark.** We did not confirm a candidate whose YouTube caption track is available in Urdu script and can be checked against the source video. YouTube's [documented automatic-caption language list](https://support.google.com/youtube/answer/6373554?hl=en-GBAnd) does not include Urdu; therefore a candidate must have publisher-uploaded Urdu captions and those captions need to be verified before adding gold phrases. We have not substituted translated or unverified captions. The blocker is exposed as `BENCHMARK_CURATION_BLOCKERS` in `benchmark_registry.py` so it can be resolved in a later curation update.
+
+The available captions are source material for a pilot, not a claim that caption error rates are uniform across languages. Deterministic phrase matching demonstrates evidence presence only; it does not establish semantic answer faithfulness. The new video benchmarks should be run against their actual indexed stores before drawing retrieval-quality conclusions.
+

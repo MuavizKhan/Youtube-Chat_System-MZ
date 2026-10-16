@@ -33,6 +33,8 @@ from Backend.rag_system.evaluation import (
     _build_result_record,
 )
 from Backend.rag_system.benchmark_registry import (
+    VIDEO_BENCHMARKS,
+    BENCHMARK_CURATION_BLOCKERS,
     describe_video_benchmark,
     get_video_benchmark,
 )
@@ -85,6 +87,81 @@ def test_video_benchmark_registry_scopes_cases_and_records_source_metadata():
     assert description["gold_evidence_case_count"] == 10
     assert description["temporal_evidence_case_count"] == 1
     assert description["transcript_source"]["url"] == benchmark.transcript_source_url
+
+
+@pytest.mark.regression
+def test_pilot_registry_has_five_videos_and_four_cases_per_new_video():
+    assert len(VIDEO_BENCHMARKS) == 5
+
+    new_benchmarks = [
+        benchmark
+        for video_id, benchmark in VIDEO_BENCHMARKS.items()
+        if video_id != GOLD_EVIDENCE_VIDEO_ID
+    ]
+    assert len(new_benchmarks) == 4
+    assert {benchmark.transcript_language for benchmark in new_benchmarks} == {
+        "en", "hi", "ar"
+    }
+
+    for benchmark in new_benchmarks:
+        cases = benchmark.question_cases_for_evaluation()
+        question_ids = [case["id"] for case in cases]
+        assert len(question_ids) == len(set(question_ids)) == 5
+        assert set(question_ids) == set(benchmark.expected_retrieval)
+        assert len(benchmark.gold_evidence_cases) == 4
+        assert len(benchmark.temporal_evidence_cases) == 0
+        assert {
+            case.question_id for case in benchmark.gold_evidence_cases
+        }.issubset(question_ids)
+        assert cases[-1]["expected"] == "must_not_retrieve"
+        assert benchmark.runtime_seconds and benchmark.runtime_seconds > 0
+        assert benchmark.transcript_word_count and benchmark.transcript_word_count > 0
+        assert benchmark.transcript_source_url.startswith("https://")
+        assert benchmark.annotation_source_urls
+        assert benchmark.caption_track_kind in {
+            "youtube_auto_generated",
+            "youtube_channel_published",
+        }
+        assert benchmark.caption_validation_note
+
+
+@pytest.mark.regression
+def test_urdu_caption_sourcing_blocker_is_explicit_not_a_fake_benchmark():
+    assert BENCHMARK_CURATION_BLOCKERS["language"] == "ur"
+    assert BENCHMARK_CURATION_BLOCKERS["status"] == "blocked_pending_source_verification"
+    assert "publisher-uploaded Urdu caption track" in BENCHMARK_CURATION_BLOCKERS["reason"]
+    assert all(
+        benchmark.transcript_language != "ur"
+        for benchmark in VIDEO_BENCHMARKS.values()
+    )
+
+
+@pytest.mark.regression
+def test_registered_caption_phrases_match_representative_transcript_text():
+    from Backend.rag_system.gold_evidence import matched_gold_groups
+
+    fixtures = {
+        "pOnl-Zndcls": (
+            "The speaker says small talk is difficult.",
+            "EW03",
+        ),
+        "A-JBaNvv3Tk": (
+            "Open-source models may have no alignment whatsoever.",
+            "AI02",
+        ),
+        "INpnuL7qnzY": (
+            "पहला बड़ा किसान आंदोलन बिजोलिया में था; 84 प्रकार के कर और चवरी कर का उल्लेख है।",
+            "HI01",
+        ),
+        "fAd2nKfrDB8": (
+            "الهدوء التام مبيديش الراحة؛ نبض قلبك حركة الدم والصوت هو بوصلة مهمة.",
+            "AR01",
+        ),
+    }
+    for video_id, (transcript, question_id) in fixtures.items():
+        benchmark = VIDEO_BENCHMARKS[video_id]
+        case = benchmark.gold_evidence_by_question[question_id]
+        assert matched_gold_groups(transcript, case) == {0}
 
 
 @pytest.mark.regression
