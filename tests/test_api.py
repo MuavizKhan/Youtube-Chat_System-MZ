@@ -144,11 +144,56 @@ def test_ready(client):
 
 @pytest.mark.api
 def test_ready_reports_missing_configuration(client,monkeypatch):
+    monkeypatch.setattr(app_module,"LLM_PROVIDER","huggingface")
     monkeypatch.setattr(app_module,"HF_TOKEN",None)
     r=client.get("/ready")
     assert r.status_code==503
     assert r.json()["error"]=="service_not_ready"
     assert r.json()["request_id"]
+
+
+@pytest.mark.api
+def test_ready_uses_groq_credentials_without_huggingface_credentials(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(app_module, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(app_module, "GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setattr(app_module, "GROQ_MODEL_ID", "test-groq-model")
+    monkeypatch.setattr(app_module, "HF_TOKEN", None)
+    monkeypatch.setattr(app_module, "HF_MODEL_ID", None)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
+@pytest.mark.api
+@pytest.mark.parametrize(
+    ("groq_api_key", "groq_model_id"),
+    [
+        (None, "test-groq-model"),
+        ("test-groq-key", None),
+    ],
+)
+def test_ready_requires_selected_groq_configuration(
+    client,
+    monkeypatch,
+    groq_api_key,
+    groq_model_id,
+):
+    monkeypatch.setattr(app_module, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(app_module, "GROQ_API_KEY", groq_api_key)
+    monkeypatch.setattr(app_module, "GROQ_MODEL_ID", groq_model_id)
+    # Valid Hugging Face settings must not mask missing Groq settings.
+    monkeypatch.setattr(app_module, "HF_TOKEN", "test-hf-token")
+    monkeypatch.setattr(app_module, "HF_MODEL_ID", "test-hf-model")
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "service_not_ready"
 
 
 @pytest.mark.api
