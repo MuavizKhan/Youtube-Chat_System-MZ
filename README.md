@@ -432,3 +432,22 @@ Caption/source records:
 
 The available captions are source material for a pilot, not a claim that caption error rates are uniform across languages. Deterministic phrase matching demonstrates evidence presence only; it does not establish semantic answer faithfulness. The new video benchmarks should be run against their actual indexed stores before drawing retrieval-quality conclusions.
 
+## Phase 10.4 — Multi-video evaluation and versioned reports
+
+`Backend/rag_system/multi_video_evaluation.py` runs the benchmark registry entries in sequence and builds one machine-readable report. It does not call the generation model or download transcripts; each video's existing local FAISS index must already be available. An index or evaluator error is recorded against that video, processing continues for the remaining entries, and the report cannot claim a full pass when a video could not be evaluated.
+
+Run the registered five-video pilot from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m Backend.rag_system.multi_video_evaluation --output evaluation_reports/phase10_4_multivideo_baseline_v1.json
+```
+
+To run a subset, pass exact registered video IDs after `--videos`. The command prints the JSON report to standard output and, when `--output` is supplied, writes the same report to that path. The report includes a schema version, run ID, timestamp, each video's status and retrieval configuration, raw-anchor metrics, production-expanded-context metrics, temporal metrics where annotated, per-language aggregates, and case-level failure diagnostics. The process exits non-zero if any video cannot be evaluated or fails the existing production quality gates; the report is still saved so failures can be investigated.
+
+Aggregation reports both:
+- **Macro-average by video:** each successfully evaluated video contributes equally, regardless of transcript length or question count.
+- **Case-weighted average:** each gold question case contributes equally, weighted by its video's case count.
+
+The raw-anchor benchmark remains diagnostic as in the single-video runner. The existing production-context and temporal hard gates are preserved; this phase does not weaken thresholds or tune retrieval. Failed evidence cases identify the video, language, question, stage, matched/missing evidence-group indexes, annotated transcript phrases, and available index-candidate trace. The report labels unavailable indexes and failed evaluations rather than representing them as zero-valued performance.
+
+The initial JSON is a versioned *run report*, not an automatically committed baseline. Capture the baseline on the machine with the real pilot indexes present, review the per-video statuses and failures, then retain the resulting `evaluation_reports/phase10_4_multivideo_baseline_v1.json` as the baseline artifact. Urdu remains a documented curation blocker until an Urdu-script YouTube caption track and evidence phrases can be verified; the runner does not create a synthetic Urdu entry.
