@@ -836,9 +836,12 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
     assert financial_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert policy_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert deep_semantic_candidate[0].metadata["chunk_id"] not in selected_chunk_ids
-    # In-window facet reserves must affect top-k recall, not just the anchor tail.
-    assert financial_candidate in result[:4]
+    # The best in-window facet reserve gets the raw top-K promotion slot.
+    # The other reserve remains in expanded context without displacing another
+    # primary anchor; deep semantic rescues remain excluded from this reserve lane.
     assert policy_candidate in result[:4]
+    assert financial_candidate not in result[:4]
+    assert ranked[2] in result[:4]
 
 
 
@@ -1125,9 +1128,10 @@ def test_stronger_single_facet_candidate_competes_with_multi_candidate_facet_gro
         )
         for i in range(40)
     ]
-    # Model the Q04/Q05-shaped competition: two policy candidates qualify as
-    # a multi-candidate lexical facet, but one financial candidate has a larger
-    # individual rank lift and should not be starved by the group-level tier.
+    # Model the Q04/Q05-shaped competition: the financial candidate has the
+    # strongest individual rank lift, so it gets the promotion slot. Because its
+    # facet has only one reserve, the policy reserve stays in expanded context
+    # rather than displacing another primary raw top-K anchor.
     ranked[19] = (doc(106, 950, 955, "policy evidence one"), ranked[19][1])
     ranked[21] = (doc(125, 1050, 1055, "policy evidence two"), ranked[21][1])
     ranked[25] = (doc(69, 1250, 1255, "financial crisis evidence"), ranked[25][1])
@@ -1146,8 +1150,12 @@ def test_stronger_single_facet_candidate_competes_with_multi_candidate_facet_gro
     )
 
     selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    initial_ids = trace["initial_diverse_anchor_chunk_ids"]
     assert 69 in selected_ids[:4]
-    assert 125 in selected_ids[:4]
+    assert initial_ids[2] in selected_ids[:4]
+    assert 125 not in selected_ids[:4]
+    # Suppressing raw top-K promotion does not remove useful context.
+    assert 125 in selected_ids
     assert 106 not in selected_ids
 
     replacements = trace["reserve_replacements"]
