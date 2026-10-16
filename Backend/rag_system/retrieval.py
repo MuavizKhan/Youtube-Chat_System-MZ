@@ -2765,23 +2765,101 @@ def select_diverse_retrieval_anchors(
         reserved_identities.add(identity)
         reserved_facets.add(proposal["facet_name"])
         if proposal["global_rank"] <= limit * 3:
-            prioritized_reserves.append(candidate_item)
+            prioritized_reserves.append({
+                "item": candidate_item,
+                "facet_name": proposal["facet_name"],
+                "source_name": proposal.get("source_name", "facet"),
+                "multi_candidate_lexical_reserve": (
+                    is_multi_candidate_lexical_reserve(identity, proposal)
+                ),
+            })
 
-    # The full context keeps all selected anchors, but the gold retrieval
-    # benchmark also scores the first TOP_K anchors. Place bounded, in-window
-    # facet reserves immediately after the strongest global anchors so the
-    # reserve improves top-k evidence coverage rather than only tail recall.
-    # Protected, stronger anchors take precedence over ordinary reserve promotions.
-    # Deduplicate because a protected anchor remains in the selected list.
+    # The expanded context retains all selected anchors, but raw top-K is
+    # sensitive to promotion order. Preserve protected anchors first. For
+    # ordinary facet reserves, promote one leading facet by default; promote
+    # multiple reserves from that facet only when the leading candidate belongs
+    # to a proven multi-candidate lexical facet. This keeps a same-facet evidence
+    # group together without scattering the small top-K budget across facets.
+    # Original-query lexical reserves retain their dedicated promotion lane.
     promotion_candidates = []
     promotion_candidate_identities = set()
+    promotion_decisions = []
 
-    for item in [*protected_anchor_promotions, *prioritized_reserves]:
+    for item in protected_anchor_promotions:
         identity = _retrieval_document_identity(item[0])
         if identity in promotion_candidate_identities:
             continue
         promotion_candidate_identities.add(identity)
         promotion_candidates.append(item)
+        promotion_decisions.append({
+            "chunk_id": item[0].metadata.get("chunk_id"),
+            "source": "protected_anchor",
+            "promoted": True,
+            "reason": "protected_anchor_precedence",
+        })
+
+    primary_promotion_facet = None
+    primary_facet_is_multi_candidate = False
+
+    for reserve in prioritized_reserves:
+        item = reserve["item"]
+        identity = _retrieval_document_identity(item[0])
+        source_name = reserve["source_name"]
+        facet_name = reserve["facet_name"]
+        is_multi_candidate = reserve["multi_candidate_lexical_reserve"]
+
+        if identity in promotion_candidate_identities:
+            promotion_decisions.append({
+                "chunk_id": item[0].metadata.get("chunk_id"),
+                "source": source_name,
+                "facet_name": facet_name,
+                "promoted": False,
+                "reason": "identity_already_promoted",
+            })
+            continue
+
+        if source_name == "original_query_lexical":
+            promote = True
+            reason = "original_query_lexical_lane"
+        elif primary_promotion_facet is None:
+            primary_promotion_facet = facet_name
+            primary_facet_is_multi_candidate = is_multi_candidate
+            promote = True
+            reason = "primary_facet_reserve"
+        elif (
+            primary_facet_is_multi_candidate
+            and facet_name == primary_promotion_facet
+            and is_multi_candidate
+        ):
+            promote = True
+            reason = "same_multi_candidate_facet"
+        elif facet_name != primary_promotion_facet:
+            promote = False
+            reason = (
+                "different_facet_from_primary_group"
+                if primary_facet_is_multi_candidate
+                else "primary_facet_is_not_multi_candidate"
+            )
+        else:
+            promote = False
+            reason = "reserve_not_in_multi_candidate_lexical_group"
+
+        promotion_decisions.append({
+            "chunk_id": item[0].metadata.get("chunk_id"),
+            "source": source_name,
+            "facet_name": facet_name,
+            "multi_candidate_lexical_reserve": is_multi_candidate,
+            "promoted": promote,
+            "reason": reason,
+        })
+        if not promote:
+            continue
+
+        promotion_candidate_identities.add(identity)
+        promotion_candidates.append(item)
+
+    if diagnostic_trace is not None:
+        diagnostic_trace["promotion_decisions"] = promotion_decisions
 
     if promotion_candidates and TOP_K > 1:
         promoted_count = min(len(promotion_candidates), TOP_K - 1)
