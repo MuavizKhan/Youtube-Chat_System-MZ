@@ -147,6 +147,10 @@ class VideoBenchmark:
     gold_evidence_cases: tuple[GoldEvidenceCase, ...]
     temporal_evidence_cases: tuple[TemporalEvidenceCase, ...]
     annotation_source_urls: tuple[str, ...]
+    runtime_seconds: int | None = None
+    transcript_word_count: int | None = None
+    caption_track_kind: str = "not_audited"
+    caption_validation_note: str = ""
 
     @property
     def gold_evidence_by_question(self) -> dict[str, GoldEvidenceCase]:
@@ -184,10 +188,370 @@ KINGFISHER_BENCHMARK = VideoBenchmark(
     ),
 )
 
+
+
+# Phase 10.3 pilot corpus. Caption pages below expose the YouTube caption
+# track (rather than a third-party re-transcription). The four answerable
+# evidence phrases per entry were checked against the visible caption text.
+# The unrelated fifth question is a negative retrieval control and has no gold
+# transcript phrase annotation. New entries use video-local question IDs.
+
+ENGLISH_WORKSHOP_VIDEO_ID = "pOnl-Zndcls"
+ENGLISH_WORKSHOP_SOURCE_URL = (
+    "https://prepublish.ai/youtube-transcript/pOnl-Zndcls"
+)
+ENGLISH_WORKSHOP_QUESTIONS = (
+    {
+        "id": "EW01",
+        "type": "direct_fact",
+        "question": "How many ways does the speaker promise to express himself in meetings?",
+    },
+    {
+        "id": "EW02",
+        "type": "specific_detail",
+        "question": "What short structure does the speaker offer for explaining work?",
+    },
+    {
+        "id": "EW03",
+        "type": "explanation",
+        "question": "What does the speaker say is difficult about making conversation with strangers?",
+    },
+    {
+        "id": "EW04",
+        "type": "specific_detail",
+        "question": "What kind of email format does the speaker promise to provide?",
+    },
+    {
+        "id": "EW05",
+        "type": "unrelated",
+        "question": "What is the capital of Australia?",
+    },
+)
+ENGLISH_WORKSHOP_EXPECTED = {
+    "EW01": "must_retrieve",
+    "EW02": "must_retrieve",
+    "EW03": "must_retrieve",
+    "EW04": "must_retrieve",
+    "EW05": "must_not_retrieve",
+}
+ENGLISH_WORKSHOP_GOLD = (
+    GoldEvidenceCase(
+        question_id="EW01",
+        groups=(("three ways to express yourself",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="EW02",
+        groups=(("30 second structure for explaining your work",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="EW03",
+        groups=(("small talk is difficult",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="EW04",
+        groups=(("simple email format that gets replies",),),
+        min_group_coverage=1.0,
+    ),
+)
+
+ENGLISH_AI_VIDEO_ID = "A-JBaNvv3Tk"
+ENGLISH_AI_SOURCE_URL = (
+    "https://prepublish.ai/youtube-transcript/A-JBaNvv3Tk"
+)
+ENGLISH_AI_QUESTIONS = (
+    {
+        "id": "AI01",
+        "type": "direct_fact",
+        "question": "What does the guest predict will become easier for anyone?",
+    },
+    {
+        "id": "AI02",
+        "type": "specific_detail",
+        "question": "What does the guest say some future open-source models may lack?",
+    },
+    {
+        "id": "AI03",
+        "type": "direct_fact",
+        "question": "What has the guest unified into one system?",
+    },
+    {
+        "id": "AI04",
+        "type": "specific_detail",
+        "question": "What does the guest say about the pace of his shipping?",
+    },
+    {
+        "id": "AI05",
+        "type": "unrelated",
+        "question": "What is the capital of Australia?",
+    },
+)
+ENGLISH_AI_EXPECTED = {
+    "AI01": "must_retrieve",
+    "AI02": "must_retrieve",
+    "AI03": "must_retrieve",
+    "AI04": "must_retrieve",
+    "AI05": "must_not_retrieve",
+}
+ENGLISH_AI_GOLD = (
+    GoldEvidenceCase(
+        question_id="AI01",
+        groups=(("easy to hack anyone",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AI02",
+        groups=(("alignment whatsoever",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AI03",
+        groups=(("central system",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AI04",
+        groups=(("how fast I'm shipping",),),
+        min_group_coverage=1.0,
+    ),
+)
+
+HINDI_HISTORY_VIDEO_ID = "INpnuL7qnzY"
+HINDI_HISTORY_SOURCE_URL = (
+    "https://prepublish.ai/youtube-transcript/INpnuL7qnzY"
+)
+HINDI_HISTORY_QUESTIONS = (
+    {
+        "id": "HI01",
+        "type": "direct_fact",
+        "question": "Which peasant movement is named as the first major movement?",
+    },
+    {
+        "id": "HI02",
+        "type": "direct_fact",
+        "question": "Where does the transcript place the Bijolia movement?",
+    },
+    {
+        "id": "HI03",
+        "type": "specific_detail",
+        "question": "How many types of taxes does the speaker mention?",
+    },
+    {
+        "id": "HI04",
+        "type": "specific_detail",
+        "question": "Which tax is mentioned by name as a new tax?",
+    },
+    {
+        "id": "HI05",
+        "type": "unrelated",
+        "question": "What is the capital of Australia?",
+    },
+)
+HINDI_HISTORY_EXPECTED = {
+    "HI01": "must_retrieve",
+    "HI02": "must_retrieve",
+    "HI03": "must_retrieve",
+    "HI04": "must_retrieve",
+    "HI05": "must_not_retrieve",
+}
+HINDI_HISTORY_GOLD = (
+    GoldEvidenceCase(
+        question_id="HI01",
+        groups=(("पहला बड़ा किसान आंदोलन",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI02",
+        groups=(("बिजोलिया में",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI03",
+        groups=(("84 प्रकार के कर",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI04",
+        groups=(("चवरी कर",),),
+        min_group_coverage=1.0,
+    ),
+)
+
+ARABIC_SILENCE_VIDEO_ID = "fAd2nKfrDB8"
+ARABIC_SILENCE_SOURCE_URL = (
+    "https://prepublish.ai/youtube-transcript/fAd2nKfrDB8"
+)
+ARABIC_SILENCE_QUESTIONS = (
+    {
+        "id": "AR01",
+        "type": "explanation",
+        "question": "Does complete quiet provide the rest people expect?",
+    },
+    {
+        "id": "AR02",
+        "type": "specific_detail",
+        "question": "How much might one hour in the world's quietest room cost?",
+    },
+    {
+        "id": "AR03",
+        "type": "specific_detail",
+        "question": "What bodily sounds might people begin to hear in the room?",
+    },
+    {
+        "id": "AR04",
+        "type": "explanation",
+        "question": "What role does the episode assign to sound in perception?",
+    },
+    {
+        "id": "AR05",
+        "type": "unrelated",
+        "question": "What is the capital of Australia?",
+    },
+)
+ARABIC_SILENCE_EXPECTED = {
+    "AR01": "must_retrieve",
+    "AR02": "must_retrieve",
+    "AR03": "must_retrieve",
+    "AR04": "must_retrieve",
+    "AR05": "must_not_retrieve",
+}
+ARABIC_SILENCE_GOLD = (
+    GoldEvidenceCase(
+        question_id="AR01",
+        groups=(("الهدوء التام مبيديش الراحة",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR02",
+        groups=(("600 دولار",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR03",
+        groups=(("نبض قلبك حركة الدم",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR04",
+        groups=(("الصوت هو بوصلة مهمة",),),
+        min_group_coverage=1.0,
+    ),
+)
+
+BENCHMARK_CURATION_BLOCKERS = {
+    "language": "ur",
+    "status": "blocked_pending_source_verification",
+    "reason": (
+        "No candidate with an accessible, verified Urdu-script YouTube caption "
+        "track was confirmed during this curation slice. YouTube's automatic "
+        "caption language list does not include Urdu, so a valid candidate "
+        "needs a publisher-uploaded Urdu caption track that can be verified "
+        "against the video. Do not substitute an unverified translation."
+    ),
+    "verification_reference": (
+        "https://support.google.com/youtube/answer/6373554?hl=en-GBAnd"
+    ),
+}
+
+ENGLISH_WORKSHOP_BENCHMARK = VideoBenchmark(
+    video_id=ENGLISH_WORKSHOP_VIDEO_ID,
+    title="How to Improve Your English for Your Career (Live Workshop)",
+    transcript_language="en",
+    video_url=f"https://www.youtube.com/watch?v={ENGLISH_WORKSHOP_VIDEO_ID}",
+    transcript_source_kind="youtube_auto_generated_captions",
+    transcript_source_url=ENGLISH_WORKSHOP_SOURCE_URL,
+    question_cases=ENGLISH_WORKSHOP_QUESTIONS,
+    expected_retrieval=ENGLISH_WORKSHOP_EXPECTED,
+    gold_evidence_cases=ENGLISH_WORKSHOP_GOLD,
+    temporal_evidence_cases=(),
+    annotation_source_urls=(ENGLISH_WORKSHOP_SOURCE_URL,),
+    runtime_seconds=3280,
+    transcript_word_count=7304,
+    caption_track_kind="youtube_auto_generated",
+    caption_validation_note=(
+        "Caption page identifies English captions generated automatically by "
+        "YouTube; visible transcript text reviewed for the four gold phrases."
+    ),
+)
+
+ENGLISH_AI_BENCHMARK = VideoBenchmark(
+    video_id=ENGLISH_AI_VIDEO_ID,
+    title="Ex-Apple dev reveals his Agentic Engineering Workflow",
+    transcript_language="en",
+    video_url=f"https://www.youtube.com/watch?v={ENGLISH_AI_VIDEO_ID}",
+    transcript_source_kind="youtube_auto_generated_captions",
+    transcript_source_url=ENGLISH_AI_SOURCE_URL,
+    question_cases=ENGLISH_AI_QUESTIONS,
+    expected_retrieval=ENGLISH_AI_EXPECTED,
+    gold_evidence_cases=ENGLISH_AI_GOLD,
+    temporal_evidence_cases=(),
+    annotation_source_urls=(ENGLISH_AI_SOURCE_URL,),
+    runtime_seconds=4265,
+    transcript_word_count=13185,
+    caption_track_kind="youtube_auto_generated",
+    caption_validation_note=(
+        "Caption page identifies English captions generated automatically by "
+        "YouTube; transcript text reviewed for the four gold phrases."
+    ),
+)
+
+HINDI_HISTORY_BENCHMARK = VideoBenchmark(
+    video_id=HINDI_HISTORY_VIDEO_ID,
+    title=(
+        "किसान आंदोलन | Rajasthan ke kisan andolan by Rajveer Sir "
+        "revision class Rajasthan history all exams"
+    ),
+    transcript_language="hi",
+    video_url=f"https://www.youtube.com/watch?v={HINDI_HISTORY_VIDEO_ID}",
+    transcript_source_kind="youtube_auto_generated_captions",
+    transcript_source_url=HINDI_HISTORY_SOURCE_URL,
+    question_cases=HINDI_HISTORY_QUESTIONS,
+    expected_retrieval=HINDI_HISTORY_EXPECTED,
+    gold_evidence_cases=HINDI_HISTORY_GOLD,
+    temporal_evidence_cases=(),
+    annotation_source_urls=(HINDI_HISTORY_SOURCE_URL,),
+    runtime_seconds=2420,
+    transcript_word_count=7228,
+    caption_track_kind="youtube_auto_generated",
+    caption_validation_note=(
+        "Searchable caption page identifies Hindi captions generated "
+        "automatically by YouTube. The indexed caption excerpt exposes the "
+        "four phrases used here; full-page fetch was unavailable in research."
+    ),
+)
+
+ARABIC_SILENCE_BENCHMARK = VideoBenchmark(
+    video_id=ARABIC_SILENCE_VIDEO_ID,
+    title="الدحيح | هل الصمت التام راحة؟",
+    transcript_language="ar",
+    video_url=f"https://www.youtube.com/watch?v={ARABIC_SILENCE_VIDEO_ID}",
+    transcript_source_kind="youtube_channel_published_captions",
+    transcript_source_url=ARABIC_SILENCE_SOURCE_URL,
+    question_cases=ARABIC_SILENCE_QUESTIONS,
+    expected_retrieval=ARABIC_SILENCE_EXPECTED,
+    gold_evidence_cases=ARABIC_SILENCE_GOLD,
+    temporal_evidence_cases=(),
+    annotation_source_urls=(ARABIC_SILENCE_SOURCE_URL,),
+    runtime_seconds=1443,
+    transcript_word_count=4008,
+    caption_track_kind="youtube_channel_published",
+    caption_validation_note=(
+        "Caption page identifies Arabic captions published by the channel; "
+        "visible transcript text reviewed for the four gold phrases."
+    ),
+)
+
+
 # The key is the exact YouTube video ID. Unknown IDs are intentionally absent:
 # no annotation or passing result is inferred for an unregistered video.
 VIDEO_BENCHMARKS: dict[str, VideoBenchmark] = {
     KINGFISHER_BENCHMARK.video_id: KINGFISHER_BENCHMARK,
+    ENGLISH_WORKSHOP_BENCHMARK.video_id: ENGLISH_WORKSHOP_BENCHMARK,
+    ENGLISH_AI_BENCHMARK.video_id: ENGLISH_AI_BENCHMARK,
+    HINDI_HISTORY_BENCHMARK.video_id: HINDI_HISTORY_BENCHMARK,
+    ARABIC_SILENCE_BENCHMARK.video_id: ARABIC_SILENCE_BENCHMARK,
 }
 
 
@@ -218,7 +582,11 @@ def describe_video_benchmark(video_id: str) -> dict[str, Any]:
         "transcript_source": {
             "kind": benchmark.transcript_source_kind,
             "url": benchmark.transcript_source_url,
+            "caption_track_kind": benchmark.caption_track_kind,
+            "validation_note": benchmark.caption_validation_note,
         },
+        "runtime_seconds": benchmark.runtime_seconds,
+        "transcript_word_count": benchmark.transcript_word_count,
         "annotation_source_urls": list(benchmark.annotation_source_urls),
         "question_ids": [case["id"] for case in benchmark.question_cases],
         "gold_evidence_question_ids": [
