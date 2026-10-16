@@ -110,6 +110,12 @@ def test_multi_video_report_distinguishes_video_macro_and_case_weighted_metrics(
     assert english["videos_contributing"] == 2
     assert english["case_weighted_average"]["hit_rate_at_k"] == pytest.approx(0.625)
     assert report["summary"]["evaluation_error_video_count"] == 1
+    assert report["summary"]["registered_video_count"] == 3
+    assert report["summary"]["selected_video_count"] == 3
+    hindi = report["summary"]["by_language"]["hi"]
+    assert hindi["video_count"] == 1
+    assert hindi["evaluation_error_video_count"] == 1
+    assert hindi["evaluated_video_count"] == 0
     assert report["summary"]["overall_passed"] is False
 
 
