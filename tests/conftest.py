@@ -3,6 +3,7 @@ import os
 
 _TEST_ENVIRONMENT = {
     "APP_ENV": "test",
+    "LLM_PROVIDER": "huggingface",
     "HF_TOKEN": "test-token",
     "HF_MODEL_ID": "test-model",
     "HF_PROVIDER": "auto",
