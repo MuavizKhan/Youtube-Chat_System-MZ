@@ -30,6 +30,7 @@ from Backend.rag_system.evaluation import (
     evaluate_retrieval_result,
     _build_gold_result_record,
     _build_gold_context_result_record,
+    _build_result_record,
 )
 from Backend.rag_system.benchmark_registry import (
     describe_video_benchmark,
@@ -94,6 +95,23 @@ def test_unregistered_video_is_not_reported_as_a_passing_benchmark():
     description = describe_video_benchmark(video_id)
     assert description["status"] == "not_configured"
     assert "no quality pass/fail is claimed" in description["message"]
+
+
+@pytest.mark.regression
+def test_result_record_accepts_question_ids_scoped_to_a_video():
+    # The same ID namespace is not globally reserved across video manifests.
+    record = _build_result_record(
+        test_case={
+            "id": "HI01",
+            "type": "unanswerable",
+            "question": "Which fact is not in this transcript?",
+            "expected": "must_not_retrieve",
+        },
+        results=[],
+    )
+
+    assert record["expected"] == "must_not_retrieve"
+    assert record["passed"] is True
 
 
 @pytest.mark.regression
