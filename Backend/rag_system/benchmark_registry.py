@@ -14,7 +14,6 @@ from .gold_evidence import (
     GoldEvidenceCase,
 )
 from .temporal_evidence import (
-    GOLD_TEMPORAL_VIDEO_ID,
     TEMPORAL_ANNOTATION_SOURCE,
     TEMPORAL_EVIDENCE_CASES,
     TemporalEvidenceCase,
