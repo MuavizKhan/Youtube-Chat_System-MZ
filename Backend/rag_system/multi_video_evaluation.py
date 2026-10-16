@@ -9,7 +9,6 @@ aggregation without network calls, model-provider calls, or local indexes.
 import argparse
 import json
 import math
-from collections import defaultdict
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,8 +97,6 @@ def _stage_metrics(summary: dict[str, Any], stage: str) -> dict[str, Any] | None
 
 def _group_details(
     *,
-    video_id: str,
-    question_id: str,
     gold_case: Any,
     matched_indexes: Sequence[int],
     missing_indexes: Sequence[int],
@@ -208,8 +205,6 @@ def _build_case_diagnostics(
                 )
                 if gold_case is not None:
                     diagnostic["groups"] = _group_details(
-                        video_id=video_id,
-                        question_id=question_id,
                         gold_case=gold_case,
                         matched_indexes=matched_indexes,
                         missing_indexes=missing_indexes,
@@ -467,6 +462,7 @@ def build_multi_video_report(
     *,
     generated_at: str | None = None,
     curation_blockers: dict[str, Any] | None = None,
+    registered_video_count: int | None = None,
 ) -> dict[str, Any]:
     """Aggregate already-run single-video summaries without doing retrieval."""
     reports = [dict(item) for item in video_reports]
@@ -475,7 +471,9 @@ def build_multi_video_report(
     if curation_blockers is None:
         curation_blockers = BENCHMARK_CURATION_BLOCKERS
 
-    configured_count = len(reports)
+    selected_video_count = len(reports)
+    if registered_video_count is None:
+        registered_video_count = selected_video_count
     evaluated = [item for item in reports if item.get("status") == "evaluated"]
     eval_errors = [
         item for item in reports
@@ -492,20 +490,31 @@ def build_multi_video_report(
     languages = sorted({
         item.get("language", "unknown")
         for item in reports
-        if item.get("status") == "evaluated"
     })
     by_language: dict[str, Any] = {}
     for language in languages:
-        language_reports = [
+        all_language_reports = [
             item for item in reports
+            if item.get("language", "unknown") == language
+        ]
+        language_reports = [
+            item for item in all_language_reports
             if item.get("status") == "evaluated"
-            and item.get("language", "unknown") == language
         ]
         by_language[language] = {
-            "video_count": len(language_reports),
+            "video_count": len(all_language_reports),
+            "evaluated_video_count": len(language_reports),
+            "evaluation_error_video_count": sum(
+                1 for item in all_language_reports
+                if item.get("status") in {"evaluation_error", "not_configured"}
+            ),
             "quality_passed_video_count": sum(
                 1 for item in language_reports
                 if item.get("overall_passed") is True
+            ),
+            "quality_failure_video_count": sum(
+                1 for item in language_reports
+                if item.get("overall_passed") is not True
             ),
             "stage_metrics": {
                 stage: _aggregate_stage(language_reports, stage)
@@ -514,8 +523,8 @@ def build_multi_video_report(
         }
 
     overall_passed = (
-        configured_count > 0
-        and len(evaluated) == configured_count
+        selected_video_count > 0
+        and len(evaluated) == selected_video_count
         and not quality_failures
     )
 
@@ -524,7 +533,8 @@ def build_multi_video_report(
         "report_id": REPORT_ID,
         "generated_at": generated_at,
         "summary": {
-            "registered_video_count": configured_count,
+            "registered_video_count": registered_video_count,
+            "selected_video_count": selected_video_count,
             "evaluated_video_count": len(evaluated),
             "evaluation_error_video_count": len(eval_errors),
             "quality_failure_video_count": len(quality_failures),
@@ -557,7 +567,10 @@ def run_multi_video_evaluation(
         evaluator=evaluator,
         registry=registry,
     )
-    return build_multi_video_report(reports)
+    return build_multi_video_report(
+        reports,
+        registered_video_count=len(registry),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
