@@ -836,9 +836,12 @@ def test_anchor_reserve_prefers_in_window_candidates_over_deep_semantic_rescues(
     assert financial_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert policy_candidate[0].metadata["chunk_id"] in selected_chunk_ids
     assert deep_semantic_candidate[0].metadata["chunk_id"] not in selected_chunk_ids
-    # In-window facet reserves must affect top-k recall, not just the anchor tail.
-    assert financial_candidate in result[:4]
+    # The best in-window facet reserve gets the raw top-K promotion slot.
+    # The other reserve remains in expanded context without displacing another
+    # primary anchor; deep semantic rescues remain excluded from this reserve lane.
     assert policy_candidate in result[:4]
+    assert financial_candidate not in result[:4]
+    assert ranked[2] in result[:4]
 
 
 
@@ -1125,9 +1128,10 @@ def test_stronger_single_facet_candidate_competes_with_multi_candidate_facet_gro
         )
         for i in range(40)
     ]
-    # Model the Q04/Q05-shaped competition: two policy candidates qualify as
-    # a multi-candidate lexical facet, but one financial candidate has a larger
-    # individual rank lift and should not be starved by the group-level tier.
+    # Model the Q04/Q05-shaped competition: the financial candidate has the
+    # strongest individual rank lift, so it gets the promotion slot. Because its
+    # facet has only one reserve, the policy reserve stays in expanded context
+    # rather than displacing another primary raw top-K anchor.
     ranked[19] = (doc(106, 950, 955, "policy evidence one"), ranked[19][1])
     ranked[21] = (doc(125, 1050, 1055, "policy evidence two"), ranked[21][1])
     ranked[25] = (doc(69, 1250, 1255, "financial crisis evidence"), ranked[25][1])
@@ -1146,8 +1150,12 @@ def test_stronger_single_facet_candidate_competes_with_multi_candidate_facet_gro
     )
 
     selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    initial_ids = trace["initial_diverse_anchor_chunk_ids"]
     assert 69 in selected_ids[:4]
-    assert 125 in selected_ids[:4]
+    assert initial_ids[2] in selected_ids[:4]
+    assert 125 not in selected_ids[:4]
+    # Suppressing raw top-K promotion does not remove useful context.
+    assert 125 in selected_ids
     assert 106 not in selected_ids
 
     replacements = trace["reserve_replacements"]
@@ -2850,4 +2858,107 @@ def test_weaker_same_source_reserve_preserves_and_promotes_selected_anchor():
         == "weaker_than_replacement_in_global_and_facet_rank"
         for item in trace["reserve_rejections"]
     )
+
+
+
+@pytest.mark.unit
+def test_single_facet_reserve_preserves_primary_anchor_against_other_facet():
+    ranked = [
+        (
+            doc(i * 1000, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    ranked[19] = (
+        doc(106, 950, 955, "policy evidence one"),
+        ranked[19][1],
+    )
+    ranked[21] = (
+        doc(125, 1050, 1055, "policy evidence two"),
+        ranked[21][1],
+    )
+    ranked[25] = (
+        doc(69, 1250, 1255, "financial crisis evidence"),
+        ranked[25][1],
+    )
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            "financial_economic::lexical": [ranked[25]],
+            "policy_governance::lexical": [ranked[19], ranked[21]],
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    initial_ids = trace["initial_diverse_anchor_chunk_ids"]
+
+    # The higher-lift financial reserve is promoted; a reserve from another
+    # facet does not displace a primary anchor from raw top-K by default.
+    assert 69 in selected_ids[:4]
+    assert initial_ids[2] in selected_ids[:4]
+    assert 125 not in selected_ids[:4]
+
+    decisions = {
+        item["chunk_id"]: item
+        for item in trace["promotion_decisions"]
+    }
+    assert decisions[69]["promoted"] is True
+    assert decisions[125]["promoted"] is False
+    assert decisions[125]["reason"] == "primary_facet_is_not_multi_candidate"
+
+
+@pytest.mark.unit
+def test_same_multi_candidate_lexical_facet_reserves_promote_together():
+    ranked = [
+        (
+            doc(i * 1000, i * 50, i * 50 + 5, f"global candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(40)
+    ]
+    ranked[23] = (
+        doc(179, 1150, 1155, "financial evidence two"),
+        ranked[23][1],
+    )
+    ranked[25] = (
+        doc(69, 1250, 1255, "financial evidence one"),
+        ranked[25][1],
+    )
+
+    # One selected anchor separates two strong candidates in the same lexical
+    # facet, making the latter facet rank 3 but keeping it globally eligible.
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=2,
+        facet_candidate_rankings={
+            "financial_economic::lexical": [
+                ranked[25],
+                ranked[0],
+                ranked[23],
+            ],
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    assert 69 in selected_ids[:4]
+    assert 179 in selected_ids[:4]
+
+    decisions = {
+        item["chunk_id"]: item
+        for item in trace["promotion_decisions"]
+    }
+    assert decisions[69]["promoted"] is True
+    assert decisions[179]["promoted"] is True
+    assert decisions[179]["reason"] == "same_multi_candidate_facet"
 
