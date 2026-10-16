@@ -33,9 +33,13 @@ from .config import (
     TOP_K,
 )
 
+from .benchmark_registry import (
+    EXPECTED_RETRIEVAL,
+    TEST_QUESTIONS,
+    describe_video_benchmark,
+    get_video_benchmark,
+)
 from .gold_evidence import (
-    GOLD_EVIDENCE_CASES,
-    GOLD_EVIDENCE_VIDEO_ID,
     get_gold_evidence_case,
     matched_gold_groups,
     normalize_evidence_text,
@@ -43,7 +47,6 @@ from .gold_evidence import (
 from .temporal_evidence import (
     GOLD_TEMPORAL_VIDEO_ID,
     TEMPORAL_BENCHMARK_THRESHOLDS,
-    TEMPORAL_EVIDENCE_CASES,
     get_temporal_evidence_case,
 )
 
@@ -57,117 +60,6 @@ from .retrieval import (
 
 
 DEFAULT_VIDEO = "https://www.youtube.com/watch?v=MdeQMVBuGgY"
-
-TEST_QUESTIONS = [
-    {
-        "id": "Q01",
-        "type": "direct_fact",
-        "question": "What is Kingfisher Airlines?",
-    },
-    {
-        "id": "Q02",
-        "type": "direct_fact",
-        "question": (
-            "What connection does Vijay Mallya discuss "
-            "with Formula One?"
-        ),
-    },
-    {
-        "id": "Q03",
-        "type": "direct_fact",
-        "question": (
-            "What businesses or companies does Vijay Mallya "
-            "discuss in the interview?"
-        ),
-    },
-    {
-        "id": "Q04",
-        "type": "explanation",
-        "question": (
-            "Why does Vijay Mallya say Kingfisher Airlines "
-            "struggled or failed?"
-        ),
-    },
-    {
-        "id": "Q05",
-        "type": "explanation",
-        "question": (
-            "How does Vijay Mallya describe the challenges "
-            "he faced while running Kingfisher Airlines?"
-        ),
-    },
-    {
-        "id": "Q06",
-        "type": "explanation",
-        "question": (
-            "What does Vijay Mallya say about building "
-            "the Kingfisher brand?"
-        ),
-    },
-    {
-        "id": "Q07",
-        "type": "specific_detail",
-        "question": (
-            "What does Vijay Mallya say about the amount "
-            "of debt or money involved in the Kingfisher "
-            "situation?"
-        ),
-    },
-    {
-        "id": "Q08",
-        "type": "specific_detail",
-        "question": (
-            "What does Vijay Mallya say about banks and "
-            "the recovery of money?"
-        ),
-    },
-    {
-        "id": "Q09",
-        "type": "specific_detail",
-        "question": (
-            "What does Vijay Mallya say about the role of "
-            "Indian government policy in the problems "
-            "faced by Kingfisher Airlines?"
-        ),
-    },
-    {
-        "id": "Q10",
-        "type": "multi_part",
-        "question": (
-            "What does Vijay Mallya say about the failure "
-            "of Kingfisher Airlines, and what reasons does "
-            "he give for it?"
-        ),
-    },
-    {
-        "id": "Q11",
-        "type": "temporal",
-        "question": (
-            "Where in the video does Vijay Mallya discuss "
-            "Kingfisher Airlines, and what is discussed "
-            "there?"
-        ),
-    },
-    {
-        "id": "Q12",
-        "type": "unanswerable",
-        "question": (
-            "What programming language does Vijay Mallya "
-            "say is his favorite?"
-        ),
-    },
-    {
-        "id": "Q13",
-        "type": "unrelated",
-        "question": "What is the capital of Australia?",
-    },
-]
-
-EXPECTED_RETRIEVAL = {
-    **{f"Q{i:02d}": "must_retrieve" for i in range(1, 12)},
-    "Q12": "may_retrieve",
-    "Q13": "must_not_retrieve",
-}
 
 # The benchmark deliberately keeps hard thresholds tied to the existing
 # retrieval contract instead of inventing arbitrary semantic-quality scores.
@@ -210,13 +102,16 @@ def _expected_for(question_id: str) -> str:
 def evaluate_retrieval_result(
     question_id: str,
     retrieved_count: int,
+    *,
+    expected: str | None = None,
 ) -> tuple[bool, str]:
     """Evaluate one retrieval result against the regression contract."""
 
     if retrieved_count < 0:
         raise ValueError("retrieved_count cannot be negative.")
 
-    expected = _expected_for(question_id)
+    if expected is None:
+        expected = _expected_for(question_id)
 
     if expected == "must_retrieve":
         passed = retrieved_count > 0
@@ -250,9 +145,13 @@ def _build_result_record(
     results: list[tuple[Any, float]],
 ) -> dict[str, Any]:
     retrieved_count = len(results)
+    expected = test_case.get("expected")
+    if expected is None:
+        expected = _expected_for(test_case["id"])
     passed, evaluation_message = evaluate_retrieval_result(
         question_id=test_case["id"],
         retrieved_count=retrieved_count,
+        expected=expected,
     )
 
     distances = [float(distance) for _, distance in results]
@@ -267,7 +166,7 @@ def _build_result_record(
         "id": test_case["id"],
         "type": test_case["type"],
         "question": test_case["question"],
-        "expected": EXPECTED_RETRIEVAL[test_case["id"]],
+        "expected": expected,
         "retrieved": retrieved_count,
         "passed": passed,
         "message": evaluation_message,
@@ -391,10 +290,13 @@ def evaluate_benchmark_thresholds(
 def _build_gold_result_record(
     test_case: dict[str, str],
     results: list[tuple[Any, float]],
+    *,
+    gold_case=None,
 ) -> dict[str, Any]:
-    """Score raw top-k retrieval against curated evidence groups."""
+    """Score raw top-k retrieval against the selected video's gold groups."""
 
-    gold_case = get_gold_evidence_case(test_case["id"])
+    if gold_case is None:
+        gold_case = get_gold_evidence_case(test_case["id"])
     top_results = results[:TOP_K]
 
     matched_group_indexes: set[int] = set()
@@ -463,10 +365,13 @@ def _build_gold_result_record(
 def _build_gold_context_result_record(
     test_case: dict[str, str],
     results: list[tuple[Any, float]],
+    *,
+    gold_case=None,
 ) -> dict[str, Any]:
-    """Score the full production-expanded context against gold evidence."""
+    """Score production-expanded context against the selected video's gold groups."""
 
-    gold_case = get_gold_evidence_case(test_case["id"])
+    if gold_case is None:
+        gold_case = get_gold_evidence_case(test_case["id"])
     matched_group_indexes: set[int] = set()
     relevant_documents = 0
 
@@ -773,10 +678,12 @@ def _build_temporal_result_record(
     results: list[tuple[Any, float]],
     *,
     expected_video_id: str = GOLD_TEMPORAL_VIDEO_ID,
+    temporal_case=None,
 ) -> dict[str, Any]:
-    """Score top-k retrieval against chapter-level timestamp gold windows."""
+    """Score top-k retrieval against the selected video's timestamp windows."""
 
-    temporal_case = get_temporal_evidence_case(test_case["id"])
+    if temporal_case is None:
+        temporal_case = get_temporal_evidence_case(test_case["id"])
     top_results = results[:TOP_K]
     valid_timestamp_count = 0
     valid_identity_count = 0
@@ -1222,14 +1129,17 @@ def diagnose_video(
     """Run end-to-end retrieval diagnostics for selected gold questions."""
 
     video_id = extract_video_id(video_reference)
-    if video_id != GOLD_EVIDENCE_VIDEO_ID:
+    benchmark = get_video_benchmark(video_id)
+    if benchmark is None:
         raise ValueError(
-            "End-to-end gold retrieval diagnostics are currently defined only "
-            f"for benchmark video {GOLD_EVIDENCE_VIDEO_ID}."
+            f"No benchmark is configured for video {video_id}; "
+            "gold retrieval diagnostics cannot run."
         )
 
-    test_case_map = {case["id"]: case for case in TEST_QUESTIONS}
-    available = {case.question_id for case in GOLD_EVIDENCE_CASES}
+    test_case_map = {
+        case["id"]: case for case in benchmark.question_cases_for_evaluation()
+    }
+    available = set(benchmark.gold_evidence_by_question)
     invalid = [question_id for question_id in question_ids if question_id not in available]
     if invalid:
         raise ValueError(
@@ -1242,7 +1152,10 @@ def diagnose_video(
     diagnostics = build_end_to_end_retrieval_diagnostics(
         vector_store,
         selected_cases,
-        [case for case in GOLD_EVIDENCE_CASES if case.question_id in question_ids],
+        [
+            case for case in benchmark.gold_evidence_cases
+            if case.question_id in question_ids
+        ],
     )
 
     result = {
@@ -1291,6 +1204,7 @@ def build_evaluation_summary(
     gold_context_results: list[dict[str, Any]] | None = None,
     temporal_results: list[dict[str, Any]] | None = None,
     gold_retrieval_diagnostics: list[dict[str, Any]] | None = None,
+    benchmark_configuration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a stable machine-readable evaluation summary."""
 
@@ -1309,10 +1223,20 @@ def build_evaluation_summary(
     )
     strict_failed = strict_total - strict_passed
 
-    benchmark_metrics = build_benchmark_metrics(results)
-    benchmark_passed, benchmark_failures = evaluate_benchmark_thresholds(
-        benchmark_metrics
-    )
+    if benchmark_configuration is None:
+        benchmark_configuration = describe_video_benchmark(video_id)
+    benchmark_configured = benchmark_configuration.get("status") == "configured"
+
+    if benchmark_configured:
+        benchmark_metrics = build_benchmark_metrics(results)
+        benchmark_passed, benchmark_failures = evaluate_benchmark_thresholds(
+            benchmark_metrics
+        )
+    else:
+        # Unregistered videos are not an empty suite that can pass by default.
+        benchmark_metrics = {"status": "not_configured", "cases": 0}
+        benchmark_passed = False
+        benchmark_failures = ["no_benchmark_configured"]
 
     gold_benchmark = None
     if gold_results is not None:
@@ -1364,6 +1288,7 @@ def build_evaluation_summary(
 
     return {
         "video_id": video_id,
+        "benchmark_configuration": benchmark_configuration,
         "retrieval_strategy": "question_aware_soft_facet_rerank",
         "retrieval_config": {
             "top_k": TOP_K,
@@ -1392,12 +1317,17 @@ def build_evaluation_summary(
         "total": total,
         "passed": passed,
         "failed": failed,
-        "pass_rate": passed / total if total else 1.0,
+        "pass_rate": (
+            passed / total if total
+            else (1.0 if benchmark_configured else None)
+        ),
         "strict_total": strict_total,
         "strict_passed": strict_passed,
         "strict_failed": strict_failed,
         "strict_pass_rate": (
-            strict_passed / strict_total if strict_total else 1.0
+            strict_passed / strict_total
+            if strict_total
+            else (1.0 if benchmark_configured else None)
         ),
         "results": results,
     }
@@ -1431,16 +1361,34 @@ def evaluate_video(
     """Run the retrieval regression suite and return a summary."""
 
     video_id = extract_video_id(video_reference)
-    vector_store = load_vector_store(video_id)
+    benchmark = get_video_benchmark(video_id)
+    benchmark_configuration = describe_video_benchmark(video_id)
 
+    if benchmark is None:
+        if display:
+            print()
+            print("=" * 80)
+            print("RAG RETRIEVAL EVALUATION NOT CONFIGURED")
+            print("=" * 80)
+            print(f"Video ID: {video_id}")
+            print(benchmark_configuration["message"])
+        return build_evaluation_summary(
+            video_id=video_id,
+            results=[],
+            benchmark_configuration=benchmark_configuration,
+        )
+
+    vector_store = load_vector_store(video_id)
     results = []
     gold_results = []
     gold_context_results = []
     temporal_results = []
     gold_retrieval_diagnostics = None
     production_gold_results_by_id = {}
-    run_video_specific_gold = video_id == GOLD_EVIDENCE_VIDEO_ID
-    run_temporal_gold = video_id == GOLD_TEMPORAL_VIDEO_ID
+    gold_cases_by_id = benchmark.gold_evidence_by_question
+    temporal_cases_by_id = benchmark.temporal_evidence_by_question
+    run_video_specific_gold = bool(benchmark.gold_evidence_cases)
+    run_temporal_gold = bool(benchmark.temporal_evidence_cases)
 
     if display:
         print("\n" + "=" * 80)
@@ -1472,7 +1420,7 @@ def evaluate_video(
         )
         print("\nLoading vector store...")
 
-    for test_case in TEST_QUESTIONS:
+    for test_case in benchmark.question_cases_for_evaluation():
         question_id = test_case["id"]
         question_type = test_case["type"]
         question = test_case["question"]
@@ -1494,13 +1442,8 @@ def evaluate_video(
         )
         results.append(record)
 
-        if (
-            run_video_specific_gold
-            and question_id in {
-                case.question_id
-                for case in GOLD_EVIDENCE_CASES
-            }
-        ):
+        gold_case = gold_cases_by_id.get(question_id)
+        if gold_case is not None:
             raw_retrieved = retrieve_question_context(
                 vector_store=vector_store,
                 query=question,
@@ -1510,20 +1453,20 @@ def evaluate_video(
                 _build_gold_result_record(
                     test_case=test_case,
                     results=raw_retrieved,
+                    gold_case=gold_case,
                 )
             )
             gold_context_results.append(
                 _build_gold_context_result_record(
                     test_case=test_case,
                     results=retrieved,
+                    gold_case=gold_case,
                 )
             )
             production_gold_results_by_id[question_id] = retrieved
 
-        if run_temporal_gold and question_id in {
-            case.question_id
-            for case in TEMPORAL_EVIDENCE_CASES
-        }:
+        temporal_case = temporal_cases_by_id.get(question_id)
+        if temporal_case is not None:
             raw_retrieved = retrieve_question_context(
                 vector_store=vector_store,
                 query=question,
@@ -1533,7 +1476,8 @@ def evaluate_video(
                 _build_temporal_result_record(
                     test_case=test_case,
                     results=raw_retrieved,
-                    expected_video_id=GOLD_TEMPORAL_VIDEO_ID,
+                    expected_video_id=benchmark.video_id,
+                    temporal_case=temporal_case,
                 )
             )
 
@@ -1546,7 +1490,7 @@ def evaluate_video(
     if run_video_specific_gold:
         gold_retrieval_diagnostics = build_gold_retrieval_gap_diagnostics(
             vector_store=vector_store,
-            gold_cases=GOLD_EVIDENCE_CASES,
+            gold_cases=benchmark.gold_evidence_cases,
             production_results_by_id=production_gold_results_by_id,
         )
 
@@ -1561,6 +1505,7 @@ def evaluate_video(
         ),
         temporal_results=temporal_results if run_temporal_gold else None,
         gold_retrieval_diagnostics=gold_retrieval_diagnostics,
+        benchmark_configuration=benchmark_configuration,
     )
 
     if display:

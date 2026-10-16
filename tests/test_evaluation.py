@@ -30,9 +30,15 @@ from Backend.rag_system.evaluation import (
     evaluate_retrieval_result,
     _build_gold_result_record,
     _build_gold_context_result_record,
+    _build_result_record,
+)
+from Backend.rag_system.benchmark_registry import (
+    describe_video_benchmark,
+    get_video_benchmark,
 )
 from Backend.rag_system.gold_evidence import (
     GOLD_EVIDENCE_CASES,
+    GOLD_EVIDENCE_VIDEO_ID,
     GoldEvidenceCase,
     get_gold_evidence_case,
     matched_gold_groups,
@@ -56,6 +62,56 @@ def test_ids_and_expectations_are_complete():
     assert EXPECTED_RETRIEVAL["Q11"] == "must_retrieve"
     assert EXPECTED_RETRIEVAL["Q12"] == "may_retrieve"
     assert EXPECTED_RETRIEVAL["Q13"] == "must_not_retrieve"
+
+
+@pytest.mark.regression
+def test_video_benchmark_registry_scopes_cases_and_records_source_metadata():
+    benchmark = get_video_benchmark(GOLD_EVIDENCE_VIDEO_ID)
+
+    assert benchmark is not None
+    assert benchmark.transcript_language == "en"
+    assert benchmark.video_url.endswith(GOLD_EVIDENCE_VIDEO_ID)
+    assert benchmark.transcript_source_kind == "published_transcript_copy"
+    assert set(benchmark.gold_evidence_by_question) == {
+        f"Q{i:02d}" for i in range(1, 11)
+    }
+    assert set(benchmark.temporal_evidence_by_question) == {"Q11"}
+    assert len(benchmark.question_cases_for_evaluation()) == 13
+    assert benchmark.question_cases_for_evaluation()[0]["expected"] == "must_retrieve"
+
+    description = describe_video_benchmark(GOLD_EVIDENCE_VIDEO_ID)
+    assert description["status"] == "configured"
+    assert description["question_count"] == 13
+    assert description["gold_evidence_case_count"] == 10
+    assert description["temporal_evidence_case_count"] == 1
+    assert description["transcript_source"]["url"] == benchmark.transcript_source_url
+
+
+@pytest.mark.regression
+def test_unregistered_video_is_not_reported_as_a_passing_benchmark():
+    video_id = "AbcdefGhijk"
+
+    assert get_video_benchmark(video_id) is None
+    description = describe_video_benchmark(video_id)
+    assert description["status"] == "not_configured"
+    assert "no quality pass/fail is claimed" in description["message"]
+
+
+@pytest.mark.regression
+def test_result_record_accepts_question_ids_scoped_to_a_video():
+    # The same ID namespace is not globally reserved across video manifests.
+    record = _build_result_record(
+        test_case={
+            "id": "HI01",
+            "type": "unanswerable",
+            "question": "Which fact is not in this transcript?",
+            "expected": "must_not_retrieve",
+        },
+        results=[],
+    )
+
+    assert record["expected"] == "must_not_retrieve"
+    assert record["passed"] is True
 
 
 @pytest.mark.regression
@@ -788,6 +844,13 @@ def test_video_specific_gold_benchmarks_are_skipped_for_other_videos(monkeypatch
     )
 
     assert summary["video_id"] == other_video_id
+    assert summary["benchmark_configuration"]["status"] == "not_configured"
+    assert summary["benchmark_metrics"] == {
+        "status": "not_configured",
+        "cases": 0,
+    }
+    assert summary["benchmark_passed"] is False
+    assert summary["benchmark_failures"] == ["no_benchmark_configured"]
     assert summary["gold_benchmark"] is None
     assert summary["temporal_benchmark"] is None
 
