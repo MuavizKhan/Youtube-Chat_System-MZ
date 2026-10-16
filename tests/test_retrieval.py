@@ -2797,3 +2797,57 @@ def test_temporal_coverage_is_measured_after_context_budget():
     assert bundle["coverage_ratio"] == pytest.approx(1 / 3, abs=0.01)
     assert bundle["results"] == []
     assert [document.metadata["chunk_id"] for document, _ in bundle["candidates"]] == [1]
+
+
+@pytest.mark.unit
+def test_weaker_same_source_reserve_preserves_and_promotes_selected_anchor():
+    ranked = [
+        (
+            doc(i * 10, i * 50, i * 50 + 5, f"candidate {i}"),
+            0.1 + i / 100,
+        )
+        for i in range(30)
+    ]
+
+    # Simulate a selected anchor at global rank 10 and an adjacent reserve
+    # at global rank 13. The reserve is also much weaker in the same facet.
+    ranked[9] = (doc(26, 450, 455, "strong selected evidence"), ranked[9][1])
+    ranked[12] = (doc(27, 600, 605, "weaker adjacent reserve"), ranked[12][1])
+
+    facet_results = [
+        ranked[0],
+        ranked[1],
+        ranked[9],  # Facet rank 3; global rank 10.
+        ranked[2],
+        ranked[3],
+        ranked[4],
+        ranked[5],
+        ranked[6],
+        ranked[7],
+        ranked[12],  # Facet rank 10; global rank 13.
+    ]
+
+    trace = {}
+    result = retrieval.select_diverse_retrieval_anchors(
+        ranked,
+        limit=12,
+        min_chunk_gap=3,
+        facet_reserve_limit=1,
+        facet_candidate_rankings={
+            "brand_marketing::lexical": facet_results,
+        },
+        diagnostic_trace=trace,
+    )
+
+    selected_ids = [item[0].metadata["chunk_id"] for item in result]
+    assert 26 in selected_ids[:4]
+    assert 27 not in selected_ids
+
+    assert any(
+        item["candidate_chunk_id"] == 27
+        and item["replaced_chunk_id"] == 26
+        and item["reason"]
+        == "weaker_than_replacement_in_global_and_facet_rank"
+        for item in trace["reserve_rejections"]
+    )
+
