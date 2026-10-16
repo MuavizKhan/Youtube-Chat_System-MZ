@@ -145,7 +145,9 @@ def _build_result_record(
     results: list[tuple[Any, float]],
 ) -> dict[str, Any]:
     retrieved_count = len(results)
-    expected = test_case.get("expected", _expected_for(test_case["id"]))
+    expected = test_case.get("expected")
+    if expected is None:
+        expected = _expected_for(test_case["id"])
     passed, evaluation_message = evaluate_retrieval_result(
         question_id=test_case["id"],
         retrieved_count=retrieved_count,
@@ -1364,7 +1366,8 @@ def evaluate_video(
 
     if benchmark is None:
         if display:
-            print("\\n" + "=" * 80)
+            print()
+            print("=" * 80)
             print("RAG RETRIEVAL EVALUATION NOT CONFIGURED")
             print("=" * 80)
             print(f"Video ID: {video_id}")
