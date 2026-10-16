@@ -36,6 +36,7 @@ from Backend.rag_system.gold_evidence import (
     GoldEvidenceCase,
     get_gold_evidence_case,
     matched_gold_groups,
+    normalize_evidence_text,
 )
 from Backend.rag_system.temporal_evidence import (
     GOLD_TEMPORAL_VIDEO_ID,
@@ -87,6 +88,60 @@ def test_gold_phrase_matching_is_case_insensitive():
     )
 
     assert matched == {0, 1}
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("Kingfisher — Airlines!", "kingfisher airlines"),
+        ("किंगफिशर—एयरलाइंस", "किंगफिशर एयरलाइंस"),
+        ("کنگفشر\u200c ائیرلائنز", "کنگفشر ائیرلائنز"),
+        ("مَالِيَا نے کہا", "ماليا نے کہا"),
+    ],
+)
+def test_evidence_normalization_preserves_unicode_scripts_and_text_boundaries(
+    text,
+    phrase,
+):
+    normalized_text = normalize_evidence_text(text)
+    normalized_phrase = normalize_evidence_text(phrase)
+
+    assert normalized_phrase
+    assert normalized_phrase in normalized_text
+
+
+@pytest.mark.regression
+def test_gold_evidence_matching_works_for_non_latin_scripts():
+    cases_and_text = [
+        (
+            GoldEvidenceCase(
+                question_id="HI01",
+                groups=(("किंगफिशर एयरलाइंस",),),
+                min_group_coverage=1.0,
+            ),
+            "वीडियो में किंगफिशर—एयरलाइंस का उल्लेख है।",
+        ),
+        (
+            GoldEvidenceCase(
+                question_id="UR01",
+                groups=(("کنگفشر ائیرلائنز",),),
+                min_group_coverage=1.0,
+            ),
+            "ویڈیو میں کنگفشر\u200c ائیرلائنز کا ذکر ہے۔",
+        ),
+        (
+            GoldEvidenceCase(
+                question_id="AR01",
+                groups=(("ماليا تحدث عن الشركة",),),
+                min_group_coverage=1.0,
+            ),
+            "مَالِيَا تحدث عن الشركة.",
+        ),
+    ]
+
+    for case, transcript_text in cases_and_text:
+        assert matched_gold_groups(transcript_text, case) == {0}
 
 
 @pytest.mark.regression
