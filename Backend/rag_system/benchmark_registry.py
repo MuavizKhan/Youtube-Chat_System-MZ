@@ -274,7 +274,7 @@ ENGLISH_AI_QUESTIONS = (
     },
     {
         "id": "AI03",
-        "type": "direct_fact",
+        "type": "specific_detail",
         "question": "What has the guest unified into one system?",
     },
     {
