@@ -396,7 +396,7 @@ ARABIC_SILENCE_QUESTIONS = (
     },
     {
         "id": "AR03",
-        "type": "specific_detail",
+        "type": "direct_fact",
         "question": "What bodily sounds might people begin to hear in the room?",
     },
     {
