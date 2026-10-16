@@ -11,7 +11,7 @@ and remains covered by the existing retrieval regression contract; a
 separate timestamp-grounded annotation set is intentionally deferred.
 """
 
-import re
+import unicodedata
 from dataclasses import dataclass
 
 
@@ -221,14 +221,46 @@ def get_gold_evidence_case(question_id: str) -> GoldEvidenceCase:
 
 
 def normalize_evidence_text(text: str) -> str:
-    """Normalize transcript text for deterministic phrase matching."""
+    """Normalize transcript text while preserving letters across scripts.
 
-    normalized = text.casefold()
-    normalized = normalized.replace("’", "'")
-    normalized = normalized.replace("“", '"')
-    normalized = normalized.replace("”", '"')
-    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-    return " ".join(normalized.split())
+    Unicode compatibility normalization and case folding make equivalent
+    spellings more consistent. Punctuation becomes a word boundary, format
+    controls such as zero-width joiners are ignored, and optional Arabic
+    combining marks are removed. Other combining marks (including Indic
+    vowel signs) are preserved because they carry meaning in those scripts.
+    """
+
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = (
+        normalized
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("\u0640", "")  # Arabic tatweel
+    )
+
+    characters = []
+    for character in normalized:
+        category = unicodedata.category(character)
+        unicode_name = unicodedata.name(character, "")
+
+        # Arabic vowel/recitation marks are optional in many transcript
+        # renderings; do not remove combining marks from other scripts.
+        if category.startswith("M") and unicode_name.startswith("ARABIC "):
+            continue
+
+        # Ignore zero-width formatting controls, which may appear in Arabic
+        # and Urdu text without changing the visible words.
+        if category == "Cf":
+            continue
+
+        if category[0] in {"L", "N", "M"}:
+            characters.append(character)
+        else:
+            characters.append(" ")
+
+    return " ".join("".join(characters).split())
 
 
 def matched_gold_groups(
