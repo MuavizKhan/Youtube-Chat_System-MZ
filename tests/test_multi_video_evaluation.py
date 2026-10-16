@@ -254,6 +254,40 @@ def test_runner_attaches_video_query_stage_and_missing_group_diagnostics():
     assert raw_failure["groups"][1]["production_context_candidate_chunk_ids"] == []
 
 
+def test_temporal_validity_metrics_are_aggregated_when_annotations_exist():
+    report_row = _video_report(
+        "english-temporal",
+        "en",
+        1,
+        {
+            "hit_rate_at_k": 1.0,
+            "mean_group_coverage": 0.8,
+            "mrr": 1.0,
+            "mean_precision_at_k": 0.25,
+        },
+    )
+    report_row["stage_metrics"]["temporal"] = _stage(
+        2,
+        {
+            "hit_rate_at_k": 1.0,
+            "mean_window_coverage": 0.75,
+            "timestamp_validity_rate": 1.0,
+            "source_identity_validity_rate": 0.5,
+            "mrr": 0.75,
+            "pass_rate": 0.5,
+        },
+    )
+
+    report = build_multi_video_report([report_row])
+    temporal = report["summary"]["stage_metrics"]["temporal"]
+
+    assert temporal["videos_contributing"] == 1
+    assert temporal["case_count"] == 2
+    assert temporal["macro_average_by_video"]["timestamp_validity_rate"] == pytest.approx(1.0)
+    assert temporal["case_weighted_average"]["source_identity_validity_rate"] == pytest.approx(0.5)
+    assert temporal["case_weighted_average"]["mean_window_coverage"] == pytest.approx(0.75)
+
+
 def test_runner_retains_per_video_errors_instead_of_skipping_them():
     benchmarks = list(VIDEO_BENCHMARKS.values())[:2]
     registry = {benchmark.video_id: benchmark for benchmark in benchmarks}
