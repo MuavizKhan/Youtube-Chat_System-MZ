@@ -11,7 +11,6 @@ and remains covered by the existing retrieval regression contract; a
 separate timestamp-grounded annotation set is intentionally deferred.
 """
 
-import re
 import unicodedata
 from dataclasses import dataclass
 
