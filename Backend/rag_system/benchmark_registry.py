@@ -208,8 +208,8 @@ ENGLISH_WORKSHOP_QUESTIONS = (
     },
     {
         "id": "EW02",
-        "type": "specific_detail",
-        "question": "What short structure does the speaker offer for explaining work?",
+        "type": "explanation",
+        "question": "How does the speaker suggest structuring an explanation of your work?",
     },
     {
         "id": "EW03",
@@ -218,8 +218,8 @@ ENGLISH_WORKSHOP_QUESTIONS = (
     },
     {
         "id": "EW04",
-        "type": "specific_detail",
-        "question": "What kind of email format does the speaker promise to provide?",
+        "type": "multi_part",
+        "question": "What email structure does the speaker promise, and what outcome is it meant to get?",
     },
     {
         "id": "EW05",
@@ -269,8 +269,8 @@ ENGLISH_AI_QUESTIONS = (
     },
     {
         "id": "AI02",
-        "type": "specific_detail",
-        "question": "What does the guest say some future open-source models may lack?",
+        "type": "explanation",
+        "question": "What concern does the guest raise about some future open-source models?",
     },
     {
         "id": "AI03",
@@ -279,8 +279,8 @@ ENGLISH_AI_QUESTIONS = (
     },
     {
         "id": "AI04",
-        "type": "specific_detail",
-        "question": "What does the guest say about the pace of his shipping?",
+        "type": "multi_part",
+        "question": "What does the guest say about his shipping pace and how quickly he is shipping?",
     },
     {
         "id": "AI05",
@@ -330,8 +330,8 @@ HINDI_HISTORY_QUESTIONS = (
     },
     {
         "id": "HI02",
-        "type": "direct_fact",
-        "question": "Where does the transcript place the Bijolia movement?",
+        "type": "explanation",
+        "question": "How does the caption locate the first major peasant movement in relation to Bijolia?",
     },
     {
         "id": "HI03",
@@ -340,8 +340,8 @@ HINDI_HISTORY_QUESTIONS = (
     },
     {
         "id": "HI04",
-        "type": "specific_detail",
-        "question": "Which tax is mentioned by name as a new tax?",
+        "type": "multi_part",
+        "question": "Which tax is identified as new, and what name does the speaker give for it?",
     },
     {
         "id": "HI05",
@@ -374,7 +374,7 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI04",
-        groups=(("चवरी कर",),),
+        groups=(("नया टैक्स लगाया गया था चवरी कर",),),
         min_group_coverage=1.0,
     ),
 )
@@ -401,8 +401,8 @@ ARABIC_SILENCE_QUESTIONS = (
     },
     {
         "id": "AR04",
-        "type": "explanation",
-        "question": "What role does the episode assign to sound in perception?",
+        "type": "multi_part",
+        "question": "What does the episode say sound contributes to perception, and how does it describe sound's role?",
     },
     {
         "id": "AR05",

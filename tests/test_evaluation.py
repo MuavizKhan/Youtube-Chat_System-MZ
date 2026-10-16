@@ -114,6 +114,11 @@ def test_pilot_registry_has_five_videos_and_four_cases_per_new_video():
             case.question_id for case in benchmark.gold_evidence_cases
         }.issubset(question_ids)
         assert cases[-1]["expected"] == "must_not_retrieve"
+        case_types = {case["type"] for case in cases}
+        assert "direct_fact" in case_types
+        assert "specific_detail" in case_types
+        assert case_types.intersection({"multi_part", "explanation"})
+        assert "unrelated" in case_types
         assert benchmark.runtime_seconds and benchmark.runtime_seconds > 0
         assert benchmark.transcript_word_count and benchmark.transcript_word_count > 0
         assert benchmark.transcript_source_url.startswith("https://")
