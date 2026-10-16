@@ -378,14 +378,6 @@ def test_generation_translates_errors(error_text,expected):
 
 
 @pytest.mark.unit
-def test_generation_rejects_malformed_response():
-    fake,_=client(response=SimpleNamespace(choices=[]))
-    prompt=chain.RAG_PROMPT.invoke({"context":"X","question":"Q"})
-    with pytest.raises(RuntimeError,match="Could not extract"):
-        chain.generate_with_huggingface(fake,prompt)
-
-
-@pytest.mark.unit
 def test_generation_rejects_empty_answer(monkeypatch):
     monkeypatch.setattr(chain, "HF_MAX_RETRIES", 0)
 

@@ -47,8 +47,11 @@ from Backend.rag_system.index_service import (
 
 from Backend.rag_system.config import (
     CORS_ALLOW_ORIGINS,
+    GROQ_API_KEY,
+    GROQ_MODEL_ID,
     HF_MODEL_ID,
     HF_TOKEN,
+    LLM_PROVIDER,
     RATE_LIMIT,
     RATE_LIMIT_STORAGE_URI,
     MAX_REQUEST_BODY_BYTES,
@@ -586,15 +589,16 @@ def readiness():
 
     missing_dependencies = []
 
-    if not HF_TOKEN:
-        missing_dependencies.append(
-            "HF_TOKEN"
-        )
-
-    if not HF_MODEL_ID:
-        missing_dependencies.append(
-            "HF_MODEL_ID"
-        )
+    if LLM_PROVIDER == "groq":
+        if not GROQ_API_KEY:
+            missing_dependencies.append("GROQ_API_KEY")
+        if not GROQ_MODEL_ID:
+            missing_dependencies.append("GROQ_MODEL_ID")
+    else:
+        if not HF_TOKEN:
+            missing_dependencies.append("HF_TOKEN")
+        if not HF_MODEL_ID:
+            missing_dependencies.append("HF_MODEL_ID")
 
     if missing_dependencies:
 
