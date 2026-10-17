@@ -22,8 +22,8 @@ from .benchmark_registry import (
 from .evaluation import evaluate_video
 
 
-REPORT_SCHEMA_VERSION = "1.0.0"
-REPORT_ID = "phase10_4_multivideo_baseline_v1"
+REPORT_SCHEMA_VERSION = "1.1.0"
+REPORT_ID = "phase10_5_query_language_coverage_v1"
 
 _STAGE_SPECS = {
     "raw_anchor": {
