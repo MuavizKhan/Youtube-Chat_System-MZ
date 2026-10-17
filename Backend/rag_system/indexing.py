@@ -60,6 +60,49 @@ from .retrieval import (
 # 1. GET YOUTUBE TRANSCRIPT
 # ============================================================
 
+def normalize_transcript_languages(
+    languages: Optional[list[str]] = None,
+) -> list[str]:
+    """Normalize an ordered list of supported transcript language codes."""
+    if languages is None:
+        return list(PREFERRED_LANGUAGES)
+
+    if isinstance(languages, str) or not isinstance(languages, (list, tuple)):
+        raise ValueError(
+            "Transcript languages must be a non-empty list of language codes."
+        )
+
+    if not languages:
+        raise ValueError(
+            "At least one transcript language code must be supplied."
+        )
+
+    supported = {
+        code.strip().casefold()
+        for code in PREFERRED_LANGUAGES
+        if isinstance(code, str) and code.strip()
+    }
+    normalized = []
+
+    for language in languages:
+        if not isinstance(language, str) or not language.strip():
+            raise ValueError(
+                "Transcript language codes must be non-empty strings."
+            )
+
+        code = language.strip().casefold()
+        if code not in supported:
+            raise ValueError(
+                f"Unsupported transcript language code: {language!r}. "
+                f"Supported codes: {', '.join(PREFERRED_LANGUAGES)}."
+            )
+
+        if code not in normalized:
+            normalized.append(code)
+
+    return normalized
+
+
 def get_transcript(
     video_id: str,
     languages: Optional[list[str]] = None,
@@ -86,10 +129,7 @@ def get_transcript(
     video_id = video_id.strip()
 
 
-    if languages is None:
-
-        languages = PREFERRED_LANGUAGES
-
+    languages = normalize_transcript_languages(languages)
 
     api = YouTubeTranscriptApi()
 
@@ -721,6 +761,7 @@ def get_index_action(state: IndexState) -> IndexAction:
 
 def build_index_metadata(
     chunks: list[Document],
+    requested_languages: Optional[list[str]] = None,
 ) -> dict:
     """
     Build metadata describing the configuration and source
@@ -778,6 +819,9 @@ def build_index_metadata(
         "transcript_language_code": metadata["language_code"],
         "transcript_generated": bool(
             metadata["is_generated"]
+        ),
+        "requested_languages": normalize_transcript_languages(
+            requested_languages
         ),
     }
 
@@ -864,6 +908,20 @@ def _validate_vector_store_contents(
     if metadata["metadata_version"] != INDEX_METADATA_VERSION:
         return False, False
 
+    # Additive field: legacy indexes without this key remain loadable, but
+    # explicit language-selection requests will rebuild them because their
+    # original preference order is unknown.
+    if "requested_languages" in metadata:
+        try:
+            requested_languages = normalize_transcript_languages(
+                metadata["requested_languages"]
+            )
+        except (TypeError, ValueError):
+            return False, False
+
+        if requested_languages != metadata["requested_languages"]:
+            return False, False
+
     if metadata["video_id"] != video_id:
         return False, False
 
@@ -895,6 +953,48 @@ def _validate_vector_store_contents(
     )
 
     return True, is_stale
+
+
+def get_index_language_preferences(
+    video_id: str,
+) -> list[str] | None:
+    """Read the language preference order recorded for a persisted index."""
+    if not video_id or not video_id.strip():
+        return None
+
+    metadata_path = VECTOR_STORE_ROOT / video_id.strip() / "metadata.json"
+    try:
+        with metadata_path.open("r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(metadata, dict):
+        return None
+
+    requested_languages = metadata.get("requested_languages")
+    if not isinstance(requested_languages, list):
+        return None
+
+    try:
+        normalized = normalize_transcript_languages(requested_languages)
+    except (TypeError, ValueError):
+        return None
+
+    return normalized if normalized == requested_languages else None
+
+
+def index_matches_requested_languages(
+    video_id: str,
+    languages: Optional[list[str]],
+) -> bool:
+    """Whether an index matches an explicitly requested language priority."""
+    if languages is None:
+        # Omitted languages mean "reuse any valid indexed transcript".
+        return True
+
+    requested = normalize_transcript_languages(languages)
+    return get_index_language_preferences(video_id) == requested
 
 
 # state resolver
@@ -979,6 +1079,7 @@ def save_vector_store(
     vector_store,
     video_id: str,
     chunks: list[Document],
+    requested_languages: Optional[list[str]] = None,
 ):
     """
     Safely persist one FAISS index per YouTube video.
@@ -1041,7 +1142,8 @@ def save_vector_store(
         # ----------------------------------------------------
 
         metadata = build_index_metadata(
-            chunks
+            chunks,
+            requested_languages=requested_languages,
         )
 
         metadata_path = (
@@ -1170,6 +1272,7 @@ def create_index(
         )
 
     video_id = video_id.strip()
+    requested_languages = normalize_transcript_languages(languages)
 
     print(
         "\n" + "=" * 70
@@ -1197,7 +1300,7 @@ def create_index(
 
     transcript = get_transcript(
         video_id,
-        languages=languages,
+        languages=requested_languages,
     )
 
     print(
@@ -1292,6 +1395,7 @@ def create_index(
         vector_store,
         video_id,
         chunks,
+        requested_languages=requested_languages,
     )
 
     print(
@@ -1392,6 +1496,16 @@ def ensure_index_with_action(
         action = get_index_action(
             state
         )
+
+        if (
+            state is IndexState.VALID
+            and languages is not None
+            and not index_matches_requested_languages(
+                video_id,
+                languages,
+            )
+        ):
+            action = IndexAction.REBUILD
 
         # ----------------------------------------------------
         # 2. Reuse
