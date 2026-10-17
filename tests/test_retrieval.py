@@ -83,6 +83,15 @@ def test_query_focus_terms_remove_speaker_question_boilerplate():
 
 
 @pytest.mark.unit
+def test_query_focus_terms_remove_arabic_question_boilerplate():
+    terms = retrieval.extract_query_focus_terms(
+        "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟"
+    )
+
+    assert terms == ["تصل", "تكلفة", "الجلوس", "ساعة", "غرفة", "أورفيلد"]
+
+
+@pytest.mark.unit
 def test_query_variants_keep_original_and_add_content_focus():
     variants = retrieval.build_retrieval_query_variants(
         "What does Vijay Mallya say about building the Kingfisher brand?"
@@ -396,6 +405,33 @@ def test_lexical_search_requires_shared_evidence():
     }
     results=retrieval.lexical_search(FakeVectorStore(documents),"Who is Alice at Acme?")
     assert [d.metadata["chunk_id"] for d,_ in results]==[1]
+
+
+@pytest.mark.unit
+def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():
+    documents = {
+        "answer": doc(
+            1, 0, 10,
+            'دخلت مختبرات "أورفيلد"، تدفع فيها ما يصل إلى 600 دولار '
+            'عشان تقعد ساعة واحدة جوه.'
+        ),
+        "adjacent": doc(
+            2, 10, 20,
+            "الناس العاديين ميقدروش يقعدوا ساعة في الأوضة دي."
+        ),
+        "unrelated": doc(
+            3, 20, 30,
+            "ساعة وتفاصيل عامة عن الصوت والترددات."
+        ),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟",
+        limit=3,
+    )
+
+    assert [document.metadata["chunk_id"] for document, _score in results] == [1]
 
 
 @pytest.mark.unit
