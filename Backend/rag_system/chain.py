@@ -446,6 +446,41 @@ def append_requested_temporal_timestamp(
     return f"{answer.rstrip()}\n\nRelevant timestamp: {timestamp}"
 
 
+def _select_citation_results(
+    retrieved_results,
+    retrieval_trace: dict[str, Any] | None,
+) -> list:
+    """Keep only selected retrieval anchors for user-facing source links.
+
+    Context expansion neighbors remain available to generation, but should not
+    automatically become clickable citations.
+    """
+    if (
+        not isinstance(retrieval_trace, dict)
+        or "citation_chunk_ids" not in retrieval_trace
+    ):
+        # Backward-compatible path for legacy/test traces.
+        return list(retrieved_results)
+
+    raw_ids = retrieval_trace.get("citation_chunk_ids")
+    if not isinstance(raw_ids, list):
+        return []
+
+    allowed_ids = {str(chunk_id) for chunk_id in raw_ids if chunk_id is not None}
+    selected = []
+    seen_ids = set()
+    for document, distance in retrieved_results:
+        chunk_id = document.metadata.get("chunk_id")
+        normalized_id = str(chunk_id) if chunk_id is not None else None
+        if normalized_id is None or normalized_id not in allowed_ids:
+            continue
+        if normalized_id in seen_ids:
+            continue
+        seen_ids.add(normalized_id)
+        selected.append((document, distance))
+    return selected
+
+
 def merge_overlapping_results(
     retrieved_results,
     merge_gap_seconds: float = SOURCE_MERGE_GAP_SECONDS,
@@ -1265,8 +1300,9 @@ def format_sources(
     Convert merged source segments into API-friendly
     metadata.
 
-    source_id corresponds to the SOURCE number given to
-    the LLM.
+    source_id is the one-based identifier for the returned source link.
+    Source links use selected evidence anchors; generation context may also
+    include neighboring chunks for continuity.
     """
 
     sources = []
@@ -1391,6 +1427,19 @@ def _build_retrieval_attempt_trace(
     return attempt
 
 
+def _split_retrieval_result_bundle(result_bundle):
+    """Return expanded context results and selected anchors compatibly."""
+    if (
+        isinstance(result_bundle, tuple)
+        and len(result_bundle) == 2
+        and isinstance(result_bundle[0], list)
+        and isinstance(result_bundle[1], list)
+    ):
+        return result_bundle[0], result_bundle[1]
+    # Test doubles and older callers may return only a results list.
+    return result_bundle, result_bundle
+
+
 def _retrieve_with_query_recovery_trace(
     vector_store,
     question: str,
@@ -1400,6 +1449,7 @@ def _retrieve_with_query_recovery_trace(
 
     started = time.perf_counter()
     attempts = []
+    citation_results = []
     planner_used = False
     planner_intent = None
     planner_latency_ms = 0.0
@@ -1462,6 +1512,11 @@ def _retrieve_with_query_recovery_trace(
                 for document, _distance in temporal_results
                 if document.metadata.get("chunk_id") is not None
             ][:20],
+            "citation_chunk_ids": [
+                document.metadata.get("chunk_id")
+                for document, _distance in temporal_results
+                if document.metadata.get("chunk_id") is not None
+            ][:20],
         }
 
         logger.info(
@@ -1476,13 +1531,17 @@ def _retrieve_with_query_recovery_trace(
         )
         return temporal_results, temporal_trace
 
-    initial_results = retrieve_question_context(
+    initial_bundle = retrieve_question_context(
         vector_store=vector_store,
         query=question,
         k=TOP_K,
         fetch_k=MMR_FETCH_K,
         lambda_mult=MMR_LAMBDA,
         max_distance=MAX_DISTANCE,
+        return_anchors=True,
+    )
+    initial_results, citation_results = _split_retrieval_result_bundle(
+        initial_bundle
     )
     attempts.append(
         _build_retrieval_attempt_trace(
@@ -1565,6 +1624,7 @@ def _retrieve_with_query_recovery_trace(
             if overview_results:
                 logger.info("Query recovery used overview routing")
                 final_results = overview_results
+                citation_results = overview_results
                 final_stage = "overview"
             else:
                 final_results = []
@@ -1639,6 +1699,7 @@ def _retrieve_with_query_recovery_trace(
                 attempts.append(attempt_trace)
 
                 if recovered_anchors and semantic_gate_passed:
+                    citation_results = recovered_anchors
                     final_results = expand_question_context(
                         vector_store,
                         query,
@@ -1695,6 +1756,7 @@ def _retrieve_with_query_recovery_trace(
                     attempts.append(attempt_trace)
 
                     if relaxed_anchors and semantic_gate_passed:
+                        citation_results = relaxed_anchors
                         final_results = expand_question_context(
                             vector_store,
                             query,
@@ -1727,6 +1789,7 @@ def _retrieve_with_query_recovery_trace(
                         "as a best-effort fallback"
                     )
                     final_results = best_effort_results
+                    citation_results = best_effort_results
                     final_stage = "best_effort_overview"
                 else:
                     final_stage = "no_evidence"
@@ -1737,6 +1800,12 @@ def _retrieve_with_query_recovery_trace(
         chunk_id = document.metadata.get("chunk_id")
         if chunk_id is not None and chunk_id not in final_chunk_ids:
             final_chunk_ids.append(chunk_id)
+
+    citation_chunk_ids = []
+    for document, _distance in citation_results:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None and chunk_id not in citation_chunk_ids:
+            citation_chunk_ids.append(chunk_id)
 
     return final_results, {
         "recovery_used": final_stage != "initial_strict",
@@ -1750,6 +1819,7 @@ def _retrieve_with_query_recovery_trace(
             2,
         ),
         "final_chunk_ids": final_chunk_ids[:20],
+        "citation_chunk_ids": citation_chunk_ids[:20],
     }
 
 
@@ -2167,11 +2237,16 @@ def answer_question(
     "source_groups"
     ]
 
-    sources = format_sources(
-    source_groups
+    retrieval_trace = result.get("retrieval_trace", {})
+    citation_results = _select_citation_results(
+        retrieved_results,
+        retrieval_trace,
     )
+    citation_source_groups = merge_overlapping_results(citation_results)
+    sources = format_sources(citation_source_groups)
     candidate_retrieved_chunks = len(retrieved_results)
     candidate_source_segments = len(source_groups)
+    candidate_citation_source_segments = len(citation_source_groups)
 
     observability = {
         "total_latency_ms": round(
@@ -2183,7 +2258,8 @@ def answer_question(
         "follow_up_resolved": follow_up_resolved,
         "retrieval": {
             **result.get("retrieval_trace", {}),
-            "source_segments": len(source_groups),
+            "source_segments": len(sources),
+            "candidate_citation_source_segments": candidate_citation_source_segments,
             "source_timestamps": [
                 {
                     "source_id": source["source_id"],
@@ -2226,7 +2302,7 @@ def answer_question(
 
     response_sources = sources
     response_retrieved_chunks = candidate_retrieved_chunks
-    response_source_segments = candidate_source_segments
+    response_source_segments = len(sources)
     if fallback_answer_returned:
         response_sources = []
         response_retrieved_chunks = 0
@@ -2246,6 +2322,7 @@ def answer_question(
         {
             "candidate_retrieved_chunks": candidate_retrieved_chunks,
             "candidate_source_segments": candidate_source_segments,
+            "candidate_citation_source_segments": candidate_citation_source_segments,
             "source_segments": response_source_segments,
             "source_timestamps": [
                 {
