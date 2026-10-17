@@ -33,6 +33,10 @@ _ACTIVE_STATUSES = {
 }
 
 
+class ActiveIndexJobLanguageConflictError(ValueError):
+    """Raised when an active per-video index job has different language preferences."""
+
+
 @dataclass(frozen=True)
 class IndexJob:
     job_id: str
@@ -203,6 +207,15 @@ class IndexJobStore:
                 existing is not None
                 and existing["status"] in _ACTIVE_STATUSES
             ):
+                if (
+                    serialized_languages is not None
+                    and existing["languages_json"] != serialized_languages
+                ):
+                    raise ActiveIndexJobLanguageConflictError(
+                        "An index job is already active for this video "
+                        "with different transcript-language preferences. "
+                        "Wait for it to finish, then retry."
+                    )
                 return self._row_to_job(existing)
 
             job = IndexJob(
