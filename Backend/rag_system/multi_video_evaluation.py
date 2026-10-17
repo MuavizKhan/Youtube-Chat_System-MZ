@@ -407,6 +407,22 @@ def evaluate_registered_videos(
         if temporal is not None and temporal.get("passed") is not True:
             reasons.extend(temporal.get("failures") or ["temporal_benchmark_failed"])
 
+        query_language_by_id = {
+            case["id"]: case.get("query_language", "en")
+            for case in benchmark.question_cases
+        }
+        question_results = [
+            {
+                **item,
+                "query_language": item.get(
+                    "query_language",
+                    query_language_by_id.get(item.get("id"), "en"),
+                ),
+            }
+            for item in (summary.get("results") or [])
+            if isinstance(item, dict)
+        ]
+
         video_reports.append({
             **base,
             "status": "evaluated",
@@ -414,7 +430,7 @@ def evaluate_registered_videos(
             "failure_reasons": sorted(set(reasons)),
             "retrieval_contract": retrieval_contract,
             "stage_metrics": stage_metrics,
-            "question_results": summary.get("results", []),
+            "question_results": question_results,
             "case_diagnostics": case_diagnostics,
             "failure_diagnostics": failure_diagnostics,
             "retrieval_config": summary.get("retrieval_config", {}),
