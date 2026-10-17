@@ -153,13 +153,27 @@ def test_entity_inventory_questions_route_through_business_corporate_facet():
 
     brand_product_query = plans[3][1]
     assert brand_product_query.endswith(
-        "brands brand names products product names consumer brands product lines"
+        "brands brand names products product names consumer brands product lines "
+        "brands brand names products product names consumer brands product lines "
+        "sub-brands brand portfolio rebranding acquired brands low-cost premium "
+        "airline brands"
     )
 
     teams_query = plans[4][1]
     assert teams_query.endswith(
         "teams sports teams franchises clubs leagues ownership"
     )
+
+
+@pytest.mark.unit
+def test_non_inventory_business_questions_keep_generic_facet_queries():
+    plans = retrieval.build_evidence_facet_plan(
+        "Discuss businesses and companies from the interview."
+    )
+
+    assert [label for label, _query in plans] == ["business_corporate"]
+    assert "sub-brands" not in plans[0][1]
+    assert "rebranding acquired brands" not in plans[0][1]
 
 
 @pytest.mark.unit
