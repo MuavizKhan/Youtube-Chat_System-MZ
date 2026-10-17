@@ -22,6 +22,34 @@ def test_get_transcript_uses_supported_language_priority(monkeypatch):
     )
 
 
+def test_get_transcript_normalizes_explicit_language_preferences(monkeypatch):
+    api = MagicMock()
+    fetched_transcript = MagicMock()
+    api.fetch.return_value = fetched_transcript
+    monkeypatch.setattr(indexing, "YouTubeTranscriptApi", lambda: api)
+
+    result = indexing.get_transcript(
+        VIDEO_ID,
+        languages=[" AR ", "en", "ar"],
+    )
+
+    assert result is fetched_transcript
+    api.fetch.assert_called_once_with(
+        VIDEO_ID,
+        languages=["ar", "en"],
+    )
+
+
+def test_get_transcript_rejects_unsupported_language(monkeypatch):
+    api = MagicMock()
+    monkeypatch.setattr(indexing, "YouTubeTranscriptApi", lambda: api)
+
+    with pytest.raises(ValueError, match="Unsupported transcript language code"):
+        indexing.get_transcript(VIDEO_ID, languages=["fr"])
+
+    api.fetch.assert_not_called()
+
+
 
 
 def test_create_index_rejects_empty_video_id():
@@ -107,7 +135,7 @@ def test_create_index_builds_and_saves_index(monkeypatch):
 
     get_transcript.assert_called_once_with(
         VIDEO_ID,
-        languages=None,
+        languages=["en", "hi", "ur", "ar"],
     )
 
     transcript_to_documents.assert_called_once_with(
@@ -126,4 +154,5 @@ def test_create_index_builds_and_saves_index(monkeypatch):
         vector_store,
         VIDEO_ID,
         chunks,
+        requested_languages=["en", "hi", "ur", "ar"],
     )
