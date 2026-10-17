@@ -361,7 +361,13 @@ def get_index_status(
                 canonical_video_id
             )
 
-            if persisted_state is IndexState.VALID:
+            if persisted_state is IndexState.VALID and (
+                job.languages is None
+                or index_matches_requested_languages(
+                    canonical_video_id,
+                    job.languages,
+                )
+            ):
                 return IndexStatus(
                     video_id=canonical_video_id,
                     state="ready",
@@ -383,12 +389,27 @@ def get_index_status(
                 canonical_video_id
             )
 
-            if persisted_state is IndexState.VALID:
+            if persisted_state is IndexState.VALID and (
+                job.languages is None
+                or index_matches_requested_languages(
+                    canonical_video_id,
+                    job.languages,
+                )
+            ):
                 return IndexStatus(
                     video_id=canonical_video_id,
                     state="ready",
                     action=job.action,
                     ready=True,
+                    job_id=job.job_id,
+                )
+
+            if persisted_state is IndexState.VALID:
+                return IndexStatus(
+                    video_id=canonical_video_id,
+                    state="failed",
+                    action="retry",
+                    ready=False,
                     job_id=job.job_id,
                 )
 
