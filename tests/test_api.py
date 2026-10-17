@@ -369,6 +369,27 @@ def test_prepare_index_endpoint_passes_explicit_languages(client, monkeypatch):
 
 
 @pytest.mark.api
+def test_prepare_index_endpoint_returns_conflict_for_active_language_mismatch(client, monkeypatch):
+    def fail_for_conflict(video_id, languages=None):
+        raise app_module.IndexLanguageConflictError(
+            "An index job is already active for this video with different transcript-language preferences."
+        )
+
+    monkeypatch.setattr(app_module, "submit_index", fail_for_conflict)
+
+    response = client.post(
+        "/index",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "languages": ["ar"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "index_language_conflict"
+
+
+@pytest.mark.api
 def test_prepare_index_endpoint_rejects_unsupported_language(client):
     response = client.post(
         "/index",
