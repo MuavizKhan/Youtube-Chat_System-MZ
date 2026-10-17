@@ -98,8 +98,8 @@ def test_multi_video_report_distinguishes_video_macro_and_case_weighted_metrics(
         curation_blockers={"status": "blocked_pending_source_verification"},
     )
 
-    assert report["report_schema_version"] == REPORT_SCHEMA_VERSION
-    assert report["report_id"] == REPORT_ID
+    assert report["report_schema_version"] == REPORT_SCHEMA_VERSION == "1.2.0"
+    assert report["report_id"] == REPORT_ID == "phase10_5_1_language_pair_quality_v1"
     raw = report["summary"]["stage_metrics"]["raw_anchor"]
     assert raw["videos_contributing"] == 2
     assert raw["case_count"] == 8
