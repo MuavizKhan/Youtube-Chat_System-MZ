@@ -691,20 +691,48 @@ def _select_final_retrieval_candidates(
             "semantic_gate_passed": False,
         }
 
-    if not lexical_results and not passes_strong_semantic_gate(
+    semantic_gate_passed = passes_strong_semantic_gate(
         semantic_results,
         max_distance,
-    ):
-        # Reject weak semantic-only matches before attempting to load a
-        # reranker. Diagnostic and production now share this exact gate.
-        return {
-            "cross_encoder_results": list(combined_results),
-            "facet_soft_reranked": list(combined_results),
-            "anchors": [],
-            "context_max_chunks": context_max_chunks,
-            "anchor_limit": anchor_limit,
-            "semantic_gate_passed": False,
-        }
+    )
+    if not semantic_gate_passed:
+        if not lexical_results:
+            # Reject weak semantic-only matches before attempting to load a
+            # reranker. Diagnostic and production now share this exact gate.
+            return {
+                "cross_encoder_results": list(combined_results),
+                "facet_soft_reranked": list(combined_results),
+                "anchors": [],
+                "context_max_chunks": context_max_chunks,
+                "anchor_limit": anchor_limit,
+                "semantic_gate_passed": False,
+            }
+
+        if not dense_question:
+            # For a simple question, weak semantic candidates must not ride
+            # along merely because a different candidate matched lexically.
+            # Retain only candidates independently surfaced by lexical search.
+            # Dense questions keep the existing multi-evidence behavior.
+            lexical_candidate_identities = {
+                _retrieval_document_identity(document)
+                for document, _score in lexical_results
+            }
+            combined_results = [
+                item
+                for item in combined_results
+                if _retrieval_document_identity(item[0])
+                in lexical_candidate_identities
+            ]
+
+            if not combined_results:
+                return {
+                    "cross_encoder_results": [],
+                    "facet_soft_reranked": [],
+                    "anchors": [],
+                    "context_max_chunks": context_max_chunks,
+                    "anchor_limit": anchor_limit,
+                    "semantic_gate_passed": False,
+                }
 
     cross_encoder_results = rerank_with_cross_encoder(
         query=query,
@@ -741,7 +769,7 @@ def _select_final_retrieval_candidates(
         "anchors": anchors,
         "context_max_chunks": context_max_chunks,
         "anchor_limit": anchor_limit,
-        "semantic_gate_passed": True,
+        "semantic_gate_passed": semantic_gate_passed,
     }
 
 

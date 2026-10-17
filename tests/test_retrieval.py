@@ -1814,6 +1814,71 @@ def test_question_context_accepts_strong_semantic_match(monkeypatch):
 
 
 @pytest.mark.unit
+def test_non_dense_selection_filters_weak_semantic_only_candidates_with_lexical_evidence(monkeypatch):
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+
+    # Mirror the Orfield example: chunk 3 is a weak semantic hit, while
+    # chunk 1 is independently found by lexical retrieval and contains the answer.
+    weak_semantic = doc(3, 198, 262, "unrelated discussion about sound perception")
+    lexical_evidence = doc(1, 109, 163, "Orfield room costs 600 dollars for one hour")
+    semantic_results = [(weak_semantic, 1.262688)]
+    lexical_results = [(lexical_evidence, 0.330751)]
+    combined_results = retrieval.fuse_semantic_and_lexical_results(
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        lexical_distance=1.3,
+        lexical_weight=1.0,
+    )
+
+    selection = retrieval._select_final_retrieval_candidates(
+        query="How much does one hour in the Orfield room cost?",
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        combined_results=combined_results,
+        facet_rankings={},
+        facet_candidate_rankings={},
+        dense_question=False,
+        k=4,
+        max_distance=1.3,
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in selection["anchors"]] == [1]
+    assert [item[0].metadata["chunk_id"] for item in selection["cross_encoder_results"]] == [1]
+    assert selection["semantic_gate_passed"] is False
+
+
+@pytest.mark.unit
+def test_dense_selection_keeps_existing_hybrid_candidates_when_semantic_gate_is_weak(monkeypatch):
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+
+    weak_semantic = doc(3, 198, 262, "unrelated discussion about sound perception")
+    lexical_evidence = doc(1, 109, 163, "Orfield room costs 600 dollars for one hour")
+    semantic_results = [(weak_semantic, 1.262688)]
+    lexical_results = [(lexical_evidence, 0.330751)]
+    combined_results = retrieval.fuse_semantic_and_lexical_results(
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        lexical_distance=1.3,
+        lexical_weight=1.0,
+    )
+
+    selection = retrieval._select_final_retrieval_candidates(
+        query="Why did several things happen and what effects followed?",
+        semantic_results=semantic_results,
+        lexical_results=lexical_results,
+        combined_results=combined_results,
+        facet_rankings={},
+        facet_candidate_rankings={},
+        dense_question=True,
+        k=4,
+        max_distance=1.3,
+    )
+
+    assert {item[0].metadata["chunk_id"] for item in selection["anchors"]} == {1, 3}
+    assert selection["semantic_gate_passed"] is False
+
+
+@pytest.mark.unit
 def test_strong_semantic_gate_rejects_lexical_distance_sentinel():
     relevant = doc(1, 0, 10, "semantic result")
     lexical_only = doc(2, 20, 30, "lexical-only result")
