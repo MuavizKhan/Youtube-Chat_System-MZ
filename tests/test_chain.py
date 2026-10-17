@@ -628,6 +628,52 @@ def test_rag_chain_falls_back_without_generation(monkeypatch):
 
 
 @pytest.mark.unit
+def test_retrieval_trace_separates_selected_anchors_from_expanded_context(monkeypatch):
+    anchors = [
+        (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
+        (doc(3, 30, 40, "second selected anchor"), 0.5),
+    ]
+    expanded = [
+        (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
+        (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "second selected anchor"), 0.5),
+    ]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (expanded, anchors),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "How much does it cost?",
+        object(),
+    )
+
+    assert results == expanded
+    assert trace["final_chunk_ids"] == [1, 2, 3]
+    assert trace["citation_chunk_ids"] == [1, 3]
+
+
+@pytest.mark.unit
+def test_select_citation_results_excludes_context_expansion_neighbors():
+    expanded = [
+        (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
+        (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "second selected anchor"), 0.5),
+    ]
+
+    selected = chain._select_citation_results(
+        expanded,
+        {"citation_chunk_ids": [1, 3]},
+    )
+
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 3]
+
+
+@pytest.mark.unit
 def test_retrieval_trace_records_initial_strict_success(monkeypatch):
     expected = [(doc(4, 10, 20, "evidence"), 0.35)]
 
@@ -1322,6 +1368,66 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert calls["load_vector_store"] == 0
     assert captured_clients["query"] is configured_client
     assert captured_clients["generation"] is configured_client
+
+@pytest.mark.regression
+def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch):
+    expanded_documents = [
+        doc(1, 10, 20, "answer-bearing evidence"),
+        doc(2, 20, 30, "context expansion only"),
+        doc(3, 30, 40, "additional anchor"),
+    ]
+    expanded_results = [
+        (expanded_documents[0], 0.2),
+        (expanded_documents[1], chain.MAX_DISTANCE),
+        (expanded_documents[2], 0.5),
+    ]
+    context_groups = chain.merge_overlapping_results(expanded_results)
+    retrieval_result = {
+        "answer": "The cost is about 600 dollars per hour.",
+        "retrieved_results": expanded_results,
+        "source_groups": context_groups,
+        "retrieval_trace": {
+            "final_stage": "initial_strict",
+            "final_chunk_ids": [1, 2, 3],
+            "citation_chunk_ids": [1, 3],
+        },
+        "generation_trace": {"generated": True, "fallback_used": False},
+    }
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            return retrieval_result
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+
+    result = chain.answer_question(
+        video_reference="Gfr50f6ZBvo",
+        question="How much does one hour cost?",
+    )
+
+    assert result["retrieved_chunks"] == 3
+    assert result["source_segments"] == 2
+    assert [source["chunk_ids"] for source in result["sources"]] == [[1], [3]]
+    assert [(source["start"], source["end"]) for source in result["sources"]] == [
+        (10.0, 20.0),
+        (30.0, 40.0),
+    ]
+    retrieval_trace = result["observability"]["retrieval"]
+    assert retrieval_trace["candidate_source_segments"] == 1
+    assert retrieval_trace["candidate_citation_source_segments"] == 2
+    assert retrieval_trace["source_timestamps"] == [
+        {"source_id": 1, "start": 10.0, "end": 20.0},
+        {"source_id": 2, "start": 30.0, "end": 40.0},
+    ]
+
 
 @pytest.mark.regression
 def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch):

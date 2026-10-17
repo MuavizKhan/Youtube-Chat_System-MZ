@@ -3378,13 +3378,23 @@ def retrieve_question_context(
     max_distance: float = MAX_DISTANCE,
     expand_context: bool = True,
     allow_overview: bool = True,
+    return_anchors: bool = False,
 ):
-    """Retrieve transcript evidence for a question about the current YouTube video."""
+    """Retrieve transcript evidence, optionally retaining anchors before expansion.
+
+    By default the return value stays a list of (document, distance) pairs.
+    With return_anchors=True, return (expanded_context, selected_anchors) so
+    callers can retain neighboring chunks for generation without treating them
+    as independently selected evidence for citations.
+    """
     lambda_mult, max_distance = _validate_retrieval_parameters(
         query, k, fetch_k, lambda_mult, max_distance
     )
     if allow_overview and is_overview_question(query):
-        return retrieve_overview(vector_store)
+        overview_results = retrieve_overview(vector_store)
+        if return_anchors:
+            return overview_results, overview_results
+        return overview_results
 
     dense_question = is_evidence_dense_question(query)
     lexical_rrf_weight = DENSE_LEXICAL_RRF_WEIGHT if dense_question else 1.0
@@ -3464,10 +3474,16 @@ def retrieve_question_context(
     )
     raw_results = selection["anchors"]
     if not expand_context:
+        if return_anchors:
+            return raw_results, raw_results
         return raw_results
-    return expand_retrieval_context(
+
+    expanded_results = expand_retrieval_context(
         vector_store,
         raw_results,
         max_chunks=selection["context_max_chunks"],
     )
+    if return_anchors:
+        return expanded_results, raw_results
+    return expanded_results
 
