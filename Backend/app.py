@@ -38,6 +38,7 @@ from typing import Any, Literal
 from Backend.rag_system.chain import answer_question
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.index_service import (
+    IndexLanguageConflictError,
     IndexNotReadyError,
     get_index_status,
     recover_index_jobs,
@@ -451,6 +452,15 @@ class IndexPrepareRequest(BaseModel):
         max_length=2048,
         description="YouTube video ID or URL to prepare.",
     )
+    languages: list[Literal["en", "hi", "ur", "ar"]] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4,
+        description=(
+            "Optional ordered list of transcript language codes. "
+            "Omitting it preserves the existing default priority."
+        ),
+    )
 
 
 class IndexStatusResponse(BaseModel):
@@ -659,7 +669,13 @@ def index_prepare(
         ) from error
 
     try:
-        result = submit_index(video_id)
+        if index_request.languages is None:
+            result = submit_index(video_id)
+        else:
+            result = submit_index(
+                video_id,
+                languages=index_request.languages,
+            )
         logger.info(
             "Index request accepted request_id=%s video_id=%s state=%s action=%s",
             request.state.request_id,
@@ -680,6 +696,15 @@ def index_prepare(
             "ready": result.ready,
             "job_id": result.job_id,
         }
+
+    except IndexLanguageConflictError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "index_language_conflict",
+                "message": str(error),
+            },
+        ) from error
 
     except Exception as error:
         logger.exception(

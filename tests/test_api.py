@@ -340,6 +340,69 @@ def test_prepare_index_endpoint_returns_ready_result(client, monkeypatch):
 
 
 @pytest.mark.api
+def test_prepare_index_endpoint_passes_explicit_languages(client, monkeypatch):
+    calls = []
+
+    def fake_prepare(video_id, languages=None):
+        calls.append((video_id, languages))
+        return SimpleNamespace(
+            video_id=video_id,
+            state="queued",
+            action="rebuild",
+            ready=False,
+            job_id="job-ar-1",
+        )
+
+    monkeypatch.setattr(app_module, "submit_index", fake_prepare)
+
+    response = client.post(
+        "/index",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "languages": ["ar"],
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["action"] == "rebuild"
+    assert calls == [(VALID_VIDEO_ID, ["ar"])]
+
+
+@pytest.mark.api
+def test_prepare_index_endpoint_returns_conflict_for_active_language_mismatch(client, monkeypatch):
+    def fail_for_conflict(video_id, languages=None):
+        raise app_module.IndexLanguageConflictError(
+            "An index job is already active for this video with different transcript-language preferences."
+        )
+
+    monkeypatch.setattr(app_module, "submit_index", fail_for_conflict)
+
+    response = client.post(
+        "/index",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "languages": ["ar"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "index_language_conflict"
+
+
+@pytest.mark.api
+def test_prepare_index_endpoint_rejects_unsupported_language(client):
+    response = client.post(
+        "/index",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "languages": ["fr"],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.api
 def test_prepare_index_endpoint_rejects_invalid_video_reference(client):
     response = client.post(
         "/index",

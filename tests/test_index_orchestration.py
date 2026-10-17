@@ -610,6 +610,42 @@ def test_ensure_index_passes_languages_to_create_index(
     }
 
 
+def test_ensure_index_rebuilds_valid_index_for_different_languages(
+    monkeypatch,
+    disable_cache_clear,
+):
+    vector_store = FakeVectorStore()
+    calls = {}
+
+    monkeypatch.setattr(
+        indexing,
+        "get_index_state",
+        lambda video_id: indexing.IndexState.VALID,
+    )
+    monkeypatch.setattr(
+        indexing,
+        "index_matches_requested_languages",
+        lambda video_id, languages: False,
+    )
+
+    def fake_create(video_id, languages=None):
+        calls["create"] = (video_id, languages)
+        return vector_store
+
+    monkeypatch.setattr(indexing, "create_index", fake_create)
+    monkeypatch.setattr(indexing, "load_vector_store", lambda video_id: vector_store)
+
+    result, action = indexing.ensure_index_with_action(
+        "fAd2nKfrDB8",
+        languages=["ar"],
+    )
+
+    assert result is vector_store
+    assert action is indexing.IndexAction.REBUILD
+    assert calls["create"] == ("fAd2nKfrDB8", ["ar"])
+    assert disable_cache_clear == ["clear", "clear"]
+
+
 def test_ensure_index_rejects_failed_creation(
     monkeypatch,
     disable_cache_clear,

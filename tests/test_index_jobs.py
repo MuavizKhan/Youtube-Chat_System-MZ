@@ -5,6 +5,7 @@ import time
 import pytest
 
 from Backend.rag_system.index_jobs import (
+    ActiveIndexJobLanguageConflictError,
     JOB_BUILDING,
     JOB_FAILED,
     JOB_QUEUED,
@@ -100,6 +101,28 @@ def test_job_store_deduplicates_active_jobs(tmp_path):
 
     assert second.job_id == first.job_id
     assert store.get(VIDEO_ID).job_id == first.job_id
+
+
+@pytest.mark.unit
+def test_job_store_rejects_active_job_with_different_language_preferences(tmp_path):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    original = store.enqueue(
+        VIDEO_ID,
+        action="create",
+        languages=["en"],
+    )
+
+    with pytest.raises(
+        ActiveIndexJobLanguageConflictError,
+        match="different transcript-language preferences",
+    ):
+        store.enqueue(
+            VIDEO_ID,
+            action="rebuild",
+            languages=["ar"],
+        )
+
+    assert store.get(VIDEO_ID).job_id == original.job_id
 
 
 @pytest.mark.unit

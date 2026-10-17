@@ -42,7 +42,18 @@ Request:
 }
 ```
 
-Accepts a raw 11-character YouTube video ID or a supported YouTube URL. If the index is already valid, the endpoint returns `200` immediately. Otherwise it creates or reuses a durable background job and returns `202` without waiting for transcript/embedding work to finish.
+Accepts a raw 11-character YouTube video ID or a supported YouTube URL. If the index is already valid for the requested language preferences, the endpoint returns `200` immediately. Otherwise it creates or reuses a durable background job and returns `202` without waiting for transcript/embedding work to finish.
+
+To select a transcript language explicitly (for example, Arabic captions), send an ordered `languages` list:
+
+```json
+{
+  "video_id": "fAd2nKfrDB8",
+  "languages": ["ar"]
+}
+```
+
+Supported codes are `en`, `hi`, `ur`, and `ar`. The list order defines transcript preference. When an existing valid index was built with a different preference list, the service queues a rebuild and records that preference in index metadata instead of silently reusing the old-language index. If another active index job for the same video has conflicting language preferences, the endpoint returns `409 index_language_conflict`; retry after that job finishes. Omitting `languages` keeps the English-first preference for new indexes and reuses any existing valid index regardless of its transcript language.
 
 Queued response (HTTP 202):
 

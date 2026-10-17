@@ -132,6 +132,100 @@ def test_submit_index_reuses_valid_index_without_queueing(monkeypatch):
 
 
 @pytest.mark.unit
+def test_submit_index_rebuilds_valid_index_for_explicit_language_mismatch(monkeypatch):
+    store = FakeJobStore()
+    dispatched = []
+
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "_dispatch_video",
+        lambda video_id: dispatched.append(video_id),
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.VALID,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: False,
+    )
+
+    status = index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+    assert status.state == "queued"
+    assert status.action == IndexAction.REBUILD.value
+    assert status.ready is False
+    assert store.enqueued == [
+        (VIDEO_ID, IndexAction.REBUILD.value, ["ar"])
+    ]
+    assert dispatched == [VIDEO_ID]
+
+
+@pytest.mark.unit
+def test_submit_index_reuses_matching_active_language_job(monkeypatch):
+    active_job = IndexJob(
+        job_id="job-ar-active",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.REBUILD.value,
+        languages=["ar"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+    store = FakeJobStore(active_job)
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: pytest.fail("An active matching job should be reused."),
+    )
+
+    status = index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+    assert status.state == JOB_BUILDING
+    assert status.action == IndexAction.REBUILD.value
+    assert status.ready is False
+    assert status.job_id == "job-ar-active"
+    assert store.enqueued == []
+
+
+@pytest.mark.unit
+def test_submit_index_rejects_conflicting_active_language_job(monkeypatch):
+    active_job = IndexJob(
+        job_id="job-active",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.REBUILD.value,
+        languages=["en"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(active_job))
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: pytest.fail("State need not be checked after language conflict."),
+    )
+
+    with pytest.raises(index_service.IndexLanguageConflictError, match="different transcript-language"):
+        index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+
+@pytest.mark.unit
 def test_load_ready_index_rejects_queued_index(monkeypatch):
     queued_job = IndexJob(
         job_id="job-1",
@@ -271,12 +365,54 @@ def test_failed_job_does_not_hide_a_valid_persisted_index(monkeypatch):
         "get_index_state",
         lambda video_id: IndexState.VALID,
     )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: True,
+    )
 
     status = index_service.get_index_status(VIDEO_ID)
 
     assert status.state == "ready"
     assert status.action == IndexAction.REUSE.value
     assert status.ready is True
+
+
+@pytest.mark.unit
+def test_failed_language_switch_does_not_report_old_index_ready(monkeypatch):
+    job = IndexJob(
+        job_id="job-ar-failed",
+        video_id=VIDEO_ID,
+        status=JOB_FAILED,
+        action=IndexAction.REBUILD.value,
+        languages=["ar"],
+        attempt=1,
+        error="No Arabic transcript available.",
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.VALID,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: False,
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "failed"
+    assert status.action == "retry"
+    assert status.ready is False
+    assert status.job_id == "job-ar-failed"
+
 
 @pytest.mark.unit
 def test_submit_index_returns_durable_job_id(monkeypatch):
