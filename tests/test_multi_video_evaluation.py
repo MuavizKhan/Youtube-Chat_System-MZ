@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+from Backend.rag_system import multi_video_evaluation
 from Backend.rag_system.benchmark_registry import (
     ARABIC_SILENCE_BENCHMARK,
     HINDI_HISTORY_BENCHMARK,
@@ -98,8 +101,9 @@ def test_multi_video_report_distinguishes_video_macro_and_case_weighted_metrics(
         curation_blockers={"status": "blocked_pending_source_verification"},
     )
 
-    assert report["report_schema_version"] == REPORT_SCHEMA_VERSION == "1.3.0"
-    assert report["report_id"] == REPORT_ID == "phase10_5_2_contract_metric_semantics_v1"
+    assert report["report_schema_version"] == REPORT_SCHEMA_VERSION == "1.4.0"
+    assert report["report_id"] == REPORT_ID == "phase10_6_experiment_provenance_v1"
+    assert report["experiment_metadata"] is None
     raw = report["summary"]["stage_metrics"]["raw_anchor"]
     assert raw["videos_contributing"] == 2
     assert raw["case_count"] == 8
@@ -119,6 +123,92 @@ def test_multi_video_report_distinguishes_video_macro_and_case_weighted_metrics(
     assert hindi["evaluation_error_video_count"] == 1
     assert hindi["evaluated_video_count"] == 0
     assert report["summary"]["overall_passed"] is False
+
+
+
+def test_experiment_metadata_records_model_index_runtime_and_effective_config(monkeypatch):
+    config = multi_video_evaluation.rag_config
+    monkeypatch.setattr(config, "PROJECT_ROOT", Path("/repo"))
+    monkeypatch.setattr(
+        config,
+        "VECTOR_STORE_ROOT",
+        Path("/repo/Backend/rag_system/vector_stores/experiments/experiment-bge-m3"),
+    )
+    monkeypatch.setattr(
+        config,
+        "INDEX_JOB_DB_PATH",
+        Path("/repo/Backend/rag_system/index_jobs_experiment-bge-m3.sqlite3"),
+    )
+    monkeypatch.setattr(config, "EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.setattr(config, "RAG_INDEX_NAMESPACE", "experiment-bge-m3")
+    monkeypatch.setattr(config, "MAX_DISTANCE", 1.12)
+    monkeypatch.setattr(config, "TOP_K", 4)
+    monkeypatch.setattr(config, "CHUNK_SIZE", 1000)
+    monkeypatch.setattr(config, "CHUNK_OVERLAP", 200)
+    monkeypatch.setattr(
+        multi_video_evaluation,
+        "_read_git_provenance",
+        lambda: {
+            "git_commit": "abc123",
+            "git_worktree_tracked_changes": False,
+        },
+    )
+
+    metadata = multi_video_evaluation._build_experiment_metadata()
+
+    assert metadata["embedding_model"] == "BAAI/bge-m3"
+    assert metadata["index_namespace"] == "experiment-bge-m3"
+    assert metadata["vector_store_root"] == (
+        "Backend/rag_system/vector_stores/experiments/experiment-bge-m3"
+    )
+    assert metadata["index_job_db_path"] == (
+        "Backend/rag_system/index_jobs_experiment-bge-m3.sqlite3"
+    )
+    assert metadata["git_commit"] == "abc123"
+    assert metadata["git_worktree_tracked_changes"] is False
+    assert metadata["index_config"]["chunk_size"] == 1000
+    assert metadata["index_config"]["chunk_overlap"] == 200
+    assert metadata["effective_retrieval_config"]["max_distance"] == pytest.approx(1.12)
+    assert metadata["effective_retrieval_config"]["top_k"] == 4
+
+
+def test_multi_video_report_preserves_supplied_experiment_metadata():
+    metadata = {
+        "embedding_model": "BAAI/bge-m3",
+        "index_namespace": "experiment-bge-m3",
+        "git_commit": "abc123",
+        "effective_retrieval_config": {"max_distance": 1.12},
+    }
+
+    report = build_multi_video_report(
+        [],
+        generated_at="2026-10-17T16:00:00Z",
+        experiment_metadata=metadata,
+    )
+
+    assert report["experiment_metadata"] == metadata
+
+
+def test_evaluation_runner_attaches_runtime_experiment_metadata(monkeypatch):
+    metadata = {
+        "embedding_model": "BAAI/bge-m3",
+        "index_namespace": "experiment-bge-m3",
+        "effective_retrieval_config": {"max_distance": 1.12},
+    }
+    monkeypatch.setattr(
+        multi_video_evaluation,
+        "_build_experiment_metadata",
+        lambda: metadata,
+    )
+    monkeypatch.setattr(
+        multi_video_evaluation,
+        "evaluate_registered_videos",
+        lambda **_kwargs: [],
+    )
+
+    report = multi_video_evaluation.run_multi_video_evaluation(registry={})
+
+    assert report["experiment_metadata"] == metadata
 
 
 def test_runner_attaches_video_query_stage_and_missing_group_diagnostics():
