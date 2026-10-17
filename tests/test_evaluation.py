@@ -1282,3 +1282,29 @@ def test_gold_context_benchmark_metrics_and_thresholds_pass():
 
     assert passed
     assert failures == []
+
+
+
+@pytest.mark.unit
+def test_result_record_preserves_query_language():
+    test_case = {
+        "id": "AR07",
+        "type": "specific_detail",
+        "question": "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟",
+        "query_language": "ar",
+        "expected": "must_retrieve",
+    }
+    result = _build_result_record(
+        test_case,
+        [
+            (
+                Document(
+                    page_content="600 دولار",
+                    metadata={"chunk_id": 1},
+                ),
+                0.2,
+            )
+        ],
+    )
+
+    assert result["query_language"] == "ar"
