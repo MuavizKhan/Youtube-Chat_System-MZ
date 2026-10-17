@@ -1747,6 +1747,44 @@ def test_question_context_uses_overview_path(monkeypatch):
 
 
 @pytest.mark.unit
+def test_question_context_can_return_expanded_context_and_selected_anchors(monkeypatch):
+    monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
+    anchor = doc(1, 10, 20, "selected anchor")
+    neighbor = doc(2, 20, 30, "context-only neighbor")
+    anchor_results = [(anchor, 0.2)]
+    expanded_results = [
+        (anchor, 0.2),
+        (neighbor, retrieval.MAX_DISTANCE),
+    ]
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **_kwargs: anchor_results,
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "lexical_search",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda _store, _results, **_kwargs: expanded_results,
+    )
+
+    expanded, anchors = retrieval.retrieve_question_context(
+        object(),
+        "How much does it cost?",
+        allow_overview=False,
+        return_anchors=True,
+    )
+
+    assert expanded == expanded_results
+    assert anchors == anchor_results
+
+
+@pytest.mark.unit
 def test_question_context_merges_and_deduplicates(monkeypatch):
     monkeypatch.setattr(retrieval, "RAG_RERANK_ENABLED", False)
     monkeypatch.setattr(retrieval,"expand_retrieval_context",lambda vector_store,retrieved_results,**kwargs:retrieved_results)
