@@ -158,3 +158,39 @@ def test_build_index_metadata_preserves_explicit_language_order():
     )
 
     assert metadata["requested_languages"] == ["ar", "en"]
+
+
+def test_index_language_preferences_read_from_persisted_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(indexing, "VECTOR_STORE_ROOT", tmp_path)
+    video_dir = tmp_path / "arabic-video"
+    video_dir.mkdir()
+    (video_dir / "metadata.json").write_text(
+        json.dumps({"requested_languages": ["ar", "en"]}),
+        encoding="utf-8",
+    )
+
+    assert indexing.get_index_language_preferences("arabic-video") == ["ar", "en"]
+    assert indexing.index_matches_requested_languages(
+        "arabic-video",
+        ["ar", "en"],
+    )
+    assert not indexing.index_matches_requested_languages(
+        "arabic-video",
+        ["en", "ar"],
+    )
+
+
+def test_index_language_preferences_missing_from_legacy_metadata_returns_unknown(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(indexing, "VECTOR_STORE_ROOT", tmp_path)
+    video_dir = tmp_path / "legacy-video"
+    video_dir.mkdir()
+    (video_dir / "metadata.json").write_text("{}", encoding="utf-8")
+
+    assert indexing.get_index_language_preferences("legacy-video") is None
+    assert not indexing.index_matches_requested_languages(
+        "legacy-video",
+        ["ar"],
+    )
