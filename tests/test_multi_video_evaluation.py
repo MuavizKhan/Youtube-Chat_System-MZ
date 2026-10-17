@@ -428,3 +428,97 @@ def test_multi_video_report_breaks_stage_metrics_out_by_query_language():
     assert query_languages["ar"]["stage_metrics"]["production_context"][
         "metrics"
     ]["evidence_presence_rate"] == pytest.approx(1.0)
+
+
+def test_report_separates_transcript_query_language_pairs_and_negative_controls():
+    arabic = _video_report(
+        "arabic-demo",
+        "ar",
+        1,
+        {
+            "hit_rate_at_k": 0.0,
+            "mean_group_coverage": 0.0,
+            "mrr": 0.0,
+            "mean_precision_at_k": 0.0,
+        },
+        overall_passed=False,
+    )
+    arabic["question_results"] = [
+        {
+            "id": "AR02", "query_language": "en",
+            "expected": "must_retrieve", "retrieved": 3, "passed": True,
+        },
+        {
+            "id": "AR05", "query_language": "en",
+            "expected": "must_not_retrieve", "retrieved": 0, "passed": True,
+        },
+        {
+            "id": "AR07", "query_language": "ar",
+            "expected": "must_retrieve", "retrieved": 3, "passed": True,
+        },
+        {
+            "id": "AR10", "query_language": "ar",
+            "expected": "must_not_retrieve", "retrieved": 0, "passed": True,
+        },
+    ]
+    arabic["case_diagnostics"] = [
+        {
+            "query_language": "en", "stage": "raw_anchor", "passed": False,
+            "metrics": {"hit_at_k": False, "group_coverage": 0.0},
+        },
+        {
+            "query_language": "ar", "stage": "raw_anchor", "passed": True,
+            "metrics": {"hit_at_k": True, "group_coverage": 1.0},
+        },
+        {
+            "query_language": "ar", "stage": "production_context",
+            "passed": True,
+            "metrics": {"evidence_presence": True, "group_coverage": 1.0},
+        },
+    ]
+
+    hindi = _video_report(
+        "hindi-demo",
+        "hi",
+        1,
+        {
+            "hit_rate_at_k": 0.0,
+            "mean_group_coverage": 0.0,
+            "mrr": 0.0,
+            "mean_precision_at_k": 0.0,
+        },
+        overall_passed=False,
+    )
+    hindi["question_results"] = [
+        {
+            "id": "HI04", "query_language": "en",
+            "expected": "must_retrieve", "retrieved": 5, "passed": True,
+        },
+        {
+            "id": "HI10", "query_language": "hi",
+            "expected": "must_not_retrieve", "retrieved": 11, "passed": False,
+        },
+    ]
+
+    report = build_multi_video_report([arabic, hindi])
+    by_pair = report["summary"]["by_transcript_and_query_language"]
+
+    arabic_english = by_pair["ar"]["en"]
+    assert arabic_english["question_count"] == 2
+    assert arabic_english["retrieval_contract"]["must_retrieve"]["recall"] == pytest.approx(1.0)
+    assert arabic_english["retrieval_contract"]["must_not_retrieve"]["rejection_rate"] == pytest.approx(1.0)
+    assert arabic_english["stage_metrics"]["raw_anchor"]["metrics"]["hit_rate_at_k"] == pytest.approx(0.0)
+
+    arabic_native = by_pair["ar"]["ar"]
+    assert arabic_native["question_count"] == 2
+    assert arabic_native["retrieval_contract"]["must_not_retrieve"]["rejection_rate"] == pytest.approx(1.0)
+    assert arabic_native["stage_metrics"]["production_context"]["metrics"]["case_pass_rate"] == pytest.approx(1.0)
+
+    hindi_native = by_pair["hi"]["hi"]
+    assert hindi_native["retrieval_contract"]["must_not_retrieve"]["case_count"] == 1
+    assert hindi_native["retrieval_contract"]["must_not_retrieve"]["rejection_rate"] == pytest.approx(0.0)
+    assert hindi_native["retrieval_contract"]["strict"]["pass_rate"] == pytest.approx(0.0)
+
+    # Same English query language is deliberately separated by transcript language.
+    assert by_pair["hi"]["en"]["question_count"] == 1
+    assert by_pair["ar"]["en"]["question_count"] == 2
