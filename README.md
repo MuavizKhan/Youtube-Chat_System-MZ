@@ -467,6 +467,32 @@ Caption/source records:
 
 The available captions are source material for a pilot, not a claim that caption error rates are uniform across languages. Deterministic phrase matching demonstrates evidence presence only; it does not establish semantic answer faithfulness. The new video benchmarks should be run against their actual indexed stores before drawing retrieval-quality conclusions.
 
+
+## Phase 10.6 — Embedding-experiment provenance
+
+Multi-video evaluation reports use schema `1.4.0` and report ID
+`phase10_6_experiment_provenance_v1`. The top-level `experiment_metadata`
+records the configured embedding model, index namespace and paths, Python
+version, Git commit, whether tracked files differed from that commit, index
+chunk/language settings, and the effective retrieval configuration (including
+the threshold and recovery settings). Paths inside the repository are written
+relative to the project root; external index-job database overrides remain
+explicit.
+
+A report produced outside a Git checkout can still be evaluated, but its Git
+revision fields are `null`. For a reproducible confirmation run, use a clean
+tracked working tree, save the exact report, and verify that
+`experiment_metadata.embedding_model` is `BAAI/bge-m3`,
+`experiment_metadata.index_namespace` is `experiment-bge-m3`, and
+`experiment_metadata.effective_retrieval_config.max_distance` is `1.12`.
+
+The raw-anchor gold benchmark remains a diagnostic, not a hard release gate.
+The overall pass flag continues to depend on the existing retrieval contract,
+production-context evidence, temporal checks where configured, and complete
+evaluation of the selected videos. A passing report does not imply that every
+raw-anchor diagnostic passes or that the generated answer is semantically
+faithful.
+
 ## Phase 10.4 — Multi-video evaluation and versioned reports
 
 `Backend/rag_system/multi_video_evaluation.py` runs the benchmark registry entries in sequence and builds one machine-readable report. It does not call the generation model or download transcripts; each video's existing local FAISS index must already be available. An index or evaluator error is recorded against that video, processing continues for the remaining entries, and the report cannot claim a full pass when a video could not be evaluated.
