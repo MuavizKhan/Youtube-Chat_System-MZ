@@ -724,7 +724,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Optional JSON report path, e.g. "
-            "evaluation_reports/phase10_4_multivideo_baseline_v1.json"
+            "evaluation_reports/phase10_5_query_language_coverage_v1.json"
         ),
     )
     args = parser.parse_args(argv)
