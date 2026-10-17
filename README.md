@@ -104,7 +104,31 @@ Chat requires the index to be ready. If preparation is queued or running, the AP
 
 Indexing prefers English captions, then falls back to Hindi, Urdu, and Arabic (in that order) when English is unavailable. The default embedding model is multilingual so English questions can search transcripts in these languages. This uses available YouTube captions; videos without captions in a supported language may still fail to index.
 
-The embedding model change makes existing indexes created with the previous model stale. Let the extension prepare each previously indexed video again before asking questions. To change the model explicitly, set `HF_EMBEDDING_MODEL` in your local `.env`.
+The embedding model is recorded in each index metadata file. Changing HF_EMBEDDING_MODEL makes indexes built with a different model stale; do not change the production model merely to run an experiment. Use the isolated namespace workflow below to compare models without overwriting the baseline indexes.
+
+
+### Isolated embedding-model experiments
+
+Use RAG_INDEX_NAMESPACE when evaluating an alternative embedding model. The namespace puts FAISS indexes under `Backend/rag_system/vector_stores/experiments/<namespace>` and gives index-job coordination a separate SQLite database. Leaving the namespace empty preserves the existing production paths. Namespace names must be 1-64 letters, digits, underscores, or hyphens and begin with a letter or digit.
+
+From PowerShell at the repository root, set the namespace and candidate model **before starting the backend or evaluation process** (configuration is read at import time):
+
+```powershell
+$env:RAG_INDEX_NAMESPACE = "experiment-bge-m3"
+$env:HF_EMBEDDING_MODEL = "BAAI/bge-m3"
+.\.venv\Scripts\python.exe -m uvicorn Backend.app:app --reload
+```
+
+Stop any other local backend using the same port first. Request index preparation for the benchmark videos while this process is running; then run the evaluation in a process with the same two environment variables. Do not point an experiment at `vector_stores` without the `experiments/<namespace>` segment.
+
+When finished, close the experiment process and clear its variables before returning to the baseline configuration:
+
+```powershell
+Remove-Item Env:RAG_INDEX_NAMESPACE
+Remove-Item Env:HF_EMBEDDING_MODEL
+```
+
+The experiment changes the index location and the embedding model, but leaves chunk size, overlap, retrieval settings, evidence annotations, and quality thresholds unchanged. Record the baseline report before comparing candidate results.
 
 ## Local development
 
