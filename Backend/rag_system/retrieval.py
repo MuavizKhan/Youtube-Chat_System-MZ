@@ -1071,6 +1071,16 @@ EVIDENCE_FACET_QUERY_DEFINITIONS = {
 }
 
 
+# Repeating the core brand/product terms deliberately weights this facet toward
+# inventory-style evidence; the controlled Q03 query experiment validated this
+# wording without changing the global retrieval or anchor-selection policies.
+ENTITY_INVENTORY_BRAND_FACET_EXTENSION = (
+    "brands brand names products product names consumer brands product lines "
+    "sub-brands brand portfolio rebranding acquired brands low-cost premium "
+    "airline brands"
+)
+
+
 def build_evidence_facet_plan(
     query: str,
 ) -> list[tuple[str, str]]:
@@ -1109,6 +1119,7 @@ def build_evidence_facet_plan(
         normalized,
     ):
         add_facet("operational_challenges")
+    entity_inventory_question = False
     if re.search(
         r"\b(?:businesses|companies|subsidiaries|ownership|investments?|corporate structure|organizations?)\b",
         normalized,
@@ -1186,7 +1197,18 @@ def build_evidence_facet_plan(
         add_facet("sequence_timeline")
 
     return [
-        (name, f"{focus_query} {EVIDENCE_FACET_QUERY_DEFINITIONS[name]}")
+        (
+            name,
+            f"{focus_query} {EVIDENCE_FACET_QUERY_DEFINITIONS[name]}"
+            + (
+                f" {ENTITY_INVENTORY_BRAND_FACET_EXTENSION}"
+                if (
+                    entity_inventory_question
+                    and name == "business_brands_products"
+                )
+                else ""
+            ),
+        )
         for name in facet_names[:4]
     ]
 
