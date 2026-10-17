@@ -365,12 +365,54 @@ def test_failed_job_does_not_hide_a_valid_persisted_index(monkeypatch):
         "get_index_state",
         lambda video_id: IndexState.VALID,
     )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: True,
+    )
 
     status = index_service.get_index_status(VIDEO_ID)
 
     assert status.state == "ready"
     assert status.action == IndexAction.REUSE.value
     assert status.ready is True
+
+
+@pytest.mark.unit
+def test_failed_language_switch_does_not_report_old_index_ready(monkeypatch):
+    job = IndexJob(
+        job_id="job-ar-failed",
+        video_id=VIDEO_ID,
+        status=JOB_FAILED,
+        action=IndexAction.REBUILD.value,
+        languages=["ar"],
+        attempt=1,
+        error="No Arabic transcript available.",
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.VALID,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: False,
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "failed"
+    assert status.action == "retry"
+    assert status.ready is False
+    assert status.job_id == "job-ar-failed"
+
 
 @pytest.mark.unit
 def test_submit_index_returns_durable_job_id(monkeypatch):
