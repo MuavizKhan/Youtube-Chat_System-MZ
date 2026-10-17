@@ -166,6 +166,39 @@ def test_submit_index_rebuilds_valid_index_for_explicit_language_mismatch(monkey
 
 
 @pytest.mark.unit
+def test_submit_index_reuses_matching_active_language_job(monkeypatch):
+    active_job = IndexJob(
+        job_id="job-ar-active",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.REBUILD.value,
+        languages=["ar"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+    store = FakeJobStore(active_job)
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: pytest.fail("An active matching job should be reused."),
+    )
+
+    status = index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+    assert status.state == JOB_BUILDING
+    assert status.action == IndexAction.REBUILD.value
+    assert status.ready is False
+    assert status.job_id == "job-ar-active"
+    assert store.enqueued == []
+
+
+@pytest.mark.unit
 def test_submit_index_rejects_conflicting_active_language_job(monkeypatch):
     active_job = IndexJob(
         job_id="job-active",
