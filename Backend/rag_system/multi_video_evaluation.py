@@ -22,8 +22,8 @@ from .benchmark_registry import (
 from .evaluation import evaluate_video
 
 
-REPORT_SCHEMA_VERSION = "1.0.0"
-REPORT_ID = "phase10_4_multivideo_baseline_v1"
+REPORT_SCHEMA_VERSION = "1.1.0"
+REPORT_ID = "phase10_5_query_language_coverage_v1"
 
 _STAGE_SPECS = {
     "raw_anchor": {
@@ -147,6 +147,10 @@ def _build_case_diagnostics(
         for item in (summary.get("gold_retrieval_diagnostics") or [])
         if isinstance(item, dict)
     }
+    query_language_by_id = {
+        item["id"]: item.get("query_language", "en")
+        for item in benchmark.question_cases
+    }
 
     diagnostics: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -161,6 +165,10 @@ def _build_case_diagnostics(
             "language": language,
             "question_id": result.get("id"),
             "question": result.get("question"),
+            "query_language": result.get(
+                "query_language",
+                query_language_by_id.get(result.get("id"), "en"),
+            ),
             "stage": "retrieval_contract",
             "passed": False,
             "failure_reasons": [result.get("message", "retrieval_contract_failed")],
@@ -188,6 +196,7 @@ def _build_case_diagnostics(
                 "language": language,
                 "question_id": question_id,
                 "question": result.get("question"),
+                "query_language": query_language_by_id.get(question_id, "en"),
                 "stage": stage,
                 "passed": bool(result.get("passed")),
                 "metrics": {},
@@ -398,6 +407,22 @@ def evaluate_registered_videos(
         if temporal is not None and temporal.get("passed") is not True:
             reasons.extend(temporal.get("failures") or ["temporal_benchmark_failed"])
 
+        query_language_by_id = {
+            case["id"]: case.get("query_language", "en")
+            for case in benchmark.question_cases
+        }
+        question_results = [
+            {
+                **item,
+                "query_language": item.get(
+                    "query_language",
+                    query_language_by_id.get(item.get("id"), "en"),
+                ),
+            }
+            for item in (summary.get("results") or [])
+            if isinstance(item, dict)
+        ]
+
         video_reports.append({
             **base,
             "status": "evaluated",
@@ -405,7 +430,7 @@ def evaluate_registered_videos(
             "failure_reasons": sorted(set(reasons)),
             "retrieval_contract": retrieval_contract,
             "stage_metrics": stage_metrics,
-            "question_results": summary.get("results", []),
+            "question_results": question_results,
             "case_diagnostics": case_diagnostics,
             "failure_diagnostics": failure_diagnostics,
             "retrieval_config": summary.get("retrieval_config", {}),
@@ -455,6 +480,112 @@ def _aggregate_stage(
         "macro_average_by_video": macro,
         "case_weighted_average": weighted,
     }
+
+
+def _aggregate_by_query_language(
+    video_reports: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Summarize annotated retrieval quality by the language of each query.
+
+    Transcript language and query language are intentionally separate axes:
+    English questions against Hindi/Arabic transcripts measure cross-lingual
+    retrieval, while native-language questions measure in-language retrieval.
+    """
+    metric_sources = {
+        "raw_anchor": {
+            "hit_rate_at_k": "hit_at_k",
+            "mean_group_coverage": "group_coverage",
+            "mrr": "mrr",
+            "mean_precision_at_k": "precision_at_k",
+        },
+        "production_context": {
+            "evidence_presence_rate": "evidence_presence",
+            "mean_group_coverage": "group_coverage",
+            "mean_relevance_ratio": "relevance_ratio",
+        },
+        "temporal": {
+            "hit_rate_at_k": "hit_at_k",
+            "mean_window_coverage": "window_coverage",
+            "timestamp_validity_rate": "timestamp_validity_rate",
+            "source_identity_validity_rate": "source_identity_validity_rate",
+            "mrr": "mrr",
+        },
+    }
+    questions_by_language: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    cases_by_language_stage: dict[str, dict[str, list[dict[str, Any]]]] = {}
+
+    for report in video_reports:
+        if report.get("status") != "evaluated":
+            continue
+        video_id = report.get("video_id", "unknown")
+        for question in report.get("question_results") or []:
+            if not isinstance(question, dict):
+                continue
+            language = question.get("query_language", "en")
+            questions_by_language.setdefault(language, []).append((video_id, question))
+
+        for diagnostic in report.get("case_diagnostics") or []:
+            if not isinstance(diagnostic, dict):
+                continue
+            language = diagnostic.get("query_language", "en")
+            stage = diagnostic.get("stage")
+            if stage not in metric_sources:
+                continue
+            cases_by_language_stage.setdefault(language, {}).setdefault(
+                stage, []
+            ).append(diagnostic)
+
+    languages = sorted(set(questions_by_language) | set(cases_by_language_stage))
+    output: dict[str, Any] = {}
+    for language in languages:
+        question_rows = questions_by_language.get(language, [])
+        stage_metrics: dict[str, Any] = {}
+        language_stages = cases_by_language_stage.get(language, {})
+        for stage, source_map in metric_sources.items():
+            rows = language_stages.get(stage, [])
+            if not rows:
+                continue
+
+            values_by_metric: dict[str, list[float]] = {}
+            for output_key, source_key in source_map.items():
+                metric_values: list[float] = []
+                for row in rows:
+                    value = (row.get("metrics") or {}).get(source_key)
+                    if isinstance(value, bool):
+                        metric_values.append(float(value))
+                    elif _finite_number(value):
+                        metric_values.append(float(value))
+                if metric_values:
+                    values_by_metric[output_key] = metric_values
+
+            means = {
+                key: sum(values) / len(values)
+                for key, values in values_by_metric.items()
+            }
+            if stage in {"raw_anchor", "production_context"}:
+                means["case_pass_rate"] = sum(
+                    1 for row in rows if row.get("passed") is True
+                ) / len(rows)
+            elif stage == "temporal":
+                means["pass_rate"] = sum(
+                    1 for row in rows if row.get("passed") is True
+                ) / len(rows)
+
+            stage_metrics[stage] = {
+                "case_count": len(rows),
+                "passed_cases": sum(
+                    1 for row in rows if row.get("passed") is True
+                ),
+                "metrics": means,
+            }
+
+        output[language] = {
+            "video_count": len({video_id for video_id, _ in question_rows}),
+            "question_count": len(question_rows),
+            "stage_metrics": stage_metrics,
+        }
+
+    return output
 
 
 def build_multi_video_report(
@@ -527,6 +658,7 @@ def build_multi_video_report(
         and len(evaluated) == selected_video_count
         and not quality_failures
     )
+    by_query_language = _aggregate_by_query_language(reports)
 
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -541,6 +673,7 @@ def build_multi_video_report(
             "overall_passed": overall_passed,
             "stage_metrics": stage_metrics,
             "by_language": by_language,
+            "by_query_language": by_query_language,
             "urdu_curation_status": {
                 "status": curation_blockers.get("status"),
                 "reason": curation_blockers.get("reason"),
@@ -591,7 +724,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Optional JSON report path, e.g. "
-            "evaluation_reports/phase10_4_multivideo_baseline_v1.json"
+            "evaluation_reports/phase10_5_query_language_coverage_v1.json"
         ),
     )
     args = parser.parse_args(argv)

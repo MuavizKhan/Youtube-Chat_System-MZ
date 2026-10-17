@@ -106,14 +106,30 @@ def test_pilot_registry_has_five_videos_and_four_cases_per_new_video():
     for benchmark in new_benchmarks:
         cases = benchmark.question_cases_for_evaluation()
         question_ids = [case["id"] for case in cases]
-        assert len(question_ids) == len(set(question_ids)) == 5
+        expected_case_count = (
+            5 if benchmark.transcript_language == "en" else 10
+        )
+        expected_gold_case_count = (
+            4 if benchmark.transcript_language == "en" else 8
+        )
+
+        assert len(question_ids) == len(set(question_ids)) == expected_case_count
         assert set(question_ids) == set(benchmark.expected_retrieval)
-        assert len(benchmark.gold_evidence_cases) == 4
+        assert len(benchmark.gold_evidence_cases) == expected_gold_case_count
         assert len(benchmark.temporal_evidence_cases) == 0
         assert {
             case.question_id for case in benchmark.gold_evidence_cases
         }.issubset(question_ids)
         assert cases[-1]["expected"] == "must_not_retrieve"
+        native_cases = [
+            case for case in cases
+            if case.get("query_language", "en") == benchmark.transcript_language
+        ]
+        assert all(
+            case.get("query_language", "en") == "en"
+            for case in cases
+            if case not in native_cases
+        )
         case_types = {case["type"] for case in cases}
         assert "direct_fact" in case_types
         assert "specific_detail" in case_types
@@ -1282,3 +1298,29 @@ def test_gold_context_benchmark_metrics_and_thresholds_pass():
 
     assert passed
     assert failures == []
+
+
+
+@pytest.mark.unit
+def test_result_record_preserves_query_language():
+    test_case = {
+        "id": "AR07",
+        "type": "specific_detail",
+        "question": "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟",
+        "query_language": "ar",
+        "expected": "must_retrieve",
+    }
+    result = _build_result_record(
+        test_case,
+        [
+            (
+                Document(
+                    page_content="600 دولار",
+                    metadata={"chunk_id": 1},
+                ),
+                0.2,
+            )
+        ],
+    )
+
+    assert result["query_language"] == "ar"

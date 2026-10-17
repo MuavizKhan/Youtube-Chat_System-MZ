@@ -165,6 +165,7 @@ class VideoBenchmark:
         return [
             {
                 **case,
+                "query_language": case.get("query_language", "en"),
                 "expected": self.expected_retrieval[case["id"]],
             }
             for case in self.question_cases
@@ -349,12 +350,50 @@ HINDI_HISTORY_QUESTIONS = (
         "question": "What is the capital of Australia?",
     },
 )
+HINDI_HISTORY_NATIVE_QUESTIONS = (
+    {
+        "id": "HI06",
+        "type": "direct_fact",
+        "query_language": "hi",
+        "question": "किस किसान आंदोलन को पहला बड़ा आंदोलन बताया गया है?",
+    },
+    {
+        "id": "HI07",
+        "type": "explanation",
+        "query_language": "hi",
+        "question": "पहले बड़े किसान आंदोलन को बिजोलिया के संदर्भ में कहाँ बताया गया है?",
+    },
+    {
+        "id": "HI08",
+        "type": "specific_detail",
+        "query_language": "hi",
+        "question": "वक्ता कितने प्रकार के करों का उल्लेख करते हैं?",
+    },
+    {
+        "id": "HI09",
+        "type": "multi_part",
+        "query_language": "hi",
+        "question": "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया गया?",
+    },
+    {
+        "id": "HI10",
+        "type": "unrelated",
+        "query_language": "hi",
+        "question": "ऑस्ट्रेलिया की राजधानी क्या है?",
+    },
+)
+HINDI_HISTORY_QUESTIONS = HINDI_HISTORY_QUESTIONS + HINDI_HISTORY_NATIVE_QUESTIONS
 HINDI_HISTORY_EXPECTED = {
     "HI01": "must_retrieve",
     "HI02": "must_retrieve",
     "HI03": "must_retrieve",
     "HI04": "must_retrieve",
     "HI05": "must_not_retrieve",
+    "HI06": "must_retrieve",
+    "HI07": "must_retrieve",
+    "HI08": "must_retrieve",
+    "HI09": "must_retrieve",
+    "HI10": "must_not_retrieve",
 }
 HINDI_HISTORY_GOLD = (
     GoldEvidenceCase(
@@ -374,6 +413,26 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI04",
+        groups=(("नया टैक्स लगाया गया था चवरी कर",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI06",
+        groups=(("पहला बड़ा किसान आंदोलन",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI07",
+        groups=(("बिजोलिया में",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI08",
+        groups=(("84 प्रकार के कर",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="HI09",
         groups=(("नया टैक्स लगाया गया था चवरी कर",),),
         min_group_coverage=1.0,
     ),
@@ -410,12 +469,50 @@ ARABIC_SILENCE_QUESTIONS = (
         "question": "What is the capital of Australia?",
     },
 )
+ARABIC_SILENCE_NATIVE_QUESTIONS = (
+    {
+        "id": "AR06",
+        "type": "explanation",
+        "query_language": "ar",
+        "question": "هل يمنح الصمت التام الناس الراحة التي يتوقعونها؟",
+    },
+    {
+        "id": "AR07",
+        "type": "specific_detail",
+        "query_language": "ar",
+        "question": "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟",
+    },
+    {
+        "id": "AR08",
+        "type": "direct_fact",
+        "query_language": "ar",
+        "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
+    },
+    {
+        "id": "AR09",
+        "type": "multi_part",
+        "query_language": "ar",
+        "question": "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+    },
+    {
+        "id": "AR10",
+        "type": "unrelated",
+        "query_language": "ar",
+        "question": "ما عاصمة أستراليا؟",
+    },
+)
+ARABIC_SILENCE_QUESTIONS = ARABIC_SILENCE_QUESTIONS + ARABIC_SILENCE_NATIVE_QUESTIONS
 ARABIC_SILENCE_EXPECTED = {
     "AR01": "must_retrieve",
     "AR02": "must_retrieve",
     "AR03": "must_retrieve",
     "AR04": "must_retrieve",
     "AR05": "must_not_retrieve",
+    "AR06": "must_retrieve",
+    "AR07": "must_retrieve",
+    "AR08": "must_retrieve",
+    "AR09": "must_retrieve",
+    "AR10": "must_not_retrieve",
 }
 ARABIC_SILENCE_GOLD = (
     GoldEvidenceCase(
@@ -435,6 +532,26 @@ ARABIC_SILENCE_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="AR04",
+        groups=(("الصوت هو بوصلة مهمة",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR06",
+        groups=(("الهدوء التام مبيديش الراحة",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR07",
+        groups=(("600 دولار",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR08",
+        groups=(("نبض قلبك حركة الدم",),),
+        min_group_coverage=1.0,
+    ),
+    GoldEvidenceCase(
+        question_id="AR09",
         groups=(("الصوت هو بوصلة مهمة",),),
         min_group_coverage=1.0,
     ),

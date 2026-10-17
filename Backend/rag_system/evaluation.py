@@ -166,6 +166,7 @@ def _build_result_record(
         "id": test_case["id"],
         "type": test_case["type"],
         "question": test_case["question"],
+        "query_language": test_case.get("query_language", "en"),
         "expected": expected,
         "retrieved": retrieved_count,
         "passed": passed,
