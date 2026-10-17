@@ -977,7 +977,16 @@ STOPWORDS = {
 # Question boilerplate is useful for human language but is weak retrieval
 # evidence. These terms are removed only from the focus-query path; the
 # original user query is always retained as a semantic retrieval variant.
-QUERY_FOCUS_STOPWORDS = STOPWORDS | {
+# Arabic question framing and common function words need the same treatment as
+# English boilerplate; otherwise they dilute exact content terms in lexical
+# retrieval (especially for dialectal Arabic questions about transcript facts).
+ARABIC_QUERY_FOCUS_STOPWORDS = {
+    "كم", "قد", "هل", "ما", "ماذا", "لماذا", "كيف", "أين", "اين", "متى",
+    "من", "في", "على", "إلى", "الى", "عن", "مع", "داخل", "لمدة", "خلال",
+    "حول", "بين", "اللي", "ايه", "أيه",
+}
+
+QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
     "he", "she", "his", "her", "their", "them", "me", "my", "your", "our",
     "we", "i", "say", "says", "said", "tell", "tells", "told",
     "discuss", "discusses", "discussed", "describe", "describes",
