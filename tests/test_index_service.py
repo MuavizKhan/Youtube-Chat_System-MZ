@@ -132,6 +132,67 @@ def test_submit_index_reuses_valid_index_without_queueing(monkeypatch):
 
 
 @pytest.mark.unit
+def test_submit_index_rebuilds_valid_index_for_explicit_language_mismatch(monkeypatch):
+    store = FakeJobStore()
+    dispatched = []
+
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "_dispatch_video",
+        lambda video_id: dispatched.append(video_id),
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.VALID,
+    )
+    monkeypatch.setattr(
+        index_service,
+        "index_matches_requested_languages",
+        lambda video_id, languages: False,
+    )
+
+    status = index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+    assert status.state == "queued"
+    assert status.action == IndexAction.REBUILD.value
+    assert status.ready is False
+    assert store.enqueued == [
+        (VIDEO_ID, IndexAction.REBUILD.value, ["ar"])
+    ]
+    assert dispatched == [VIDEO_ID]
+
+
+@pytest.mark.unit
+def test_submit_index_rejects_conflicting_active_language_job(monkeypatch):
+    active_job = IndexJob(
+        job_id="job-active",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.REBUILD.value,
+        languages=["en"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(active_job))
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: pytest.fail("State need not be checked after language conflict."),
+    )
+
+    with pytest.raises(index_service.IndexLanguageConflictError, match="different transcript-language"):
+        index_service.submit_index(VIDEO_ID, languages=["ar"])
+
+
+@pytest.mark.unit
 def test_load_ready_index_rejects_queued_index(monkeypatch):
     queued_job = IndexJob(
         job_id="job-1",
