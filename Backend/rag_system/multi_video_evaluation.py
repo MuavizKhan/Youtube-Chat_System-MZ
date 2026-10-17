@@ -9,11 +9,14 @@ aggregation without network calls, model-provider calls, or local indexes.
 import argparse
 import json
 import math
+import platform
+import subprocess
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import config as rag_config
 from .benchmark_registry import (
     BENCHMARK_CURATION_BLOCKERS,
     VIDEO_BENCHMARKS,
@@ -22,8 +25,8 @@ from .benchmark_registry import (
 from .evaluation import evaluate_video
 
 
-REPORT_SCHEMA_VERSION = "1.3.0"
-REPORT_ID = "phase10_5_2_contract_metric_semantics_v1"
+REPORT_SCHEMA_VERSION = "1.4.0"
+REPORT_ID = "phase10_6_experiment_provenance_v1"
 
 _STAGE_SPECS = {
     "raw_anchor": {
@@ -757,12 +760,105 @@ def _aggregate_by_transcript_and_query_language(
     return output
 
 
+
+def _read_git_provenance() -> dict[str, Any]:
+    """Return the evaluated source revision and tracked-worktree cleanliness.
+
+    Reports remain usable outside a Git checkout; unavailable Git metadata is
+    represented as null instead of failing the evaluation.
+    """
+    try:
+        root = rag_config.PROJECT_ROOT
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        diff_result = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "git_commit": None,
+            "git_worktree_tracked_changes": None,
+        }
+
+    tracked_changes = (
+        diff_result.returncode != 0
+        if diff_result.returncode in (0, 1)
+        else None
+    )
+    return {
+        "git_commit": commit_result.stdout.strip() or None,
+        "git_worktree_tracked_changes": tracked_changes,
+    }
+
+
+def _project_relative_path(path: Path) -> str:
+    """Represent project-local paths portably, preserving external overrides."""
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(Path(rag_config.PROJECT_ROOT).resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def _build_experiment_metadata() -> dict[str, Any]:
+    """Capture the model, index location, runtime, and effective retrieval knobs."""
+    return {
+        "embedding_model": rag_config.EMBEDDING_MODEL,
+        "index_namespace": rag_config.RAG_INDEX_NAMESPACE or None,
+        "vector_store_root": _project_relative_path(rag_config.VECTOR_STORE_ROOT),
+        "index_job_db_path": _project_relative_path(rag_config.INDEX_JOB_DB_PATH),
+        "python_version": platform.python_version(),
+        **_read_git_provenance(),
+        "index_config": {
+            "chunk_size": rag_config.CHUNK_SIZE,
+            "chunk_overlap": rag_config.CHUNK_OVERLAP,
+            "preferred_transcript_languages": list(rag_config.PREFERRED_LANGUAGES),
+        },
+        "effective_retrieval_config": {
+            "top_k": rag_config.TOP_K,
+            "fetch_k": rag_config.MMR_FETCH_K,
+            "lambda_mult": rag_config.MMR_LAMBDA,
+            "max_distance": rag_config.MAX_DISTANCE,
+            "recovery_max_distance": rag_config.RECOVERY_MAX_DISTANCE,
+            "recovery_top_k": rag_config.RECOVERY_TOP_K,
+            "recovery_fetch_k": rag_config.RECOVERY_FETCH_K,
+            "rrf_k": rag_config.RRF_K,
+            "dense_lexical_rrf_weight": rag_config.DENSE_LEXICAL_RRF_WEIGHT,
+            "context_expansion_chunks": rag_config.CONTEXT_EXPANSION_CHUNKS,
+            "context_max_chunks": rag_config.CONTEXT_MAX_CHUNKS,
+            "dense_semantic_k": rag_config.DENSE_SEMANTIC_K,
+            "dense_semantic_fetch_k": rag_config.DENSE_SEMANTIC_FETCH_K,
+            "dense_anchor_limit": rag_config.DENSE_ANCHOR_LIMIT,
+            "dense_anchor_min_chunk_gap": rag_config.DENSE_ANCHOR_MIN_CHUNK_GAP,
+            "dense_context_max_chunks": rag_config.DENSE_CONTEXT_MAX_CHUNKS,
+            "dense_facet_rerank_weight": rag_config.DENSE_FACET_RERANK_WEIGHT,
+            "rerank_enabled": rag_config.RAG_RERANK_ENABLED,
+            "rerank_model": rag_config.RAG_RERANK_MODEL,
+            "rerank_candidate_k": rag_config.RAG_RERANK_CANDIDATE_K,
+            "rerank_batch_size": rag_config.RAG_RERANK_BATCH_SIZE,
+            "rerank_max_length": rag_config.RAG_RERANK_MAX_LENGTH,
+        },
+    }
+
+
 def build_multi_video_report(
     video_reports: Sequence[dict[str, Any]],
     *,
     generated_at: str | None = None,
     curation_blockers: dict[str, Any] | None = None,
     registered_video_count: int | None = None,
+    experiment_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Aggregate already-run single-video summaries without doing retrieval."""
     reports = [dict(item) for item in video_reports]
@@ -836,6 +932,11 @@ def build_multi_video_report(
         "report_schema_version": REPORT_SCHEMA_VERSION,
         "report_id": REPORT_ID,
         "generated_at": generated_at,
+        "experiment_metadata": (
+            dict(experiment_metadata)
+            if experiment_metadata is not None
+            else None
+        ),
         "summary": {
             "registered_video_count": registered_video_count,
             "selected_video_count": selected_video_count,
@@ -876,6 +977,7 @@ def run_multi_video_evaluation(
     return build_multi_video_report(
         reports,
         registered_video_count=len(registry),
+        experiment_metadata=_build_experiment_metadata(),
     )
 
 
@@ -897,7 +999,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Optional JSON report path, e.g. "
-            "evaluation_reports/phase10_5_2_contract_metric_semantics_v1.json"
+            "evaluation_reports/phase10_6_experiment_provenance_v1.json"
         ),
     )
     args = parser.parse_args(argv)
