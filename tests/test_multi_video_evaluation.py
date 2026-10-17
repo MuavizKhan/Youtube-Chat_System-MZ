@@ -243,6 +243,7 @@ def test_runner_attaches_video_query_stage_and_missing_group_diagnostics():
     video = reports[0]
 
     assert video["status"] == "evaluated"
+    assert video["question_results"][0]["query_language"] == "en"
     assert video["overall_passed"] is True  # raw-anchor benchmark remains diagnostic
     raw_failure = next(
         item for item in video["failure_diagnostics"]
