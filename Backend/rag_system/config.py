@@ -9,6 +9,7 @@ Application logic belongs in the other modules.
 
 import math
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,7 +31,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 RAG_ROOT = Path(__file__).resolve().parent
 
-VECTOR_STORE_ROOT = RAG_ROOT / "vector_stores"
+# Capture an intentional process-level override before dotenv loads values
+# from .env. An isolated namespace gets its own job database by default even
+# when .env contains the historical default INDEX_JOB_DB_PATH.
+_PROCESS_INDEX_JOB_DB_PATH = os.environ.get("INDEX_JOB_DB_PATH")
 
 
 # ============================================================
@@ -40,6 +44,27 @@ VECTOR_STORE_ROOT = RAG_ROOT / "vector_stores"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 load_dotenv(dotenv_path=ENV_FILE)
+
+
+# Optional namespace for isolated index/embedding experiments. Empty preserves
+# the historical production paths exactly. Restrict this to one safe path
+# segment so a namespace cannot escape the experiments directory.
+RAG_INDEX_NAMESPACE = os.getenv("RAG_INDEX_NAMESPACE", "").strip()
+if RAG_INDEX_NAMESPACE and not re.fullmatch(
+    r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", RAG_INDEX_NAMESPACE
+):
+    raise RuntimeError(
+        "RAG_INDEX_NAMESPACE must be 1-64 characters containing only "
+        "letters, digits, underscores, or hyphens, and start with a letter or digit."
+    )
+
+_DEFAULT_VECTOR_STORE_ROOT = RAG_ROOT / "vector_stores"
+if RAG_INDEX_NAMESPACE:
+    VECTOR_STORE_ROOT = (
+        _DEFAULT_VECTOR_STORE_ROOT / "experiments" / RAG_INDEX_NAMESPACE
+    )
+else:
+    VECTOR_STORE_ROOT = _DEFAULT_VECTOR_STORE_ROOT
 
 
 # ============================================================
@@ -134,14 +159,23 @@ def _get_list(
 # INDEX JOB COORDINATION
 # ============================================================
 
-_default_index_job_db_path = RAG_ROOT / "index_jobs.sqlite3"
+_default_index_job_db_path = (
+    RAG_ROOT / f"index_jobs_{RAG_INDEX_NAMESPACE}.sqlite3"
+    if RAG_INDEX_NAMESPACE
+    else RAG_ROOT / "index_jobs.sqlite3"
+)
 
-INDEX_JOB_DB_PATH = Path(
-    os.getenv(
-        "INDEX_JOB_DB_PATH",
-        str(_default_index_job_db_path),
-    )
-).expanduser()
+# With a namespace, prefer its dedicated database over a legacy/default value
+# loaded from .env. An explicitly exported process-level override remains honored.
+if RAG_INDEX_NAMESPACE and _PROCESS_INDEX_JOB_DB_PATH is None:
+    INDEX_JOB_DB_PATH = _default_index_job_db_path
+else:
+    INDEX_JOB_DB_PATH = Path(
+        os.getenv(
+            "INDEX_JOB_DB_PATH",
+            str(_default_index_job_db_path),
+        )
+    ).expanduser()
 
 if not INDEX_JOB_DB_PATH.is_absolute():
     INDEX_JOB_DB_PATH = PROJECT_ROOT / INDEX_JOB_DB_PATH
