@@ -129,6 +129,7 @@ Remove-Item Env:HF_EMBEDDING_MODEL
 ```
 
 The experiment changes the index location and the embedding model, but leaves chunk size, overlap, retrieval settings, evidence annotations, and quality thresholds unchanged. Record the baseline report before comparing candidate results.
+
 ## Local development
 
 ### Backend
