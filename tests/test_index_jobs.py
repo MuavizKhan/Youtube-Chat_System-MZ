@@ -5,6 +5,7 @@ import time
 import pytest
 
 from Backend.rag_system.index_jobs import (
+    ActiveIndexJobLanguageConflictError,
     JOB_BUILDING,
     JOB_FAILED,
     JOB_QUEUED,
@@ -110,8 +111,6 @@ def test_job_store_rejects_active_job_with_different_language_preferences(tmp_pa
         action="create",
         languages=["en"],
     )
-
-    from Backend.rag_system.index_jobs import ActiveIndexJobLanguageConflictError
 
     with pytest.raises(
         ActiveIndexJobLanguageConflictError,
