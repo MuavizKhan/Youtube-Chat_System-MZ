@@ -934,11 +934,43 @@ def _group_diagnosis(candidate_diagnostics: list[dict[str, Any]]) -> str:
     )
 
 
+def _diagnostic_text_preview(
+    text: str,
+    phrases: tuple[str, ...],
+    *,
+    max_chars: int = 480,
+) -> str:
+    """Return a compact excerpt near a matched gold phrase for trace auditing."""
+    compact_text = " ".join(text.split())
+    folded_text = compact_text.casefold()
+    match_start = None
+    for phrase in phrases:
+        position = folded_text.find(phrase.casefold())
+        if position >= 0:
+            match_start = position
+            break
+
+    if match_start is None:
+        start = 0
+    else:
+        start = max(0, match_start - max_chars // 4)
+    end = min(len(compact_text), start + max_chars)
+    if end == len(compact_text):
+        start = max(0, end - max_chars)
+    excerpt = compact_text[start:end]
+    if start:
+        excerpt = "… " + excerpt
+    if end < len(compact_text):
+        excerpt = excerpt + " …"
+    return excerpt
+
+
 def _gold_candidate_map(vector_store, gold_case):
     documents = get_all_documents(vector_store)
     group_map = {}
     for group_index in range(len(gold_case.groups)):
         candidate_ids = []
+        candidate_details = {}
         matched_phrase = None
         for document in documents:
             matched_groups = matched_gold_groups(
@@ -950,7 +982,21 @@ def _gold_candidate_map(vector_store, gold_case):
             chunk_id = document.metadata.get("chunk_id")
             if chunk_id is not None:
                 candidate_ids.append(chunk_id)
-            normalized = normalize_evidence_text(document.page_content)
+                candidate_details.setdefault(
+                    chunk_id,
+                    {
+                        "text_preview": _diagnostic_text_preview(
+                            document.page_content,
+                            gold_case.groups[group_index],
+                        ),
+                        "start_seconds": document.metadata.get("start"),
+                        "end_seconds": document.metadata.get("end"),
+                        "video_id": document.metadata.get("video_id"),
+                    },
+                )
+            normalized = normalize_evidence_text(
+                document.page_content
+            )
             for phrase in gold_case.groups[group_index]:
                 if normalize_evidence_text(phrase) in normalized:
                     matched_phrase = phrase
@@ -958,6 +1004,7 @@ def _gold_candidate_map(vector_store, gold_case):
         group_map[group_index] = {
             "candidate_chunk_ids": sorted(set(candidate_ids)),
             "matched_index_phrase": matched_phrase,
+            "candidate_details": candidate_details,
         }
     return group_map
 
@@ -1048,8 +1095,26 @@ def build_end_to_end_retrieval_diagnostics(
                     for variant, ranks in semantic_mmr_maps.items()
                 }
 
+                anchor_rank = anchor_map.get(chunk_id)
+                final_context_rank = context_map.get(chunk_id)
+                candidate_details = group_info.get(
+                    "candidate_details", {}
+                ).get(chunk_id, {})
+                if anchor_rank is not None and anchor_rank <= TOP_K:
+                    raw_anchor_top_k_status = "within_top_k"
+                elif anchor_rank is not None:
+                    raw_anchor_top_k_status = "selected_beyond_top_k"
+                elif final_context_rank is not None:
+                    raw_anchor_top_k_status = "context_neighbor_only"
+                else:
+                    raw_anchor_top_k_status = "not_selected_as_anchor_or_context"
+
                 candidate = {
                     "chunk_id": chunk_id,
+                    "text_preview": candidate_details.get("text_preview"),
+                    "start_seconds": candidate_details.get("start_seconds"),
+                    "end_seconds": candidate_details.get("end_seconds"),
+                    "video_id": candidate_details.get("video_id"),
                     "raw_faiss_rank": _best_variant_rank(raw_by_variant),
                     "raw_faiss_rank_by_variant": raw_by_variant,
                     "raw_faiss_distance": _best_variant_distance(
@@ -1068,17 +1133,49 @@ def build_end_to_end_retrieval_diagnostics(
                         for source_name, ranks in facet_candidate_rank_maps.items()
                         if chunk_id in ranks
                     },
-                    "anchor_rank": anchor_map.get(chunk_id),
-                    "final_context_rank": context_map.get(chunk_id),
+                    "anchor_rank": anchor_rank,
+                    "raw_anchor_top_k_rank": (
+                        anchor_rank
+                        if anchor_rank is not None and anchor_rank <= TOP_K
+                        else None
+                    ),
+                    "raw_anchor_top_k_status": raw_anchor_top_k_status,
+                    "final_context_rank": final_context_rank,
                 }
                 candidate["diagnosis"] = _candidate_diagnosis(candidate)
                 candidates.append(candidate)
+
+            raw_anchor_top_k_candidate_chunk_ids = [
+                candidate["chunk_id"]
+                for candidate in candidates
+                if candidate["raw_anchor_top_k_status"] == "within_top_k"
+            ]
+            if raw_anchor_top_k_candidate_chunk_ids:
+                raw_anchor_top_k_status = "evidence_in_top_k"
+            elif any(
+                candidate["raw_anchor_top_k_status"] == "selected_beyond_top_k"
+                for candidate in candidates
+            ):
+                raw_anchor_top_k_status = "evidence_anchor_beyond_top_k"
+            elif any(
+                candidate["raw_anchor_top_k_status"] == "context_neighbor_only"
+                for candidate in candidates
+            ):
+                raw_anchor_top_k_status = "evidence_recovered_only_by_context_expansion"
+            else:
+                raw_anchor_top_k_status = "evidence_not_selected_in_anchors_or_context"
 
             groups.append({
                 "group": group_index,
                 "candidate_count": len(candidates),
                 "candidate_chunk_ids": group_info["candidate_chunk_ids"][:12],
                 "matched_index_phrase": group_info["matched_index_phrase"],
+                "raw_anchor_top_k_limit": TOP_K,
+                "raw_anchor_top_k_candidate_chunk_ids": raw_anchor_top_k_candidate_chunk_ids,
+                "raw_anchor_top_k_evidence_present": bool(
+                    raw_anchor_top_k_candidate_chunk_ids
+                ),
+                "raw_anchor_top_k_status": raw_anchor_top_k_status,
                 "diagnosis": _group_diagnosis(candidates),
                 "candidates": candidates[:12],
             })
@@ -1092,6 +1189,7 @@ def build_end_to_end_retrieval_diagnostics(
             "semantic_fetch_k": pipeline["semantic_fetch_k"],
             "lexical_limit": pipeline["lexical_limit"],
             "anchor_limit": pipeline["anchor_limit"],
+            "raw_anchor_top_k_limit": TOP_K,
             "reranking_enabled": pipeline.get(
                 "reranking_enabled",
                 RAG_RERANK_ENABLED,
