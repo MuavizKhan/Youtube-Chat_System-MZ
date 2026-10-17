@@ -22,8 +22,8 @@ from .benchmark_registry import (
 from .evaluation import evaluate_video
 
 
-REPORT_SCHEMA_VERSION = "1.2.0"
-REPORT_ID = "phase10_5_1_language_pair_quality_v1"
+REPORT_SCHEMA_VERSION = "1.3.0"
+REPORT_ID = "phase10_5_2_contract_metric_semantics_v1"
 
 _STAGE_SPECS = {
     "raw_anchor": {
@@ -688,7 +688,8 @@ def _aggregate_by_transcript_and_query_language(
             "must_retrieve": {
                 "case_count": len(must_retrieve),
                 "retrieved_cases": retrieved_answerable,
-                "recall": (
+                # Counts any non-empty result, not whether gold evidence was found.
+                "retrieval_presence_rate": (
                     retrieved_answerable / len(must_retrieve)
                     if must_retrieve else None
                 ),
@@ -896,7 +897,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Optional JSON report path, e.g. "
-            "evaluation_reports/phase10_5_1_language_pair_quality_v1.json"
+            "evaluation_reports/phase10_5_2_contract_metric_semantics_v1.json"
         ),
     )
     args = parser.parse_args(argv)
