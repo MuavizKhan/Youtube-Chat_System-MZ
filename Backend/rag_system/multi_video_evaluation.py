@@ -22,8 +22,8 @@ from .benchmark_registry import (
 from .evaluation import evaluate_video
 
 
-REPORT_SCHEMA_VERSION = "1.1.0"
-REPORT_ID = "phase10_5_query_language_coverage_v1"
+REPORT_SCHEMA_VERSION = "1.2.0"
+REPORT_ID = "phase10_5_1_language_pair_quality_v1"
 
 _STAGE_SPECS = {
     "raw_anchor": {
@@ -588,6 +588,174 @@ def _aggregate_by_query_language(
     return output
 
 
+def _aggregate_by_transcript_and_query_language(
+    video_reports: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate retrieval quality by transcript language and query language.
+
+    This avoids pooling English-on-English retrieval with English queries
+    against non-English transcripts. Retrieval-contract controls are reported
+    separately from gold-evidence stages because unrelated questions do not
+    have gold evidence annotations.
+    """
+    metric_sources = {
+        "raw_anchor": {
+            "hit_rate_at_k": "hit_at_k",
+            "mean_group_coverage": "group_coverage",
+            "mrr": "mrr",
+            "mean_precision_at_k": "precision_at_k",
+        },
+        "production_context": {
+            "evidence_presence_rate": "evidence_presence",
+            "mean_group_coverage": "group_coverage",
+            "mean_relevance_ratio": "relevance_ratio",
+        },
+        "temporal": {
+            "hit_rate_at_k": "hit_at_k",
+            "mean_window_coverage": "window_coverage",
+            "timestamp_validity_rate": "timestamp_validity_rate",
+            "source_identity_validity_rate": "source_identity_validity_rate",
+            "mrr": "mrr",
+        },
+    }
+    questions_by_pair: dict[
+        tuple[str, str], list[tuple[str, dict[str, Any]]]
+    ] = {}
+    stages_by_pair: dict[
+        tuple[str, str], dict[str, list[dict[str, Any]]]
+    ] = {}
+
+    for report in video_reports:
+        if report.get("status") != "evaluated":
+            continue
+        transcript_language = report.get("language", "unknown")
+        video_id = report.get("video_id", "unknown")
+
+        for question in report.get("question_results") or []:
+            if not isinstance(question, dict):
+                continue
+            query_language = question.get("query_language", "en")
+            pair = (transcript_language, query_language)
+            questions_by_pair.setdefault(pair, []).append((video_id, question))
+
+        for diagnostic in report.get("case_diagnostics") or []:
+            if not isinstance(diagnostic, dict):
+                continue
+            stage = diagnostic.get("stage")
+            if stage not in metric_sources:
+                continue
+            query_language = diagnostic.get("query_language", "en")
+            pair = (transcript_language, query_language)
+            stages_by_pair.setdefault(pair, {}).setdefault(stage, []).append(
+                diagnostic
+            )
+
+    output: dict[str, Any] = {}
+    pairs = sorted(set(questions_by_pair) | set(stages_by_pair))
+    for transcript_language, query_language in pairs:
+        pair = (transcript_language, query_language)
+        question_rows = [
+            question for _, question in questions_by_pair.get(pair, [])
+        ]
+
+        must_retrieve = [
+            item for item in question_rows
+            if item.get("expected") == "must_retrieve"
+        ]
+        must_not_retrieve = [
+            item for item in question_rows
+            if item.get("expected") == "must_not_retrieve"
+        ]
+        strict_rows = [
+            item for item in question_rows
+            if item.get("expected") in {"must_retrieve", "must_not_retrieve"}
+        ]
+        retrieved_answerable = sum(
+            1 for item in must_retrieve
+            if isinstance(item.get("retrieved"), (int, float))
+            and not isinstance(item.get("retrieved"), bool)
+            and item.get("retrieved", 0) > 0
+        )
+        rejected_negative = sum(
+            1 for item in must_not_retrieve
+            if item.get("retrieved") == 0
+        )
+        strict_passed = sum(
+            1 for item in strict_rows if item.get("passed") is True
+        )
+
+        contract_metrics = {
+            "must_retrieve": {
+                "case_count": len(must_retrieve),
+                "retrieved_cases": retrieved_answerable,
+                "recall": (
+                    retrieved_answerable / len(must_retrieve)
+                    if must_retrieve else None
+                ),
+            },
+            "must_not_retrieve": {
+                "case_count": len(must_not_retrieve),
+                "rejected_cases": rejected_negative,
+                "rejection_rate": (
+                    rejected_negative / len(must_not_retrieve)
+                    if must_not_retrieve else None
+                ),
+            },
+            "strict": {
+                "case_count": len(strict_rows),
+                "passed_cases": strict_passed,
+                "pass_rate": (
+                    strict_passed / len(strict_rows)
+                    if strict_rows else None
+                ),
+            },
+            "may_retrieve_case_count": sum(
+                1 for item in question_rows
+                if item.get("expected") == "may_retrieve"
+            ),
+        }
+
+        pair_stage_metrics: dict[str, Any] = {}
+        pair_stages = stages_by_pair.get(pair, {})
+        for stage, source_map in metric_sources.items():
+            rows = pair_stages.get(stage, [])
+            if not rows:
+                continue
+
+            means: dict[str, float] = {}
+            for output_key, source_key in source_map.items():
+                values = []
+                for row in rows:
+                    value = (row.get("metrics") or {}).get(source_key)
+                    if isinstance(value, bool):
+                        values.append(float(value))
+                    elif _finite_number(value):
+                        values.append(float(value))
+                if values:
+                    means[output_key] = sum(values) / len(values)
+
+            passed_cases = sum(1 for row in rows if row.get("passed") is True)
+            pass_key = "pass_rate" if stage == "temporal" else "case_pass_rate"
+            means[pass_key] = passed_cases / len(rows)
+            pair_stage_metrics[stage] = {
+                "case_count": len(rows),
+                "passed_cases": passed_cases,
+                "metrics": means,
+            }
+
+        output.setdefault(transcript_language, {})[query_language] = {
+            "video_count": len({
+                video_id
+                for video_id, _ in questions_by_pair.get(pair, [])
+            }),
+            "question_count": len(question_rows),
+            "retrieval_contract": contract_metrics,
+            "stage_metrics": pair_stage_metrics,
+        }
+
+    return output
+
+
 def build_multi_video_report(
     video_reports: Sequence[dict[str, Any]],
     *,
@@ -659,6 +827,9 @@ def build_multi_video_report(
         and not quality_failures
     )
     by_query_language = _aggregate_by_query_language(reports)
+    by_transcript_and_query_language = (
+        _aggregate_by_transcript_and_query_language(reports)
+    )
 
     return {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -674,6 +845,7 @@ def build_multi_video_report(
             "stage_metrics": stage_metrics,
             "by_language": by_language,
             "by_query_language": by_query_language,
+            "by_transcript_and_query_language": by_transcript_and_query_language,
             "urdu_curation_status": {
                 "status": curation_blockers.get("status"),
                 "reason": curation_blockers.get("reason"),
@@ -724,7 +896,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Optional JSON report path, e.g. "
-            "evaluation_reports/phase10_5_query_language_coverage_v1.json"
+            "evaluation_reports/phase10_5_1_language_pair_quality_v1.json"
         ),
     )
     args = parser.parse_args(argv)
