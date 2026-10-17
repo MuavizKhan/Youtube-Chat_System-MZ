@@ -457,6 +457,14 @@ def submit_index(
                 "Wait for it to finish, then retry."
             )
 
+        return IndexStatus(
+            video_id=canonical_video_id,
+            state=existing_job.status,
+            action=existing_job.action,
+            ready=False,
+            job_id=existing_job.job_id,
+        )
+
     persisted_state = get_index_state(
         canonical_video_id
     )
