@@ -28,6 +28,7 @@ from .config import (
     INDEX_JOB_WORKERS,
 )
 from .index_jobs import (
+    ActiveIndexJobLanguageConflictError,
     JOB_BUILDING,
     JOB_FAILED,
     JOB_QUEUED,
@@ -40,6 +41,8 @@ from .indexing import (
     ensure_index_with_action,
     get_index_action,
     get_index_state,
+    index_matches_requested_languages,
+    normalize_transcript_languages,
 )
 from .retrieval import (
     load_vector_store,
@@ -63,6 +66,10 @@ class IndexStatus:
     action: str
     ready: bool
     job_id: str | None = None
+
+
+class IndexLanguageConflictError(RuntimeError):
+    """Raised when an active index job conflicts with requested transcript languages."""
 
 
 class IndexNotReadyError(FileNotFoundError):
@@ -426,14 +433,41 @@ def submit_index(
     canonical_video_id = validate_video_id(
         video_id
     )
+    requested_languages = (
+        normalize_transcript_languages(languages)
+        if languages is not None
+        else None
+    )
 
     recover_index_jobs()
+
+    existing_job = _JOB_STORE.get(canonical_video_id)
+    if (
+        requested_languages is not None
+        and existing_job is not None
+        and existing_job.status in {JOB_QUEUED, JOB_BUILDING}
+    ):
+        active_preferences = normalize_transcript_languages(
+            existing_job.languages
+        )
+        if active_preferences != requested_languages:
+            raise IndexLanguageConflictError(
+                "An index job is already active for this video "
+                "with different transcript-language preferences. "
+                "Wait for it to finish, then retry."
+            )
 
     persisted_state = get_index_state(
         canonical_video_id
     )
 
-    if persisted_state is IndexState.VALID:
+    if persisted_state is IndexState.VALID and (
+        requested_languages is None
+        or index_matches_requested_languages(
+            canonical_video_id,
+            requested_languages,
+        )
+    ):
         return IndexStatus(
             video_id=canonical_video_id,
             state="ready",
@@ -442,15 +476,20 @@ def submit_index(
             job_id=None,
         )
 
-    action = get_index_action(
-        persisted_state
+    action = (
+        IndexAction.REBUILD
+        if persisted_state is IndexState.VALID
+        else get_index_action(persisted_state)
     )
 
-    job = _JOB_STORE.enqueue(
-        canonical_video_id,
-        action=action.value,
-        languages=languages,
-    )
+    try:
+        job = _JOB_STORE.enqueue(
+            canonical_video_id,
+            action=action.value,
+            languages=requested_languages,
+        )
+    except ActiveIndexJobLanguageConflictError as error:
+        raise IndexLanguageConflictError(str(error)) from error
 
     _dispatch_video(
         canonical_video_id
