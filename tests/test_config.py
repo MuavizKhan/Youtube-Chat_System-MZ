@@ -209,3 +209,100 @@ def test_embedding_model_defaults_to_multilingual_model():
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
 
+
+
+def run_index_namespace_import(extra_env: dict[str, str | None]):
+    env = os.environ.copy()
+    env.pop("RAG_INDEX_NAMESPACE", None)
+    env.pop("INDEX_JOB_DB_PATH", None)
+
+    for key, value in extra_env.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+
+    env["PYTHON_DOTENV_DISABLED"] = "true"
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import Backend.rag_system.config as config; "
+                "print(f'namespace={config.RAG_INDEX_NAMESPACE}'); "
+                "print(f'vector_store_root={config.VECTOR_STORE_ROOT}'); "
+                "print(f'index_job_db_path={config.INDEX_JOB_DB_PATH}'); "
+                "print(f'project_root={config.PROJECT_ROOT}')"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=env,
+        check=False,
+    )
+
+
+def test_index_namespace_keeps_default_storage_paths_unchanged():
+    result = run_index_namespace_import({})
+
+    assert result.returncode == 0
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    project_root = Path(values["project_root"])
+
+    assert values["namespace"] == ""
+    assert Path(values["vector_store_root"]) == (
+        project_root / "Backend" / "rag_system" / "vector_stores"
+    )
+    assert Path(values["index_job_db_path"]) == (
+        project_root / "Backend" / "rag_system" / "index_jobs.sqlite3"
+    )
+
+
+def test_index_namespace_isolates_vector_stores_and_job_database():
+    result = run_index_namespace_import(
+        {"RAG_INDEX_NAMESPACE": "experiment-bge-m3"}
+    )
+
+    assert result.returncode == 0
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    project_root = Path(values["project_root"])
+
+    assert values["namespace"] == "experiment-bge-m3"
+    assert Path(values["vector_store_root"]) == (
+        project_root
+        / "Backend" / "rag_system" / "vector_stores"
+        / "experiments" / "experiment-bge-m3"
+    )
+    assert Path(values["index_job_db_path"]) == (
+        project_root / "Backend" / "rag_system" / "index_jobs_experiment-bge-m3.sqlite3"
+    )
+
+
+def test_index_namespace_honors_explicit_process_job_database_override():
+    result = run_index_namespace_import(
+        {
+            "RAG_INDEX_NAMESPACE": "experiment-bge-m3",
+            "INDEX_JOB_DB_PATH": "custom-experiment-jobs.sqlite3",
+        }
+    )
+
+    assert result.returncode == 0
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines())
+    project_root = Path(values["project_root"])
+
+    assert Path(values["index_job_db_path"]) == (
+        project_root / "custom-experiment-jobs.sqlite3"
+    )
+
+
+@pytest.mark.parametrize(
+    "namespace",
+    ["../baseline", "nested/path", "bad namespace", ".", "..", "x" * 65],
+)
+def test_index_namespace_rejects_unsafe_path_segments(namespace):
+    result = run_index_namespace_import({"RAG_INDEX_NAMESPACE": namespace})
+
+    assert result.returncode != 0
+    assert "RAG_INDEX_NAMESPACE must be 1-64 characters" in result.stderr
