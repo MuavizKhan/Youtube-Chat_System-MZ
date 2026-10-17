@@ -735,7 +735,8 @@ def _aggregate_by_transcript_and_query_language(
                     means[output_key] = sum(values) / len(values)
 
             passed_cases = sum(1 for row in rows if row.get("passed") is True)
-            means["case_pass_rate"] = passed_cases / len(rows)
+            pass_key = "pass_rate" if stage == "temporal" else "case_pass_rate"
+            means[pass_key] = passed_cases / len(rows)
             pair_stage_metrics[stage] = {
                 "case_count": len(rows),
                 "passed_cases": passed_cases,
