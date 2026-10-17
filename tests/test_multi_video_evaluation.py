@@ -189,6 +189,28 @@ def test_multi_video_report_preserves_supplied_experiment_metadata():
     assert report["experiment_metadata"] == metadata
 
 
+def test_evaluation_runner_attaches_runtime_experiment_metadata(monkeypatch):
+    metadata = {
+        "embedding_model": "BAAI/bge-m3",
+        "index_namespace": "experiment-bge-m3",
+        "effective_retrieval_config": {"max_distance": 1.12},
+    }
+    monkeypatch.setattr(
+        multi_video_evaluation,
+        "_build_experiment_metadata",
+        lambda: metadata,
+    )
+    monkeypatch.setattr(
+        multi_video_evaluation,
+        "evaluate_registered_videos",
+        lambda **_kwargs: [],
+    )
+
+    report = multi_video_evaluation.run_multi_video_evaluation(registry={})
+
+    assert report["experiment_metadata"] == metadata
+
+
 def test_runner_attaches_video_query_stage_and_missing_group_diagnostics():
     benchmark = KINGFISHER_BENCHMARK
     gold_case = benchmark.gold_evidence_by_question["Q01"]
