@@ -130,7 +130,7 @@ def test_pilot_registry_has_five_videos_and_four_cases_per_new_video():
             for case in cases
             if case not in native_cases
         )
-        assert case_types := {case["type"] for case in cases}
+        case_types = {case["type"] for case in cases}
         assert "direct_fact" in case_types
         assert "specific_detail" in case_types
         assert case_types.intersection({"multi_part", "explanation"})
