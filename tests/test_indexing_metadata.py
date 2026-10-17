@@ -62,6 +62,7 @@ def test_build_index_metadata():
         "transcript_language": "English",
         "transcript_language_code": "en",
         "transcript_generated": True,
+        "requested_languages": ["en", "hi", "ur", "ar"],
     }
 
 
@@ -147,3 +148,13 @@ def test_save_vector_store_writes_metadata(tmp_path, monkeypatch):
     assert metadata["video_id"] == "Gfr50f6ZBvo"
     assert metadata["chunk_count"] == 2
     assert metadata["embedding_model"] == indexing.EMBEDDING_MODEL
+    assert metadata["requested_languages"] == ["en", "hi", "ur", "ar"]
+
+
+def test_build_index_metadata_preserves_explicit_language_order():
+    metadata = build_index_metadata(
+        make_chunks(),
+        requested_languages=["ar", "en"],
+    )
+
+    assert metadata["requested_languages"] == ["ar", "en"]
