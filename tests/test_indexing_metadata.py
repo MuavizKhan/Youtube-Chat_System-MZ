@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 
 from Backend.rag_system.indexing import (
     INDEX_METADATA_VERSION,
+    TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
     build_index_metadata,
     save_vector_store,
 )
@@ -27,6 +28,14 @@ def make_chunks():
                 "chunk_id": 0,
                 "chunk_length": 24,
                 "source": "youtube_transcript",
+                "transcript_segments": [
+                    {
+                        "segment_id": 0,
+                        "start": 0.0,
+                        "end": 10.0,
+                        "text": "First source caption.",
+                    },
+                ],
             },
         ),
         Document(
@@ -42,6 +51,14 @@ def make_chunks():
                 "chunk_id": 1,
                 "chunk_length": 25,
                 "source": "youtube_transcript",
+                "transcript_segments": [
+                    {
+                        "segment_id": 1,
+                        "start": 10.0,
+                        "end": 20.0,
+                        "text": "Second source caption.",
+                    },
+                ],
             },
         ),
     ]
@@ -54,6 +71,7 @@ def test_build_index_metadata():
 
     assert metadata == {
         "metadata_version": INDEX_METADATA_VERSION,
+        "transcript_segment_schema_version": TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
         "video_id": "Gfr50f6ZBvo",
         "embedding_model": indexing.EMBEDDING_MODEL,
         "chunk_size": indexing.CHUNK_SIZE,
@@ -64,6 +82,28 @@ def test_build_index_metadata():
         "transcript_generated": True,
         "requested_languages": ["en", "hi", "ur", "ar"],
     }
+
+
+def test_build_index_metadata_rejects_missing_transcript_segments():
+    chunks = make_chunks()
+    del chunks[0].metadata["transcript_segments"]
+
+    with pytest.raises(
+        ValueError,
+        match="missing transcript segment metadata",
+    ):
+        build_index_metadata(chunks)
+
+
+def test_build_index_metadata_rejects_malformed_transcript_segments():
+    chunks = make_chunks()
+    chunks[0].metadata["transcript_segments"][0]["start"] = float("nan")
+
+    with pytest.raises(
+        ValueError,
+        match="valid times",
+    ):
+        build_index_metadata(chunks)
 
 
 def test_build_index_metadata_rejects_empty_chunks():
