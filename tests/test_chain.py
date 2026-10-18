@@ -346,11 +346,11 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
 def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions():
     question = "What does Vijay Mallya say about the amounts involved?"
     context = (
-        "[SOURCE 1]\\nTimestamp: 02:01:07 - 02:02:31\\n"
-        "Transcript:\\nI put 3,000 crores of UB Group money into Kingfisher "
-        "Airlines to keep it afloat.\\n\\n"
-        "[SOURCE 2]\\nTimestamp: 03:54:28 - 03:55:58\\n"
-        "Transcript:\\nI think CBI in 2017 concluded around 423 crores were "
+        "[SOURCE 1]\nTimestamp: 02:01:07 - 02:02:31\n"
+        "Transcript:\nI put 3,000 crores of UB Group money into Kingfisher "
+        "Airlines to keep it afloat.\n\n"
+        "[SOURCE 2]\nTimestamp: 03:54:28 - 03:55:58\n"
+        "Transcript:\nI think CBI in 2017 concluded around 423 crores were "
         "found. Then ED said something around 3,000 crore had a money-laundering "
         "problem."
     )
