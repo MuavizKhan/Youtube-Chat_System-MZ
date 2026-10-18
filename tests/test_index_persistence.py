@@ -31,6 +31,14 @@ def _chunks(video_id="abc123"):
                 "language": "English",
                 "language_code": "en",
                 "is_generated": True,
+                "transcript_segments": [
+                    {
+                        "segment_id": 0,
+                        "start": 0.0,
+                        "end": 1.0,
+                        "text": "test content",
+                    },
+                ],
             },
         )
     ]
@@ -240,6 +248,14 @@ def test_save_vector_store_preserves_backup_when_restore_fails(
                 "is_generated": True,
                 "start": 0.0,
                 "duration": 1.0,
+                "transcript_segments": [
+                    {
+                        "segment_id": 0,
+                        "start": 0.0,
+                        "end": 1.0,
+                        "text": "test content",
+                    },
+                ],
             },
         )
     ]

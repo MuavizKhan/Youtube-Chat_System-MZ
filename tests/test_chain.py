@@ -284,6 +284,75 @@ def test_format_source_group_deduplicates_chunks():
 
 
 @pytest.mark.unit
+def test_format_source_group_reconstructs_caption_segments_in_order_and_deduplicates_overlap():
+    first = doc(1, 10, 30, "flattened chunk one")
+    first.metadata["transcript_segments"] = [
+        {"segment_id": 0, "start": 10.0, "end": 12.0, "text": "First caption."},
+        {"segment_id": 1, "start": 12.0, "end": 15.0, "text": "Shared caption."},
+    ]
+    second = doc(2, 20, 40, "flattened chunk two")
+    second.metadata["transcript_segments"] = [
+        {"segment_id": 1, "start": 12.0, "end": 15.0, "text": "Shared caption."},
+        {"segment_id": 2, "start": 30.0, "end": 32.0, "text": "Final caption."},
+    ]
+
+    group = chain.merge_overlapping_results(
+        [(first, 0.2), (second, 0.3)]
+    )[0]
+    formatted = chain.format_source_group(group, 1)
+
+    assert (
+        "Transcript caption segments in chronological order "
+        "(boundaries are not speaker labels):"
+    ) in formatted
+    assert formatted.index("First caption.") < formatted.index("Shared caption.")
+    assert formatted.index("Shared caption.") < formatted.index("Final caption.")
+    assert formatted.count("Shared caption.") == 1
+    assert "flattened chunk one" not in formatted
+    assert "flattened chunk two" not in formatted
+
+
+@pytest.mark.unit
+def test_format_source_group_falls_back_for_mixed_legacy_and_segmented_chunks():
+    segmented = doc(1, 10, 25, "first legacy-compatible chunk text")
+    segmented.metadata["transcript_segments"] = [
+        {"segment_id": 0, "start": 10.0, "end": 12.0, "text": "Caption one."},
+    ]
+    legacy = doc(2, 20, 35, "second legacy-compatible chunk text")
+
+    group = chain.merge_overlapping_results(
+        [(segmented, 0.2), (legacy, 0.3)]
+    )[0]
+    formatted = chain.format_source_group(group, 1)
+
+    assert "Transcript:\n" in formatted
+    assert "first legacy-compatible chunk text" in formatted
+    assert "second legacy-compatible chunk text" in formatted
+    assert "Transcript caption segments in chronological order" not in formatted
+
+
+@pytest.mark.unit
+def test_format_source_group_falls_back_when_duplicate_caption_metadata_conflicts():
+    first = doc(1, 10, 30, "original first chunk")
+    first.metadata["transcript_segments"] = [
+        {"segment_id": 0, "start": 10.0, "end": 12.0, "text": "Original caption."},
+    ]
+    second = doc(2, 20, 40, "original second chunk")
+    second.metadata["transcript_segments"] = [
+        {"segment_id": 0, "start": 10.0, "end": 12.0, "text": "Conflicting caption."},
+    ]
+
+    group = chain.merge_overlapping_results(
+        [(first, 0.2), (second, 0.3)]
+    )[0]
+    formatted = chain.format_source_group(group, 1)
+
+    assert "Transcript:\n" in formatted
+    assert "original first chunk" in formatted
+    assert "original second chunk" in formatted
+    assert "Transcript caption segments in chronological order" not in formatted
+
+
 def test_build_context_empty():
     assert chain.build_context([])=="No relevant transcript context was retrieved."
 
@@ -338,6 +407,14 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     )
     assert (
         "it does not by itself verify the underlying finding"
+        in normalized_system_prompt
+    )
+    assert (
+        "A caption line preserves one caption snippet, not a verified speaker turn."
+        in normalized_system_prompt
+    )
+    assert (
+        "Caption boundaries and timestamps do not prove"
         in normalized_system_prompt
     )
 

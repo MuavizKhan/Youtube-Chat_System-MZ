@@ -128,7 +128,14 @@ SPEAKER AND CLAIM ATTRIBUTION — HIGH PRIORITY
 ---------------------------------------------
 The supplied transcript context may contain multiple speakers. Source blocks are
 timestamped evidence segments, not speaker labels and not guaranteed single-speaker
-turns.
+turns. Some blocks preserve the original caption snippets as separate lines.
+
+- A caption line preserves one caption snippet, not a verified speaker turn.
+- A single caption can contain words from more than one speaker, and a speaker may
+  continue across multiple captions. Caption boundaries and timestamps do not prove
+  that the speaker changed.
+- Use caption order and the exact wording to understand the conversation, but never
+  infer a speaker's identity from segmentation alone.
 
 For each material claim, determine from the actual transcript wording who is
 speaking and what level of certainty is supported:
@@ -1074,6 +1081,76 @@ def merge_overlapping_text(
 # 4. FORMAT ONE DOCUMENT
 # ============================================================
 
+def _caption_segments_for_documents(
+    documents: list,
+) -> list[dict[str, Any]] | None:
+    """Return deduplicated caption metadata, or None when reconstruction is unsafe.
+
+    Every document must carry a complete segment list. Falling back for the
+    entire group is deliberate: mixing reconstructed captions with legacy chunk
+    text could silently omit transcript content.
+    """
+    if not documents:
+        return None
+
+    segments_by_id: dict[int, dict[str, Any]] = {}
+
+    for document in documents:
+        metadata = getattr(document, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+
+        records = metadata.get("transcript_segments")
+        if not isinstance(records, list) or not records:
+            return None
+
+        for record in records:
+            if not isinstance(record, dict):
+                return None
+
+            segment_id = record.get("segment_id")
+            start = record.get("start")
+            end = record.get("end")
+            text = record.get("text")
+
+            if (
+                type(segment_id) is not int
+                or segment_id < 0
+                or isinstance(start, bool)
+                or not isinstance(start, (int, float))
+                or not math.isfinite(float(start))
+                or isinstance(end, bool)
+                or not isinstance(end, (int, float))
+                or not math.isfinite(float(end))
+                or float(start) < 0
+                or float(end) < float(start)
+                or not isinstance(text, str)
+                or not text.strip()
+            ):
+                return None
+
+            segment = {
+                "segment_id": segment_id,
+                "start": float(start),
+                "end": float(end),
+                "text": text,
+            }
+            existing = segments_by_id.get(segment_id)
+            if existing is not None and existing != segment:
+                # Conflicting copies of one caption are not safe to reconcile.
+                return None
+
+            segments_by_id[segment_id] = segment
+
+    if not segments_by_id:
+        return None
+
+    return sorted(
+        segments_by_id.values(),
+        key=lambda segment: (segment["start"], segment["segment_id"]),
+    )
+
+
 def format_source_group(
     source_group: dict,
     source_number: int,
@@ -1110,42 +1187,36 @@ def format_source_group(
     )
 
 
-    # --------------------------------------------------------
-    # Combine transcript text while avoiding duplicate
-    # chunk entries.
-    # --------------------------------------------------------
+    # Prefer the original caption structure when every retrieved chunk
+    # carries valid, consistent metadata. Legacy or incomplete groups retain
+    # the established whole-chunk formatter to avoid losing source text.
+    caption_segments = _caption_segments_for_documents(documents)
 
-    transcript_parts = []
-
-    seen_chunk_ids = set()
-
-    for document in documents:
-
-        chunk_id = document.metadata.get(
-            "chunk_id"
+    if caption_segments is not None:
+        transcript_text = "\n".join(
+            f"- {segment['text']}"
+            for segment in caption_segments
         )
-
-        if chunk_id in seen_chunk_ids:
-            continue
-
-        seen_chunk_ids.add(
-            chunk_id
+        transcript_heading = (
+            "Transcript caption segments in chronological order "
+            "(boundaries are not speaker labels):\n"
         )
+    else:
+        transcript_parts = []
+        seen_chunk_ids = set()
 
-        text = (
-            document.page_content
-            .strip()
-        )
+        for document in documents:
+            chunk_id = document.metadata.get("chunk_id")
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
 
-        if text:
+            text = document.page_content.strip()
+            if text:
+                transcript_parts.append(text)
 
-            transcript_parts.append(
-                text
-            )
-
-    transcript_text = merge_overlapping_text(
-        transcript_parts
-    )
+        transcript_text = merge_overlapping_text(transcript_parts)
+        transcript_heading = "Transcript:\n"
 
     return (
         f"[SOURCE {source_number}]\n"
@@ -1153,7 +1224,7 @@ def format_source_group(
         f"Timestamp: "
         f"{format_timestamp(start)} - "
         f"{format_timestamp(end)}\n"
-        f"Transcript:\n"
+        f"{transcript_heading}"
         f"{transcript_text}"
     )
 

@@ -9,6 +9,7 @@ from Backend.rag_system.config import (
 
 from Backend.rag_system.indexing import (
     INDEX_METADATA_VERSION,
+    TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
     IndexState,
     get_index_state,
 )
@@ -35,6 +36,7 @@ def create_index(
 
     metadata = {
         "metadata_version": INDEX_METADATA_VERSION,
+        "transcript_segment_schema_version": TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
         "video_id": video_id,
         "embedding_model": EMBEDDING_MODEL,
         "chunk_size": CHUNK_SIZE,
@@ -276,6 +278,48 @@ def test_wrong_embedding_model_returns_stale(
         get_index_state("dQw4w9WgXcQ")
         is IndexState.STALE
     )
+
+
+def test_missing_transcript_segment_schema_returns_stale(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "Backend.rag_system.indexing.VECTOR_STORE_ROOT",
+        tmp_path,
+    )
+    path = create_index("dQw4w9WgXcQ", tmp_path)
+    metadata = json.loads(
+        (path / "metadata.json").read_text(encoding="utf-8")
+    )
+    metadata.pop("transcript_segment_schema_version")
+    (path / "metadata.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+
+    assert get_index_state("dQw4w9WgXcQ") is IndexState.STALE
+
+
+def test_unsupported_transcript_segment_schema_returns_stale(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "Backend.rag_system.indexing.VECTOR_STORE_ROOT",
+        tmp_path,
+    )
+    path = create_index("dQw4w9WgXcQ", tmp_path)
+    metadata = json.loads(
+        (path / "metadata.json").read_text(encoding="utf-8")
+    )
+    metadata["transcript_segment_schema_version"] = 999
+    (path / "metadata.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+
+    assert get_index_state("dQw4w9WgXcQ") is IndexState.STALE
 
 
 def test_wrong_chunk_size_returns_stale(

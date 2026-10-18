@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -5,6 +7,83 @@ from Backend.rag_system import indexing
 
 
 VIDEO_ID = "Gfr50f6ZBvo"
+
+
+def sample_transcript():
+    return SimpleNamespace(
+        video_id=VIDEO_ID,
+        language="English",
+        language_code="en",
+        is_generated=True,
+        snippets=[
+            SimpleNamespace(
+                text="Interviewer asks a question.",
+                start=0.0,
+                duration=1.5,
+            ),
+            SimpleNamespace(
+                text="A guest begins an answer long enough to cross chunks.",
+                start=2.0,
+                duration=3.0,
+            ),
+            SimpleNamespace(
+                text="Interviewer follows up.",
+                start=5.0,
+                duration=1.5,
+            ),
+        ],
+    )
+
+
+def test_transcript_to_documents_preserves_caption_segment_ids():
+    documents = indexing.transcript_to_documents(sample_transcript())
+
+    assert [document.metadata["segment_id"] for document in documents] == [0, 1, 2]
+    assert [document.page_content for document in documents] == [
+        "Interviewer asks a question.",
+        "A guest begins an answer long enough to cross chunks.",
+        "Interviewer follows up.",
+    ]
+
+
+def test_timestamped_chunks_preserve_caption_segments_across_chunk_boundaries(
+    monkeypatch,
+):
+    monkeypatch.setattr(indexing, "CHUNK_SIZE", 20)
+    monkeypatch.setattr(indexing, "CHUNK_OVERLAP", 5)
+
+    documents = indexing.transcript_to_documents(sample_transcript())
+    chunks = indexing.split_into_timestamped_chunks(documents)
+
+    assert len(chunks) > 1
+    assert all(chunk.page_content.strip() for chunk in chunks)
+    assert all(chunk.metadata["transcript_segments"] for chunk in chunks)
+
+    segments_by_id = {}
+    segment_occurrences = {}
+    for chunk in chunks:
+        for segment in chunk.metadata["transcript_segments"]:
+            segment_id = segment["segment_id"]
+            segment_occurrences[segment_id] = (
+                segment_occurrences.get(segment_id, 0) + 1
+            )
+            existing = segments_by_id.get(segment_id)
+            if existing is not None:
+                assert existing == segment
+            segments_by_id[segment_id] = segment
+
+    assert set(segments_by_id) == {0, 1, 2}
+    assert segment_occurrences[1] > 1
+    assert segments_by_id[0] == {
+        "segment_id": 0,
+        "start": 0.0,
+        "end": 1.5,
+        "text": "Interviewer asks a question.",
+    }
+    assert segments_by_id[1]["text"] == (
+        "A guest begins an answer long enough to cross chunks."
+    )
+    assert segments_by_id[2]["text"] == "Interviewer follows up."
 
 def test_get_transcript_uses_supported_language_priority(monkeypatch):
     api = MagicMock()
