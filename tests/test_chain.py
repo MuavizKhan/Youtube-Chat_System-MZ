@@ -361,9 +361,18 @@ def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions
 
     assert question in user_prompt
     assert context in user_prompt
-    assert "source blocks are timestamped evidence segments" in normalized_system_prompt
-    assert "only when the context clearly shows that person stated or endorsed it" in normalized_system_prompt
-    assert "describe it neutrally as something discussed" in normalized_system_prompt
+    assert (
+        "source blocks are timestamped evidence segments"
+        in normalized_system_prompt
+    )
+    assert (
+        "only when the context clearly shows that person stated or endorsed it"
+        in normalized_system_prompt
+    )
+    assert (
+        "describe it neutrally as something discussed"
+        in normalized_system_prompt
+    )
     assert "Do not guess." in normalized_system_prompt
 
 
