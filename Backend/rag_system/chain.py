@@ -662,6 +662,56 @@ def merge_overlapping_results(
     return groups
 
 
+def _build_citation_source_groups(
+    citation_results,
+    retrieval_trace: dict[str, Any] | None,
+) -> list[dict]:
+    """Build source links without stretching opt-in neighbor citations.
+
+    The default path is behaviorally equivalent to the existing merged-anchor
+    policy. During the expanded-context experiment, selected anchors are merged
+    together as before, but context-only neighbors remain individual source
+    intervals even when they overlap an anchor. This makes each neighbor
+    directly seekable without changing retrieval or generation.
+    """
+    if not RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS or not isinstance(
+        retrieval_trace, dict
+    ):
+        return merge_overlapping_results(citation_results)
+
+    anchor_ids = retrieval_trace.get("citation_chunk_ids")
+    if not isinstance(anchor_ids, list):
+        # Keep legacy traces on the established grouping path.
+        return merge_overlapping_results(citation_results)
+
+    anchor_id_set = {
+        str(chunk_id) for chunk_id in anchor_ids if chunk_id is not None
+    }
+    anchor_results = []
+    context_only_results = []
+    for document, distance in citation_results:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is not None and str(chunk_id) in anchor_id_set:
+            anchor_results.append((document, distance))
+        else:
+            context_only_results.append((document, distance))
+
+    source_groups = merge_overlapping_results(anchor_results)
+    for result in context_only_results:
+        # A one-result merge preserves the same timestamp normalization used
+        # by ordinary source groups without coalescing neighboring intervals.
+        source_groups.extend(merge_overlapping_results([result]))
+
+    source_groups.sort(
+        key=lambda group: (
+            group["start"],
+            group["end"],
+            group["distance"],
+        )
+    )
+    return source_groups
+
+
 # Add overlap-aware text reconstruction
 def merge_overlapping_text(
     texts: list[str],
@@ -1320,8 +1370,9 @@ def format_sources(
     metadata.
 
     source_id is the one-based identifier for the returned source link.
-    Source links use selected evidence anchors; generation context may also
-    include neighboring chunks for continuity.
+    Default source links use selected evidence anchors. In the opt-in expanded
+    context experiment, selected anchors stay merged, while context-only
+    neighbors are returned as individual intervals for precise navigation.
     """
 
     sources = []
@@ -2261,7 +2312,10 @@ def answer_question(
         retrieved_results,
         retrieval_trace,
     )
-    citation_source_groups = merge_overlapping_results(citation_results)
+    citation_source_groups = _build_citation_source_groups(
+        citation_results,
+        retrieval_trace,
+    )
     sources = format_sources(citation_source_groups)
     candidate_retrieved_chunks = len(retrieved_results)
     candidate_source_segments = len(source_groups)
