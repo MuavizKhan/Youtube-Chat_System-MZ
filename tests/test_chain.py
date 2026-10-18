@@ -327,7 +327,11 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     assert "timestamp ranges remain part of the answer" in system_prompt
     assert "distinct figures as stated in the transcript" in system_prompt
     assert "Do not round" in system_prompt
-    assert "Never turn an allegation described by the interviewer" in system_prompt
+    normalized_system_prompt = " ".join(system_prompt.split())
+    assert (
+        "Never turn an allegation described by the interviewer"
+        in normalized_system_prompt
+    )
 
 
 class FakeCompletions:
