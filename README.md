@@ -512,3 +512,13 @@ production-context evidence, temporal checks where configured, and complete
 evaluation of the selected videos. A passing report does not imply that every
 raw-anchor diagnostic passes or that the generated answer is semantically
 faithful.
+
+### Raw-anchor trace auditing
+
+The end-to-end diagnostic includes each gold candidate's text preview and
+timestamp bounds, its rank through the retrieval stages, and an explicit
+raw_anchor_top_k_limit. The group-level raw_anchor_top_k_status separates
+evidence in the scored top-K anchors from evidence selected only beyond that
+cutoff or added only by bounded context expansion. These fields are diagnostic
+only: they do not change candidate ranking, the raw-anchor metric, or the
+production-context quality gate.

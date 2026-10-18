@@ -1158,6 +1158,38 @@ def test_end_to_end_retrieval_diagnostics_classify_stage_misses(monkeypatch):
         },
     ]) == "faiss_distance_gate_miss"
 
+    # The benchmark scores only the first TOP_K anchors, while dense retrieval
+    # can select a larger anchor set. The diagnostic must make that cutoff
+    # explicit and distinguish a selected-but-late anchor from a context-only
+    # neighbor, without changing the production selection itself.
+    monkeypatch.setattr("Backend.rag_system.evaluation.TOP_K", 1)
+    pipeline["anchors"] = [
+        (documents[0], 0.1),
+        (documents[1], 0.2),
+    ]
+    pipeline["final_context"] = [
+        (documents[0], 0.1),
+        (documents[2], 0.3),
+    ]
+    diagnostics = build_end_to_end_retrieval_diagnostics(
+        FakeStore(),
+        [test_case],
+        [synthetic],
+    )
+    groups = diagnostics[0]["groups"]
+
+    assert groups[0]["raw_anchor_top_k_evidence_present"] is True
+    assert groups[0]["raw_anchor_top_k_status"] == "evidence_in_top_k"
+    assert groups[1]["raw_anchor_top_k_status"] == "evidence_anchor_beyond_top_k"
+    assert groups[1]["candidates"][0]["anchor_rank"] == 2
+    assert groups[1]["candidates"][0]["raw_anchor_top_k_rank"] is None
+    assert groups[1]["candidates"][0]["raw_anchor_top_k_status"] == "selected_beyond_top_k"
+    assert groups[2]["raw_anchor_top_k_status"] == "evidence_recovered_only_by_context_expansion"
+    assert groups[2]["candidates"][0]["raw_anchor_top_k_status"] == "context_neighbor_only"
+    assert groups[2]["candidates"][0]["text_preview"] == "group two evidence"
+    assert groups[2]["candidates"][0]["start_seconds"] == 20
+    assert groups[2]["candidates"][0]["end_seconds"] == 25
+
 
 @pytest.mark.regression
 def test_q03_requires_complete_production_context_without_changing_anchor_threshold():
