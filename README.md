@@ -525,7 +525,7 @@ production-context quality gate.
 
 ## Phase 10.8 — Answer/source audit and citation-policy experiment
 
-The local answer-source audit captures the real `POST /chat` response for Q07, AR03, and AR08 without passing the response through PowerShell's object/console encoding path. The Python harness decodes the HTTP body explicitly as UTF-8, writes JSON with `ensure_ascii=false` behavior, records the runner commit, and takes the effective retrieval configuration from each API response rather than from environment variables in the separate audit process. It flags likely mojibake; it does not try to silently rewrite model text.
+The local answer-source audit captures the real `POST /chat` response for Q07, AR03, and AR08 without passing the response through PowerShell's object/console encoding path. The Python harness decodes the HTTP body explicitly as UTF-8, writes JSON with Python's `ensure_ascii=False` setting, records the runner commit, and takes the effective retrieval configuration from each API response rather than from environment variables in the separate audit process. It flags likely mojibake; it does not try to silently rewrite model text.
 
 The API response's `retrieval_config` includes the embedding model, configured index namespace, and citation policy used by the running backend. This reports runtime configuration; it is not a substitute for separately validating the registered/local index metadata.
 
