@@ -187,6 +187,10 @@ def test_save_vector_store_writes_metadata(tmp_path, monkeypatch):
 
     assert metadata["video_id"] == "Gfr50f6ZBvo"
     assert metadata["chunk_count"] == 2
+    assert (
+        metadata["transcript_segment_schema_version"]
+        == indexing.TRANSCRIPT_SEGMENT_SCHEMA_VERSION
+    )
     assert metadata["embedding_model"] == indexing.EMBEDDING_MODEL
     assert metadata["requested_languages"] == ["en", "hi", "ur", "ar"]
 
