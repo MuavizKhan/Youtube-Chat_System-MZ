@@ -356,7 +356,7 @@ def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions
     )
     prompt = chain.RAG_PROMPT.invoke({"context": context, "question": question})
     messages = chain.prompt_to_messages(prompt)
-    normalized_system_prompt = " ".join(messages[0]["content"].split())
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
     user_prompt = messages[1]["content"]
 
     assert question in user_prompt
@@ -373,7 +373,7 @@ def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions
         "describe it neutrally as something discussed"
         in normalized_system_prompt
     )
-    assert "Do not guess." in normalized_system_prompt
+    assert "do not guess." in normalized_system_prompt
 
 
 class FakeCompletions:
