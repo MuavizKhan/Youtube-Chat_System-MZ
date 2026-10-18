@@ -26,6 +26,7 @@ import uuid
 import threading
 
 import json
+import math
 from typing import Optional
 
 from youtube_transcript_api import (
@@ -186,7 +187,7 @@ def transcript_to_documents(
     documents = []
 
 
-    for snippet in transcript.snippets:
+    for segment_id, snippet in enumerate(transcript.snippets):
 
         text = snippet.text.strip()
 
@@ -222,6 +223,9 @@ def transcript_to_documents(
 
                 "is_generated":
                     transcript.is_generated,
+
+                "segment_id":
+                    segment_id,
 
             },
         )
@@ -321,6 +325,8 @@ def build_transcript_timeline(
             {
                 "char_start": char_start,
                 "char_end": char_end,
+                "segment_id": document.metadata.get("segment_id", len(snippet_spans)),
+                "text": text,
                 "start": snippet_start,
                 "end": snippet_end,
             }
@@ -624,6 +630,20 @@ def split_into_timestamped_chunks(
         )
 
 
+        transcript_segments = [
+            {
+                "segment_id": span["segment_id"],
+                "start": span["start"],
+                "end": span["end"],
+                "text": span["text"],
+            }
+            for span in snippet_spans
+            if (
+                span["char_end"] > char_start
+                and span["char_start"] < char_end
+            )
+        ]
+
         metadata = {
 
             "video_id":
@@ -664,6 +684,9 @@ def split_into_timestamped_chunks(
 
             "chunk_length":
                 len(chunk_text),
+
+            "transcript_segments":
+                transcript_segments,
 
             "source":
                 "youtube_transcript",
@@ -737,6 +760,7 @@ class IndexState(str, Enum):
     STALE = "stale"
 
 INDEX_METADATA_VERSION = 1
+TRANSCRIPT_SEGMENT_SCHEMA_VERSION = 1
 
 
 def get_index_action(state: IndexState) -> IndexAction:
@@ -808,8 +832,47 @@ def build_index_metadata(
             "multiple video IDs."
         )
 
+    for chunk in chunks:
+        segments = chunk.metadata.get("transcript_segments")
+        if not isinstance(segments, list) or not segments:
+            raise ValueError(
+                "Cannot build index metadata because a chunk is missing "
+                "transcript segment metadata."
+            )
+
+        for segment in segments:
+            if not isinstance(segment, dict):
+                raise ValueError(
+                    "Cannot build index metadata because transcript segment "
+                    "records must be objects."
+                )
+            segment_id = segment.get("segment_id")
+            start = segment.get("start")
+            end = segment.get("end")
+            text = segment.get("text")
+            if (
+                type(segment_id) is not int
+                or segment_id < 0
+                or isinstance(start, bool)
+                or not isinstance(start, (int, float))
+                or not math.isfinite(float(start))
+                or isinstance(end, bool)
+                or not isinstance(end, (int, float))
+                or not math.isfinite(float(end))
+                or float(start) < 0
+                or float(end) < float(start)
+                or not isinstance(text, str)
+                or not text.strip()
+            ):
+                raise ValueError(
+                    "Cannot build index metadata because transcript segment "
+                    "records must have a non-negative integer ID, valid times, "
+                    "and non-empty text."
+                )
+
     return {
         "metadata_version": INDEX_METADATA_VERSION,
+        "transcript_segment_schema_version": TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
         "video_id": metadata["video_id"],
         "embedding_model": EMBEDDING_MODEL,
         "chunk_size": CHUNK_SIZE,
@@ -950,6 +1013,8 @@ def _validate_vector_store_contents(
         metadata["embedding_model"] != EMBEDDING_MODEL
         or metadata["chunk_size"] != CHUNK_SIZE
         or metadata["chunk_overlap"] != CHUNK_OVERLAP
+        or metadata.get("transcript_segment_schema_version")
+        != TRANSCRIPT_SEGMENT_SCHEMA_VERSION
     )
 
     return True, is_stale
