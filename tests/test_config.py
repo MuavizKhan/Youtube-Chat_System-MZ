@@ -306,3 +306,45 @@ def test_index_namespace_rejects_unsafe_path_segments(namespace):
 
     assert result.returncode != 0
     assert "RAG_INDEX_NAMESPACE must be 1-64 characters" in result.stderr
+
+
+def _run_citation_policy_import(value: str | None):
+    env = os.environ.copy()
+    env.pop("RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", None)
+    if value is not None:
+        env["RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS"] = value
+    env["PYTHON_DOTENV_DISABLED"] = "true"
+
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import Backend.rag_system.config as config; "
+                "print(config.RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        env=env,
+        check=False,
+    )
+
+
+def test_context_neighbor_citation_experiment_defaults_off():
+    result = _run_citation_policy_import(None)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "False"
+
+
+def test_context_neighbor_citation_experiment_can_be_enabled():
+    result = _run_citation_policy_import("true")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "True"
+
+
+def test_context_neighbor_citation_experiment_rejects_invalid_boolean():
+    result = _run_citation_policy_import("sometimes")
+    assert result.returncode != 0
+    assert "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS" in result.stderr

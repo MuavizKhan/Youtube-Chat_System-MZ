@@ -220,6 +220,8 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     assert "Absence of a statement is answerable" in system_prompt
     assert "application appends a separate" in system_prompt
     assert "timestamp ranges remain part of the answer" in system_prompt
+    assert "distinct figures as stated in the transcript" in system_prompt
+    assert "Do not round" in system_prompt
 
 
 class FakeCompletions:
@@ -671,6 +673,30 @@ def test_select_citation_results_excludes_context_expansion_neighbors():
     )
 
     assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 3]
+
+
+@pytest.mark.regression
+def test_select_citation_results_can_include_context_neighbors_in_experiment(monkeypatch):
+    expanded = [
+        (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
+        (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "second selected anchor"), 0.5),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS",
+        True,
+    )
+
+    selected = chain._select_citation_results(
+        expanded,
+        {
+            "final_chunk_ids": [1, 2, 3],
+            "citation_chunk_ids": [1, 3],
+        },
+    )
+
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 2, 3]
 
 
 @pytest.mark.unit
@@ -1397,6 +1423,9 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
     monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
     monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
     monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "EMBEDDING_MODEL", "test-embedding-model")
+    monkeypatch.setattr(chain, "RAG_INDEX_NAMESPACE", "test-namespace")
+    monkeypatch.setattr(chain, "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", False)
 
     class FakeRagChain:
         def invoke(self, _inputs):
@@ -1415,6 +1444,9 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
 
     assert result["retrieved_chunks"] == 3
     assert result["source_segments"] == 2
+    assert result["retrieval_config"]["embedding_model"] == "test-embedding-model"
+    assert result["retrieval_config"]["index_namespace"] == "test-namespace"
+    assert result["retrieval_config"]["citation_policy"] == "selected_anchors"
     assert [source["chunk_ids"] for source in result["sources"]] == [[1], [3]]
     assert [(source["start"], source["end"]) for source in result["sources"]] == [
         (10.0, 20.0),

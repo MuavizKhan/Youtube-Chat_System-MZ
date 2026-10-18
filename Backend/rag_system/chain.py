@@ -42,6 +42,9 @@ from langchain_core.runnables import (
 )
 
 from .config import (
+    EMBEDDING_MODEL,
+    RAG_INDEX_NAMESPACE,
+    RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS,
     HF_MAX_TOKENS,
     HF_MODEL_ID,
     HF_PROVIDER,
@@ -210,10 +213,17 @@ SOURCE / TIMESTAMP RULES
 
 20. Never fabricate a source, timestamp, citation, or reference.
 
+21. For questions involving numbers, amounts, percentages, dates, or counts, preserve
+    distinct figures as stated in the transcript. Explain what each figure refers
+    to and retain its attribution to the speaker or named source. Do not round,
+    merge, or treat different figures as interchangeable unless the transcript
+    explicitly says they describe the same measure. If the transcript distinguishes
+    a component figure from a total, state that distinction.
+
 FINAL RULE
 ----------
 
-21. Return only the answer to the user's question.
+22. Return only the answer to the user's question.
 """
 
 
@@ -450,19 +460,28 @@ def _select_citation_results(
     retrieved_results,
     retrieval_trace: dict[str, Any] | None,
 ) -> list:
-    """Keep only selected retrieval anchors for user-facing source links.
+    """Select source chunks according to the configured citation experiment.
 
-    Context expansion neighbors remain available to generation, but should not
-    automatically become clickable citations.
+    The default is anchor-only citations. The opt-in experiment includes
+    context-expanded neighbors so audits can compare citation coverage without
+    changing any retrieval ranking, context expansion, or distance thresholds.
     """
-    if (
-        not isinstance(retrieval_trace, dict)
-        or "citation_chunk_ids" not in retrieval_trace
-    ):
-        # Backward-compatible path for legacy/test traces.
+    if not isinstance(retrieval_trace, dict):
         return list(retrieved_results)
 
-    raw_ids = retrieval_trace.get("citation_chunk_ids")
+    if RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
+        raw_ids = retrieval_trace.get("final_chunk_ids")
+        if raw_ids is None:
+            raw_ids = retrieval_trace.get("citation_chunk_ids")
+        if raw_ids is None:
+            # Preserve behavior for legacy/test traces with no ID metadata.
+            return list(retrieved_results)
+    else:
+        if "citation_chunk_ids" not in retrieval_trace:
+            # Backward-compatible path for legacy/test traces.
+            return list(retrieved_results)
+        raw_ids = retrieval_trace.get("citation_chunk_ids")
+
     if not isinstance(raw_ids, list):
         return []
 
@@ -2375,6 +2394,13 @@ def answer_question(
 
     "retrieval_config":
         {
+            "embedding_model": EMBEDDING_MODEL,
+            "index_namespace": RAG_INDEX_NAMESPACE or "default",
+            "citation_policy": (
+                "expanded_context_experiment"
+                if RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS
+                else "selected_anchors"
+            ),
             "top_k":
                 TOP_K,
 

@@ -522,3 +522,50 @@ evidence in the scored top-K anchors from evidence selected only beyond that
 cutoff or added only by bounded context expansion. These fields are diagnostic
 only: they do not change candidate ranking, the raw-anchor metric, or the
 production-context quality gate.
+
+## Phase 10.8 — Answer/source audit and citation-policy experiment
+
+The local answer-source audit captures the real `POST /chat` response for Q07, AR03, and AR08 without passing the response through PowerShell's object/console encoding path. The Python harness decodes the HTTP body explicitly as UTF-8, writes JSON with Python's `ensure_ascii=False` setting, records the runner commit, and takes the effective retrieval configuration from each API response rather than from environment variables in the separate audit process. It flags likely mojibake; it does not try to silently rewrite model text.
+
+The API response's `retrieval_config` includes the embedding model, configured index namespace, and citation policy used by the running backend. This reports runtime configuration; it is not a substitute for separately validating the registered/local index metadata.
+
+Run the baseline with the already-indexed BGE-M3 namespace and unchanged retrieval settings. Start the server in one PowerShell terminal from the repository root:
+
+```powershell
+$env:RAG_INDEX_NAMESPACE = "experiment-bge-m3"
+$env:HF_EMBEDDING_MODEL = "BAAI/bge-m3"
+$env:RAG_MAX_DISTANCE = "1.12"
+$env:RAG_RECOVERY_MAX_DISTANCE = "1.60"
+$env:RAG_TOP_K = "4"
+$env:RAG_MMR_FETCH_K = "10"
+$env:RAG_MMR_LAMBDA = "0.7"
+$env:RAG_DENSE_SEMANTIC_K = "24"
+$env:RAG_DENSE_SEMANTIC_FETCH_K = "32"
+$env:RAG_DENSE_ANCHOR_LIMIT = "12"
+$env:RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = "false"
+.\.venv\Scripts\python.exe -m uvicorn Backend.app:app --reload
+```
+
+In a second terminal, run the audit:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_answer_source_audit_anchor_only.json
+```
+
+Then stop the server with Ctrl+C, change only the citation policy to opt in to context-neighbor sources, and restart the server:
+
+```powershell
+$env:RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = "true"
+.\.venv\Scripts\python.exe -m uvicorn Backend.app:app --reload
+```
+
+Run the same three cases with a separate output path:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_answer_source_audit_expanded_context.json
+```
+
+Compare `effective_server_configuration.citation_policy`, each case's `annotated_evidence_groups`, `returned_source_chunk_ids`, `plain_text_timestamp_ranges`, source time ranges, and `answer_text_encoding_suspect`. The experimental mode changes source-link selection only; the generated answer and retrieved context may still vary slightly because each call invokes the model, so compare evidence and citation coverage rather than judging a single wording difference.
+
+The experiment has no default behavior change: `RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS=false` preserves anchor-only source links. Context-expanded neighbors should not become the default unless the A/B audit shows that they consistently improve direct evidence access without introducing misleading or over-broad links. Q07 also has an explicit prompt constraint to preserve distinct numerical amounts and explain what each amount refers to; this still requires real-model validation in the configured local environment.
+
