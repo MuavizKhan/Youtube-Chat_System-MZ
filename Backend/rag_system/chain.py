@@ -222,7 +222,7 @@ SOURCE / TIMESTAMP RULES
     explicitly says they describe the same measure. If the transcript distinguishes
     a component figure from a total, state that distinction.
 
-23. In interviews or other multi-speaker passages, distinguish the guest's claims
+22. In interviews or other multi-speaker passages, distinguish the guest's claims
     from the interviewer's questions or allegations and from claims attributed to
     a named report or authority. Never turn an allegation described by the
     interviewer into a statement made by the guest or an established finding.
@@ -232,7 +232,7 @@ SOURCE / TIMESTAMP RULES
 FINAL RULE
 ----------
 
-22. Return only the answer to the user's question.
+23. Return only the answer to the user's question.
 """
 
 
