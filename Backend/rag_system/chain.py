@@ -494,6 +494,40 @@ def append_requested_temporal_timestamp(
     return f"{answer.rstrip()}\n\nRelevant timestamp: {timestamp}"
 
 
+def append_verified_response_timestamps(
+    answer: str,
+    question: str,
+    sources: list[dict[str, Any]],
+    retrieval_trace: dict[str, Any] | None,
+    *,
+    has_evidence: bool,
+) -> str:
+    """Append trusted timestamps without allowing model-authored metadata through.
+
+    Explicit temporal requests take precedence: when a verified temporal window
+    is available, return that range instead of also appending a generic source
+    summary. Otherwise, append summary ranges from the returned source metadata.
+    """
+    substantive_answer = _strip_unverified_timestamp_summary(answer)
+    if not substantive_answer.strip():
+        substantive_answer = FALLBACK_ANSWER
+
+    temporal_answer = append_requested_temporal_timestamp(
+        answer=substantive_answer,
+        question=question,
+        retrieval_trace=retrieval_trace,
+        has_evidence=has_evidence,
+    )
+    if temporal_answer != substantive_answer:
+        return temporal_answer
+
+    return append_relevant_source_timestamps(
+        answer=temporal_answer,
+        sources=sources,
+        has_evidence=has_evidence,
+    )
+
+
 def _select_citation_results(
     retrieved_results,
     retrieval_trace: dict[str, Any] | None,
@@ -1168,7 +1202,7 @@ def get_chat_response_diagnostics(
 # ============================================================
 
 def sanitize_generated_answer(answer: str) -> str:
-    """Remove accidental source/citation scaffolding from model output."""
+    """Remove source/citation scaffolding and untrusted timestamp summaries."""
 
     if not answer or not answer.strip():
         return FALLBACK_ANSWER
@@ -2395,15 +2429,11 @@ def answer_question(
     # --------------------------------------------------------
 
     has_evidence = bool(retrieved_results and sources)
-    final_answer = append_requested_temporal_timestamp(
+    final_answer = append_verified_response_timestamps(
         answer=result["answer"],
         question=original_question,
-        retrieval_trace=result.get("retrieval_trace"),
-        has_evidence=has_evidence,
-    )
-    final_answer = append_relevant_source_timestamps(
-        answer=final_answer,
         sources=sources,
+        retrieval_trace=result.get("retrieval_trace"),
         has_evidence=has_evidence,
     )
 
