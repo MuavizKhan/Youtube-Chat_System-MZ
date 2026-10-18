@@ -81,19 +81,45 @@ def test_append_requested_temporal_timestamp_is_guarded(
 
 
 @pytest.mark.unit
-def test_append_requested_temporal_timestamp_does_not_duplicate_range():
+def test_append_requested_temporal_timestamp_replaces_model_summary_with_window():
     trace = {
         "route": "temporal_window",
         "temporal_window": {"start_seconds": 1535.0, "end_seconds": 1584.52},
     }
-    answer = "A factual answer. Relevant timestamp: 25:35–26:24"
+    answer = (
+        "A factual answer.\n\n"
+        "Relevant timestamps: 00:10–00:20"
+    )
 
     assert chain.append_requested_temporal_timestamp(
         answer=answer,
         question="Cite the relevant timestamp for 25:35–26:25.",
         retrieval_trace=trace,
         has_evidence=True,
-    ) == answer
+    ) == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+
+
+@pytest.mark.unit
+def test_append_verified_response_timestamps_preserves_requested_temporal_window():
+    result = chain.append_verified_response_timestamps(
+        answer=(
+            "A factual answer.\n\n"
+            "Relevant timestamps: 00:10–00:20"
+        ),
+        question="Cite the relevant timestamp for 25:35–26:25.",
+        sources=[{"start": 120, "end": 160, "distance": 0.1}],
+        retrieval_trace={
+            "route": "temporal_window",
+            "temporal_window": {
+                "start_seconds": 1535.0,
+                "end_seconds": 1584.52,
+            },
+        },
+        has_evidence=True,
+    )
+
+    assert result == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+    assert "00:10–00:20" not in result
 
 
 @pytest.mark.unit
@@ -140,13 +166,27 @@ def test_append_relevant_source_timestamps_skips_fallback_missing_evidence_and_i
 
 
 @pytest.mark.unit
-def test_append_relevant_source_timestamps_does_not_duplicate_existing_range():
-    answer = "A grounded answer. Relevant timestamp: 00:10–00:20"
+def test_append_relevant_source_timestamps_replaces_model_summary_with_source_ranges():
+    answer = "A grounded answer.\n\nRelevant timestamp: 00:10–00:20"
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[{"start": 120, "end": 160, "distance": 0.1}],
+        has_evidence=True,
+    )
+
+    assert result == "A grounded answer.\n\nRelevant timestamps: 02:00–02:40"
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
+def test_append_relevant_source_timestamps_removes_unverified_summary_without_sources():
+    answer = "A grounded answer.\n\nRelevant timestamps: 99:00–99:01"
+
     assert chain.append_relevant_source_timestamps(
         answer=answer,
-        sources=[{"start": 10, "end": 20, "distance": 0.1}],
-        has_evidence=True,
-    ) == answer
+        sources=[],
+        has_evidence=False,
+    ) == "A grounded answer."
 
 
 @pytest.mark.unit
@@ -191,6 +231,16 @@ def test_format_source_group_deduplicates_chunks():
 @pytest.mark.unit
 def test_build_context_empty():
     assert chain.build_context([])=="No relevant transcript context was retrieved."
+
+
+@pytest.mark.unit
+def test_sanitize_generated_answer_removes_model_authored_timestamp_summary():
+    answer = (
+        "A grounded answer.\n\n"
+        "Relevant timestamps: 99:00–99:01"
+    )
+
+    assert chain.sanitize_generated_answer(answer) == "A grounded answer."
 
 
 @pytest.mark.unit
@@ -1409,7 +1459,10 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
     ]
     context_groups = chain.merge_overlapping_results(expanded_results)
     retrieval_result = {
-        "answer": "The cost is about 600 dollars per hour.",
+        "answer": (
+            "The cost is about 600 dollars per hour.\n\n"
+            "Relevant timestamps: 99:00–99:01"
+        ),
         "retrieved_results": expanded_results,
         "source_groups": context_groups,
         "retrieval_trace": {
@@ -1448,6 +1501,10 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
     assert result["retrieval_config"]["index_namespace"] == "test-namespace"
     assert result["retrieval_config"]["citation_policy"] == "selected_anchors"
     assert [source["chunk_ids"] for source in result["sources"]] == [[1], [3]]
+    assert result["answer"].endswith(
+        "Relevant timestamps: 00:10–00:20, 00:30–00:40"
+    )
+    assert "99:00–99:01" not in result["answer"]
     assert [(source["start"], source["end"]) for source in result["sources"]] == [
         (10.0, 20.0),
         (30.0, 40.0),
