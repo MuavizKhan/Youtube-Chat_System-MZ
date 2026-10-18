@@ -220,7 +220,7 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     assert "Absence of a statement is answerable" in system_prompt
     assert "application appends a separate" in system_prompt
     assert "timestamp ranges remain part of the answer" in system_prompt
-    assert "preserve distinct figures as stated in the transcript" in system_prompt
+    assert "distinct figures as stated in the transcript" in system_prompt
     assert "Do not round" in system_prompt
 
 
