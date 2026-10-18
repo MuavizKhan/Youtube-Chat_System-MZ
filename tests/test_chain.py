@@ -332,6 +332,48 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
         "Never turn an allegation described by the interviewer"
         in normalized_system_prompt
     )
+    assert (
+        "The name in the question does not make that person the source "
+        "of every nearby claim" in normalized_system_prompt
+    )
+    assert (
+        "it does not by itself verify the underlying finding"
+        in normalized_system_prompt
+    )
+
+
+@pytest.mark.unit
+def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions():
+    question = "What does Vijay Mallya say about the amounts involved?"
+    context = (
+        "[SOURCE 1]\nTimestamp: 02:01:07 - 02:02:31\n"
+        "Transcript:\nI put 3,000 crores of UB Group money into Kingfisher "
+        "Airlines to keep it afloat.\n\n"
+        "[SOURCE 2]\nTimestamp: 03:54:28 - 03:55:58\n"
+        "Transcript:\nI think CBI in 2017 concluded around 423 crores were "
+        "found. Then ED said something around 3,000 crore had a money-laundering "
+        "problem."
+    )
+    prompt = chain.RAG_PROMPT.invoke({"context": context, "question": question})
+    messages = chain.prompt_to_messages(prompt)
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+    user_prompt = messages[1]["content"]
+
+    assert question in user_prompt
+    assert context in user_prompt
+    assert (
+        "source blocks are timestamped evidence segments"
+        in normalized_system_prompt
+    )
+    assert (
+        "only when the context clearly shows that person stated or endorsed it"
+        in normalized_system_prompt
+    )
+    assert (
+        "describe it neutrally as something discussed"
+        in normalized_system_prompt
+    )
+    assert "do not guess." in normalized_system_prompt
 
 
 class FakeCompletions:
