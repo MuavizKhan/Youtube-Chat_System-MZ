@@ -186,7 +186,7 @@ def test_append_relevant_source_timestamps_removes_unverified_summary_without_so
         answer=answer,
         sources=[],
         has_evidence=False,
-    ) == "A grounded answer"
+    ) == "A grounded answer."
 
 
 @pytest.mark.unit
@@ -240,7 +240,7 @@ def test_sanitize_generated_answer_removes_model_authored_timestamp_summary():
         "Relevant timestamps: 99:00–99:01"
     )
 
-    assert chain.sanitize_generated_answer(answer) == "A grounded answer"
+    assert chain.sanitize_generated_answer(answer) == "A grounded answer."
 
 
 @pytest.mark.unit
