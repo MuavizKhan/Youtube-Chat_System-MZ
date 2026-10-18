@@ -348,22 +348,16 @@ _CLAIM_CLAUSE_BOUNDARY_PATTERN = re.compile(
     r"[.!?;\n]+|,\s*(?=(?:and|but|while|whereas|however)\b)",
     re.IGNORECASE,
 )
-_CLAIM_STOP_WORDS = frozenset({
-    "a", "about", "after", "also", "an", "and", "are", "as", "at", "be",
-    "been", "being", "but", "by", "can", "could", "did", "do", "does",
-    "for", "from", "had", "has", "have", "he", "her", "hers", "him",
-    "his", "how", "i", "if", "in", "into", "is", "it", "its", "may",
-    "might", "more", "most", "not", "of", "on", "or", "our", "she",
-    "should", "so", "some", "such", "than", "that", "the", "their",
-    "them", "then", "there", "these", "they", "this", "those", "to",
-    "under", "was", "we", "were", "what", "when", "where", "which",
-    "while", "who", "why", "will", "with", "would", "you", "your",
-    "approximately", "around", "crore", "crores", "cr", "rupee", "rupees",
-})
+_CLAIM_STOP_WORDS = set("""
+    a an and are as at be been but by can could did do does for from had has
+    have he her his how i if in into is it its may might not of on or she so
+    than that the their them then there these they this those to was we were
+    what when where which while who why will with would you your about around
+    approximately crore crores cr rupee rupees
+""".split())
 
 
 def _extract_money_amounts(text: str) -> list[float]:
-    """Extract currency/amount-like numeric values without treating timestamps as amounts."""
     if not isinstance(text, str) or not text:
         return []
 
@@ -371,24 +365,23 @@ def _extract_money_amounts(text: str) -> list[float]:
     for match in _MONEY_AMOUNT_PATTERN.finditer(text):
         token = match.group("currency_amount") or match.group("amount")
         try:
-            value = float(token.replace(",", ""))
+            amount = float(token.replace(",", ""))
         except (AttributeError, ValueError):
             continue
-        if math.isfinite(value):
-            amounts.append(value)
+        if math.isfinite(amount):
+            amounts.append(amount)
     return amounts
 
 
 def _claim_terms(text: str) -> set[str]:
     return {
-        token
-        for token in re.findall(r"[a-z]{2,}", text.lower())
+        token for token in re.findall(r"[a-z]{2,}", text.lower())
         if token not in _CLAIM_STOP_WORDS
     }
 
 
 def _money_claims(answer: str) -> list[dict[str, Any]]:
-    """Extract amount mentions with their local clause so equal figures remain distinguishable."""
+    """Extract monetary mentions with their surrounding clause."""
     claims = []
     for match in _MONEY_AMOUNT_PATTERN.finditer(answer):
         token = match.group("currency_amount") or match.group("amount")
@@ -399,29 +392,21 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
         if not math.isfinite(amount):
             continue
 
-        left = 0
-        right = len(answer)
+        left, right = 0, len(answer)
         for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(answer):
             if boundary.end() <= match.start():
                 left = boundary.end()
             elif boundary.start() >= match.end():
                 right = boundary.start()
                 break
-
-        clause = answer[left:right].strip()
-        terms = _claim_terms(clause)
-        if not terms:
-            terms = _claim_terms(
-                answer[max(0, match.start() - 90):min(len(answer), match.end() + 90)]
-            )
-        claims.append({"amount": amount, "terms": terms})
+        terms = _claim_terms(answer[left:right])
+        if terms:
+            claims.append({"amount": amount, "terms": terms})
     return claims
 
 
 def _amounts_match(left: float, right: float) -> bool:
-    if math.isclose(left, right, rel_tol=0.0, abs_tol=0.1):
-        return True
-    return (
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=0.1) or (
         min(abs(left), abs(right)) >= 100
         and abs(left - right) / max(abs(left), abs(right)) <= 0.01
     )
@@ -433,101 +418,75 @@ def _select_claim_aligned_timestamp_candidates(
     *,
     max_ranges: int,
 ) -> list[dict[str, Any]] | None:
-    """Prefer returned source intervals whose transcript text supports answer amounts.
-
-    Each amount is matched separately using both its numeric value and the local
-    words around that mention. This helps distinguish repeated values used for
-    different claims (for example, a contribution and a separate allegation).
-    None signals that the older distance-only policy should be used instead.
-    """
+    """Match amount claims to returned source intervals using transcript text."""
     claims = _money_claims(answer)
-    transcript_candidates = [
-        candidate
-        for candidate in candidates
-        if isinstance(candidate.get("transcript_text"), str)
-        and candidate["transcript_text"].strip()
+    with_text = [
+        candidate for candidate in candidates
+        if candidate.get("transcript_text", "").strip()
     ]
-    if len(claims) < 2 or not transcript_candidates:
+    if len(claims) < 2 or not with_text:
         return None
 
-    transcript_values = {
-        id(candidate): _extract_money_amounts(candidate["transcript_text"])
-        for candidate in transcript_candidates
-    }
-    transcript_terms = {
-        id(candidate): _claim_terms(candidate["transcript_text"])
-        for candidate in transcript_candidates
-    }
-    distinct_answer_amounts = {claim["amount"] for claim in claims}
-    source_amount_breadth = {
-        id(candidate): sum(
+    profiles = []
+    for candidate in with_text:
+        text = candidate["transcript_text"]
+        profiles.append({
+            "candidate": candidate,
+            "amounts": _extract_money_amounts(text),
+            "terms": _claim_terms(text),
+        })
+    answer_amounts = {claim["amount"] for claim in claims}
+    for profile in profiles:
+        profile["amount_breadth"] = sum(
             any(_amounts_match(amount, source_amount)
-                for source_amount in transcript_values[id(candidate)])
-            for amount in distinct_answer_amounts
+                for source_amount in profile["amounts"])
+            for amount in answer_amounts
         )
-        for candidate in transcript_candidates
-    }
 
-    assigned_sources: dict[int, dict[str, Any]] = {}
+    selected: dict[int, dict[str, Any]] = {}
     for claim in claims:
         choices = []
-        for candidate in transcript_candidates:
-            source_amounts = transcript_values[id(candidate)]
+        for profile in profiles:
             if not any(
-                _amounts_match(claim["amount"], source_amount)
-                for source_amount in source_amounts
+                _amounts_match(claim["amount"], amount)
+                for amount in profile["amounts"]
             ):
                 continue
-
-            overlap = len(claim["terms"] & transcript_terms[id(candidate)])
-            if overlap < 1:
-                continue
-
-            choices.append((
-                (
+            overlap = len(claim["terms"] & profile["terms"])
+            if overlap:
+                candidate = profile["candidate"]
+                choices.append((
+                    (overlap, profile["amount_breadth"], -candidate["distance"]),
+                    profile,
                     overlap,
-                    source_amount_breadth[id(candidate)],
-                    -candidate["distance"],
-                    -candidate["start"],
-                ),
-                candidate,
-                overlap,
-            ))
+                ))
 
         if not choices:
-            # Do not pretend to have claim-level source alignment when a
-            # monetary claim has no plausible interval in the returned sources.
+            # Fall back rather than implying unsupported claim/source alignment.
             return None
 
-        _, best_candidate, overlap = max(choices, key=lambda item: item[0])
-        candidate_id = best_candidate["candidate_index"]
-        record = assigned_sources.setdefault(
-            candidate_id,
-            {"candidate": best_candidate, "claim_count": 0, "overlap_total": 0},
+        _, profile, overlap = max(choices, key=lambda item: item[0])
+        candidate = profile["candidate"]
+        record = selected.setdefault(
+            candidate["candidate_index"],
+            {"candidate": candidate, "claim_count": 0, "overlap": 0},
         )
         record["claim_count"] += 1
-        record["overlap_total"] += overlap
+        record["overlap"] += overlap
 
-    # Multi-amount answers may need more than the three ranges used for simple
-    # answers, but keep the plain-text summary bounded.
-    budget = min(5, max_ranges if len(claims) < 4 else max(5, max_ranges))
-    selected_records = list(assigned_sources.values())
-    if len(selected_records) > budget:
-        selected_records.sort(
-            key=lambda record: (
-                record["claim_count"],
-                record["overlap_total"],
-                record["candidate"]["distance"] * -1,
-                record["candidate"]["start"] * -1,
-            ),
-            reverse=True,
-        )
-        selected_records = selected_records[:budget]
-
-    return [record["candidate"] for record in selected_records]
-
-
-def _strip_unverified_timestamp_summary(answer: str):
+    # Dense multi-amount answers can use up to five ranges; ordinary answers
+    # keep the existing three-range limit.
+    budget = min(5, max_ranges if len(claims) < 4 else 5)
+    ranked = list(selected.values())
+    ranked.sort(
+        key=lambda item: (
+            item["claim_count"],
+            item["overlap"],
+            -item["candidate"]["distance"],
+        ),
+        reverse=True,
+    )
+    return [item["candidate"] for item in ranked[:budget]]def _strip_unverified_timestamp_summary(answer: str) -> str:
     """Remove a model-authored timestamp summary before trusted ranges are appended.
 
     Timestamp summary ranges are generated by the application from source
