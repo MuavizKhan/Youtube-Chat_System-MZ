@@ -220,6 +220,8 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     assert "Absence of a statement is answerable" in system_prompt
     assert "application appends a separate" in system_prompt
     assert "timestamp ranges remain part of the answer" in system_prompt
+    assert "preserve distinct figures as stated in the transcript" in system_prompt
+    assert "Do not round" in system_prompt
 
 
 class FakeCompletions:
@@ -671,6 +673,30 @@ def test_select_citation_results_excludes_context_expansion_neighbors():
     )
 
     assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 3]
+
+
+@pytest.mark.regression
+def test_select_citation_results_can_include_context_neighbors_in_experiment(monkeypatch):
+    expanded = [
+        (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
+        (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "second selected anchor"), 0.5),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS",
+        True,
+    )
+
+    selected = chain._select_citation_results(
+        expanded,
+        {
+            "final_chunk_ids": [1, 2, 3],
+            "citation_chunk_ids": [1, 3],
+        },
+    )
+
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 2, 3]
 
 
 @pytest.mark.unit
