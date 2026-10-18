@@ -1462,6 +1462,63 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
 
 
 @pytest.mark.regression
+def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypatch):
+    expanded_documents = [
+        doc(1, 10, 40, "selected answer anchor"),
+        doc(2, 20, 50, "context-only neighbor"),
+        doc(3, 60, 80, "second selected anchor"),
+    ]
+    expanded_results = [
+        (expanded_documents[0], 0.2),
+        (expanded_documents[1], chain.MAX_DISTANCE),
+        (expanded_documents[2], 0.5),
+    ]
+    retrieval_result = {
+        "answer": "A grounded answer.",
+        "retrieved_results": expanded_results,
+        "source_groups": chain.merge_overlapping_results(expanded_results),
+        "retrieval_trace": {
+            "final_stage": "initial_strict",
+            "final_chunk_ids": [1, 2, 3],
+            "citation_chunk_ids": [1, 3],
+        },
+        "generation_trace": {"generated": True, "fallback_used": False},
+    }
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "EMBEDDING_MODEL", "test-embedding-model")
+    monkeypatch.setattr(chain, "RAG_INDEX_NAMESPACE", "test-namespace")
+    monkeypatch.setattr(chain, "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", True)
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            return retrieval_result
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+
+    result = chain.answer_question(
+        video_reference="Gfr50f6ZBvo",
+        question="What does the passage say?",
+    )
+
+    assert result["retrieval_config"]["citation_policy"] == "expanded_context_experiment"
+    assert result["source_segments"] == 3
+    assert [source["chunk_ids"] for source in result["sources"]] == [[1], [2], [3]]
+    # Chunk 2 overlaps anchor 1 in time, but the neighbor link stays precise.
+    assert [(source["start"], source["end"]) for source in result["sources"]] == [
+        (10.0, 40.0),
+        (20.0, 50.0),
+        (60.0, 80.0),
+    ]
+
+
+@pytest.mark.regression
 def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch):
     source_documents = [
         doc(173, 11595.279, 11675.0, "unrelated transcript section one"),
