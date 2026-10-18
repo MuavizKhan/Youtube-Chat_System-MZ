@@ -1423,6 +1423,9 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
     monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
     monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
     monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "EMBEDDING_MODEL", "test-embedding-model")
+    monkeypatch.setattr(chain, "RAG_INDEX_NAMESPACE", "test-namespace")
+    monkeypatch.setattr(chain, "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", False)
 
     class FakeRagChain:
         def invoke(self, _inputs):
@@ -1441,6 +1444,9 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
 
     assert result["retrieved_chunks"] == 3
     assert result["source_segments"] == 2
+    assert result["retrieval_config"]["embedding_model"] == "test-embedding-model"
+    assert result["retrieval_config"]["index_namespace"] == "test-namespace"
+    assert result["retrieval_config"]["citation_policy"] == "selected_anchors"
     assert [source["chunk_ids"] for source in result["sources"]] == [[1], [3]]
     assert [(source["start"], source["end"]) for source in result["sources"]] == [
         (10.0, 20.0),
