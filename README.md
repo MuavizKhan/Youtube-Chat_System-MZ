@@ -569,3 +569,22 @@ Compare `effective_server_configuration.citation_policy`, each case's `annotated
 
 The experiment has no default behavior change: `RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS=false` preserves anchor-only source links. In expanded mode, selected anchors remain merged, while context-only neighbors are returned as individual chunk-sized intervals so a link does not stretch across neighboring chunks. Neighbor intervals can overlap anchor links by design. The experimental mode does not change retrieval ranking or generation context, and should not become the default unless real-video audits show better direct evidence access without misleading or over-broad links. Q07's distinct numerical amounts still require real-model validation.
 
+## Phase 10.8.1 — Preserve transcript caption boundaries
+
+The caption-boundary experiment preserves original non-empty transcript snippets through timestamp-aware chunking and into the RAG generation context. The embedding text, chunk size, chunk overlap, retrieval ranking, retrieval thresholds, and source-link policy remain unchanged.
+
+Each indexed chunk stores the ordered caption snippets that overlap its original character range. A caption carries its stable transcript-local segment ID, start/end times, and exact caption text. When retrieved chunks overlap, context formatting deduplicates repeated copies by segment ID and restores chronological order. The formatted lines explicitly identify these as caption snippets, not verified speaker turns. This improves access to dialogue structure but does not identify speakers or guarantee correct attribution.
+
+Index metadata includes a separate `transcript_segment_schema_version`. Existing indexes without this marker are treated as stale and rebuilt through the normal index lifecycle; indexes with missing or conflicting segment metadata fall back to the established whole-chunk formatter when that is safer. A schema mismatch must not be treated as a corrupt FAISS index. Index rebuilding uses the existing staged-publication path, which protects an older index if a replacement fails.
+
+For a controlled live evaluation, use a fresh namespace rather than overwriting the existing baseline:
+
+```powershell
+$env:RAG_INDEX_NAMESPACE = "experiment-caption-segments"
+$env:HF_EMBEDDING_MODEL = "BAAI/bge-m3"
+.\.venv\Scripts\python.exe -m uvicorn Backend.app:app --reload
+```
+
+Request indexing for the benchmark videos using the normal `POST /index` endpoint and wait for each index status to become `ready` before running the answer/source audit. Evaluate Q07, AR03, and AR08 with the existing retrieval settings. Compare the generated answer, available transcript context, source intervals, and timestamps against the Phase 10.8 baseline. Do not claim the attribution issue is fixed solely because the new metadata exists or unit tests pass.
+
+
