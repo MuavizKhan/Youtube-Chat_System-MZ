@@ -100,6 +100,29 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
 
 
 @pytest.mark.unit
+def test_append_verified_response_timestamps_preserves_requested_temporal_window():
+    result = chain.append_verified_response_timestamps(
+        answer=(
+            "A factual answer.\n\n"
+            "Relevant timestamps: 00:10–00:20"
+        ),
+        question="Cite the relevant timestamp for 25:35–26:25.",
+        sources=[{"start": 120, "end": 160, "distance": 0.1}],
+        retrieval_trace={
+            "route": "temporal_window",
+            "temporal_window": {
+                "start_seconds": 1535.0,
+                "end_seconds": 1584.52,
+            },
+        },
+        has_evidence=True,
+    )
+
+    assert result == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
 def test_append_relevant_source_timestamps_uses_three_strongest_in_chronological_order():
     answer = chain.append_relevant_source_timestamps(
         answer="A grounded answer.",
