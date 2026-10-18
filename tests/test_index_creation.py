@@ -60,14 +60,20 @@ def test_timestamped_chunks_preserve_caption_segments_across_chunk_boundaries(
     assert all(chunk.metadata["transcript_segments"] for chunk in chunks)
 
     segments_by_id = {}
+    segment_occurrences = {}
     for chunk in chunks:
         for segment in chunk.metadata["transcript_segments"]:
-            existing = segments_by_id.get(segment["segment_id"])
+            segment_id = segment["segment_id"]
+            segment_occurrences[segment_id] = (
+                segment_occurrences.get(segment_id, 0) + 1
+            )
+            existing = segments_by_id.get(segment_id)
             if existing is not None:
                 assert existing == segment
-            segments_by_id[segment["segment_id"]] = segment
+            segments_by_id[segment_id] = segment
 
     assert set(segments_by_id) == {0, 1, 2}
+    assert segment_occurrences[1] > 1
     assert segments_by_id[0] == {
         "segment_id": 0,
         "start": 0.0,
