@@ -141,6 +141,61 @@ def test_append_relevant_source_timestamps_uses_three_strongest_in_chronological
 
 
 @pytest.mark.unit
+def test_append_relevant_source_timestamps_aligns_multi_amount_claims_to_transcript_text():
+    answer = (
+        "Vijay says he put 3,000 crore of UB Group money into Kingfisher to keep it afloat, "
+        "and debt was approximately 6,200 crore plus interest. "
+        "The Ministry of Finance report showed 14,100 crore recovered. "
+        "The interviewer mentions a CBI-related 423 crore figure and an ED "
+        "money-laundering allegation involving 3,000 crore."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 10,
+                "end": 20,
+                "distance": 0.01,
+                "transcript_text": "Kingfisher was known for guest service and on-time departures.",
+            },
+            {
+                "start": 100,
+                "end": 140,
+                "distance": 0.8,
+                "transcript_text": (
+                    "I put 3,000 crores of UB Group money into Kingfisher Airlines "
+                    "and infused cash to keep it afloat."
+                ),
+            },
+            {
+                "start": 200,
+                "end": 240,
+                "distance": 0.95,
+                "transcript_text": (
+                    "The DRT debt certificate records 6,203 crores plus interest. "
+                    "The Ministry of Finance report showed 14,100 crores recovered."
+                ),
+            },
+            {
+                "start": 300,
+                "end": 340,
+                "distance": 1.01,
+                "transcript_text": (
+                    "The interviewer says CBI identified about 423 crores and ED "
+                    "reported a 3,000 crore money-laundering issue."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith(
+        "Relevant timestamps: 01:40–02:20, 03:20–04:00, 05:00–05:40"
+    )
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
 def test_append_relevant_source_timestamps_skips_fallback_missing_evidence_and_invalid_ranges():
     sources = [{"start": 10, "end": 20, "distance": 0.1}]
 
@@ -272,6 +327,11 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     assert "timestamp ranges remain part of the answer" in system_prompt
     assert "distinct figures as stated in the transcript" in system_prompt
     assert "Do not round" in system_prompt
+    normalized_system_prompt = " ".join(system_prompt.split())
+    assert (
+        "Never turn an allegation described by the interviewer"
+        in normalized_system_prompt
+    )
 
 
 class FakeCompletions:

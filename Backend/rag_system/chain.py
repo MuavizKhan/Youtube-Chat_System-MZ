@@ -200,9 +200,11 @@ SOURCE / TIMESTAMP RULES
     [1]
 
 17. Do not invent timestamps or citations. The application appends a separate
-    "Relevant timestamps" line to every substantive answer using up to three
-    of the strongest retrieved source segments. Do not calculate or invent
-    timestamp values yourself.
+    "Relevant timestamps" line to every substantive answer from returned source
+    metadata. For answers containing several distinct monetary claims, the
+    application may select up to five source intervals that best match those
+    claims; ordinary answers retain a concise timestamp summary. Do not calculate
+    or invent timestamp values yourself.
 
 18. Do NOT mention the retrieval system, vector database,
     embeddings, prompts, or internal implementation.
@@ -220,10 +222,17 @@ SOURCE / TIMESTAMP RULES
     explicitly says they describe the same measure. If the transcript distinguishes
     a component figure from a total, state that distinction.
 
+22. In interviews or other multi-speaker passages, distinguish the guest's claims
+    from the interviewer's questions or allegations and from claims attributed to
+    a named report or authority. Never turn an allegation described by the
+    interviewer into a statement made by the guest or an established finding.
+    If the transcript does not make the speaker or status of a claim clear, qualify
+    it as something mentioned in the discussion rather than guessing.
+
 FINAL RULE
 ----------
 
-22. Return only the answer to the user's question.
+23. Return only the answer to the user's question.
 """
 
 
@@ -327,6 +336,158 @@ _MODEL_TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
 
+_MONEY_AMOUNT_PATTERN = re.compile(
+    r"(?:"
+    r"(?:₹|INR\b|Rs\.?)\s*(?P<currency_amount>\d[\d,]*(?:\.\d+)?)"
+    r"|(?<![\w:])(?P<amount>\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?:crores?\b|cr\b|rupees?\b|INR\b|percent\b|%)"
+    r")",
+    re.IGNORECASE,
+)
+_CLAIM_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"[.!?;\n]+|,\s*(?=(?:and|but|while|whereas|however)\b)",
+    re.IGNORECASE,
+)
+_CLAIM_STOP_WORDS = set("""
+    a an and are as at be been but by can could did do does for from had has
+    have he her his how i if in into is it its may might not of on or she so
+    than that the their them then there these they this those to was we were
+    what when where which while who why will with would you your about around
+    approximately crore crores cr rupee rupees
+""".split())
+
+
+def _extract_money_amounts(text: str) -> list[float]:
+    if not isinstance(text, str) or not text:
+        return []
+
+    amounts = []
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text):
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if math.isfinite(amount):
+            amounts.append(amount)
+    return amounts
+
+
+def _claim_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z]{2,}", text.lower())
+        if token not in _CLAIM_STOP_WORDS
+    }
+
+
+def _money_claims(answer: str) -> list[dict[str, Any]]:
+    """Extract monetary mentions with their surrounding clause."""
+    claims = []
+    for match in _MONEY_AMOUNT_PATTERN.finditer(answer):
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if not math.isfinite(amount):
+            continue
+
+        left, right = 0, len(answer)
+        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(answer):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        terms = _claim_terms(answer[left:right])
+        if terms:
+            claims.append({"amount": amount, "terms": terms})
+    return claims
+
+
+def _amounts_match(left: float, right: float) -> bool:
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=0.1) or (
+        min(abs(left), abs(right)) >= 100
+        and abs(left - right) / max(abs(left), abs(right)) <= 0.01
+    )
+
+
+def _select_claim_aligned_timestamp_candidates(
+    answer: str,
+    candidates: list[dict[str, Any]],
+    *,
+    max_ranges: int,
+) -> list[dict[str, Any]] | None:
+    """Match amount claims to returned source intervals using transcript text."""
+    claims = _money_claims(answer)
+    with_text = [
+        candidate for candidate in candidates
+        if candidate.get("transcript_text", "").strip()
+    ]
+    if len(claims) < 2 or not with_text:
+        return None
+
+    profiles = []
+    for candidate in with_text:
+        text = candidate["transcript_text"]
+        profiles.append({
+            "candidate": candidate,
+            "amounts": _extract_money_amounts(text),
+            "terms": _claim_terms(text),
+        })
+    answer_amounts = {claim["amount"] for claim in claims}
+    for profile in profiles:
+        profile["amount_breadth"] = sum(
+            any(_amounts_match(amount, source_amount)
+                for source_amount in profile["amounts"])
+            for amount in answer_amounts
+        )
+
+    selected: dict[int, dict[str, Any]] = {}
+    for claim in claims:
+        choices = []
+        for profile in profiles:
+            if not any(
+                _amounts_match(claim["amount"], amount)
+                for amount in profile["amounts"]
+            ):
+                continue
+            overlap = len(claim["terms"] & profile["terms"])
+            if overlap:
+                candidate = profile["candidate"]
+                choices.append((
+                    (overlap, profile["amount_breadth"], -candidate["distance"]),
+                    profile,
+                    overlap,
+                ))
+
+        if not choices:
+            # Fall back rather than implying unsupported claim/source alignment.
+            return None
+
+        _, profile, overlap = max(choices, key=lambda item: item[0])
+        candidate = profile["candidate"]
+        record = selected.setdefault(
+            candidate["candidate_index"],
+            {"candidate": candidate, "claim_count": 0, "overlap": 0},
+        )
+        record["claim_count"] += 1
+        record["overlap"] += overlap
+
+    # Dense multi-amount answers can use up to five ranges; ordinary answers
+    # keep the existing three-range limit.
+    budget = min(5, max_ranges if len(claims) < 4 else 5)
+    ranked = list(selected.values())
+    ranked.sort(
+        key=lambda item: (
+            item["claim_count"],
+            item["overlap"],
+            -item["candidate"]["distance"],
+        ),
+        reverse=True,
+    )
+    return [item["candidate"] for item in ranked[:budget]]
+
 
 def _strip_unverified_timestamp_summary(answer: str) -> str:
     """Remove a model-authored timestamp summary before trusted ranges are appended.
@@ -353,9 +514,10 @@ def append_relevant_source_timestamps(
 ) -> str:
     """Append source-grounded timestamp ranges to a substantive answer.
 
-    Selects the strongest source segments by retrieval distance, then presents
-    up to max_ranges ranges in chronological order. This is deterministic so
-    timestamp display does not depend on the LLM following prompt advice.
+    For multi-amount answers, first try to match each amount's local wording to
+    transcript text from returned sources. Other answers retain the established
+    distance-ranked behavior. Selected ranges are always grounded in returned
+    source metadata and presented chronologically.
     """
     if (
         not isinstance(answer, str)
@@ -419,20 +581,34 @@ def append_relevant_source_timestamps(
             "start": start,
             "end": end,
             "distance": distance,
+            "transcript_text": (
+                source.get("transcript_text")
+                if isinstance(source.get("transcript_text"), str)
+                else ""
+            ),
+            "candidate_index": len(candidates),
         })
 
     if not candidates:
         return answer
 
-    # A smaller retrieval distance is the stronger available source signal.
-    candidates.sort(
-        key=lambda item: (
-            item["distance"],
-            item["start"],
-            item["end"],
-        )
+    selected = _select_claim_aligned_timestamp_candidates(
+        answer,
+        candidates,
+        max_ranges=max_ranges,
     )
-    selected = candidates[:max_ranges]
+    if selected is None:
+        # Preserve the existing behavior unless multiple monetary claims can
+        # be matched against transcript text from actual returned sources.
+        candidates.sort(
+            key=lambda item: (
+                item["distance"],
+                item["start"],
+                item["end"],
+            )
+        )
+        selected = candidates[:max_ranges]
+
     selected.sort(key=lambda item: (item["start"], item["end"]))
 
     ranges = ", ".join(
@@ -2392,6 +2568,21 @@ def answer_question(
         retrieval_trace,
     )
     sources = format_sources(citation_source_groups)
+    # Keep transcript text private to timestamp selection; do not add it to the
+    # public API's clickable-source metadata.
+    timestamp_sources = []
+    for source, source_group in zip(sources, citation_source_groups):
+        documents = source_group.get("documents", [])
+        transcript_text = "\n".join(
+            document.page_content
+            for document in documents
+            if isinstance(getattr(document, "page_content", None), str)
+            and document.page_content.strip()
+        )
+        timestamp_sources.append({
+            **source,
+            "transcript_text": transcript_text,
+        })
     candidate_retrieved_chunks = len(retrieved_results)
     candidate_source_segments = len(source_groups)
     candidate_citation_source_segments = len(citation_source_groups)
@@ -2432,7 +2623,7 @@ def answer_question(
     final_answer = append_verified_response_timestamps(
         answer=result["answer"],
         question=original_question,
-        sources=sources,
+        sources=timestamp_sources,
         retrieval_trace=result.get("retrieval_trace"),
         has_evidence=has_evidence,
     )
