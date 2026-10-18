@@ -155,7 +155,7 @@ def test_q07_evidence_groups_distinguish_context_sources_and_summary():
 
 def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
     response = {
-        "answer": "Ø§ÙÙØ¨Ø¶",
+        "answer": "\\u00d8\\u00a7\\u00d9\\u0084\\u00d9\\u0086\\u00d8\\u00a8\\u00d8\\u00b6",
         "sources": [],
         "observability": {"retrieval": {}},
     }
