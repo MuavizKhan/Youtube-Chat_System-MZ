@@ -3095,6 +3095,36 @@ Transcript caption segments in chronological order:
 
 
 @pytest.mark.unit
+def test_financial_fallback_does_not_borrow_recovery_report_attribution_from_other_source_blocks():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report was published for Parliament.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [02:50:25–02:51:41] The total amount recovered was 14,100 crore rupees.
+[SOURCE 5]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+    )
+
+    # An attribution from another returned source is not evidence for this
+    # recovery claim; the extractor must decline rather than join unrelated
+    # source blocks into one assertion.
+    assert fallback is None
+
+
+@pytest.mark.unit
 def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
     answer = (
         "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
