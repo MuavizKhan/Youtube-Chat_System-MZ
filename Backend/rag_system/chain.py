@@ -981,9 +981,44 @@ def append_relevant_source_timestamps(
             max_ranges=max_ranges,
         )
     if selected is None:
-        # If transcript wording cannot be aligned with the answer (for example,
-        # English answers grounded in Arabic-only captions), preserve the
-        # established distance-ranked behavior instead of guessing a match.
+        # Do not attach a nearest-by-distance timestamp to an eye/eyelid sound
+        # claim when source text is available but provides no acoustic evidence
+        # for that concept. The caller can still return source links separately;
+        # an absent timestamp is safer than a misleading one.
+        eye_sound_concept = next(
+            (
+                concept for concept in _ANSWER_ALIGNMENT_CONCEPTS
+                if "eyelid" in concept.get("aliases", set())
+            ),
+            None,
+        )
+        normalized_answer = unicodedata.normalize("NFKC", answer).lower()
+        answer_mentions_eye_sound = bool(
+            eye_sound_concept
+            and (
+                re.search(
+                    eye_sound_concept["english_pattern"],
+                    normalized_answer,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    eye_sound_concept["arabic_pattern"],
+                    normalized_answer,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        source_text_is_available = any(
+            isinstance(candidate.get("transcript_text"), str)
+            and candidate["transcript_text"].strip()
+            for candidate in candidates
+        )
+        if answer_mentions_eye_sound and source_text_is_available:
+            return answer
+
+        # For older source records that have no transcript text (or other cases
+        # without a concept-specific acoustic contract), preserve the established
+        # distance-ranked behavior rather than dropping timestamp metadata.
         candidates.sort(
             key=lambda item: (
                 item["distance"],
