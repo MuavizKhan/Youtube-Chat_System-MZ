@@ -2838,3 +2838,31 @@ def test_generation_context_diagnostics_report_certificate_topic_coverage():
     assert "The debt certificate gives a figure of 6203." in result["context"]
     assert "included_chunk_ids" in result["diagnostics"]
     assert "113" in result["diagnostics"]["included_chunk_ids"]
+
+
+@pytest.mark.unit
+def test_timestamp_alignment_matches_bare_certificate_number_in_source_caption():
+    answer = (
+        "The DRT judgment debt was 4,999 crore rupees; the debt certificate "
+        "lists 6,203 crore; the Ministry of Finance report says 14,100 crore was recovered."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 100, "end": 140, "distance": 0.7,
+                "transcript_text": "The DRT judgment debt was 4,999 crore rupees plus interest.",
+            },
+            {
+                "start": 200, "end": 240, "distance": 1.0,
+                "transcript_text": "The debt certificate gives a figure of 6203. The principal carries unapplied interest at 11.5% per annum.",
+            },
+            {
+                "start": 300, "end": 340, "distance": 0.9,
+                "transcript_text": "The Ministry of Finance report said 14,100 crore rupees were recovered.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 01:40–02:20, 03:20–03:40, 05:00–05:40")
