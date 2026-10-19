@@ -1458,19 +1458,32 @@ def _generation_context_query_terms(question: str | None) -> set[str]:
     """Extract query terms, with a small cross-language bridge for source selection."""
     terms = _claim_terms(question or "")
     normalized = unicodedata.normalize("NFKC", question or "").lower()
-    if re.search(r"[\u0600-\u06ff]", normalized) and re.search(
+    is_arabic = bool(re.search(r"[\u0600-\u06ff]", normalized))
+    is_bodily_sound_question = bool(re.search(
+        r"\b(?:bodily|body|internal)\s+sounds?\b|"
+        r"\bsounds?\b.{0,60}\b(?:hear|room)\b|"
         r"(?:أصوات|اصوات|صوت).{0,80}(?:أجسام|اجسام|جسم|سماع|يسمع)|"
         r"(?:أجسام|اجسام).{0,80}(?:أصوات|اصوات|سماع)",
         normalized,
-    ):
-        # The caption corpus for this audit is English while the user asks in
-        # Arabic. Bridge the broad "bodily sounds" request to concepts expressed
-        # by the source, so budgeted context selection keeps the whole list.
+        re.IGNORECASE,
+    ))
+    if is_arabic:
+        terms.update(_answer_alignment_terms(normalized))
+    if is_bodily_sound_question and is_arabic:
+        # Bridge Arabic questions to the English caption vocabulary so the
+        # generation budget preserves every transcript-supported list item.
         terms.update({
             "heart", "heartbeat", "blood", "vein", "veins", "artery", "arteries",
             "flow", "rushing", "rush", "move", "movement", "lung", "lungs",
             "breath", "breathing", "stomach", "belly", "rumbling", "eyelid",
             "eyelids", "blink", "blinking", "eye", "eyes",
+        })
+    elif is_bodily_sound_question:
+        # Also support an English question against Arabic transcript captions.
+        terms.update({
+            "نبض", "قلب", "الدم", "دم", "عروق", "شرايين", "أوعية",
+            "رئتين", "الرئتين", "الرئة", "تنفس", "المعدة", "معدة",
+            "جفون", "الجفون", "جفن", "العين", "عين", "رمش", "ترمش",
         })
     return terms
 
@@ -1483,7 +1496,10 @@ def _generation_line_relevance(
 ) -> int:
     """Score one transcript line for evidence selection, never as a hard gate."""
     transcript_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
-    overlap = len(question_terms & _claim_terms(transcript_text))
+    line_terms = _claim_terms(transcript_text)
+    if re.search(r"[\u0600-\u06ff]", transcript_text):
+        line_terms.update(_answer_alignment_terms(transcript_text))
+    overlap = len(question_terms & line_terms)
     if financial_question and _extract_money_amounts(transcript_text):
         # For amount questions, retain lines containing actual monetary figures
         # even when the transcript uses different wording from the question.
@@ -1654,6 +1670,63 @@ def _truncate_formatted_source(
     return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
 
 
+def _included_chunk_ids_for_excerpt(
+    source_group: dict,
+    original_text: str,
+    excerpt: str,
+    all_chunk_ids: list[str],
+) -> list[str]:
+    """Identify chunks whose actual caption rows survived budget truncation.
+
+    Full, untruncated source groups retain all of their chunk IDs. For shortened
+    caption-aware groups, a chunk is included only if at least one complete
+    timestamped caption row from that chunk appears in the prompt excerpt.
+    Legacy shortened text cannot be mapped safely and therefore yields no IDs.
+    """
+    if excerpt == original_text:
+        return list(all_chunk_ids)
+
+    included_rows = {
+        line.strip() for line in excerpt.splitlines()
+        if line.strip().startswith("- [")
+    }
+    if not included_rows:
+        return []
+
+    included = []
+    for document in source_group.get("documents", []):
+        metadata = getattr(document, "metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        chunk_id = metadata.get("chunk_id")
+        segments = metadata.get("transcript_segments")
+        if chunk_id is None or not isinstance(segments, list):
+            continue
+        matched = False
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            start = segment.get("start")
+            end = segment.get("end")
+            text = segment.get("text")
+            if (
+                not isinstance(start, (int, float))
+                or not isinstance(end, (int, float))
+                or not isinstance(text, str)
+            ):
+                continue
+            row = (
+                f"- [{format_timestamp(float(start))}–"
+                f"{format_timestamp(float(end))}] {text}"
+            )
+            if row in included_rows:
+                matched = True
+                break
+        if matched and str(chunk_id) not in included:
+            included.append(str(chunk_id))
+    return included
+
+
 def _relevant_financial_amounts(text: str) -> set[float]:
     """Return amounts whose transcript clause has financial claim context."""
     material_terms = {
@@ -1769,6 +1842,7 @@ def build_generation_context(
             "start": start,
             "priority": priority,
             "source_chunk_ids": source_chunk_ids,
+            "source_group": source_group,
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
         })
 
@@ -1867,7 +1941,16 @@ def build_generation_context(
             question,
         )
         if excerpt:
-            selected.append({**record, "text": excerpt})
+            selected.append({
+                **record,
+                "text": excerpt,
+                "included_chunk_ids": _included_chunk_ids_for_excerpt(
+                    record["source_group"],
+                    record["text"],
+                    excerpt,
+                    record["source_chunk_ids"],
+                ),
+            })
 
     selected.sort(key=lambda record: record["index"])
     context = "\n\n".join(record["text"] for record in selected)
@@ -1881,7 +1964,7 @@ def build_generation_context(
         "groups_available": len(records),
         "groups_included": len(selected),
         "included_chunk_ids": list(dict.fromkeys(
-            chunk_id for record in selected for chunk_id in record["source_chunk_ids"]
+            chunk_id for record in selected for chunk_id in record["included_chunk_ids"]
         )),
         "reduced": True,
     }
