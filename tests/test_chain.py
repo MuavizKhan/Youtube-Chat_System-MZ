@@ -726,7 +726,8 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
 
     assert "do not silently repair a number" in normalized_system_prompt
     assert 'call one a "misreading" unless the transcript explicitly supports that relationship' in normalized_system_prompt
-    assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
+    assert "retain its attribution" in normalized_system_prompt
+    assert "distinguish the guest's statements from an interviewer's questions" in normalized_system_prompt
     assert "never describe a recovery figure as a company debt total" in normalized_system_prompt
     assert "map every figure to its nearby claim, subject, qualifier, and source/speaker" in normalized_system_prompt
     assert "include each materially relevant monetary claim" in normalized_system_prompt
