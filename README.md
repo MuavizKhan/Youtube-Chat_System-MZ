@@ -190,6 +190,12 @@ The next Phase 8 slice expands strong retrieval hits with a small, chronological
 
 This improves continuity for questions that depend on what was said immediately before or after a retrieved passage while keeping the existing FAISS/MMR/lexical retrieval strategy intact.
 
+## Phase 10.8 — Generation context budget
+
+Retrieval breadth and prompt size are controlled separately. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to the generation model. When all retrieved source groups fit, the full context is preserved. Otherwise, groups with stronger retrieval distances are packed first, with selected groups restored to chronological order; one source that alone exceeds the budget is shortened as a last resort.
+
+This guard does not change retrieved candidates, distance thresholds, citation selection, or the clickable source metadata returned to the client. The answer's `generation.context_budget` diagnostics report the original/final context sizes and how many source groups were included. The character ceiling is a conservative size guard, not an exact provider-token counter; a provider can still reject requests for account-level rate limits or other limits.
+
 ## Phase 8 — Answer-quality evaluation
 
 The next Phase 8 slice strengthens the deterministic RAG evaluation harness. The live end-to-end evaluator now checks not only the answer text but also the evidence provenance returned by the RAG chain.
