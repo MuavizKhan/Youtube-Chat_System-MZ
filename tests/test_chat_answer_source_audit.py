@@ -210,6 +210,22 @@ def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     assert "unclear_relationship_preserved" in failed
 
 
+def test_q07_quality_gate_rejects_financial_verification_abstention():
+    answer = (
+        "I couldn't reliably verify the financial figures from the retrieved "
+        "transcript. I won't guess at or reconcile amounts that the available "
+        "evidence does not establish."
+    )
+
+    failed = {
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    }
+
+    assert "financial_answer_not_abstained" in failed
+
+
 def test_q07_quality_gate_rejects_known_malformed_extra_amounts():
     answer = (
         "Mallya invested 3,000 crore in Kingfisher. The DRT judgment debt was 4,999 crore. "
