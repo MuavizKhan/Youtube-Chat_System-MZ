@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import re
 import pytest
 from langchain_core.documents import Document
 from Backend.rag_system import chain
