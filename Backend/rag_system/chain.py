@@ -2150,10 +2150,12 @@ def _generation_repair_instruction(
         has_drt_figure = any(claim["topic"] == "drt_debt" for claim in unique_claims)
         has_certificate_figure = any(claim["topic"] == "certificate" for claim in unique_claims)
         relationship_uncertainty_terms = (
-            r"unclear|not clear|does not (?:clearly )?(?:explain|establish|reconcile)|"
+            r"\bunclear\b|\bnot clear\b|"
+            r"does not (?:clearly )?(?:explain|establish|reconcile)|"
             r"doesn't (?:clearly )?(?:explain|establish|reconcile)|not explained|"
-            r"cannot reconcile|can't reconcile|relationship between|separately|"
-            r"different figures|distinct figures|not necessarily the same"
+            r"cannot reconcile|can't reconcile|cannot determine|can't determine|"
+            r"uncertain relationship|unresolved relationship|relationship.{0,30}(?:unclear|not clear|unexplained)|"
+            r"not enough information to determine"
         )
         missing_relationship_uncertainty = (
             has_drt_figure
