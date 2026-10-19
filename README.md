@@ -617,3 +617,22 @@ Live audits showed that an API-level success is not enough to establish answer q
 When a source must be excerpted, caption lines that overlap the question are preferred; for amount-focused questions, transcript lines containing monetary figures receive an additional selection bonus. When question and transcript languages differ, the excerpt selector samples across the source timeline rather than always taking only the opening captions. Legacy unsegmented chunks use sentence-level selection as a fallback. The answer prompt also explicitly prohibits reconciling garbled/disputed numbers or calling one figure a "misreading" unless the transcript supports that relationship.
 
 The original retrieved candidates and source metadata remain intact for the response and citation path. These rules affect only the generation prompt. Tests cover preserving relevant later captions, retaining distinct financial-amount passages across regions, and preventing a single large group from crowding all other selected groups out. A new live audit must still verify Q07 attribution and AR03/AR08 answer quality; tests and HTTP 200 alone are not acceptance criteria.
+
+
+## Phase 10.8.6 — Final answer-faithfulness and source-timestamp acceptance
+
+This final closure slice strengthens answer instructions for claim-by-claim financial attribution and complete same-language answers when the transcript enumerates multiple supported items. It also prefers returned source intervals whose transcript wording aligns with the generated answer. Alignment works for English and Arabic text; when the source language and answer language do not provide enough lexical overlap, the timestamp selector falls back to the existing distance-ranked ordering rather than pretending an alignment was found. Timestamp intervals always come from returned source metadata.
+
+The Phase 10.8 audit now distinguishes transport/API success from semantic quality. Its versioned report (report ID **phase10_8_6_answer_source_audit**, schema **1.1.0**) includes per-case checks for:
+- Q07's separately attributed ₹3,000-crore investment, ₹4,999-crore DRT debt figure, ₹6,203-crore debt-certificate figure, and ₹14,100-crore recovery report; the report fails when these claims are omitted, misattributed, silently reconciled, or unsupported by the timestamp summary.
+- AR03 and AR08 question-language fidelity and coverage of the transcript-supported heartbeat, blood movement, lung/breathing, stomach, and eyelid-blinking concepts.
+- Annotated evidence presence in the retrieved context, returned sources, and plain-text timestamp summary.
+- UTF-8/encoding integrity, generation context-budget diagnostics, and consistent server retrieval configuration.
+
+The script exits with code **1** if any HTTP request fails **or** any acceptance check fails. The cases_succeeded field continues to describe successful HTTP responses only; quality_passed is the separate release gate. The annotations in scripts/chat_answer_source_audit.py are pinned to the observed chunk IDs for the experiment-caption-segments namespace. When curating new namespaces, verify their actual chunk IDs against the transcript rather than copying these IDs blindly.
+
+After CI passes, start the local backend with the unchanged experiment-caption-segments namespace and existing retrieval configuration. Run the audit from a second terminal with a fresh output path:
+
+    .\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_6_answer_source_audit_20261019.json
+
+**Final closure criteria:** all three requests return valid responses; quality_passed is true; retrieval configuration is consistent; all answer-content, evidence-source, timestamp-alignment, encoding, and context-budget checks pass; and the full CI suite is green. A report with cases_succeeded: 3 but quality_passed: false is a failed acceptance run and must not be treated as Phase 10.8 completion. This phase changes only prompt guidance, response timestamp selection, audit annotations/checks, tests, and documentation; no embedding, retrieval-ranking, threshold, or index-format changes are made, so reindexing is not required.
