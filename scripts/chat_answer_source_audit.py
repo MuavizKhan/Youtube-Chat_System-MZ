@@ -202,9 +202,10 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     has_4999 = bool(_amount_clauses(answer, r"(?<!\d)4[ ,\u202f]?999(?!\d)"))
     has_6203 = bool(_amount_clauses(answer, r"(?<!\d)6[ ,\u202f]?203(?!\d)"))
     uncertainty_terms = (
-        r"unclear|not clear|does not (?:clearly )?explain|doesn't (?:clearly )?explain|not explained|"
+        r"unclear|not clear|does not (?:clearly )?(?:explain|establish|reconcile)|"
+        r"doesn't (?:clearly )?(?:explain|establish|reconcile)|not explained|"
         r"cannot reconcile|can't reconcile|relationship between|separately|"
-        r"different figures|distinct figures|does not establish"
+        r"different figures|distinct figures"
     )
     uncertainty_preserved = (
         has_4999
@@ -392,7 +393,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         if not group["present_in_final_context"]
     ]
     quality_checks.append(_quality_check(
-        "annotated_evidence_in_generation_context",
+        "annotated_evidence_in_retrieved_context",
         not missing_context_groups,
         (
             "All annotated evidence groups are represented in the retrieved context."
