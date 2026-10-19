@@ -3058,6 +3058,63 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert "9,000 crore recovered" not in answer
 
 @pytest.mark.unit
+def test_rag_chain_suppresses_unverified_financial_draft_when_safe_extraction_fails(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees into Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6203. "
+        "A Ministry of Finance report discusses recovery of 14,100 crore rupees."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(102, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [102],
+                "citation_chunk_ids": [102],
+            },
+        ),
+    )
+    # Simulate evidence that fails the stricter source-local fallback contract.
+    # The repair can still fail, but its unsupported numeric draft must not leak.
+    monkeypatch.setattr(
+        chain,
+        "_build_financial_evidence_fallback",
+        lambda **kwargs: None,
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return (
+            "The debt was 6,23 crore and 6,2003 crore, and 14,100 crore was recovered."
+            if len(calls) == 1
+            else "The debt is 6,0002 crore, with 9,000 crore recovered."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    assert len(calls) == 2
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is False
+    assert result["generation_trace"]["grounded_financial_fallback_used"] is False
+    assert result["generation_trace"]["financial_answer_suppressed"] is True
+    assert result["answer"] == chain.FINANCIAL_VERIFICATION_FALLBACK
+    assert "6,23" not in result["answer"]
+    assert "6,2003" not in result["answer"]
+    assert "6,0002" not in result["answer"]
+    assert "9,000" not in result["answer"]
+
+
+@pytest.mark.unit
 def test_financial_fallback_preserves_report_attribution_split_across_caption_rows():
     context = """[SOURCE 1]
 Transcript caption segments in chronological order:
