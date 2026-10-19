@@ -371,3 +371,21 @@ def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chun
     assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
     assert audit["quality"]["passed"] is False
     assert "annotated_evidence_in_retrieved_context" in audit["quality"]["failed_checks"]
+
+
+def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figures():
+    answer = (
+        "Vijay invested 3,000 crore in Kingfisher. The DRT judgment debt was "
+        "4,999 crore plus interest. The debt certificate lists 6,203 crore. "
+        "The Ministry of Finance report says 14,100 crore was recovered. "
+        "The DRT and certificate figures are separate."
+    )
+
+    checks = _answer_quality_checks("Q07", answer)
+    results = {item["name"]: item["passed"] for item in checks}
+
+    assert results["investment_3000"] is True
+    assert results["drt_4999"] is True
+    assert results["certificate_6203"] is True
+    assert results["recovery_source_attribution"] is True
+    assert results["unclear_relationship_preserved"] is False
