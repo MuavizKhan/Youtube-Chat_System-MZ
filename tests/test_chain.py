@@ -2611,6 +2611,18 @@ def test_generation_repair_instruction_detects_missing_and_unsupported_financial
         context,
     ) is None
 
+    merely_separated = complete_answer.replace(
+        "The transcript does not clearly explain how the DRT and certificate figures relate.",
+        "The DRT and certificate figures are separate.",
+    )
+    repair_for_uncertainty = chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        merely_separated,
+        context,
+    )
+    assert repair_for_uncertainty is not None
+    assert "does not clearly relate" in repair_for_uncertainty.lower()
+
 
 @pytest.mark.unit
 def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
