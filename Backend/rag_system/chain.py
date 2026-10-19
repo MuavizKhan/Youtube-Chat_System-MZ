@@ -2662,11 +2662,57 @@ def _build_financial_evidence_fallback(
         return None
 
     required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
+    source_blocks: dict[int, str] = {}
+    source_markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", context or ""))
+    for index, marker in enumerate(source_markers):
+        block_end = (
+            source_markers[index + 1].start()
+            if index + 1 < len(source_markers)
+            else len(context or "")
+        )
+        source_blocks[int(marker.group(1))] = (context or "")[marker.end():block_end]
+
     claims_by_topic: dict[str, dict[str, Any]] = {}
     for claim in _money_amount_clauses(context or ""):
-        topic = claim.get("topic")
         amount = claim.get("amount")
         claim_text = re.sub(r"\s+", " ", str(claim.get("text", ""))).strip()
+        source_id = claim.get("source_id")
+        source_block = (
+            source_blocks.get(source_id, "")
+            if isinstance(source_id, int)
+            else (context or "")
+        )
+        topic = claim.get("topic")
+        local_topic = _financial_claim_topic(claim_text)
+        if local_topic is not None:
+            topic = local_topic
+
+        # If the amount caption only says that money was recovered, use a
+        # Ministry/Finance/report attribution only when that attribution occurs
+        # in the same retrieved SOURCE block. This handles split caption rows
+        # without borrowing a report label from an unrelated source.
+        has_recovery_context = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            claim_text,
+            re.IGNORECASE,
+        ))
+        has_report_in_source = bool(re.search(
+            r"\b(?:ministry|finance|report)\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        if (
+            topic == "recovery"
+            and has_recovery_context
+            and has_report_in_source
+            and re.search(
+                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                source_block,
+                re.IGNORECASE,
+            )
+        ):
+            topic = "recovery_report"
+
         if (
             topic not in required_topics
             or not isinstance(amount, (int, float))
@@ -2674,11 +2720,25 @@ def _build_financial_evidence_fallback(
             or not claim_text
         ):
             continue
+
+        if topic == "recovery_report" and not re.search(
+            r"\b(?:ministry|finance|report)\b",
+            claim_text,
+            re.IGNORECASE,
+        ):
+            attribution_match = re.search(
+                r"\b(?:Ministry of Finance report|Ministry report|Finance report|report)\b",
+                source_block,
+                re.IGNORECASE,
+            )
+            if attribution_match:
+                attribution = attribution_match.group(0)
+                claim_text = f"{attribution} states that {claim_text}"
+
         # Keep the first source-attached claim for each family; context is
         # ordered as presented to the generator, and duplicate overlaps are
-        # expected in neighboring retrieved chunks.
-        # Group a clearly recognized bare integer for readability without
-        # inventing a unit or changing the numerical value in the transcript.
+        # expected in neighboring retrieved chunks. Format large bare integers
+        # for readability without inferring a currency unit or scale.
         if float(amount).is_integer():
             bare_value = str(int(float(amount)))
             if len(bare_value) >= 4:
@@ -2687,7 +2747,10 @@ def _build_financial_evidence_fallback(
                     f"{int(float(amount)):,}",
                     claim_text,
                 )
-        claims_by_topic.setdefault(topic, {**claim, "text": claim_text})
+        claims_by_topic.setdefault(
+            topic,
+            {**claim, "topic": topic, "text": claim_text},
+        )
 
     if any(topic not in claims_by_topic for topic in required_topics):
         return None
