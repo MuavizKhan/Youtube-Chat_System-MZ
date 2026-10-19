@@ -647,6 +647,8 @@ The follow-up to the Phase 10.8.7 live audit hardens two answer/source contracts
 
 Focused regression tests cover report attribution split across neighboring caption rows, rejection of report labels borrowed from a different source block, and the late eye-sound interval in English and Arabic answers.
 
+- **Fail-closed financial draft handling.** If a financial answer still fails the deterministic repair check and the strict source-bound extractor cannot prove the required claims, the pipeline suppresses the invalid generated draft instead of returning malformed or unsupported figures. It returns a cautious verification message and retains retrieved sources for inspection. This safe failure is not counted as a quality pass; the live audit must still pass all Q07 content and attribution checks.
+
 Run the full backend suite after CI dependency/compile checks:
 
 ```powershell
