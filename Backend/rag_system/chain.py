@@ -1553,6 +1553,16 @@ def _generation_line_relevance(
         # For amount questions, retain lines containing actual monetary figures
         # even when the transcript uses different wording from the question.
         overlap += 5
+    if financial_question and re.search(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|interest|"
+        r"recover(?:ed|y|ies)?|ministry|finance|report|invest(?:ed|ment)?|"
+        r"principal|liabilit\w*|loan)\b",
+        transcript_text,
+        re.IGNORECASE,
+    ):
+        # Some captions give a material figure as a bare number without a nearby
+        # currency/crore token. Prefer the claim-bearing caption in that case.
+        overlap += 4
     return overlap
 
 
@@ -1806,6 +1816,33 @@ def _relevant_financial_amounts(text: str) -> set[float]:
     return amounts
 
 
+def _financial_topics_in_text(text: str) -> set[str]:
+    """Identify material financial claim families even when a number has no unit."""
+    topics: set[str] = set()
+    for clause in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.split(text or ""):
+        if not clause.strip():
+            continue
+        topic = _financial_claim_topic(clause)
+        if topic:
+            topics.add(topic)
+    normalized = (text or "").lower()
+    # Claim labels can live in the caption immediately before/after the number.
+    if re.search(r"\bcertificate\b", normalized):
+        topics.add("certificate")
+    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", normalized):
+        topics.add("drt_debt")
+    if (
+        re.search(r"\b(?:ministry|finance|report)\b", normalized)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", normalized)
+    ):
+        topics.add("recovery_report")
+    if re.search(r"\b(?:invest(?:ed|ment)?|injected|infused|put)\b", normalized):
+        topics.add("investment")
+    if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", normalized):
+        topics.add("recovery")
+    return topics
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
@@ -1893,6 +1930,7 @@ def build_generation_context(
             "source_chunk_ids": source_chunk_ids,
             "source_group": source_group,
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
+            "financial_topics": _financial_topics_in_text(rendered) if financial_question else set(),
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
@@ -1930,21 +1968,60 @@ def build_generation_context(
     priority_records = priority_order[:selected_count]
 
     if financial_question:
-        # Preserve breadth of distinct financial evidence before filling the
-        # remaining prompt budget by ordinary relevance. This prevents a few
-        # high-similarity passages from crowding out a DRT/certificate/recovery
-        # figure that is only stated once.
+        # Preserve distinct financial claim families first. A bare caption number
+        # (for example a debt certificate's "6203") may not match the currency
+        # parser, so inclusion must not depend on amount parsing alone.
+        topic_frequency: dict[str, int] = {}
+        for record in records:
+            for topic in record["financial_topics"]:
+                topic_frequency[topic] = topic_frequency.get(topic, 0) + 1
+
+        diverse_records = []
+        chosen_indices: set[int] = set()
+        covered_topics: set[str] = set()
+        while len(diverse_records) < selected_count:
+            choices = []
+            for record in records:
+                if record["index"] in chosen_indices:
+                    continue
+                new_topics = record["financial_topics"] - covered_topics
+                if not new_topics:
+                    continue
+                rarity = sum(
+                    1.0 / topic_frequency[topic]
+                    for topic in new_topics
+                    if topic_frequency.get(topic, 0) > 0
+                )
+                choices.append((
+                    rarity,
+                    len(new_topics),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            diverse_records.append(chosen)
+            chosen_indices.add(chosen["index"])
+            covered_topics.update(chosen["financial_topics"])
+
+        # Once topic coverage is protected, use distinct amount coverage as a
+        # secondary signal, then fill the remaining slots by relevance.
         amount_frequency: dict[float, int] = {}
         for record in records:
             for amount in record["amounts"]:
                 amount_frequency[amount] = amount_frequency.get(amount, 0) + 1
 
-        uncovered_records = list(records)
-        amount_diverse_records = []
         covered_amounts: set[float] = set()
-        while len(amount_diverse_records) < selected_count:
+        for record in diverse_records:
+            covered_amounts.update(record["amounts"])
+        while len(diverse_records) < selected_count:
             choices = []
-            for record in uncovered_records:
+            for record in records:
+                if record["index"] in chosen_indices:
+                    continue
                 new_amounts = record["amounts"] - covered_amounts
                 if not new_amounts:
                     continue
@@ -1964,18 +2041,17 @@ def build_generation_context(
             if not choices:
                 break
             chosen = max(choices, key=lambda item: item[:-1])[-1]
-            amount_diverse_records.append(chosen)
+            diverse_records.append(chosen)
+            chosen_indices.add(chosen["index"])
             covered_amounts.update(chosen["amounts"])
-            uncovered_records.remove(chosen)
 
-        chosen_indices = {record["index"] for record in amount_diverse_records}
         for record in priority_order:
-            if len(amount_diverse_records) >= selected_count:
+            if len(diverse_records) >= selected_count:
                 break
             if record["index"] not in chosen_indices:
-                amount_diverse_records.append(record)
+                diverse_records.append(record)
                 chosen_indices.add(record["index"])
-        priority_records = amount_diverse_records[:selected_count]
+        priority_records = diverse_records[:selected_count]
     # Reserve two characters for each separator so the final concatenation
     # can never exceed the budget due to inter-group whitespace.
     per_group_budget = max(
