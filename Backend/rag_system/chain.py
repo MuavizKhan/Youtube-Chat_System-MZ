@@ -2326,15 +2326,15 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             "source_id": source_id,
         })
 
-    def caption_context(position: int) -> tuple[str, str]:
-        """Return this caption plus up to one neighboring caption in the same source."""
+    def caption_context(position: int) -> tuple[str, str, int | None]:
+        """Return this caption, one same-source neighbor, and its source ID."""
         row_index = next(
             (i for i, row in enumerate(caption_rows)
              if row["start"] <= position <= row["end"]),
             None,
         )
         if row_index is None:
-            return "", ""
+            return "", "", None
         row = caption_rows[row_index]
         indices = [row_index]
         for neighbor_index in (row_index - 1, row_index + 1):
@@ -2345,7 +2345,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 indices.append(neighbor_index)
         indices.sort()
         local_text = " ".join(caption_rows[index]["text"] for index in indices)
-        return row["text"], local_text
+        return row["text"], local_text, row["source_id"]
 
     recognized_spans = []
     for match in _MONEY_AMOUNT_PATTERN.finditer(text):
@@ -2366,13 +2366,18 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         if not math.isfinite(amount):
             continue
 
-        own_caption, nearby_captions = caption_context(match.start())
+        own_caption, nearby_captions, source_id = caption_context(match.start())
         topic = _financial_claim_topic(clause)
         claim_text = clause
         if own_caption:
             local_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(nearby_captions)
             topic = local_topic or topic or nearby_topic
+            # A caption may say only "recovered" while the immediately adjacent
+            # caption names the Ministry/Finance report. Promote that local
+            # recovery claim to the more specific report attribution.
+            if local_topic == "recovery" and nearby_topic == "recovery_report":
+                topic = "recovery_report"
             if not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
                 claim_text = nearby_captions or own_caption
             elif topic is None and nearby_topic is not None:
@@ -2382,6 +2387,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             "amount": amount,
             "text": claim_text,
             "topic": topic,
+            "source_id": source_id,
         })
         recognized_spans.append((match.start(), match.end()))
 
@@ -2396,9 +2402,13 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             absolute_end = row["start"] + match.end()
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
-            own_caption, nearby_captions = caption_context(absolute_start)
+            own_caption, nearby_captions, source_id = caption_context(absolute_start)
             local_text = nearby_captions or own_caption
-            topic = _financial_claim_topic(own_caption) or _financial_claim_topic(local_text)
+            own_topic = _financial_claim_topic(own_caption)
+            nearby_topic = _financial_claim_topic(local_text)
+            topic = own_topic or nearby_topic
+            if own_topic == "recovery" and nearby_topic == "recovery_report":
+                topic = "recovery_report"
             if topic is None:
                 continue
             try:
@@ -2409,6 +2419,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "amount": amount,
                 "text": local_text,
                 "topic": topic,
+                "source_id": source_id,
             })
 
     # Validation also runs on plain generated prose, which has no timestamped
@@ -2437,6 +2448,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "amount": amount,
                 "text": clause,
                 "topic": topic,
+                "source_id": None,
             })
     return records
 
@@ -2444,15 +2456,17 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
 def _financial_claim_topic(clause: str) -> str | None:
     """Assign a conservative primary topic to distinguish similar financial figures."""
     text = (clause or "").lower()
-    if re.search(r"\bcertificate\b", text):
-        return "certificate"
-    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", text):
-        return "drt_debt"
+    # Prefer the compound report/recovery attribution over broad words like
+    # "certificate" when a single caption group discusses both claims.
     if (
         re.search(r"\b(?:ministry|finance|report)\b", text)
         and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text)
     ):
         return "recovery_report"
+    if re.search(r"\bcertificate\b", text):
+        return "certificate"
+    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", text):
+        return "drt_debt"
     if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text):
         return "recovery"
     if re.search(r"\b(?:invest(?:ed|ment)?|put|injected|infused)\b", text):
