@@ -589,7 +589,12 @@ def run_audit(
         if isinstance(audit.get("effective_retrieval_config"), dict)
     ]
     effective_config = configs[0] if configs else None
-    configs_consistent = bool(configs) and all(config == configs[0] for config in configs)
+    # Require one effective config for every attempted case. A subset of
+    # matching configurations must not masquerade as cross-case consistency.
+    configs_consistent = (
+        len(configs) == len(AUDIT_CASES)
+        and all(config == configs[0] for config in configs)
+    )
 
     cases_succeeded = sum(item.get("status") == "success" for item in results)
     cases_failed = sum(item.get("status") != "success" for item in results)
