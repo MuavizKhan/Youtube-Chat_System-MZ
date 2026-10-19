@@ -2040,6 +2040,56 @@ _BODILY_SOUND_CONCEPTS = (
 )
 
 
+def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
+    """Extract each amount with its local wording for source/claim validation."""
+    records = []
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
+        left = 0
+        right = len(text)
+        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        clause = text[left:right].strip()
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if math.isfinite(amount):
+            records.append({
+                "amount": amount,
+                "text": clause,
+                "topic": _financial_claim_topic(clause),
+            })
+    return records
+
+
+def _financial_claim_topic(clause: str) -> str | None:
+    """Assign a conservative primary topic to distinguish similar financial figures."""
+    text = (clause or "").lower()
+    if re.search(r"\bcertificate\b", text):
+        return "certificate"
+    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", text):
+        return "drt_debt"
+    if (
+        re.search(r"\b(?:ministry|finance|report)\b", text)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text)
+    ):
+        return "recovery_report"
+    if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text):
+        return "recovery"
+    if re.search(r"\b(?:invest(?:ed|ment)?|put|injected|infused)\b", text):
+        return "investment"
+    if re.search(r"\b(?:cbi|ed|alleg(?:ation|ed)|accus\w*|money laundering)\b", text):
+        return "allegation"
+    if re.search(r"\b(?:debt|loan|liabilit\w*|interest|owed|owes|borrowed)\b", text):
+        return "debt"
+    return None
+
+
 def _generation_repair_instruction(
     question: str,
     answer: str,
@@ -2058,39 +2108,31 @@ def _generation_repair_instruction(
         re.IGNORECASE,
     ))
     if is_financial_question:
-        claims = []
-        for match in _MONEY_AMOUNT_PATTERN.finditer(context_text):
-            left = 0
-            right = len(context_text)
-            for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(context_text):
-                if boundary.end() <= match.start():
-                    left = boundary.end()
-                elif boundary.start() >= match.end():
-                    right = boundary.start()
-                    break
-            clause = context_text[left:right].strip()
-            terms = _claim_terms(clause)
-            if terms & _FINANCIAL_MATERIAL_TERMS:
-                token = match.group("currency_amount") or match.group("amount")
-                try:
-                    amount = float(token.replace(",", ""))
-                except (AttributeError, ValueError):
-                    continue
-                if math.isfinite(amount):
-                    claims.append({"amount": amount, "text": clause})
+        claims = [
+            claim for claim in _money_amount_clauses(context_text)
+            if _claim_terms(claim["text"]) & _FINANCIAL_MATERIAL_TERMS
+        ]
 
         # Deduplicate overlapping chunks that repeat the same caption clause.
         unique_claims = []
         seen_claims = set()
         for claim in claims:
-            key = (claim["amount"], re.sub(r"\s+", " ", claim["text"]).casefold())
+            key = (
+                claim["amount"],
+                claim["topic"],
+                re.sub(r"\s+", " ", claim["text"]).casefold(),
+            )
             if key in seen_claims:
                 continue
             seen_claims.add(key)
             unique_claims.append(claim)
 
         context_amounts = {claim["amount"] for claim in unique_claims}
-        answer_amounts = set(_extract_money_amounts(answer_text))
+        answer_claims = [
+            claim for claim in _money_amount_clauses(answer_text)
+            if _claim_terms(claim["text"]) & _FINANCIAL_MATERIAL_TERMS
+        ]
+        answer_amounts = {claim["amount"] for claim in answer_claims}
         missing_amounts = sorted(
             amount for amount in context_amounts
             if not any(math.isclose(amount, answer_amount, rel_tol=0.0, abs_tol=0.1)
@@ -2101,10 +2143,23 @@ def _generation_repair_instruction(
             if not any(math.isclose(amount, context_amount, rel_tol=0.0, abs_tol=0.1)
                        for context_amount in context_amounts)
         )
-        if len(context_amounts) >= 2 and (missing_amounts or unsupported_amounts):
+        missing_claim_topics = [
+            claim for claim in unique_claims
+            if claim["topic"] is not None
+            and not any(
+                math.isclose(claim["amount"], answer_claim["amount"], rel_tol=0.0, abs_tol=0.1)
+                and answer_claim["topic"] == claim["topic"]
+                for answer_claim in answer_claims
+            )
+        ]
+        has_multiple_expected_claims = len(context_amounts) >= 2
+        if has_multiple_expected_claims and (
+            missing_amounts or unsupported_amounts or missing_claim_topics
+        ):
             relevant_claims = [
                 claim for claim in unique_claims
                 if claim["amount"] in missing_amounts
+                or claim in missing_claim_topics
                 or claim["amount"] in context_amounts
             ]
             evidence_lines = []
@@ -2118,6 +2173,11 @@ def _generation_repair_instruction(
                 issues.append("omitted supported amount(s): " + ", ".join(f"{amount:g}" for amount in missing_amounts))
             if unsupported_amounts:
                 issues.append("unsupported amount(s) in draft: " + ", ".join(f"{amount:g}" for amount in unsupported_amounts))
+            if missing_claim_topics:
+                issues.append("missing or misattributed amount-to-claim association(s): " + ", ".join(
+                    f"{claim['amount']:g} should remain associated with {claim['topic']}"
+                    for claim in missing_claim_topics
+                ))
             instructions.append(
                 "FINANCIAL ANSWER REPAIR. Rewrite the answer from scratch using only the transcript context. "
                 "Preserve the exact monetary amounts and units; do not round, scale, infer, or silently reconcile figures. "
