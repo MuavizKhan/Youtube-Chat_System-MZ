@@ -54,7 +54,8 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
         "video_id": "fAd2nKfrDB8",
         "question": "What bodily sounds might people begin to hear in the room?",
         "evidence_groups": [
-            {"label": "heartbeat and blood movement phrase", "candidate_chunk_ids": [2]},
+            {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
         ],
     },
     {
@@ -62,7 +63,8 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
         "video_id": "fAd2nKfrDB8",
         "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
         "evidence_groups": [
-            {"label": "heartbeat and blood movement phrase", "candidate_chunk_ids": [2]},
+            {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
         ],
     },
 )
