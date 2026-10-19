@@ -613,6 +613,11 @@ def run_audit(
         if item.get("status") != "success"
         or not item.get("audit", {}).get("quality", {}).get("passed", False)
     ]
+    if not configs_consistent:
+        quality_failures.append({
+            "case_id": "ALL",
+            "failed_checks": ["effective_server_configuration_consistency"],
+        })
     quality_passed = (
         cases_succeeded == len(AUDIT_CASES)
         and cases_failed == 0
