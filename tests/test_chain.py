@@ -404,6 +404,86 @@ def test_sanitize_generated_answer_removes_model_authored_timestamp_summary():
 
 
 @pytest.mark.unit
+def test_build_generation_context_keeps_all_groups_when_within_budget():
+    groups = [
+        {
+            "documents": [doc(1, 10, 20, "short relevant transcript")],
+            "start": 10,
+            "end": 20,
+            "distance": 0.2,
+        }
+    ]
+
+    result = chain.build_generation_context(groups, max_chars=2000)
+
+    assert "short relevant transcript" in result["context"]
+    assert result["diagnostics"]["reduced"] is False
+    assert result["diagnostics"]["groups_available"] == 1
+    assert result["diagnostics"]["groups_included"] == 1
+    assert result["diagnostics"]["final_chars"] <= 2000
+
+
+@pytest.mark.unit
+def test_build_generation_context_prioritizes_relevance_then_restores_chronology():
+    groups = [
+        {
+            "documents": [doc(1, 0, 10, "EARLY_EVIDENCE " + "a" * 600)],
+            "start": 0,
+            "end": 10,
+            "distance": 0.5,
+        },
+        {
+            "documents": [doc(2, 100, 110, "MIDDLE_EVIDENCE " + "b" * 600)],
+            "start": 100,
+            "end": 110,
+            "distance": 0.1,
+        },
+        {
+            "documents": [doc(3, 200, 210, "LATE_EVIDENCE " + "c" * 600)],
+            "start": 200,
+            "end": 210,
+            "distance": 0.2,
+        },
+    ]
+    second_length = len(chain.format_source_group(groups[1], 2))
+    third_length = len(chain.format_source_group(groups[2], 3))
+    budget = second_length + third_length + 2
+
+    result = chain.build_generation_context(groups, max_chars=budget)
+    context = result["context"]
+
+    assert len(context) <= budget
+    assert "EARLY_EVIDENCE" not in context
+    assert "MIDDLE_EVIDENCE" in context
+    assert "LATE_EVIDENCE" in context
+    assert context.index("MIDDLE_EVIDENCE") < context.index("LATE_EVIDENCE")
+    assert result["diagnostics"]["groups_available"] == 3
+    assert result["diagnostics"]["groups_included"] == 2
+    assert result["diagnostics"]["reduced"] is True
+
+
+@pytest.mark.unit
+def test_build_generation_context_shortens_single_oversized_source_at_word_boundary():
+    large_text = "transcriptword " * 1000
+    groups = [
+        {
+            "documents": [doc(1, 10, 100, large_text)],
+            "start": 10,
+            "end": 100,
+            "distance": 0.1,
+        }
+    ]
+
+    result = chain.build_generation_context(groups, max_chars=900)
+
+    assert len(result["context"]) <= 900
+    assert "Transcript:" in result["context"]
+    assert "Transcript excerpt shortened to fit the generation context budget." in result["context"]
+    assert result["diagnostics"]["groups_included"] == 1
+    assert result["diagnostics"]["reduced"] is True
+
+
+@pytest.mark.unit
 def test_prompt_role_mapping():
     prompt=chain.RAG_PROMPT.invoke({"context":"Transcript evidence","question":"What happened?"})
     messages=chain.prompt_to_messages(prompt)
@@ -645,6 +725,9 @@ def test_build_rag_chain_uses_separate_generation_client(monkeypatch):
     assert result["answer"] == "grounded answer"
     assert result["retrieval_trace"]["final_stage"] == "initial_strict"
     assert result["generation_trace"]["generated"] is True
+    assert result["generation_trace"]["context_budget"]["groups_available"] == 1
+    assert result["generation_trace"]["context_budget"]["groups_included"] == 1
+    assert result["generation_trace"]["context_budget"]["reduced"] is False
     assert observed["client"] is generation_client
 
 @pytest.mark.unit
