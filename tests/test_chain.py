@@ -3238,6 +3238,36 @@ def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
 
 
 @pytest.mark.unit
+def test_eye_anatomy_without_sound_context_does_not_add_eye_sound_timestamp():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and even the subtle sound of your eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.2,
+                "transcript_text": (
+                    "The presenter has blue eyes and wears glasses."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37")
+    assert "09:49–10:58" not in result
+
+
+@pytest.mark.unit
 def test_arabic_eye_sound_answer_aligns_to_english_caption_that_only_says_eyes():
     answer = (
         "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
