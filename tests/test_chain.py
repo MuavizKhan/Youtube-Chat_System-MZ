@@ -3004,3 +3004,55 @@ def test_english_sound_answer_aligns_to_arabic_eye_closing_caption_variant():
     assert result.endswith("Relevant timestamps: 02:33–03:37, 09:49–10:58")
     assert "04:15–05:18" not in result
 
+@pytest.mark.unit
+def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still_fails(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees into Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6203. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(101, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [101],
+                "citation_chunk_ids": [101],
+            },
+        ),
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return (
+            "The debt was 6,23 crore and 6,2003 crore, and 14,100 crore was recovered."
+            if len(calls) == 1
+            else "The debt is 6,0002 crore, with 9,000 crore recovered."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    answer = result["answer"]
+    assert len(calls) == 2
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is False
+    assert result["generation_trace"]["grounded_financial_fallback_used"] is True
+    assert "3,000 crore" in answer
+    assert "4,999 crore" in answer
+    assert "certificate gives a figure of 6203" in answer
+    assert "14,100 crore" in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+    assert "6,2003" not in answer
+    assert "6,0002" not in answer
+    assert "9,000 crore recovered" not in answer
+
