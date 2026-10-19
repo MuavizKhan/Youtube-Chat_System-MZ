@@ -2663,6 +2663,16 @@ def _build_financial_evidence_fallback(
         # Keep the first source-attached claim for each family; context is
         # ordered as presented to the generator, and duplicate overlaps are
         # expected in neighboring retrieved chunks.
+        # Group a clearly recognized bare integer for readability without
+        # inventing a unit or changing the numerical value in the transcript.
+        if float(amount).is_integer():
+            bare_value = str(int(float(amount)))
+            if len(bare_value) >= 4:
+                claim_text = re.sub(
+                    rf"(?<![\\w,:]){re.escape(bare_value)}(?![\\w,:]|\\.\\d)",
+                    f"{int(float(amount)):,}",
+                    claim_text,
+                )
         claims_by_topic.setdefault(topic, {**claim, "text": claim_text})
 
     if any(topic not in claims_by_topic for topic in required_topics):
