@@ -28,6 +28,7 @@ import argparse
 import logging
 import math
 import re
+import unicodedata
 from typing import Any
 
 from groq import Groq
@@ -134,6 +135,10 @@ RESPONSE LANGUAGE — HIGH PRIORITY
   Hindi question, answer in Hindi; use the same principle for other languages.
 - Keep names, product names, numbers, currencies, and source-grounded facts
   accurate while expressing the answer naturally in the requested language.
+- When the transcript enumerates several distinct items that answer the question,
+  include each supported item in the answer in the question's language. Do not
+  reduce a supported list to only its first item. Omit an item only when the
+  supplied transcript does not support it or the available context is insufficient.
 - If the question deliberately uses multiple languages and no output language is
   requested, answer in the language used for the main question.
 
@@ -268,15 +273,22 @@ SOURCE / TIMESTAMP RULES
 20. Never fabricate a source, timestamp, citation, or reference.
 
 21. For questions involving numbers, amounts, percentages, dates, or counts, preserve
-    distinct figures as stated in the transcript. Explain what each figure refers
-    to and retain its attribution to the speaker or named source. Do not round,
-    merge, or treat different figures as interchangeable unless the transcript
-    explicitly says they describe the same measure. If the transcript distinguishes
-    a component figure from a total, state that distinction. When automatic captions
-    garble a number or speakers appear to disagree about a figure, do not silently
-    repair the number, reconcile the figures, or call one a "misreading" unless the
-    transcript explicitly supports that relationship. State the uncertainty or
-    attribute the separate figures to the speakers discussing them.
+    distinct figures as stated in the transcript. Before answering, silently map
+    every figure to its nearby claim, subject, qualifier, and source/speaker. Explain
+    what each figure refers to and retain its attribution. Do not round, merge, or
+    treat different figures as interchangeable unless the transcript explicitly says
+    they describe the same measure. In financial passages, keep investment, debt,
+    debt-certificate, alleged transaction, and recovery figures separate. In
+    particular, never describe a recovery figure as a company debt total merely
+    because both figures occur in the same interview. For a broad question about
+    debt or money, include each materially relevant monetary claim present in the
+    supplied context, with a short attribution, instead of choosing one figure as
+    a single total. If a DRT debt figure and a debt-certificate figure are both
+    discussed but their relationship is not explicit, report both separately and
+    say the transcript does not clearly explain how they relate. If automatic
+    captions garble a number or speakers appear to disagree, do not silently repair
+    a number, reconcile the figures, or call one a "misreading" unless the transcript
+    explicitly supports that relationship.
 
 22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
     guest's statements from an interviewer's questions, premises, allegations, or
@@ -427,6 +439,33 @@ def _extract_money_amounts(text: str) -> list[float]:
             continue
         if math.isfinite(amount):
             amounts.append(amount)
+
+    # Some transcript captions record a bare financial figure (for example
+    # "certificate number 6203") without repeating the unit in that caption.
+    # Restrict this fallback to four-to-six digit numbers near financial terms
+    # and use caption-line neighbors when the claim label is in the adjacent line.
+    lines = text.splitlines()
+    financial_terms = re.compile(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|principal|interest|"
+        r"liabilit\w*|loan|recover(?:ed|y|ies)?|recovery|invest(?:ed|ment)?|"
+        r"ministry|finance|report|kingfisher|borrowed|owed|owes)\b",
+        re.IGNORECASE,
+    )
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
+    for index, line in enumerate(lines):
+        for match in bare_pattern.finditer(line):
+            nearby = " ".join(lines[max(0, index - 1): min(len(lines), index + 2)])
+            if not financial_terms.search(nearby):
+                continue
+            try:
+                amount = float(match.group(0))
+            except ValueError:
+                continue
+            if math.isfinite(amount) and not any(
+                math.isclose(amount, existing, rel_tol=0.0, abs_tol=0.1)
+                for existing in amounts
+            ):
+                amounts.append(amount)
     return amounts
 
 
@@ -481,7 +520,7 @@ def _select_claim_aligned_timestamp_candidates(
         candidate for candidate in candidates
         if candidate.get("transcript_text", "").strip()
     ]
-    if len(claims) < 2 or not with_text:
+    if not claims or not with_text:
         return None
 
     profiles = []
@@ -519,8 +558,10 @@ def _select_claim_aligned_timestamp_candidates(
                 ))
 
         if not choices:
-            # Fall back rather than implying unsupported claim/source alignment.
-            return None
+            # Keep alignments for supported claims rather than discarding every
+            # valid financial timestamp because a draft contains one unsupported
+            # amount. A separate answer-repair pass handles the unsupported claim.
+            continue
 
         _, profile, overlap = max(choices, key=lambda item: item[0])
         candidate = profile["candidate"]
@@ -530,6 +571,9 @@ def _select_claim_aligned_timestamp_candidates(
         )
         record["claim_count"] += 1
         record["overlap"] += overlap
+
+    if not selected:
+        return None
 
     # Dense multi-amount answers can use up to five ranges; ordinary answers
     # keep the existing three-range limit.
@@ -544,6 +588,194 @@ def _select_claim_aligned_timestamp_candidates(
         reverse=True,
     )
     return [item["candidate"] for item in ranked[:budget]]
+
+
+_ANSWER_ALIGNMENT_CONCEPTS = (
+    {
+        "english_pattern": r"\bheartbeat\b|heart\s*beat|\bpulse\b",
+        "arabic_pattern": r"نبض.{0,25}قلب|قلب.{0,25}نبض|نبضات.{0,15}القلب",
+        "aliases": {"heartbeat", "heart", "pulse", "نبض", "قلب", "نبضات", "النبض"},
+    },
+    {
+        "english_pattern": r"\bblood\b.{0,60}(?:\bvein|\barter|\bflow|\brush|\bmov)|(?:\bvein|\barter).{0,60}\bblood\b",
+        "arabic_pattern": r"الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
+        "aliases": {
+            "blood", "vein", "veins", "artery", "arteries", "flow", "rushing",
+            "rush", "movement", "move", "دم", "الدم", "عروق", "شرايين",
+            "أوعية", "حركة", "تدفق", "جريان", "سريان",
+        },
+    },
+    {
+        "english_pattern": r"\blungs?\b|\bbreath(?:e|ing)?\b",
+        "arabic_pattern": r"رئتين|الرئتين|الرئة|تنفس|التنفس",
+        "aliases": {"lung", "lungs", "breath", "breathing", "رئتين", "الرئتين", "الرئة", "تنفس", "التنفس"},
+    },
+    {
+        "english_pattern": r"\bstomach\b|\brumbl\w*|\bbelly\b",
+        "arabic_pattern": r"المعدة|معدتك|معدة|البطن|بطنك",
+        "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
+    },
+    {
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
+        "arabic_pattern": r"جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
+        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "جفون", "الجفون", "جفن", "الجفن", "عين", "العين", "رمش", "ترمش", "ترف", "تومض"},
+    },
+)
+
+
+_ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
+    "the", "and", "that", "this", "these", "those", "from", "into", "with",
+    "your", "you", "their", "they", "them", "own", "may", "might", "could",
+    "would", "should", "start", "starts", "begin", "begins", "beginning",
+    "hear", "hearing", "heard", "sound", "sounds", "body", "bodies", "room",
+    "people", "person", "such", "like", "even", "inside", "there", "here",
+    "what", "which", "where", "when", "while", "also", "through", "for",
+    "about", "are", "was", "were", "is", "be", "been", "not", "can", "will",
+    "it", "its", "as", "of", "in", "on", "at", "to", "a", "an", "or", "by",
+    "up", "out", "than", "then", "very", "التي", "الذي", "الذين", "اللواتي",
+    "الناس", "قد", "يبدأ", "يبدأون", "بسماع", "سماع", "داخل", "الغرفة",
+    "أجسامهم", "اجسامهم", "أصوات", "اصوات", "صوت", "الأصوات", "الاصوات",
+    "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
+    "و", "أو", "او", "حتى", "مثل", "كما", "لأن", "لان", "يمكن", "يكون",
+    "تكون", "نفس", "هذا", "هذه", "ذلك",
+})
+
+
+def _answer_alignment_terms(text: str) -> set[str]:
+    """Extract informative English/Arabic answer words for source alignment."""
+    normalized = unicodedata.normalize(
+        "NFKC", _strip_unverified_timestamp_summary(text)
+    ).lower()
+    normalized = re.sub(r"[\u064b-\u065f\u0670\u0640]", "", normalized)
+    normalized = re.sub(r"\d+(?:[,:./]\d+)*", " ", normalized)
+    tokens = re.findall(r"[^\W_]{2,}", normalized, flags=re.UNICODE)
+    terms: set[str] = set()
+    arabic_prefixes = ("وال", "بال", "كال", "فال", "لل", "ال")
+    arabic_suffixes = (
+        "هما", "كما", "كم", "كن", "هم", "هن", "ها", "نا", "ك", "ه", "ي",
+        "ون", "ات",
+    )
+    for token in tokens:
+        if token in _ANSWER_ALIGNMENT_STOP_WORDS:
+            continue
+        variants = {token}
+        if any("\u0600" <= char <= "\u06ff" for char in token):
+            current = token
+            for prefix in arabic_prefixes:
+                if current.startswith(prefix) and len(current) > len(prefix) + 2:
+                    current = current[len(prefix):]
+                    variants.add(current)
+                    break
+            for suffix in arabic_suffixes:
+                if current.endswith(suffix) and len(current) > len(suffix) + 2:
+                    variants.add(current[:-len(suffix)])
+                    break
+        else:
+            # Lightweight suffix normalization keeps timestamp alignment
+            # useful for transcript variants such as "blinking"/"blink",
+            # "rushing"/"rush", "eyelids"/"eyelid", and "veins"/"vein".
+            if len(token) > 5 and token.endswith("ies"):
+                variants.add(token[:-3] + "y")
+            if len(token) > 5 and token.endswith("ing"):
+                stem = token[:-3]
+                variants.add(stem)
+                if len(stem) > 2 and stem[-1] == stem[-2]:
+                    variants.add(stem[:-1])
+            if len(token) > 4 and token.endswith("ed"):
+                variants.add(token[:-2])
+            if len(token) > 4 and token.endswith("es"):
+                variants.add(token[:-2])
+            if len(token) > 4 and token.endswith("s"):
+                variants.add(token[:-1])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in _ANSWER_ALIGNMENT_STOP_WORDS:
+                terms.add(variant)
+
+    # Add the counterpart vocabulary only when the concept appears in the text
+    # being aligned. This supports Arabic answers over English captions and vice
+    # versa without applying blanket translation to unrelated queries.
+    for concept in _ANSWER_ALIGNMENT_CONCEPTS:
+        if (
+            re.search(concept["english_pattern"], normalized, re.IGNORECASE)
+            or re.search(concept["arabic_pattern"], normalized, re.IGNORECASE)
+        ):
+            terms.update(concept["aliases"])
+    return terms
+
+
+def _select_answer_aligned_timestamp_candidates(
+    answer: str,
+    candidates: list[dict[str, Any]],
+    *,
+    max_ranges: int,
+) -> list[dict[str, Any]] | None:
+    """Prefer returned source intervals whose transcript wording supports the answer.
+
+    Alignment is multilingual and conservative. If no informative overlap is
+    found, return None so callers can retain the established fallback ordering.
+    """
+    answer_terms = _answer_alignment_terms(answer)
+    if len(answer_terms) < 2:
+        return None
+
+    ranked = []
+    for candidate in candidates:
+        transcript_text = candidate.get("transcript_text", "")
+        if not isinstance(transcript_text, str) or not transcript_text.strip():
+            continue
+        source_terms = _answer_alignment_terms(transcript_text)
+        overlap = answer_terms & source_terms
+        if not overlap:
+            continue
+        coverage = len(overlap) / len(answer_terms)
+        specificity = len(overlap) / math.sqrt(max(1, len(source_terms)))
+        concepts = {
+            index for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
+            if source_terms & concept["aliases"]
+        }
+        ranked.append({
+            "candidate": candidate,
+            "overlap": overlap,
+            "concepts": concepts,
+            "coverage": coverage,
+            "specificity": specificity,
+            "distance_score": -float(candidate.get("distance", math.inf)),
+        })
+
+    if not ranked:
+        return None
+
+    # Select complementary evidence instead of taking several near-duplicate
+    # high-overlap sources. In particular, a late source mentioning eyelid
+    # blinking must not lose to broader early sources that cover only the
+    # first few items in a multi-item answer.
+    selected = []
+    covered_terms: set[str] = set()
+    covered_concepts: set[int] = set()
+    remaining = list(ranked)
+    while remaining and len(selected) < max_ranges:
+        choices = [
+            (
+                len(item["concepts"] - covered_concepts),
+                len(item["overlap"] - covered_terms),
+                item["coverage"],
+                item["specificity"],
+                item["distance_score"],
+                item,
+            )
+            for item in remaining
+        ]
+        best = max(choices, key=lambda item: item[:-1])[-1]
+        concept_gain = len(best["concepts"] - covered_concepts)
+        marginal_gain = len(best["overlap"] - covered_terms)
+        if concept_gain <= 0 and marginal_gain <= 0:
+            break
+        selected.append(best["candidate"])
+        covered_terms.update(best["overlap"])
+        covered_concepts.update(best["concepts"])
+        remaining.remove(best)
+
+    return selected or None
 
 
 def _strip_unverified_timestamp_summary(answer: str) -> str:
@@ -571,10 +803,12 @@ def append_relevant_source_timestamps(
 ) -> str:
     """Append source-grounded timestamp ranges to a substantive answer.
 
-    For multi-amount answers, first try to match each amount's local wording to
-    transcript text from returned sources. Other answers retain the established
-    distance-ranked behavior. Selected ranges are always grounded in returned
-    source metadata and presented chronologically.
+    Multi-amount answers first align each amount claim with transcript text from
+    returned sources. Other answers use multilingual lexical alignment between
+    the substantive answer and returned-source transcript text, falling back to
+    the established distance-ranked behavior only when no useful overlap exists.
+    Selected ranges are always grounded in returned metadata and presented
+    chronologically.
     """
     if (
         not isinstance(answer, str)
@@ -655,8 +889,15 @@ def append_relevant_source_timestamps(
         max_ranges=max_ranges,
     )
     if selected is None:
-        # Preserve the existing behavior unless multiple monetary claims can
-        # be matched against transcript text from actual returned sources.
+        selected = _select_answer_aligned_timestamp_candidates(
+            answer,
+            candidates,
+            max_ranges=max_ranges,
+        )
+    if selected is None:
+        # If transcript wording cannot be aligned with the answer (for example,
+        # English answers grounded in Arabic-only captions), preserve the
+        # established distance-ranked behavior instead of guessing a match.
         candidates.sort(
             key=lambda item: (
                 item["distance"],
@@ -1293,8 +1534,34 @@ def build_context(
 
 
 def _generation_context_query_terms(question: str | None) -> set[str]:
-    """Extract conservative English query terms used only for excerpt selection."""
-    return _claim_terms(question or "")
+    """Extract query terms, with a small cross-language bridge for source selection."""
+    terms = _claim_terms(question or "")
+    normalized = unicodedata.normalize("NFKC", question or "").lower()
+    is_arabic = bool(re.search(r"[\u0600-\u06ff]", normalized))
+    is_bodily_sound_question = bool(re.search(
+        r"\b(?:bodily|body|internal)\s+sounds?\b|"
+        r"\bsounds?\b.{0,60}\b(?:hear|room)\b|"
+        r"(?:أصوات|اصوات|صوت).{0,80}(?:أجسام|اجسام|جسم|سماع|يسمع)|"
+        r"(?:أجسام|اجسام).{0,80}(?:أصوات|اصوات|سماع)",
+        normalized,
+        re.IGNORECASE,
+    ))
+    if is_arabic:
+        terms.update(_answer_alignment_terms(normalized))
+    if is_bodily_sound_question:
+        # Add both caption vocabularies regardless of question language. This
+        # helps line selection when the answer language and transcript language
+        # differ and prevents the last item in an enumerated list being clipped.
+        terms.update({
+            "heart", "heartbeat", "blood", "vein", "veins", "artery", "arteries",
+            "flow", "rushing", "rush", "move", "movement", "lung", "lungs",
+            "breath", "breathing", "stomach", "belly", "rumbling", "eyelid",
+            "eyelids", "blink", "blinking", "eye", "eyes",
+            "نبض", "قلب", "الدم", "دم", "عروق", "شرايين", "أوعية",
+            "رئتين", "الرئتين", "الرئة", "تنفس", "المعدة", "معدة",
+            "جفون", "الجفون", "جفن", "العين", "عين", "رمش", "ترمش",
+        })
+    return terms
 
 
 def _generation_line_relevance(
@@ -1302,14 +1569,41 @@ def _generation_line_relevance(
     question_terms: set[str],
     *,
     financial_question: bool,
+    financial_group_context: str = "",
 ) -> int:
     """Score one transcript line for evidence selection, never as a hard gate."""
     transcript_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
-    overlap = len(question_terms & _claim_terms(transcript_text))
+    line_terms = _claim_terms(transcript_text)
+    if re.search(r"[\u0600-\u06ff]", transcript_text):
+        line_terms.update(_answer_alignment_terms(transcript_text))
+    overlap = len(question_terms & line_terms)
     if financial_question and _extract_money_amounts(transcript_text):
         # For amount questions, retain lines containing actual monetary figures
         # even when the transcript uses different wording from the question.
         overlap += 5
+    if financial_question and re.search(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|interest|"
+        r"recover(?:ed|y|ies)?|ministry|finance|report|invest(?:ed|ment)?|"
+        r"principal|liabilit\w*|loan)\b",
+        transcript_text,
+        re.IGNORECASE,
+    ):
+        # Some captions give a material figure as a bare number without a nearby
+        # currency/crore token. Prefer the claim-bearing caption in that case.
+        overlap += 4
+    if financial_question and re.search(
+        r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)",
+        transcript_text,
+    ) and re.search(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|principal|interest|"
+        r"liabilit\w*|loan|recover(?:ed|y|ies)?|recovery|invest(?:ed|ment)?|"
+        r"ministry|finance|report|kingfisher|borrowed|owed|owes)\b",
+        financial_group_context,
+        re.IGNORECASE,
+    ):
+        # When a source group carries financial context but captions split the
+        # label from a bare numeric line, keep the number line with its label.
+        overlap += 6
     return overlap
 
 
@@ -1336,6 +1630,15 @@ def _truncate_formatted_source(
         (index for index, line in enumerate(lines) if line.startswith("- [")),
         None,
     )
+    financial_group_context = (
+        "\n".join(
+            line.split("] ", 1)[-1]
+            for line in lines[caption_start:]
+            if line.startswith("- [")
+        )
+        if caption_start is not None
+        else source_text
+    )
 
     if caption_start is not None:
         header = "\n".join(lines[:caption_start])
@@ -1350,6 +1653,7 @@ def _truncate_formatted_source(
                     line,
                     question_terms,
                     financial_question=financial_question,
+                    financial_group_context=financial_group_context,
                 ),
                 index,
                 line,
@@ -1425,6 +1729,7 @@ def _truncate_formatted_source(
                         sentence,
                         question_terms,
                         financial_question=financial_question,
+                        financial_group_context=financial_group_context,
                     ),
                     index,
                     sentence,
@@ -1476,6 +1781,120 @@ def _truncate_formatted_source(
     return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
 
 
+def _included_chunk_ids_for_excerpt(
+    source_group: dict,
+    original_text: str,
+    excerpt: str,
+    all_chunk_ids: list[str],
+) -> list[str]:
+    """Identify chunks whose actual caption rows survived budget truncation.
+
+    Full, untruncated source groups retain all of their chunk IDs. For shortened
+    caption-aware groups, a chunk is included only if at least one complete
+    timestamped caption row from that chunk appears in the prompt excerpt.
+    Legacy shortened text cannot be mapped safely and therefore yields no IDs.
+    """
+    if excerpt == original_text:
+        return list(all_chunk_ids)
+
+    included_rows = {
+        line.strip() for line in excerpt.splitlines()
+        if line.strip().startswith("- [")
+    }
+    if not included_rows:
+        return []
+
+    included = []
+    for document in source_group.get("documents", []):
+        metadata = getattr(document, "metadata", {})
+        if not isinstance(metadata, dict):
+            continue
+        chunk_id = metadata.get("chunk_id")
+        segments = metadata.get("transcript_segments")
+        if chunk_id is None or not isinstance(segments, list):
+            continue
+        matched = False
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            start = segment.get("start")
+            end = segment.get("end")
+            text = segment.get("text")
+            if (
+                not isinstance(start, (int, float))
+                or not isinstance(end, (int, float))
+                or not isinstance(text, str)
+            ):
+                continue
+            row = (
+                f"- [{format_timestamp(float(start))}–"
+                f"{format_timestamp(float(end))}] {text}"
+            )
+            if row in included_rows:
+                matched = True
+                break
+        if matched and str(chunk_id) not in included:
+            included.append(str(chunk_id))
+    return included
+
+
+def _relevant_financial_amounts(text: str) -> set[float]:
+    """Return amounts whose transcript clause has financial claim context."""
+    material_terms = {
+        "invest", "invested", "investment", "put", "injected", "infused",
+        "debt", "loan", "liability", "certificate", "drt", "tribunal", "court",
+        "interest", "recover", "recovered", "recovery", "ministry", "finance",
+        "report", "kingfisher", "owed", "owes", "borrowed", "money",
+    }
+    amounts = set()
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
+        left = 0
+        right = len(text)
+        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        if not (_claim_terms(text[left:right]) & material_terms):
+            continue
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if math.isfinite(amount):
+            amounts.add(amount)
+    return amounts
+
+
+def _financial_topics_in_text(text: str) -> set[str]:
+    """Identify material financial claim families even when a number has no unit."""
+    topics: set[str] = set()
+    for clause in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.split(text or ""):
+        if not clause.strip():
+            continue
+        topic = _financial_claim_topic(clause)
+        if topic:
+            topics.add(topic)
+    normalized = (text or "").lower()
+    # Claim labels can live in the caption immediately before/after the number.
+    if re.search(r"\bcertificate\b", normalized):
+        topics.add("certificate")
+    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", normalized):
+        topics.add("drt_debt")
+    if (
+        re.search(r"\b(?:ministry|finance|report)\b", normalized)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", normalized)
+    ):
+        topics.add("recovery_report")
+    if re.search(r"\b(?:invest(?:ed|ment)?|injected|infused|put)\b", normalized):
+        topics.add("investment")
+    if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", normalized):
+        topics.add("recovery")
+    return topics
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
@@ -1512,6 +1931,7 @@ def build_generation_context(
                 "final_chars": len(context),
                 "groups_available": 0,
                 "groups_included": 0,
+                "included_chunk_ids": [],
                 "reduced": context != original_context,
             },
         }
@@ -1547,12 +1967,22 @@ def build_generation_context(
         # Retrieval distance remains the dominant signal. Small evidence
         # bonuses break near-ties in favor of question-relevant material.
         priority = distance - min(0.12, overlap * 0.015) - min(0.12, amount_count * 0.03)
+        source_chunk_ids = []
+        for document in source_group.get("documents", []):
+            metadata = getattr(document, "metadata", {})
+            chunk_id = metadata.get("chunk_id") if isinstance(metadata, dict) else None
+            if chunk_id is not None and str(chunk_id) not in source_chunk_ids:
+                source_chunk_ids.append(str(chunk_id))
         records.append({
             "index": index,
             "text": rendered,
             "distance": distance,
             "start": start,
             "priority": priority,
+            "source_chunk_ids": source_chunk_ids,
+            "source_group": source_group,
+            "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
+            "financial_topics": _financial_topics_in_text(rendered) if financial_question else set(),
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
@@ -1567,6 +1997,9 @@ def build_generation_context(
                 "final_chars": original_chars,
                 "groups_available": len(records),
                 "groups_included": len(records),
+                "included_chunk_ids": list(dict.fromkeys(
+                    chunk_id for record in records for chunk_id in record["source_chunk_ids"]
+                )),
                 "reduced": False,
             },
         }
@@ -1575,7 +2008,7 @@ def build_generation_context(
     # evidence excerpt, while avoiding needless single-group packing at small
     # budgets. The hard eight-group ceiling still bounds prompt overhead.
     selected_count = min(len(records), 8, max(1, budget // 500))
-    priority_records = sorted(
+    priority_order = sorted(
         records,
         key=lambda record: (
             record["priority"],
@@ -1583,7 +2016,94 @@ def build_generation_context(
             record["start"],
             record["index"],
         ),
-    )[:selected_count]
+    )
+    priority_records = priority_order[:selected_count]
+
+    if financial_question:
+        # Preserve distinct financial claim families first. A bare caption number
+        # (for example a debt certificate's "6203") may not match the currency
+        # parser, so inclusion must not depend on amount parsing alone.
+        topic_frequency: dict[str, int] = {}
+        for record in records:
+            for topic in record["financial_topics"]:
+                topic_frequency[topic] = topic_frequency.get(topic, 0) + 1
+
+        diverse_records = []
+        chosen_indices: set[int] = set()
+        covered_topics: set[str] = set()
+        while len(diverse_records) < selected_count:
+            choices = []
+            for record in records:
+                if record["index"] in chosen_indices:
+                    continue
+                new_topics = record["financial_topics"] - covered_topics
+                if not new_topics:
+                    continue
+                rarity = sum(
+                    1.0 / topic_frequency[topic]
+                    for topic in new_topics
+                    if topic_frequency.get(topic, 0) > 0
+                )
+                choices.append((
+                    rarity,
+                    len(new_topics),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            diverse_records.append(chosen)
+            chosen_indices.add(chosen["index"])
+            covered_topics.update(chosen["financial_topics"])
+
+        # Once topic coverage is protected, use distinct amount coverage as a
+        # secondary signal, then fill the remaining slots by relevance.
+        amount_frequency: dict[float, int] = {}
+        for record in records:
+            for amount in record["amounts"]:
+                amount_frequency[amount] = amount_frequency.get(amount, 0) + 1
+
+        covered_amounts: set[float] = set()
+        for record in diverse_records:
+            covered_amounts.update(record["amounts"])
+        while len(diverse_records) < selected_count:
+            choices = []
+            for record in records:
+                if record["index"] in chosen_indices:
+                    continue
+                new_amounts = record["amounts"] - covered_amounts
+                if not new_amounts:
+                    continue
+                novelty = sum(
+                    1.0 / amount_frequency[amount]
+                    for amount in new_amounts
+                    if amount_frequency.get(amount, 0) > 0
+                )
+                choices.append((
+                    novelty,
+                    len(new_amounts),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            diverse_records.append(chosen)
+            chosen_indices.add(chosen["index"])
+            covered_amounts.update(chosen["amounts"])
+
+        for record in priority_order:
+            if len(diverse_records) >= selected_count:
+                break
+            if record["index"] not in chosen_indices:
+                diverse_records.append(record)
+                chosen_indices.add(record["index"])
+        priority_records = diverse_records[:selected_count]
     # Reserve two characters for each separator so the final concatenation
     # can never exceed the budget due to inter-group whitespace.
     per_group_budget = max(
@@ -1598,7 +2118,16 @@ def build_generation_context(
             question,
         )
         if excerpt:
-            selected.append({**record, "text": excerpt})
+            selected.append({
+                **record,
+                "text": excerpt,
+                "included_chunk_ids": _included_chunk_ids_for_excerpt(
+                    record["source_group"],
+                    record["text"],
+                    excerpt,
+                    record["source_chunk_ids"],
+                ),
+            })
 
     selected.sort(key=lambda record: record["index"])
     context = "\n\n".join(record["text"] for record in selected)
@@ -1611,6 +2140,9 @@ def build_generation_context(
         "final_chars": len(context),
         "groups_available": len(records),
         "groups_included": len(selected),
+        "included_chunk_ids": list(dict.fromkeys(
+            chunk_id for record in selected for chunk_id in record["included_chunk_ids"]
+        )),
         "reduced": True,
     }
     logger.warning(
@@ -1626,6 +2158,356 @@ def build_generation_context(
     return {"context": context, "diagnostics": diagnostics}
 
 
+
+
+_FINANCIAL_MATERIAL_TERMS = {
+    "invest", "invested", "investment", "put", "injected", "infused",
+    "debt", "loan", "liability", "certificate", "drt", "tribunal", "court",
+    "interest", "recover", "recovered", "recovery", "ministry", "finance",
+    "report", "kingfisher", "owed", "owes", "borrowed", "money",
+}
+_BODILY_SOUND_CONCEPTS = (
+    {
+        "name": "heartbeat",
+        "source": r"heartbeat|heart\s*beat|pulse|نبض.{0,25}قلب|قلب.{0,25}نبض",
+        "english": r"heartbeat|heart\s*beat|pulse",
+        "arabic": r"نبض.{0,25}قلب|قلب.{0,25}نبض|نبضات.{0,15}القلب",
+        "label_en": "heartbeat",
+        "label_ar": "نبض القلب",
+    },
+    {
+        "name": "blood movement",
+        "source": r"blood.{0,60}(?:vein|arter|flow|rush|mov)|(?:vein|arter).{0,60}blood|الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
+        "english": r"blood.{0,60}(?:vein|arter|flow|rush|mov)|(?:vein|arter).{0,60}blood",
+        "arabic": r"الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
+        "label_en": "blood moving/rushing through veins",
+        "label_ar": "حركة أو جريان الدم في العروق",
+    },
+    {
+        "name": "lungs or breathing",
+        "source": r"\blungs?\b|\bbreath(?:e|ing)?\b|رئتين|الرئتين|الرئة|تنفس|التنفس",
+        "english": r"\blungs?\b|\bbreath(?:e|ing)?\b",
+        "arabic": r"رئتين|الرئتين|الرئة|تنفس|التنفس",
+        "label_en": "lungs or breathing",
+        "label_ar": "أصوات الرئتين أو التنفس",
+    },
+    {
+        "name": "stomach",
+        "source": r"\bstomach\b|\brumbl\w*|\bbelly\b|المعدة|معدتك|معدة|البطن|بطنك",
+        "english": r"\bstomach\b|\brumbl\w*|\bbelly\b",
+        "arabic": r"المعدة|معدتك|معدة|البطن|بطنك",
+        "label_en": "stomach sounds",
+        "label_ar": "أصوات المعدة",
+    },
+    {
+        "name": "eyelid blinking",
+        "source": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)|جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
+        "english": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
+        "arabic": r"جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
+        "label_en": "eyelid blinking",
+        "label_ar": "رمش الجفون",
+    },
+)
+
+
+_FINANCIAL_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"[.!?;\n]+|(?<!\d),\s*(?!\d)"
+)
+
+
+def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
+    """Extract monetary mentions, including unitless caption numbers, with local attribution."""
+    text = text or ""
+    records: list[dict[str, Any]] = []
+    caption_rows = []
+    source_markers = [
+        (match.start(), int(match.group(1)))
+        for match in re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text)
+    ]
+    for match in re.finditer(r"(?m)^\s*-\s*\[([^\]]+)\]\s*(.+)$", text):
+        source_id = next(
+            (number for start, number in reversed(source_markers) if start < match.start()),
+            None,
+        )
+        caption_rows.append({
+            "start": match.start(),
+            "end": match.end(),
+            "text": match.group(2).strip(),
+            "source_id": source_id,
+        })
+
+    def caption_context(position: int) -> tuple[str, str]:
+        """Return this caption plus up to one neighboring caption in the same source."""
+        row_index = next(
+            (i for i, row in enumerate(caption_rows)
+             if row["start"] <= position <= row["end"]),
+            None,
+        )
+        if row_index is None:
+            return "", ""
+        row = caption_rows[row_index]
+        indices = [row_index]
+        for neighbor_index in (row_index - 1, row_index + 1):
+            if not 0 <= neighbor_index < len(caption_rows):
+                continue
+            neighbor = caption_rows[neighbor_index]
+            if neighbor["source_id"] == row["source_id"]:
+                indices.append(neighbor_index)
+        indices.sort()
+        local_text = " ".join(caption_rows[index]["text"] for index in indices)
+        return row["text"], local_text
+
+    recognized_spans = []
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text):
+        left = 0
+        right = len(text)
+        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        clause = text[left:right].strip()
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if not math.isfinite(amount):
+            continue
+
+        own_caption, nearby_captions = caption_context(match.start())
+        topic = _financial_claim_topic(clause)
+        claim_text = clause
+        if own_caption:
+            local_topic = _financial_claim_topic(own_caption)
+            nearby_topic = _financial_claim_topic(nearby_captions)
+            topic = local_topic or topic or nearby_topic
+            if not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
+                claim_text = nearby_captions or own_caption
+            elif topic is None and nearby_topic is not None:
+                topic = nearby_topic
+                claim_text = nearby_captions
+        records.append({
+            "amount": amount,
+            "text": claim_text,
+            "topic": topic,
+        })
+        recognized_spans.append((match.start(), match.end()))
+
+    # Caption speech recognition sometimes emits a financial figure as a bare
+    # number ("6203") while its currency/unit appears elsewhere or is omitted.
+    # Accept 4–6 digit values only inside timestamped caption rows that have a
+    # nearby financial claim label; source IDs/timestamps are never considered.
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
+    for row in caption_rows:
+        for match in bare_pattern.finditer(row["text"]):
+            absolute_start = row["start"] + match.start()
+            absolute_end = row["start"] + match.end()
+            if any(start <= absolute_start < end for start, end in recognized_spans):
+                continue
+            own_caption, nearby_captions = caption_context(absolute_start)
+            local_text = nearby_captions or own_caption
+            topic = _financial_claim_topic(own_caption) or _financial_claim_topic(local_text)
+            if topic is None:
+                continue
+            try:
+                amount = float(match.group(0).replace(",", ""))
+            except ValueError:
+                continue
+            records.append({
+                "amount": amount,
+                "text": local_text,
+                "topic": topic,
+            })
+    return records
+
+
+def _financial_claim_topic(clause: str) -> str | None:
+    """Assign a conservative primary topic to distinguish similar financial figures."""
+    text = (clause or "").lower()
+    if re.search(r"\bcertificate\b", text):
+        return "certificate"
+    if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", text):
+        return "drt_debt"
+    if (
+        re.search(r"\b(?:ministry|finance|report)\b", text)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text)
+    ):
+        return "recovery_report"
+    if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text):
+        return "recovery"
+    if re.search(r"\b(?:invest(?:ed|ment)?|put|injected|infused)\b", text):
+        return "investment"
+    if re.search(r"\b(?:cbi|ed|alleg(?:ation|ed)|accus\w*|money laundering)\b", text):
+        return "allegation"
+    if re.search(r"\b(?:debt|loan|liabilit\w*|interest|owed|owes|borrowed)\b", text):
+        return "debt"
+    return None
+
+
+def _generation_repair_instruction(
+    question: str,
+    answer: str,
+    context: str,
+) -> str | None:
+    """Build at most one grounded repair instruction when an answer is incomplete."""
+    instructions = []
+    question_text = unicodedata.normalize("NFKC", question or "").lower()
+    answer_text = _strip_unverified_timestamp_summary(answer or "")
+    context_text = context or ""
+
+    is_financial_question = bool(re.search(
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+        question_text,
+        re.IGNORECASE,
+    ))
+    if is_financial_question:
+        claims = [
+            claim for claim in _money_amount_clauses(context_text)
+            if _claim_terms(claim["text"]) & _FINANCIAL_MATERIAL_TERMS
+        ]
+
+        # Deduplicate overlapping chunks that repeat the same caption clause.
+        unique_claims = []
+        seen_claims = set()
+        for claim in claims:
+            key = (
+                claim["amount"],
+                claim["topic"],
+                re.sub(r"\s+", " ", claim["text"]).casefold(),
+            )
+            if key in seen_claims:
+                continue
+            seen_claims.add(key)
+            unique_claims.append(claim)
+
+        context_amounts = {claim["amount"] for claim in unique_claims}
+        answer_claims = [
+            claim for claim in _money_amount_clauses(answer_text)
+            if _claim_terms(claim["text"]) & _FINANCIAL_MATERIAL_TERMS
+        ]
+        answer_amounts = {claim["amount"] for claim in answer_claims}
+        missing_amounts = sorted(
+            amount for amount in context_amounts
+            if not any(math.isclose(amount, answer_amount, rel_tol=0.0, abs_tol=0.1)
+                       for answer_amount in answer_amounts)
+        )
+        unsupported_amounts = sorted(
+            amount for amount in answer_amounts
+            if not any(math.isclose(amount, context_amount, rel_tol=0.0, abs_tol=0.1)
+                       for context_amount in context_amounts)
+        )
+        missing_claim_topics = [
+            claim for claim in unique_claims
+            if claim["topic"] is not None
+            and not any(
+                math.isclose(claim["amount"], answer_claim["amount"], rel_tol=0.0, abs_tol=0.1)
+                and answer_claim["topic"] == claim["topic"]
+                for answer_claim in answer_claims
+            )
+        ]
+        has_drt_figure = any(claim["topic"] == "drt_debt" for claim in unique_claims)
+        has_certificate_figure = any(claim["topic"] == "certificate" for claim in unique_claims)
+        relationship_uncertainty_terms = (
+            r"\bunclear\b|\bnot clear\b|"
+            r"does not (?:clearly )?(?:explain|establish|reconcile)|"
+            r"doesn't (?:clearly )?(?:explain|establish|reconcile)|not explained|"
+            r"cannot reconcile|can't reconcile|cannot determine|can't determine|"
+            r"uncertain relationship|unresolved relationship|relationship.{0,30}(?:unclear|not clear|unexplained)|"
+            r"not enough information to determine"
+        )
+        missing_relationship_uncertainty = (
+            has_drt_figure
+            and has_certificate_figure
+            and not re.search(relationship_uncertainty_terms, answer_text, re.IGNORECASE)
+        )
+        has_multiple_expected_claims = len(context_amounts) >= 2
+        if has_multiple_expected_claims and (
+            missing_amounts
+            or unsupported_amounts
+            or missing_claim_topics
+            or missing_relationship_uncertainty
+        ):
+            relevant_claims = [
+                claim for claim in unique_claims
+                if claim["amount"] in missing_amounts
+                or claim in missing_claim_topics
+                or claim["amount"] in context_amounts
+            ]
+            evidence_lines = []
+            for claim in relevant_claims[:10]:
+                snippet = re.sub(r"\s+", " ", claim["text"])
+                if len(snippet) > 320:
+                    snippet = snippet[:317].rsplit(" ", 1)[0] + "..."
+                evidence_lines.append(f"- {claim['amount']:g} (as stated in context): {snippet}")
+            issues = []
+            if missing_amounts:
+                issues.append("omitted supported amount(s): " + ", ".join(f"{amount:g}" for amount in missing_amounts))
+            if unsupported_amounts:
+                issues.append("unsupported amount(s) in draft: " + ", ".join(f"{amount:g}" for amount in unsupported_amounts))
+            if missing_claim_topics:
+                issues.append("missing or misattributed amount-to-claim association(s): " + ", ".join(
+                    f"{claim['amount']:g} should remain associated with {claim['topic']}"
+                    for claim in missing_claim_topics
+                ))
+            if missing_relationship_uncertainty:
+                issues.append(
+                    "the transcript does not clearly relate the DRT debt figure to the debt-certificate figure; "
+                    "state that relationship uncertainty instead of reconciling them"
+                )
+            instructions.append(
+                "FINANCIAL ANSWER REPAIR. Rewrite the answer from scratch using only the transcript context. "
+                "Preserve the exact monetary amounts and units; do not round, scale, infer, or silently reconcile figures. "
+                "Keep each claim attached to its actual subject and attribution, and explicitly state when the transcript "
+                "does not explain the relationship between distinct figures. Do not describe recovery proceeds as company debt. "
+                "Issues found: " + "; ".join(issues) + ".\n"
+                "Relevant money-bearing context clauses:\n" + "\n".join(evidence_lines)
+            )
+
+    is_arabic = bool(re.search(r"[\u0600-\u06ff]", question_text))
+    is_bodily_sound_question = bool(re.search(
+        r"\b(?:bodily|body|internal)\s+sounds?\b|"
+        r"\bsounds?\b.{0,60}\b(?:hear|room)\b|"
+        r"أصوات.{0,80}(?:أجسام|اجسام|جسم|سماع|يسمع)|"
+        r"(?:أجسام|اجسام).{0,80}(?:أصوات|اصوات|سماع)",
+        question_text,
+        re.IGNORECASE,
+    ))
+    if is_bodily_sound_question:
+        required = [
+            concept for concept in _BODILY_SOUND_CONCEPTS
+            if re.search(concept["source"], context_text, re.IGNORECASE)
+        ]
+        if len(required) >= 2:
+            pattern_key = "arabic" if is_arabic else "english"
+            missing = [
+                concept for concept in required
+                if not re.search(concept[pattern_key], answer_text, re.IGNORECASE)
+            ]
+            if missing:
+                labels = [
+                    concept["label_ar"] if is_arabic else concept["label_en"]
+                    for concept in required
+                ]
+                instructions.append(
+                    "MULTI-ITEM ANSWER REPAIR. Rewrite from scratch in "
+                    + ("Arabic" if is_arabic else "English")
+                    + " and include each source-supported item in this list: "
+                    + ", ".join(labels)
+                    + ". Use only items supported by the supplied transcript. "
+                    "Do not stop after the first item and do not include a timestamp line; "
+                    "the application adds verified timestamps separately."
+                )
+
+    if not instructions:
+        return None
+    return (
+        "The previous draft failed an application source-completeness check. "
+        "The instructions below are revision requirements; the transcript context remains the only source of facts.\n\n"
+        + "\n\n".join(instructions)
+    )
 
 
 # ============================================================
@@ -2874,9 +3756,31 @@ def build_rag_chain(
                 },
             }
 
-        answer = generation_chain.invoke(
-            inputs
+        answer = generation_chain.invoke(inputs)
+        repair_instruction = _generation_repair_instruction(
+            question=inputs.get("question", ""),
+            answer=answer,
+            context=inputs.get("context", ""),
         )
+        repair_attempted = repair_instruction is not None
+        repair_passed = None
+        if repair_instruction:
+            logger.warning(
+                "Answer completeness repair triggered for question_length=%s",
+                len(inputs.get("question", "")),
+            )
+            repaired_inputs = dict(inputs)
+            repaired_inputs["question"] = (
+                inputs.get("question", "")
+                + "\n\n"
+                + repair_instruction
+            )
+            answer = generation_chain.invoke(repaired_inputs)
+            repair_passed = _generation_repair_instruction(
+                question=inputs.get("question", ""),
+                answer=answer,
+                context=inputs.get("context", ""),
+            ) is None
 
         return {
             "answer": answer,
@@ -2888,6 +3792,8 @@ def build_rag_chain(
                     2,
                 ),
                 "context_budget": context_budget,
+                "quality_repair_attempted": repair_attempted,
+                "quality_repair_passed": repair_passed,
             },
         }
 

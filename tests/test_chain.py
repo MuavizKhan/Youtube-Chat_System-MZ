@@ -196,6 +196,44 @@ def test_append_relevant_source_timestamps_aligns_multi_amount_claims_to_transcr
 
 
 @pytest.mark.unit
+def test_append_relevant_source_timestamps_prefers_arabic_answer_evidence_over_nearest_source():
+    answer = (
+        "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
+        "حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 10,
+                "end": 20,
+                "distance": 0.05,
+                "transcript_text": "الهدوء التام لا يعطي الراحة التي يتوقعها الإنسان.",
+            },
+            {
+                "start": 153.05,
+                "end": 217.615,
+                "distance": 0.9,
+                "transcript_text": (
+                    "فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599,
+                "end": 658.17,
+                "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert "Relevant timestamps: 02:33–03:37, 09:49–10:58" in result
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
 def test_append_relevant_source_timestamps_skips_fallback_missing_evidence_and_invalid_ranges():
     sources = [{"start": 10, "end": 20, "distance": 0.1}]
 
@@ -686,9 +724,14 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
     messages = chain.prompt_to_messages(prompt)
     normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
 
-    assert "do not silently repair the number" in normalized_system_prompt
+    assert "do not silently repair a number" in normalized_system_prompt
     assert 'call one a "misreading" unless the transcript explicitly supports that relationship' in normalized_system_prompt
-    assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
+    assert "retain its attribution" in normalized_system_prompt
+    assert "distinguish the guest's statements from an interviewer's questions" in normalized_system_prompt
+    assert "never describe a recovery figure as a company debt total" in normalized_system_prompt
+    assert "map every figure to its nearby claim, subject, qualifier, and source/speaker" in normalized_system_prompt
+    assert "include each materially relevant monetary claim" in normalized_system_prompt
+    assert "report both separately" in normalized_system_prompt
 
 
 @pytest.mark.unit
@@ -2429,3 +2472,408 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
     assert trace["final_stage"] == "temporal_window_empty"
     assert trace["recovery_used"] is False
     assert trace["planner_used"] is False
+
+
+@pytest.mark.unit
+def test_generation_context_query_terms_bridge_arabic_bodily_sound_question():
+    terms = chain._generation_context_query_terms(
+        "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    )
+
+    assert {"heartbeat", "blood", "vein", "lungs", "breathing", "stomach", "eyelids", "blinking"} <= terms
+
+
+@pytest.mark.unit
+def test_generation_context_preserves_arabic_question_evidence_across_budgeted_caption_groups():
+    filler = [
+        "The presenter briefly discusses an unrelated scene in the room."
+        for _ in range(24)
+    ]
+    first_group = _caption_group(
+        81,
+        150,
+        [
+            *filler,
+            "You may hear your heartbeat, the blood rushing through your veins, "
+            "the sounds of your lungs and stomach.",
+        ],
+        0.3,
+    )
+    second_group = _caption_group(
+        82,
+        590,
+        [*filler, "You might even hear the subtle sound of your eyelids blinking."],
+        0.4,
+    )
+
+    result = chain.build_generation_context(
+        [first_group, second_group],
+        question="ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
+        max_chars=1800,
+    )
+
+    assert len(result["context"]) <= 1800
+    assert "heartbeat" in result["context"].lower()
+    assert "blood rushing through your veins" in result["context"].lower()
+    assert "lungs and stomach" in result["context"].lower()
+    assert "eyelids blinking" in result["context"].lower()
+    assert set(result["diagnostics"]["included_chunk_ids"]) == {"81", "82"}
+
+
+@pytest.mark.unit
+def test_generation_context_prioritizes_distinct_material_money_claims_over_nearby_distractors():
+    filler = [
+        "The interview briefly shifts to another point before returning to the figures."
+        for _ in range(20)
+    ]
+    groups = [
+        _caption_group(
+            91, 100,
+            [*filler, "I invested 3,000 crore rupees in Kingfisher Airlines."],
+            0.72,
+        ),
+        _caption_group(
+            92, 500,
+            [*filler, "The DRT judgment debt was 4,999 crore rupees plus interest."],
+            0.84,
+        ),
+        _caption_group(
+            93, 900,
+            [
+                *filler,
+                "The debt certificate gives a figure.",
+                "6203",
+                "The principal amount carries unapplied interest at 11.5% per annum.",
+            ],
+            0.92,
+        ),
+        _caption_group(
+            94, 1300,
+            [*filler, "The Ministry of Finance report said 14,100 crore rupees had been recovered."],
+            1.00,
+        ),
+        _caption_group(
+            95, 1700,
+            [*filler, "The ticket for the unrelated event cost 500 rupees."],
+            0.05,
+        ),
+        _caption_group(
+            96, 2100,
+            [*filler, "Catering for the unrelated event cost 1,200 rupees."],
+            0.10,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts were mentioned about Kingfisher debt, investment, and recovery?",
+        max_chars=2400,
+    )
+    context = result["context"]
+
+    assert len(context) <= 2400
+    assert "3,000 crore rupees in Kingfisher Airlines" in context
+    assert "4,999 crore rupees plus interest" in context
+    assert "The debt certificate gives a figure." in context
+    assert "6203" in context
+    assert "principal amount carries unapplied interest" in context
+    assert "14,100 crore rupees had been recovered" in context
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert set(result["diagnostics"]["included_chunk_ids"]) >= {"91", "92", "93", "94"}
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_missing_and_unsupported_financial_amounts():
+    context = (
+        "I invested 3,000 crore rupees in Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6,203 crore rupees. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    bad_answer = (
+        "I invested 3,000 crore rupees, the airline's debt was around 6 crore, "
+        "and 14,100 crore was recovered."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        bad_answer,
+        context,
+    )
+    assert instruction is not None
+    assert "4,999" in instruction
+    assert "6,203" in instruction
+    assert "unsupported amount" in instruction.lower()
+
+    complete_answer = (
+        "I invested 3,000 crore rupees in Kingfisher. The DRT judgment debt was "
+        "4,999 crore rupees plus interest, while the debt certificate gave a "
+        "separate figure of 6,203 crore rupees. The Ministry of Finance report "
+        "said 14,100 crore rupees had been recovered. The transcript does not "
+        "clearly explain how the DRT and certificate figures relate."
+    )
+    assert chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        complete_answer,
+        context,
+    ) is None
+
+    merely_separated = complete_answer.replace(
+        "The transcript does not clearly explain how the DRT and certificate figures relate.",
+        "The DRT and certificate figures are separate.",
+    )
+    repair_for_uncertainty = chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        merely_separated,
+        context,
+    )
+    assert repair_for_uncertainty is not None
+    assert "does not clearly relate" in repair_for_uncertainty.lower()
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
+    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    context = (
+        "You may hear your heartbeat, the blood rushing through your veins, "
+        "the sounds of your lungs and stomach, and even your eyelids blinking."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        "الأصوات التي قد يبدأ الناس في سماعها من أجسامهم هي نبضات قلبهم.",
+        context,
+    )
+
+    assert instruction is not None
+    assert "Arabic" in instruction
+    assert "حركة أو جريان الدم في العروق" in instruction
+    assert "أصوات الرئتين أو التنفس" in instruction
+    assert "أصوات المعدة" in instruction
+    assert "رمش الجفون" in instruction
+
+
+@pytest.mark.unit
+def test_rag_chain_retries_once_when_financial_draft_drops_source_amounts(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees in Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6,203 crore rupees. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(101, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [101],
+                "citation_chunk_ids": [101],
+            },
+        ),
+    )
+    outputs = iter([
+        "I invested 3,000 crore rupees, the airline's debt was around 6 crore, "
+        "and 14,100 crore was recovered.",
+        "I invested 3,000 crore rupees in Kingfisher. The DRT judgment debt was "
+        "4,999 crore rupees plus interest, while the debt certificate gave a "
+        "separate figure of 6,203 crore rupees. The Ministry of Finance report "
+        "said 14,100 crore rupees had been recovered. The transcript does not "
+        "clearly explain how the DRT and certificate figures relate.",
+    ])
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    assert len(calls) == 2
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is True
+    assert "4,999 crore" in result["answer"]
+    assert "6,203 crore" in result["answer"]
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_misattributed_financial_figures():
+    context = (
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a separate figure of 6,203 crore rupees."
+    )
+    wrong_attribution = (
+        "The debt certificate figure was 4,999 crore rupees. "
+        "The DRT judgment debt was 6,203 crore rupees. "
+        "The transcript does not clearly explain how the figures relate."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        "What does the transcript say about the debt amounts?",
+        wrong_attribution,
+        context,
+    )
+
+    assert instruction is not None
+    assert "misattributed amount-to-claim association" in instruction.lower()
+    assert "4999 should remain associated with drt_debt" in instruction.lower()
+    assert "6203 should remain associated with certificate" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_answer_alignment_maps_arabic_sound_list_to_english_caption_intervals():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You might even hear the subtle sound of your eyelids blinking.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_answer_alignment_maps_english_sound_list_to_arabic_caption_intervals():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 153.05, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "الهدوء التام لا يعطي الراحة التي يتوقعها الإنسان.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 02:33–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_financial_repair_detects_bare_certificate_figure_and_split_recovery_attribution():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:51:41] The Ministry of Finance report says the total amount recovered was
+- [02:51:41–02:52:10] 14,100 crore rupees."""
+
+    answer = (
+        "The DRT debt was 4,999 crore rupees and another debt figure was 6,23 crore. "
+        "The interest rate was 11.5%."
+    )
+
+    claims = chain._money_amount_clauses(context)
+    assert any(item["amount"] == 6203 and item["topic"] == "certificate" for item in claims)
+    assert any(item["amount"] == 14100 and item["topic"] == "recovery_report" for item in claims)
+
+    instruction = chain._generation_repair_instruction(
+        "What amounts were mentioned about the debt and money recovered?",
+        answer,
+        context,
+    )
+    assert instruction is not None
+    assert "6203" in instruction
+    assert "14100" in instruction
+
+@pytest.mark.unit
+def test_generation_context_diagnostics_report_certificate_topic_coverage():
+    groups = [
+        _caption_group(111, 0, ["I invested 3,000 crore rupees in Kingfisher."], 0.2),
+        _caption_group(112, 100, ["The DRT judgment debt was 4,999 crore rupees."], 0.3),
+        _caption_group(113, 200, ["The debt certificate gives a figure of 6203."], 0.4),
+        _caption_group(114, 300, ["The Ministry of Finance report says 14,100 crore was recovered."], 0.5),
+        _caption_group(115, 400, ["Unrelated ticket cost 500 rupees."], 0.01),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What debt and money amounts are mentioned?",
+        max_chars=2400,
+    )
+
+    assert len(result["context"]) <= 2400
+    assert "The debt certificate gives a figure of 6203." in result["context"]
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert "113" in result["diagnostics"]["included_chunk_ids"]
+
+
+@pytest.mark.unit
+def test_timestamp_alignment_matches_bare_certificate_number_in_source_caption():
+    answer = (
+        "The DRT judgment debt was 4,999 crore rupees; the debt certificate "
+        "lists 6,203 crore; the Ministry of Finance report says 14,100 crore was recovered."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 100, "end": 140, "distance": 0.7,
+                "transcript_text": "The DRT judgment debt was 4,999 crore rupees plus interest.",
+            },
+            {
+                "start": 200, "end": 240, "distance": 1.0,
+                "transcript_text": "The debt certificate gives a figure of 6203. The principal carries unapplied interest at 11.5% per annum.",
+            },
+            {
+                "start": 300, "end": 340, "distance": 0.9,
+                "transcript_text": "The Ministry of Finance report said 14,100 crore rupees were recovered.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    # The fixture exposes only the full source interval (200–240 seconds), not
+    # caption-level boundaries; preserve that evidence range instead of
+    # inventing a narrower end timestamp.
+    assert result.endswith(
+        "Relevant timestamps: 01:40–02:20, 03:20–04:00, 05:00–05:40"
+    )
