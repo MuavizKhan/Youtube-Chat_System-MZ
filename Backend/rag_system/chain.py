@@ -1654,6 +1654,36 @@ def _truncate_formatted_source(
     return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
 
 
+def _relevant_financial_amounts(text: str) -> set[float]:
+    """Return amounts whose transcript clause has financial claim context."""
+    material_terms = {
+        "invest", "invested", "investment", "put", "injected", "infused",
+        "debt", "loan", "liability", "certificate", "drt", "tribunal", "court",
+        "interest", "recover", "recovered", "recovery", "ministry", "finance",
+        "report", "kingfisher", "owed", "owes", "borrowed", "money",
+    }
+    amounts = set()
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
+        left = 0
+        right = len(text)
+        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        if not (_claim_terms(text[left:right]) & material_terms):
+            continue
+        token = match.group("currency_amount") or match.group("amount")
+        try:
+            amount = float(token.replace(",", ""))
+        except (AttributeError, ValueError):
+            continue
+        if math.isfinite(amount):
+            amounts.add(amount)
+    return amounts
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
@@ -1739,7 +1769,7 @@ def build_generation_context(
             "start": start,
             "priority": priority,
             "source_chunk_ids": source_chunk_ids,
-            "amounts": set(_extract_money_amounts(rendered)) if financial_question else set(),
+            "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
