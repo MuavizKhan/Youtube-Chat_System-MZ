@@ -227,6 +227,37 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
         uncertainty_preserved,
         "The 4,999- and 6,203-crore figures must not be silently reconciled when the captions do not clearly explain their relationship.",
     ))
+
+    # These malformed figures and the "official 9,000-crore recovery" claim
+    # were observed in live Q07 generations. Keep the audit from passing just
+    # because the four expected claims are also present in the same answer.
+    known_unsupported_patterns = (
+        ("malformed_623", r"(?<!\\d)6\\s*,\\s*23(?!\\d)"),
+        ("malformed_62003", r"(?<!\\d)6\\s*,?\\s*2003(?!\\d)"),
+        ("malformed_60002", r"(?<!\\d)6\\s*,?\\s*0002(?!\\d)"),
+        (
+            "unsupported_official_9000_recovery",
+            r"(?:(?:official|debt[\\s\\-‑–—]*recovery|recovery).{0,60}"
+            r"9[ ,\\u202f]?000(?!\\d)|"
+            r"9[ ,\\u202f]?000(?!\\d).{0,60}"
+            r"(?:official|debt[\\s\\-‑–—]*recovery|recovery))",
+        ),
+    )
+    unsupported_found = [
+        label
+        for label, pattern in known_unsupported_patterns
+        if re.search(pattern, _substantive_answer(answer), re.IGNORECASE)
+    ]
+    checks.append(_quality_check(
+        "malformed_or_unsupported_financial_amounts_absent",
+        not unsupported_found,
+        (
+            "No known malformed extra financial amounts or unsupported official "
+            "9,000-crore recovery claim were detected."
+            if not unsupported_found
+            else "Unsupported financial claims detected: " + ", ".join(unsupported_found)
+        ),
+    ))
     return checks
 
 
