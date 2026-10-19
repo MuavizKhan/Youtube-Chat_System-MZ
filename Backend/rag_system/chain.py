@@ -2830,6 +2830,10 @@ def _build_financial_evidence_fallback(
                     f"{int(float(amount)):,}",
                     claim_text,
                 )
+        # Caption-aware context rows include source timestamps for prompt
+        # assembly. Keep the extractive fallback's claim wording, but leave
+        # timestamp presentation to the trusted returned-source metadata.
+        claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
         claims_by_topic.setdefault(
             topic,
             {**claim, "topic": topic, "text": claim_text},
