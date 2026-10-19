@@ -2628,6 +2628,63 @@ def _generation_repair_instruction(
     )
 
 
+def _build_financial_evidence_fallback(
+    question: str,
+    context: str,
+) -> str | None:
+    """Build a conservative extractive answer when financial generation repair fails.
+
+    This is intentionally narrow: it activates only when the supplied context
+    contains separately attributable investment, DRT, certificate, and recovery
+    report claims. It copies source clauses rather than asking the model to
+    reconstruct numerals, and it does not infer a unit for a bare caption figure.
+    """
+    if not re.search(
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+        question or "",
+        re.IGNORECASE,
+    ):
+        return None
+
+    required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
+    claims_by_topic: dict[str, dict[str, Any]] = {}
+    for claim in _money_amount_clauses(context or ""):
+        topic = claim.get("topic")
+        amount = claim.get("amount")
+        claim_text = re.sub(r"\s+", " ", str(claim.get("text", ""))).strip()
+        if (
+            topic not in required_topics
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+            or not claim_text
+        ):
+            continue
+        # Keep the first source-attached claim for each family; context is
+        # ordered as presented to the generator, and duplicate overlaps are
+        # expected in neighboring retrieved chunks.
+        claims_by_topic.setdefault(topic, {**claim, "text": claim_text})
+
+    if any(topic not in claims_by_topic for topic in required_topics):
+        return None
+
+    labels = (
+        ("investment", "investment"),
+        ("drt_debt", "DRT judgment debt"),
+        ("certificate", "debt certificate"),
+        ("recovery_report", "Ministry of Finance recovery report"),
+    )
+    lines = ["The transcript supports these distinct financial statements:"]
+    for topic, _label in labels:
+        lines.append(f"- {claims_by_topic[topic]['text']}")
+
+    lines.append(
+        "The transcript does not clearly explain how the DRT judgment and "
+        "debt-certificate figures relate, so they should not be treated as one total."
+    )
+    return "\n\n".join([lines[0], "\n".join(lines[1:5]), lines[5]])
+
+
 # ============================================================
 # 6. INFERENCE CLIENTS
 # ============================================================
@@ -3882,6 +3939,7 @@ def build_rag_chain(
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
+        grounded_financial_fallback_used = False
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -3899,6 +3957,17 @@ def build_rag_chain(
                 answer=answer,
                 context=inputs.get("context", ""),
             ) is None
+            if not repair_passed:
+                extractive_answer = _build_financial_evidence_fallback(
+                    question=inputs.get("question", ""),
+                    context=inputs.get("context", ""),
+                )
+                if extractive_answer is not None:
+                    answer = extractive_answer
+                    grounded_financial_fallback_used = True
+                    logger.warning(
+                        "Using source-extractive financial fallback after generation repair failed"
+                    )
 
         return {
             "answer": answer,
@@ -3912,6 +3981,7 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "grounded_financial_fallback_used": grounded_financial_fallback_used,
             },
         }
 
