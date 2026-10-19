@@ -280,11 +280,15 @@ SOURCE / TIMESTAMP RULES
     they describe the same measure. In financial passages, keep investment, debt,
     debt-certificate, alleged transaction, and recovery figures separate. In
     particular, never describe a recovery figure as a company debt total merely
-    because both figures occur in the same interview. If automatic captions garble
-    a number or speakers appear to disagree, do not silently repair a number,
-    reconcile the figures, or call one a "misreading" unless the transcript explicitly
-    supports that relationship. State the uncertainty and preserve the different
-    figures as separate claims when the transcript does not clearly reconcile them.
+    because both figures occur in the same interview. For a broad question about
+    debt or money, include each materially relevant monetary claim present in the
+    supplied context, with a short attribution, instead of choosing one figure as
+    a single total. If a DRT debt figure and a debt-certificate figure are both
+    discussed but their relationship is not explicit, report both separately and
+    say the transcript does not clearly explain how they relate. If automatic
+    captions garble a number or speakers appear to disagree, do not silently repair
+    a number, reconcile the figures, or call one a "misreading" unless the transcript
+    explicitly supports that relationship.
 
 22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
     guest's statements from an interviewer's questions, premises, allegations, or
