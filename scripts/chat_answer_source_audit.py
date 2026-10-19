@@ -123,7 +123,7 @@ def _answer_timestamp_ranges(answer: str) -> list[str]:
 def _substantive_answer(answer: str) -> str:
     """Remove the application timestamp footer before checking answer content."""
     return re.sub(
-        r"(?im)^[ \\t]*Relevant timestamps?[ \\t]*:[^\\r\\n]*(?:\\r?\\n|$)",
+        r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)",
         "",
         answer,
     ).strip()
@@ -136,7 +136,7 @@ def _quality_check(name: str, passed: bool, detail: str) -> dict[str, Any]:
 def _amount_clauses(answer: str, pattern: str) -> list[str]:
     clauses = [
         clause.strip()
-        for clause in re.split(r"(?<=[.!?;])\\s+|[\\r\\n]+", _substantive_answer(answer))
+        for clause in re.split(r"(?<=[.!?;])\s+|[\r\n]+", _substantive_answer(answer))
         if clause.strip()
     ]
     return [clause for clause in clauses if re.search(pattern, clause, re.IGNORECASE)]
@@ -147,26 +147,26 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     claim_specs = [
         (
             "investment_3000",
-            r"(?<!\\d)3[ ,\\u202f]?000(?!\\d)",
-            r"\\b(invest(?:ed|ment)?|injected|infused|put)\\b",
+            r"(?<!\d)3[ ,\u202f]?000(?!\d)",
+            r"\b(invest(?:ed|ment)?|injected|infused|put)\b",
             "The 3,000-crore figure must be attributed to an investment into Kingfisher.",
         ),
         (
             "drt_4999",
-            r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)",
-            r"\\b(drt|debt|tribunal|judg(?:e)?ment)\\b",
+            r"(?<!\d)4[ ,\u202f]?999(?!\d)",
+            r"\b(drt|debt|tribunal|judg(?:e)?ment)\b",
             "The 4,999-crore figure must remain tied to the DRT/debt passage.",
         ),
         (
             "certificate_6203",
-            r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)",
-            r"\\b(certificate|drt|debt)\\b",
+            r"(?<!\d)6[ ,\u202f]?203(?!\d)",
+            r"\b(certificate|drt|debt)\b",
             "The 6,203-crore figure must remain tied to the debt-certificate passage.",
         ),
         (
             "recovery_14100",
-            r"(?<!\\d)14[ ,\\u202f]?100(?!\\d)",
-            r"\\b(recover(?:ed|y|ies)?|recovery)\\b",
+            r"(?<!\d)14[ ,\u202f]?100(?!\d)",
+            r"\b(recover(?:ed|y|ies)?|recovery)\b",
             "The 14,100-crore figure must be described as a recovery, not debt.",
         ),
     ]
@@ -178,16 +178,16 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
         )
         checks.append(_quality_check(name, attributed, detail))
 
-    recovery_clauses = _amount_clauses(answer, r"(?<!\\d)14[ ,\\u202f]?100(?!\\d)")
+    recovery_clauses = _amount_clauses(answer, r"(?<!\d)14[ ,\u202f]?100(?!\d)")
     has_report_attribution = any(
-        re.search(r"\\b(ministry|finance|report)\\b", clause, re.IGNORECASE)
-        and re.search(r"\\b(recover(?:ed|y|ies)?|recovery)\\b", clause, re.IGNORECASE)
+        re.search(r"\b(ministry|finance|report)\b", clause, re.IGNORECASE)
+        and re.search(r"\b(recover(?:ed|y|ies)?|recovery)\b", clause, re.IGNORECASE)
         for clause in recovery_clauses
     )
     debt_total_misattributed = any(
         re.search(
-            r"(?:company(?:['’]s)?|kingfisher(?: airlines?)?)\\s+(?:company\\s+)?debt.{0,35}(?:total|totals|amount|14[ ,\\u202f]?100)"
-            r"|(?:total debt|company debt|debt total).{0,35}14[ ,\\u202f]?100",
+            r"(?:company(?:['’]s)?|kingfisher(?: airlines?)?)\s+(?:company\s+)?debt.{0,35}(?:total|totals|amount|14[ ,\u202f]?100)"
+            r"|(?:total debt|company debt|debt total).{0,35}14[ ,\u202f]?100",
             clause,
             re.IGNORECASE,
         )
@@ -199,17 +199,17 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
         "The recovery amount must be attributed to the Ministry/Finance report and not asserted as the company debt total.",
     ))
 
+    has_4999 = bool(_amount_clauses(answer, r"(?<!\d)4[ ,\u202f]?999(?!\d)"))
+    has_6203 = bool(_amount_clauses(answer, r"(?<!\d)6[ ,\u202f]?203(?!\d)"))
     uncertainty_terms = (
         r"unclear|not clear|does not explain|doesn't explain|not explained|"
         r"cannot reconcile|can't reconcile|relationship between|separately|"
         r"different figures|distinct figures|does not establish"
     )
-    figures_all_present = (
-        any(re.search(spec[1], clause) for clause in _amount_clauses(answer, r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)") for spec in [("x", r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)")])
-        and any(re.search(r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)", clause) for clause in _amount_clauses(answer, r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)"))
-    )
-    uncertainty_preserved = figures_all_present and bool(
-        re.search(uncertainty_terms, _substantive_answer(answer), re.IGNORECASE)
+    uncertainty_preserved = (
+        has_4999
+        and has_6203
+        and bool(re.search(uncertainty_terms, _substantive_answer(answer), re.IGNORECASE))
     )
     checks.append(_quality_check(
         "unclear_relationship_preserved",
@@ -223,7 +223,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     text = _substantive_answer(answer)
     if case_id == "AR03":
         requirements = [
-            ("heartbeat", r"heart\\s*beat|heartbeat"),
+            ("heartbeat", r"heart\s*beat|heartbeat"),
             ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
             ("lungs_or_breathing", r"lung|breath"),
             ("stomach", r"stomach|rumbl|belly"),
@@ -239,7 +239,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         ]
         checks.append(_quality_check(
             "question_language",
-            not bool(re.search(r"[\\u0600-\\u06ff]", text)),
+            not bool(re.search(r"[\u0600-\u06ff]", text)),
             "The English question must receive an English answer.",
         ))
         return checks
@@ -259,7 +259,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    arabic_chars = len(re.findall(r"[\\u0600-\\u06ff]", text))
+    arabic_chars = len(re.findall(r"[\u0600-\u06ff]", text))
     latin_chars = len(re.findall(r"[A-Za-z]", text))
     checks.append(_quality_check(
         "question_language",
