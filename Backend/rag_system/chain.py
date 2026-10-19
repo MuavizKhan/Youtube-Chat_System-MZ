@@ -639,11 +639,13 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
     },
     {
-        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,35}(?:blink|lid|close)",
-        # Captions vary between formal Arabic and dialect spellings for blinking
-        # or closing the eyes. Keep these variations scoped to this sound concept.
-        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
-        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "close", "closing", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "العين", "عينيك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
+        # Some captions name the eyes but omit a direct verb for blinking;
+        # retain that interval as evidence for an answer about audible eye/eyelid sounds.
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
+        # Accept formal Arabic and dialectal references to eyes, eyelids,
+        # blinking, and closing the eyes.
+        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
+        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
 
