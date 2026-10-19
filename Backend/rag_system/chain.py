@@ -2147,9 +2147,25 @@ def _generation_repair_instruction(
                 for answer_claim in answer_claims
             )
         ]
+        has_drt_figure = any(claim["topic"] == "drt_debt" for claim in unique_claims)
+        has_certificate_figure = any(claim["topic"] == "certificate" for claim in unique_claims)
+        relationship_uncertainty_terms = (
+            r"unclear|not clear|does not (?:clearly )?(?:explain|establish|reconcile)|"
+            r"doesn't (?:clearly )?(?:explain|establish|reconcile)|not explained|"
+            r"cannot reconcile|can't reconcile|relationship between|separately|"
+            r"different figures|distinct figures|not necessarily the same"
+        )
+        missing_relationship_uncertainty = (
+            has_drt_figure
+            and has_certificate_figure
+            and not re.search(relationship_uncertainty_terms, answer_text, re.IGNORECASE)
+        )
         has_multiple_expected_claims = len(context_amounts) >= 2
         if has_multiple_expected_claims and (
-            missing_amounts or unsupported_amounts or missing_claim_topics
+            missing_amounts
+            or unsupported_amounts
+            or missing_claim_topics
+            or missing_relationship_uncertainty
         ):
             relevant_claims = [
                 claim for claim in unique_claims
@@ -2173,6 +2189,11 @@ def _generation_repair_instruction(
                     f"{claim['amount']:g} should remain associated with {claim['topic']}"
                     for claim in missing_claim_topics
                 ))
+            if missing_relationship_uncertainty:
+                issues.append(
+                    "the transcript does not clearly relate the DRT debt figure to the debt-certificate figure; "
+                    "state that relationship uncertainty instead of reconciling them"
+                )
             instructions.append(
                 "FINANCIAL ANSWER REPAIR. Rewrite the answer from scratch using only the transcript context. "
                 "Preserve the exact monetary amounts and units; do not round, scale, infer, or silently reconcile figures. "
