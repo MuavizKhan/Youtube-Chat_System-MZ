@@ -28,6 +28,7 @@ import argparse
 import logging
 import math
 import re
+import unicodedata
 from typing import Any
 
 from groq import Groq
@@ -134,6 +135,10 @@ RESPONSE LANGUAGE — HIGH PRIORITY
   Hindi question, answer in Hindi; use the same principle for other languages.
 - Keep names, product names, numbers, currencies, and source-grounded facts
   accurate while expressing the answer naturally in the requested language.
+- When the transcript enumerates several distinct items that answer the question,
+  include each supported item in the answer in the question's language. Do not
+  reduce a supported list to only its first item. Omit an item only when the
+  supplied transcript does not support it or the available context is insufficient.
 - If the question deliberately uses multiple languages and no output language is
   requested, answer in the language used for the main question.
 
@@ -268,15 +273,18 @@ SOURCE / TIMESTAMP RULES
 20. Never fabricate a source, timestamp, citation, or reference.
 
 21. For questions involving numbers, amounts, percentages, dates, or counts, preserve
-    distinct figures as stated in the transcript. Explain what each figure refers
-    to and retain its attribution to the speaker or named source. Do not round,
-    merge, or treat different figures as interchangeable unless the transcript
-    explicitly says they describe the same measure. If the transcript distinguishes
-    a component figure from a total, state that distinction. When automatic captions
-    garble a number or speakers appear to disagree about a figure, do not silently
-    repair the number, reconcile the figures, or call one a "misreading" unless the
-    transcript explicitly supports that relationship. State the uncertainty or
-    attribute the separate figures to the speakers discussing them.
+    distinct figures as stated in the transcript. Before answering, silently map
+    every figure to its nearby claim, subject, qualifier, and source/speaker. Explain
+    what each figure refers to and retain its attribution. Do not round, merge, or
+    treat different figures as interchangeable unless the transcript explicitly says
+    they describe the same measure. In financial passages, keep investment, debt,
+    debt-certificate, alleged transaction, and recovery figures separate. In
+    particular, never describe a recovery figure as a company debt total merely
+    because both figures occur in the same interview. If automatic captions garble
+    a number or speakers appear to disagree, do not silently repair a number,
+    reconcile the figures, or call one a "misreading" unless the transcript explicitly
+    supports that relationship. State the uncertainty and preserve the different
+    figures as separate claims when the transcript does not clearly reconcile them.
 
 22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
     guest's statements from an interviewer's questions, premises, allegations, or
@@ -546,6 +554,100 @@ def _select_claim_aligned_timestamp_candidates(
     return [item["candidate"] for item in ranked[:budget]]
 
 
+_ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
+    "the", "and", "that", "this", "these", "those", "from", "into", "with",
+    "your", "you", "their", "they", "them", "own", "may", "might", "could",
+    "would", "should", "start", "starts", "begin", "begins", "beginning",
+    "hear", "hearing", "heard", "sound", "sounds", "body", "bodies", "room",
+    "people", "person", "such", "like", "even", "inside", "there", "here",
+    "what", "which", "where", "when", "while", "also", "through", "for",
+    "about", "are", "was", "were", "is", "be", "been", "not", "can", "will",
+    "it", "its", "as", "of", "in", "on", "at", "to", "a", "an", "or", "by",
+    "up", "out", "than", "then", "very", "التي", "الذي", "الذين", "اللواتي",
+    "الناس", "قد", "يبدأ", "يبدأون", "بسماع", "سماع", "داخل", "الغرفة",
+    "أجسامهم", "اجسامهم", "أصوات", "اصوات", "صوت", "الأصوات", "الاصوات",
+    "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
+    "و", "أو", "او", "حتى", "مثل", "كما", "لأن", "لان", "يمكن", "يكون",
+    "تكون", "نفس", "هذا", "هذه", "ذلك",
+})
+
+
+def _answer_alignment_terms(text: str) -> set[str]:
+    """Extract informative English/Arabic answer words for source alignment."""
+    normalized = unicodedata.normalize(
+        "NFKC", _strip_unverified_timestamp_summary(text)
+    ).lower()
+    normalized = re.sub(r"[\u064b-\u065f\u0670\u0640]", "", normalized)
+    normalized = re.sub(r"\d+(?:[,:./]\d+)*", " ", normalized)
+    tokens = re.findall(r"[^\W_]{2,}", normalized, flags=re.UNICODE)
+    terms: set[str] = set()
+    arabic_prefixes = ("وال", "بال", "كال", "فال", "لل", "ال")
+    arabic_suffixes = (
+        "هما", "كما", "كم", "كن", "هم", "هن", "ها", "نا", "ك", "ه", "ي",
+        "ون", "ات",
+    )
+    for token in tokens:
+        if token in _ANSWER_ALIGNMENT_STOP_WORDS:
+            continue
+        variants = {token}
+        if any("\u0600" <= char <= "\u06ff" for char in token):
+            current = token
+            for prefix in arabic_prefixes:
+                if current.startswith(prefix) and len(current) > len(prefix) + 2:
+                    current = current[len(prefix):]
+                    variants.add(current)
+                    break
+            for suffix in arabic_suffixes:
+                if current.endswith(suffix) and len(current) > len(suffix) + 2:
+                    variants.add(current[:-len(suffix)])
+                    break
+        elif token.endswith("s") and len(token) > 4:
+            variants.add(token[:-1])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in _ANSWER_ALIGNMENT_STOP_WORDS:
+                terms.add(variant)
+    return terms
+
+
+def _select_answer_aligned_timestamp_candidates(
+    answer: str,
+    candidates: list[dict[str, Any]],
+    *,
+    max_ranges: int,
+) -> list[dict[str, Any]] | None:
+    """Prefer returned source intervals whose transcript wording supports the answer.
+
+    Alignment is multilingual and conservative. If no informative overlap is
+    found, return None so callers can retain the established fallback ordering.
+    """
+    answer_terms = _answer_alignment_terms(answer)
+    if len(answer_terms) < 2:
+        return None
+
+    ranked = []
+    for candidate in candidates:
+        transcript_text = candidate.get("transcript_text", "")
+        if not isinstance(transcript_text, str) or not transcript_text.strip():
+            continue
+        source_terms = _answer_alignment_terms(transcript_text)
+        overlap = answer_terms & source_terms
+        if not overlap:
+            continue
+        coverage = len(overlap) / len(answer_terms)
+        specificity = len(overlap) / math.sqrt(max(1, len(source_terms)))
+        ranked.append((
+            coverage,
+            specificity,
+            -float(candidate.get("distance", math.inf)),
+            candidate,
+        ))
+
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item[3] for item in ranked[:max_ranges]] or None
+
+
 def _strip_unverified_timestamp_summary(answer: str) -> str:
     """Remove a model-authored timestamp summary before trusted ranges are appended.
 
@@ -655,8 +757,15 @@ def append_relevant_source_timestamps(
         max_ranges=max_ranges,
     )
     if selected is None:
-        # Preserve the existing behavior unless multiple monetary claims can
-        # be matched against transcript text from actual returned sources.
+        selected = _select_answer_aligned_timestamp_candidates(
+            answer,
+            candidates,
+            max_ranges=max_ranges,
+        )
+    if selected is None:
+        # If transcript wording cannot be aligned with the answer (for example,
+        # English answers grounded in Arabic-only captions), preserve the
+        # established distance-ranked behavior instead of guessing a match.
         candidates.sort(
             key=lambda item: (
                 item["distance"],
