@@ -272,7 +272,11 @@ SOURCE / TIMESTAMP RULES
     to and retain its attribution to the speaker or named source. Do not round,
     merge, or treat different figures as interchangeable unless the transcript
     explicitly says they describe the same measure. If the transcript distinguishes
-    a component figure from a total, state that distinction.
+    a component figure from a total, state that distinction. When automatic captions
+    garble a number or speakers appear to disagree about a figure, do not silently
+    repair the number, reconcile the figures, or call one a "misreading" unless the
+    transcript explicitly supports that relationship. State the uncertainty or
+    attribute the separate figures to the speakers discussing them.
 
 22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
     guest's statements from an interviewer's questions, premises, allegations, or
