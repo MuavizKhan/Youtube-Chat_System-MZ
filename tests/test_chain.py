@@ -729,6 +729,8 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
     assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
     assert "never describe a recovery figure as a company debt total" in normalized_system_prompt
     assert "map every figure to its nearby claim, subject, qualifier, and source/speaker" in normalized_system_prompt
+    assert "include each materially relevant monetary claim" in normalized_system_prompt
+    assert "report both separately" in normalized_system_prompt
 
 
 @pytest.mark.unit
