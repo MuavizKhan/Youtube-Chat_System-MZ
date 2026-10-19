@@ -673,10 +673,12 @@ def append_relevant_source_timestamps(
 ) -> str:
     """Append source-grounded timestamp ranges to a substantive answer.
 
-    For multi-amount answers, first try to match each amount's local wording to
-    transcript text from returned sources. Other answers retain the established
-    distance-ranked behavior. Selected ranges are always grounded in returned
-    source metadata and presented chronologically.
+    Multi-amount answers first align each amount claim with transcript text from
+    returned sources. Other answers use multilingual lexical alignment between
+    the substantive answer and returned-source transcript text, falling back to
+    the established distance-ranked behavior only when no useful overlap exists.
+    Selected ranges are always grounded in returned metadata and presented
+    chronologically.
     """
     if (
         not isinstance(answer, str)
