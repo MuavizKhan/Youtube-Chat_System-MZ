@@ -676,9 +676,13 @@ _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
     # Generic eye mentions are not enough to support an *audible* eye/eyelid
     # claim. The concept matcher below requires an eyelid/blink/close verb or
     # nearby sound/hearing/silence wording before cross-lingual expansion.
-    "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes",
+    # Keep anatomy / blink words out of raw token-overlap matching. The eye
+    # concept is added via the stricter source acoustic pattern below instead.
+    "eye", "eyes", "eyelid", "eyelids", "eyeball", "eyeballs", "eyelash", "eyelashes",
+    "blink", "blinks", "blinked", "blinking", "close", "closing", "move", "moving",
     "عين", "العين", "العينين", "عينك", "عيني", "عينيك", "عيون", "عيونك",
-    "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
+    "جفن", "الجفن", "جفون", "الجفون", "ترمش", "بترمش", "رمش", "الرمش",
+    "تومض", "ترف", "تغمض", "بتغمض", "تغمز", "غمض", "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
     "و", "أو", "او", "حتى", "مثل", "كما", "لأن", "لان", "يمكن", "يكون",
     "تكون", "نفس", "هذا", "هذه", "ذلك",
 })
