@@ -563,6 +563,39 @@ def _select_claim_aligned_timestamp_candidates(
     return [item["candidate"] for item in ranked[:budget]]
 
 
+_ANSWER_ALIGNMENT_CONCEPTS = (
+    {
+        "english_pattern": r"\bheartbeat\b|heart\s*beat|\bpulse\b",
+        "arabic_pattern": r"نبض.{0,25}قلب|قلب.{0,25}نبض|نبضات.{0,15}القلب",
+        "aliases": {"heartbeat", "heart", "pulse", "نبض", "قلب", "نبضات", "النبض"},
+    },
+    {
+        "english_pattern": r"\bblood\b.{0,60}(?:\bvein|\barter|\bflow|\brush|\bmov)|(?:\bvein|\barter).{0,60}\bblood\b",
+        "arabic_pattern": r"الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
+        "aliases": {
+            "blood", "vein", "veins", "artery", "arteries", "flow", "rushing",
+            "rush", "movement", "move", "دم", "الدم", "عروق", "شرايين",
+            "أوعية", "حركة", "تدفق", "جريان", "سريان",
+        },
+    },
+    {
+        "english_pattern": r"\blungs?\b|\bbreath(?:e|ing)?\b",
+        "arabic_pattern": r"رئتين|الرئتين|الرئة|تنفس|التنفس",
+        "aliases": {"lung", "lungs", "breath", "breathing", "رئتين", "الرئتين", "الرئة", "تنفس", "التنفس"},
+    },
+    {
+        "english_pattern": r"\bstomach\b|\brumbl\w*|\bbelly\b",
+        "arabic_pattern": r"المعدة|معدتك|معدة|البطن|بطنك",
+        "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
+    },
+    {
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
+        "arabic_pattern": r"جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
+        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "جفون", "الجفون", "جفن", "الجفن", "عين", "العين", "رمش", "ترمش", "ترف", "تومض"},
+    },
+)
+
+
 _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
     "the", "and", "that", "this", "these", "those", "from", "into", "with",
     "your", "you", "their", "they", "them", "own", "may", "might", "could",
@@ -630,6 +663,16 @@ def _answer_alignment_terms(text: str) -> set[str]:
         for variant in variants:
             if len(variant) >= 2 and variant not in _ANSWER_ALIGNMENT_STOP_WORDS:
                 terms.add(variant)
+
+    # Add the counterpart vocabulary only when the concept appears in the text
+    # being aligned. This supports Arabic answers over English captions and vice
+    # versa without applying blanket translation to unrelated queries.
+    for concept in _ANSWER_ALIGNMENT_CONCEPTS:
+        if (
+            re.search(concept["english_pattern"], normalized, re.IGNORECASE)
+            or re.search(concept["arabic_pattern"], normalized, re.IGNORECASE)
+        ):
+            terms.update(concept["aliases"])
     return terms
 
 
@@ -659,9 +702,14 @@ def _select_answer_aligned_timestamp_candidates(
             continue
         coverage = len(overlap) / len(answer_terms)
         specificity = len(overlap) / math.sqrt(max(1, len(source_terms)))
+        concepts = {
+            index for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
+            if source_terms & concept["aliases"]
+        }
         ranked.append({
             "candidate": candidate,
             "overlap": overlap,
+            "concepts": concepts,
             "coverage": coverage,
             "specificity": specificity,
             "distance_score": -float(candidate.get("distance", math.inf)),
@@ -676,10 +724,12 @@ def _select_answer_aligned_timestamp_candidates(
     # first few items in a multi-item answer.
     selected = []
     covered_terms: set[str] = set()
+    covered_concepts: set[int] = set()
     remaining = list(ranked)
     while remaining and len(selected) < max_ranges:
         choices = [
             (
+                len(item["concepts"] - covered_concepts),
                 len(item["overlap"] - covered_terms),
                 item["coverage"],
                 item["specificity"],
@@ -689,11 +739,13 @@ def _select_answer_aligned_timestamp_candidates(
             for item in remaining
         ]
         best = max(choices, key=lambda item: item[:-1])[-1]
+        concept_gain = len(best["concepts"] - covered_concepts)
         marginal_gain = len(best["overlap"] - covered_terms)
-        if marginal_gain <= 0:
+        if concept_gain <= 0 and marginal_gain <= 0:
             break
         selected.append(best["candidate"])
         covered_terms.update(best["overlap"])
+        covered_concepts.update(best["concepts"])
         remaining.remove(best)
 
     return selected or None
