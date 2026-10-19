@@ -1457,6 +1457,17 @@ def _truncate_formatted_source(
                 ) + marker
                 return excerpt[:max_chars]
 
+            if ranked:
+                # Keep a concise fragment of the strongest sentence when even
+                # that sentence cannot fit in full.
+                best_sentence = ranked[0][2]
+                sentence_budget = available - len(marker)
+                if sentence_budget > 0:
+                    excerpt_text = best_sentence[:sentence_budget].rsplit(" ", 1)[0].rstrip()
+                    excerpt = header + "\n" + excerpt_text + marker
+                    if len(excerpt) <= max_chars:
+                        return excerpt
+
     # Defensive last resort for malformed blocks or extremely small budgets.
     return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
 
