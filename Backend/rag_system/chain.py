@@ -1992,7 +1992,7 @@ _FINANCIAL_MATERIAL_TERMS = {
 _BODILY_SOUND_CONCEPTS = (
     {
         "name": "heartbeat",
-        "source": r"heartbeat|heart\s*beat|pulse",
+        "source": r"heartbeat|heart\s*beat|pulse|نبض.{0,25}قلب|قلب.{0,25}نبض",
         "english": r"heartbeat|heart\s*beat|pulse",
         "arabic": r"نبض.{0,25}قلب|قلب.{0,25}نبض|نبضات.{0,15}القلب",
         "label_en": "heartbeat",
@@ -2000,7 +2000,7 @@ _BODILY_SOUND_CONCEPTS = (
     },
     {
         "name": "blood movement",
-        "source": r"blood.{0,60}(?:vein|arter|flow|rush|mov)|(?:vein|arter).{0,60}blood",
+        "source": r"blood.{0,60}(?:vein|arter|flow|rush|mov)|(?:vein|arter).{0,60}blood|الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
         "english": r"blood.{0,60}(?:vein|arter|flow|rush|mov)|(?:vein|arter).{0,60}blood",
         "arabic": r"الدم.{0,35}(?:عروق|شرايين|أوعية|حركة|تدفق|جريان|سريان)|(?:حركة|تدفق|جريان|سريان).{0,20}الدم",
         "label_en": "blood moving/rushing through veins",
@@ -2008,7 +2008,7 @@ _BODILY_SOUND_CONCEPTS = (
     },
     {
         "name": "lungs or breathing",
-        "source": r"\blungs?\b|\bbreath(?:e|ing)?\b",
+        "source": r"\blungs?\b|\bbreath(?:e|ing)?\b|رئتين|الرئتين|الرئة|تنفس|التنفس",
         "english": r"\blungs?\b|\bbreath(?:e|ing)?\b",
         "arabic": r"رئتين|الرئتين|الرئة|تنفس|التنفس",
         "label_en": "lungs or breathing",
@@ -2016,7 +2016,7 @@ _BODILY_SOUND_CONCEPTS = (
     },
     {
         "name": "stomach",
-        "source": r"\bstomach\b|\brumbl\w*|\bbelly\b",
+        "source": r"\bstomach\b|\brumbl\w*|\bbelly\b|المعدة|معدتك|معدة|البطن|بطنك",
         "english": r"\bstomach\b|\brumbl\w*|\bbelly\b",
         "arabic": r"المعدة|معدتك|معدة|البطن|بطنك",
         "label_en": "stomach sounds",
@@ -2024,7 +2024,7 @@ _BODILY_SOUND_CONCEPTS = (
     },
     {
         "name": "eyelid blinking",
-        "source": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
+        "source": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)|جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
         "english": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
         "arabic": r"جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
         "label_en": "eyelid blinking",
