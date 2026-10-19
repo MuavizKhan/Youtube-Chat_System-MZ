@@ -1320,10 +1320,10 @@ def _truncate_formatted_source(
     if len(source_text) <= max_chars:
         return source_text
 
-    marker = "\\n[Transcript excerpt shortened to fit the generation context budget.]"
+    marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
     question_terms = _generation_context_query_terms(question)
     financial_question = bool(re.search(
-        r"\\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\\b",
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
         re.IGNORECASE,
     ))
@@ -1334,7 +1334,7 @@ def _truncate_formatted_source(
     )
 
     if caption_start is not None:
-        header = "\\n".join(lines[:caption_start])
+        header = "\n".join(lines[:caption_start])
         available = max_chars - len(header) - 1 - len(marker)
         if available <= 0:
             return source_text[:max_chars]
@@ -1391,7 +1391,7 @@ def _truncate_formatted_source(
 
         if chosen:
             chosen.sort(key=lambda item: item[0])
-            excerpt = header + "\\n" + "\\n".join(
+            excerpt = header + "\n" + "\n".join(
                 line for _, line in chosen
             ) + marker
             return excerpt[:max_chars]
@@ -1404,14 +1404,14 @@ def _truncate_formatted_source(
         None,
     )
     if transcript_start is not None:
-        header = "\\n".join(lines[:transcript_start + 1])
-        transcript = "\\n".join(lines[transcript_start + 1:])
+        header = "\n".join(lines[:transcript_start + 1])
+        transcript = "\n".join(lines[transcript_start + 1:])
         available = max_chars - len(header) - 1 - len(marker)
         if available <= 0:
             return source_text[:max_chars]
         sentences = [
             sentence.strip()
-            for sentence in re.split(r"(?<=[.!?])\\s+|[\\r\\n]+", transcript)
+            for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", transcript)
             if sentence.strip()
         ]
         if sentences:
@@ -1452,7 +1452,7 @@ def _truncate_formatted_source(
                     used += extra
             if chosen_sentences:
                 chosen_sentences.sort(key=lambda item: item[0])
-                excerpt = header + "\\n" + " ".join(
+                excerpt = header + "\n" + " ".join(
                     sentence for _, sentence in chosen_sentences
                 ) + marker
                 return excerpt[:max_chars]
@@ -1503,7 +1503,7 @@ def build_generation_context(
 
     question_terms = _generation_context_query_terms(question)
     financial_question = bool(re.search(
-        r"\\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\\b",
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
         re.IGNORECASE,
     ))
@@ -1545,7 +1545,7 @@ def build_generation_context(
     )
     if original_chars <= budget:
         return {
-            "context": "\\n\\n".join(record["text"] for record in records),
+            "context": "\n\n".join(record["text"] for record in records),
             "diagnostics": {
                 "budget_chars": budget,
                 "original_chars": original_chars,
@@ -1583,7 +1583,7 @@ def build_generation_context(
             selected.append({**record, "text": excerpt})
 
     selected.sort(key=lambda record: record["index"])
-    context = "\\n\\n".join(record["text"] for record in selected)
+    context = "\n\n".join(record["text"] for record in selected)
     if len(context) > budget:
         context = context[:budget]
 
