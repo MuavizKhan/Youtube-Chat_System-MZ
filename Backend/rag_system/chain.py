@@ -2435,6 +2435,22 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             elif topic is None and nearby_topic is not None:
                 topic = nearby_topic
                 claim_text = nearby_captions
+
+            # If a report/recovery label and its numeric amount occupy
+            # adjacent caption rows from this same source, preserve the local
+            # recovery wording in the extracted claim. Prefixing only the
+            # report name to a bare amount is insufficient for downstream
+            # answer checks that require the amount to be described as recovered.
+            if (
+                topic == "recovery_report"
+                and nearby_topic == "recovery_report"
+                and own_caption
+                and not (
+                    re.search(r"\b(?:ministry|finance|report)\b", own_caption, re.IGNORECASE)
+                    and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", own_caption, re.IGNORECASE)
+                )
+            ):
+                claim_text = nearby_captions
         records.append({
             "amount": amount,
             "text": claim_text,
