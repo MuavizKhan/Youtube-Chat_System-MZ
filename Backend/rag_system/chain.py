@@ -2164,12 +2164,52 @@ _FINANCIAL_CLAUSE_BOUNDARY_PATTERN = re.compile(
 
 
 def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
-    """Extract each amount with its local wording for source/claim validation."""
-    records = []
-    for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
+    """Extract monetary mentions, including unitless caption numbers, with local attribution."""
+    text = text or ""
+    records: list[dict[str, Any]] = []
+    caption_rows = []
+    source_markers = [
+        (match.start(), int(match.group(1)))
+        for match in re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text)
+    ]
+    for match in re.finditer(r"(?m)^\s*-\s*\[([^\]]+)\]\s*(.+)$", text):
+        source_id = next(
+            (number for start, number in reversed(source_markers) if start < match.start()),
+            None,
+        )
+        caption_rows.append({
+            "start": match.start(),
+            "end": match.end(),
+            "text": match.group(2).strip(),
+            "source_id": source_id,
+        })
+
+    def caption_context(position: int) -> tuple[str, str]:
+        """Return this caption plus up to one neighboring caption in the same source."""
+        row_index = next(
+            (i for i, row in enumerate(caption_rows)
+             if row["start"] <= position <= row["end"]),
+            None,
+        )
+        if row_index is None:
+            return "", ""
+        row = caption_rows[row_index]
+        indices = [row_index]
+        for neighbor_index in (row_index - 1, row_index + 1):
+            if not 0 <= neighbor_index < len(caption_rows):
+                continue
+            neighbor = caption_rows[neighbor_index]
+            if neighbor["source_id"] == row["source_id"]:
+                indices.append(neighbor_index)
+        indices.sort()
+        local_text = " ".join(caption_rows[index]["text"] for index in indices)
+        return row["text"], local_text
+
+    recognized_spans = []
+    for match in _MONEY_AMOUNT_PATTERN.finditer(text):
         left = 0
         right = len(text)
-        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text):
             if boundary.end() <= match.start():
                 left = boundary.end()
             elif boundary.start() >= match.end():
@@ -2181,11 +2221,52 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             amount = float(token.replace(",", ""))
         except (AttributeError, ValueError):
             continue
-        if math.isfinite(amount):
+        if not math.isfinite(amount):
+            continue
+
+        own_caption, nearby_captions = caption_context(match.start())
+        topic = _financial_claim_topic(clause)
+        claim_text = clause
+        if own_caption:
+            local_topic = _financial_claim_topic(own_caption)
+            nearby_topic = _financial_claim_topic(nearby_captions)
+            topic = local_topic or topic or nearby_topic
+            if not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
+                claim_text = nearby_captions or own_caption
+            elif topic is None and nearby_topic is not None:
+                topic = nearby_topic
+                claim_text = nearby_captions
+        records.append({
+            "amount": amount,
+            "text": claim_text,
+            "topic": topic,
+        })
+        recognized_spans.append((match.start(), match.end()))
+
+    # Caption speech recognition sometimes emits a financial figure as a bare
+    # number ("6203") while its currency/unit appears elsewhere or is omitted.
+    # Accept 4–6 digit values only inside timestamped caption rows that have a
+    # nearby financial claim label; source IDs/timestamps are never considered.
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,.:])")
+    for row in caption_rows:
+        for match in bare_pattern.finditer(row["text"]):
+            absolute_start = row["start"] + match.start()
+            absolute_end = row["start"] + match.end()
+            if any(start <= absolute_start < end for start, end in recognized_spans):
+                continue
+            own_caption, nearby_captions = caption_context(absolute_start)
+            local_text = nearby_captions or own_caption
+            topic = _financial_claim_topic(own_caption) or _financial_claim_topic(local_text)
+            if topic is None:
+                continue
+            try:
+                amount = float(match.group(0).replace(",", ""))
+            except ValueError:
+                continue
             records.append({
                 "amount": amount,
-                "text": clause,
-                "topic": _financial_claim_topic(clause),
+                "text": local_text,
+                "topic": topic,
             })
     return records
 
