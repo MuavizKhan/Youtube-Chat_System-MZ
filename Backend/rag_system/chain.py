@@ -1478,6 +1478,13 @@ def _generation_context_query_terms(question: str | None) -> set[str]:
             "breath", "breathing", "stomach", "belly", "rumbling", "eyelid",
             "eyelids", "blink", "blinking", "eye", "eyes",
         })
+        # If the transcript itself is Arabic, these concepts let its caption
+        # rows receive the same relevance boost as the English equivalents.
+        terms.update({
+            "نبض", "قلب", "الدم", "دم", "عروق", "شرايين", "أوعية",
+            "رئتين", "الرئتين", "الرئة", "تنفس", "المعدة", "معدة",
+            "جفون", "الجفون", "جفن", "العين", "عين", "رمش", "ترمش",
+        })
     elif is_bodily_sound_question:
         # Also support an English question against Arabic transcript captions.
         terms.update({
