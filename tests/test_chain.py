@@ -3291,7 +3291,7 @@ def test_eye_anatomy_without_sound_context_does_not_add_eye_sound_timestamp():
 
 
 @pytest.mark.unit
-def test_eye_sound_claim_gets_no_timestamp_when_only_unrelated_anatomy_source_exists():
+def test_eye_sound_claim_gets_no_timestamp_when_noise_is_unrelated_to_eye_source():
     answer = "You may even notice the subtle sound of your eyelids blinking."
     result = chain.append_relevant_source_timestamps(
         answer=answer,
@@ -3299,6 +3299,7 @@ def test_eye_sound_claim_gets_no_timestamp_when_only_unrelated_anatomy_source_ex
             {
                 "start": 589.599, "end": 658.17, "distance": 0.2,
                 "transcript_text": (
+                    "A loud noise came from the hallway. "
                     "The presenter has eyelid irritation, blue eyes, and wears glasses."
                 ),
             },
