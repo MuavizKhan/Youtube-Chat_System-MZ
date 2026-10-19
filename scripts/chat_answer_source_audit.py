@@ -255,10 +255,10 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
 
     requirements = [
         ("heartbeat", r"نبض.{0,20}قلب|قلب.{0,20}نبض"),
-        ("blood_movement", r"(?:حركة|تدفق|جريان).{0,20}الدم|الدم.{0,25}(?:حركة|تدفق|جريان|عروق|شرايين|أوعية)"),
+        ("blood_movement", r"(?:حركة|تدفق|جريان|سريان).{0,25}الدم|الدم.{0,30}(?:حركة|تدفق|جريان|سريان|عروق|شرايين|أوعية)"),
         ("lungs_or_breathing", r"رئتين|الرئتين|الرئة|تنفس"),
         ("stomach", r"المعدة|معدتك|صوت المعدة"),
-        ("eyelids_blinking", r"(?:عين|عيني|جفن).{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)"),
+        ("eyelids_blinking", r"(?:عين|عيني|جفن|جفون|الجفون|الجفن).{0,30}(?:ترمش|تومض|ترف|رمش|تحرك)|(?:ترمش|تومض|ترف|رمش|تحرك).{0,30}(?:عين|جفن|جفون|الجفون)"),
     ]
     checks = [
         _quality_check(
@@ -305,7 +305,19 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
     if not isinstance(retrieval, dict):
         retrieval = {}
 
-    final_context_ids = _chunk_ids(retrieval.get("final_chunk_ids"))
+    generation = observability.get("generation")
+    if not isinstance(generation, dict):
+        generation = {}
+    context_budget = generation.get("context_budget")
+    if (
+        isinstance(context_budget, dict)
+        and isinstance(context_budget.get("included_chunk_ids"), list)
+    ):
+        # Prefer chunks actually selected for prompt packing. Older backend
+        # versions have no such diagnostic and retain the retrieval-trace fallback.
+        final_context_ids = _chunk_ids(context_budget.get("included_chunk_ids"))
+    else:
+        final_context_ids = _chunk_ids(retrieval.get("final_chunk_ids"))
     anchor_ids = _chunk_ids(retrieval.get("citation_chunk_ids"))
     source_objects = response.get("sources")
     if not isinstance(source_objects, list):
