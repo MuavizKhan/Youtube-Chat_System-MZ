@@ -650,13 +650,13 @@ Focused regression tests cover report attribution split across neighboring capti
 Run the full backend suite after CI dependency/compile checks:
 
 ```powershell
-.\\.venv\\Scripts\\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 Then start the backend against the already-indexed `experiment-caption-segments` namespace with the existing retrieval configuration and run a fresh audit:
 
 ```powershell
-.\\.venv\\Scripts\\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_8_answer_source_audit_20261019.json
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_8_answer_source_audit_20261019.json
 ```
 
-**Phase 10.8 is not complete until the live report passes.** Require `cases_succeeded = 3`, `cases_failed = 0`, consistent effective server configuration, `quality_passed = true`, and an empty `quality_failures` array. In Q07, confirm the recovery amount remains explicitly attributed to the source report and malformed amounts are absent; in AR03 and AR08, confirm the plain-text timestamp summary includes the late eye-sound interval (`09:49–10:58)) as well as the relevant early interval. No reindexing is expected for these generation/attribution/timestamp changes. The five-video retrieval benchmark is a separate gate and must be reviewed from its own saved multi-video report; a passing answer/source audit does not imply that every pilot-video retrieval case passes.
+**Phase 10.8 is not complete until the live report passes.** Require `cases_succeeded = 3`, `cases_failed = 0`, consistent effective server configuration, `quality_passed = true`, and an empty `quality_failures` array. In Q07, confirm the recovery amount remains explicitly attributed to the source report and malformed amounts are absent; in AR03 and AR08, confirm the plain-text timestamp summary includes the late eye-sound interval (`09:49–10:58)` as well as the relevant early interval. No reindexing is expected for these generation/attribution/timestamp changes. The five-video retrieval benchmark is a separate gate and must be reviewed from its own saved multi-video report; a passing answer/source audit does not imply that every pilot-video retrieval case passes.
