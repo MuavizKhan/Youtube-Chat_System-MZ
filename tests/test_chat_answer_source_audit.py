@@ -229,6 +229,40 @@ def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_pa
     assert saved_report["quality_passed"] is False
 
 
+def test_run_audit_requires_effective_config_for_every_case(tmp_path, monkeypatch):
+    shared_config = {
+        "embedding_model": "BAAI/bge-m3",
+        "index_namespace": "experiment-caption-segments",
+        "citation_policy": "selected_anchors",
+    }
+
+    def fake_post_chat(_base_url, case, _timeout_seconds):
+        audit = {
+            "quality": {"passed": True, "failed_checks": []},
+        }
+        if case["id"] != "AR08":
+            audit["effective_retrieval_config"] = shared_config
+        return {"case_id": case["id"], "status": "success", "audit": audit}
+
+    monkeypatch.setattr(audit_module, "_post_chat", fake_post_chat)
+    report = audit_module.run_audit(
+        base_url="http://127.0.0.1:8000",
+        output_path=tmp_path / "missing-config-audit.json",
+        timeout_seconds=5.0,
+    )
+
+    assert report["cases_succeeded"] == 3
+    assert report["cases_failed"] == 0
+    assert report["effective_server_configuration_consistent_across_cases"] is False
+    assert report["quality_passed"] is False
+    assert report["quality_failures"] == [
+        {
+            "case_id": "ALL",
+            "failed_checks": ["effective_server_configuration_consistency"],
+        }
+    ]
+
+
 def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
     response = {
         "answer": "\u00d8\u00a7\u00d9\u0084\u00d9\u0086\u00d8\u00a8\u00d8\u00b6",
