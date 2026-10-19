@@ -3095,6 +3095,30 @@ Transcript caption segments in chronological order:
 
 
 @pytest.mark.unit
+def test_financial_fallback_maps_plain_prose_amounts_to_their_source_block():
+    context = """[SOURCE 1]
+I invested 3,000 crore rupees into Kingfisher Airlines.
+The DRT judgment debt was 4,999 crore rupees plus interest.
+The debt certificate gives a figure of 6203.
+The Ministry of Finance report said 14,100 crore rupees had been recovered."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "3,000 crore rupees" in fallback
+    assert "4,999 crore rupees" in fallback
+    assert "debt certificate gives a figure of 6,203" in fallback
+    assert re.search(
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore rupees",
+        fallback,
+        re.IGNORECASE,
+    )
+
+
+@pytest.mark.unit
 def test_financial_fallback_does_not_borrow_recovery_report_attribution_from_other_source_blocks():
     context = """[SOURCE 1]
 Transcript caption segments in chronological order:
