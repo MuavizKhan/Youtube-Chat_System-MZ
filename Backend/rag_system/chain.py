@@ -477,8 +477,9 @@ def _claim_terms(text: str) -> set[str]:
 
 
 def _money_claims(answer: str) -> list[dict[str, Any]]:
-    """Extract monetary mentions with their surrounding clause."""
+    """Extract monetary mentions and clearly labelled bare financial figures."""
     claims = []
+    recognized_spans = []
     for match in _MONEY_AMOUNT_PATTERN.finditer(answer):
         token = match.group("currency_amount") or match.group("amount")
         try:
@@ -498,6 +499,28 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
         terms = _claim_terms(answer[left:right])
         if terms:
             claims.append({"amount": amount, "terms": terms})
+        recognized_spans.append((match.start(), match.end()))
+
+    # A certificate caption can give the figure without repeating its unit.
+    # Accept this only when the same clause explicitly names a financial topic;
+    # the timestamp punctuation guard avoids treating source ranges as amounts.
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
+    for match in bare_pattern.finditer(answer):
+        if any(start <= match.start() < end for start, end in recognized_spans):
+            continue
+        left, right = 0, len(answer)
+        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(answer):
+            if boundary.end() <= match.start():
+                left = boundary.end()
+            elif boundary.start() >= match.end():
+                right = boundary.start()
+                break
+        clause = answer[left:right]
+        if _financial_claim_topic(clause) is None:
+            continue
+        terms = _claim_terms(clause)
+        if terms:
+            claims.append({"amount": float(match.group(0)), "terms": terms})
     return claims
 
 
@@ -616,9 +639,11 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
     },
     {
-        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,25}(?:blink|lid)",
-        "arabic_pattern": r"جفون|الجفون|جفن|الجفن|عين.{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)",
-        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "جفون", "الجفون", "جفن", "الجفن", "عين", "العين", "رمش", "ترمش", "ترف", "تومض"},
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,35}(?:blink|lid|close)",
+        # Captions vary between formal Arabic and dialect spellings for blinking
+        # or closing the eyes. Keep these variations scoped to this sound concept.
+        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
+        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "close", "closing", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "العين", "عينيك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
 
@@ -717,6 +742,13 @@ def _select_answer_aligned_timestamp_candidates(
     answer_terms = _answer_alignment_terms(answer)
     if len(answer_terms) < 2:
         return None
+    normalized_answer = unicodedata.normalize("NFKC", answer).lower()
+    answer_concepts = {
+        index
+        for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
+        if re.search(concept["english_pattern"], normalized_answer, re.IGNORECASE)
+        or re.search(concept["arabic_pattern"], normalized_answer, re.IGNORECASE)
+    }
 
     ranked = []
     for candidate in candidates:
@@ -725,14 +757,21 @@ def _select_answer_aligned_timestamp_candidates(
             continue
         source_terms = _answer_alignment_terms(transcript_text)
         overlap = answer_terms & source_terms
-        if not overlap:
+        normalized_source = unicodedata.normalize("NFKC", transcript_text).lower()
+        source_concepts = {
+            index
+            for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
+            if re.search(concept["english_pattern"], normalized_source, re.IGNORECASE)
+            or re.search(concept["arabic_pattern"], normalized_source, re.IGNORECASE)
+        }
+        # Direct concept matches let the selector align a translated answer to
+        # dialect captions even when token overlap is weak or normalization
+        # differs. A candidate must match a concept actually present in answer.
+        concepts = answer_concepts & source_concepts
+        if not overlap and not concepts:
             continue
         coverage = len(overlap) / len(answer_terms)
         specificity = len(overlap) / math.sqrt(max(1, len(source_terms)))
-        concepts = {
-            index for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
-            if source_terms & concept["aliases"]
-        }
         ranked.append({
             "candidate": candidate,
             "overlap": overlap,
@@ -1983,6 +2022,17 @@ def build_generation_context(
             "source_group": source_group,
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
             "financial_topics": _financial_topics_in_text(rendered) if financial_question else set(),
+            # Topic-only diversity can still miss the exact amount when captions
+            # state it as a bare number (for example, "certificate ... 6203").
+            # Keep amount+topic identities so a different certificate caption
+            # cannot accidentally count as coverage for this distinct claim.
+            "financial_claims": {
+                (str(claim["topic"]), float(claim["amount"]))
+                for claim in (_money_amount_clauses(rendered) if financial_question else [])
+                if claim.get("topic") is not None
+                and isinstance(claim.get("amount"), (int, float))
+                and math.isfinite(float(claim["amount"]))
+            },
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
@@ -2020,17 +2070,56 @@ def build_generation_context(
     priority_records = priority_order[:selected_count]
 
     if financial_question:
-        # Preserve distinct financial claim families first. A bare caption number
-        # (for example a debt certificate's "6203") may not match the currency
-        # parser, so inclusion must not depend on amount parsing alone.
+        # Reserve distinct amount+claim pairs before generic relevance fill.
+        # Topic-only coverage is insufficient when one source group says merely
+        # "certificate" while a different group contains the bare 6203 figure.
+        claim_frequency: dict[tuple[str, float], int] = {}
+        for record in records:
+            for claim_key in record["financial_claims"]:
+                claim_frequency[claim_key] = claim_frequency.get(claim_key, 0) + 1
+
+        diverse_records = []
+        chosen_indices: set[int] = set()
+        covered_claims: set[tuple[str, float]] = set()
+        covered_topics: set[str] = set()
+        while len(diverse_records) < selected_count:
+            choices = []
+            for record in records:
+                if record["index"] in chosen_indices:
+                    continue
+                new_claims = record["financial_claims"] - covered_claims
+                if not new_claims:
+                    continue
+                novelty = sum(
+                    1.0 / claim_frequency[claim_key]
+                    for claim_key in new_claims
+                    if claim_frequency.get(claim_key, 0) > 0
+                )
+                new_topics = record["financial_topics"] - covered_topics
+                choices.append((
+                    novelty,
+                    len(new_claims),
+                    len(new_topics),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            diverse_records.append(chosen)
+            chosen_indices.add(chosen["index"])
+            covered_claims.update(chosen["financial_claims"])
+            covered_topics.update(chosen["financial_topics"])
+
+        # Then reserve any remaining distinct topic families, including claims
+        # that do not carry a parseable amount or unit in the same caption.
         topic_frequency: dict[str, int] = {}
         for record in records:
             for topic in record["financial_topics"]:
                 topic_frequency[topic] = topic_frequency.get(topic, 0) + 1
 
-        diverse_records = []
-        chosen_indices: set[int] = set()
-        covered_topics: set[str] = set()
         while len(diverse_records) < selected_count:
             choices = []
             for record in records:
@@ -2058,9 +2147,10 @@ def build_generation_context(
             diverse_records.append(chosen)
             chosen_indices.add(chosen["index"])
             covered_topics.update(chosen["financial_topics"])
+            covered_claims.update(chosen["financial_claims"])
 
-        # Once topic coverage is protected, use distinct amount coverage as a
-        # secondary signal, then fill the remaining slots by relevance.
+        # Finally retain distinct monetary values where a primary topic was not
+        # confidently assigned, then fill remaining slots by normal relevance.
         amount_frequency: dict[float, int] = {}
         for record in records:
             for amount in record["amounts"]:
@@ -2320,6 +2410,34 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "text": local_text,
                 "topic": topic,
             })
+
+    # Validation also runs on plain generated prose, which has no timestamped
+    # caption rows. Allow a unitless amount there only when its own clause names
+    # a financial topic; keep timestamped-context behavior above unchanged.
+    if not caption_rows:
+        for match in bare_pattern.finditer(text):
+            if any(start <= match.start() < end for start, end in recognized_spans):
+                continue
+            left, right = 0, len(text)
+            for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text):
+                if boundary.end() <= match.start():
+                    left = boundary.end()
+                elif boundary.start() >= match.end():
+                    right = boundary.start()
+                    break
+            clause = text[left:right].strip()
+            topic = _financial_claim_topic(clause)
+            if topic is None:
+                continue
+            try:
+                amount = float(match.group(0).replace(",", ""))
+            except ValueError:
+                continue
+            records.append({
+                "amount": amount,
+                "text": clause,
+                "topic": topic,
+            })
     return records
 
 
@@ -2508,6 +2626,73 @@ def _generation_repair_instruction(
         "The instructions below are revision requirements; the transcript context remains the only source of facts.\n\n"
         + "\n\n".join(instructions)
     )
+
+
+def _build_financial_evidence_fallback(
+    question: str,
+    context: str,
+) -> str | None:
+    """Build a conservative extractive answer when financial generation repair fails.
+
+    This is intentionally narrow: it activates only when the supplied context
+    contains separately attributable investment, DRT, certificate, and recovery
+    report claims. It copies source clauses rather than asking the model to
+    reconstruct numerals, and it does not infer a unit for a bare caption figure.
+    """
+    if not re.search(
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+        question or "",
+        re.IGNORECASE,
+    ):
+        return None
+
+    required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
+    claims_by_topic: dict[str, dict[str, Any]] = {}
+    for claim in _money_amount_clauses(context or ""):
+        topic = claim.get("topic")
+        amount = claim.get("amount")
+        claim_text = re.sub(r"\s+", " ", str(claim.get("text", ""))).strip()
+        if (
+            topic not in required_topics
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+            or not claim_text
+        ):
+            continue
+        # Keep the first source-attached claim for each family; context is
+        # ordered as presented to the generator, and duplicate overlaps are
+        # expected in neighboring retrieved chunks.
+        # Group a clearly recognized bare integer for readability without
+        # inventing a unit or changing the numerical value in the transcript.
+        if float(amount).is_integer():
+            bare_value = str(int(float(amount)))
+            if len(bare_value) >= 4:
+                claim_text = re.sub(
+                    rf"(?<![\w,:]){re.escape(bare_value)}(?![\w,:]|\.\d)",
+                    f"{int(float(amount)):,}",
+                    claim_text,
+                )
+        claims_by_topic.setdefault(topic, {**claim, "text": claim_text})
+
+    if any(topic not in claims_by_topic for topic in required_topics):
+        return None
+
+    labels = (
+        ("investment", "investment"),
+        ("drt_debt", "DRT judgment debt"),
+        ("certificate", "debt certificate"),
+        ("recovery_report", "Ministry of Finance recovery report"),
+    )
+    lines = ["The transcript supports these distinct financial statements:"]
+    for topic, _label in labels:
+        lines.append(f"- {claims_by_topic[topic]['text']}")
+
+    lines.append(
+        "The transcript does not clearly explain how the DRT judgment and "
+        "debt-certificate figures relate, so they should not be treated as one total."
+    )
+    return "\n\n".join([lines[0], "\n".join(lines[1:5]), lines[5]])
 
 
 # ============================================================
@@ -3764,6 +3949,7 @@ def build_rag_chain(
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
+        grounded_financial_fallback_used = False
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -3781,6 +3967,17 @@ def build_rag_chain(
                 answer=answer,
                 context=inputs.get("context", ""),
             ) is None
+            if not repair_passed:
+                extractive_answer = _build_financial_evidence_fallback(
+                    question=inputs.get("question", ""),
+                    context=inputs.get("context", ""),
+                )
+                if extractive_answer is not None:
+                    answer = extractive_answer
+                    grounded_financial_fallback_used = True
+                    logger.warning(
+                        "Using source-extractive financial fallback after generation repair failed"
+                    )
 
         return {
             "answer": answer,
@@ -3794,6 +3991,7 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "grounded_financial_fallback_used": grounded_financial_fallback_used,
             },
         }
 
