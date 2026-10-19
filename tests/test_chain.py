@@ -3056,3 +3056,103 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert "6,0002" not in answer
     assert "9,000 crore recovered" not in answer
 
+@pytest.mark.unit
+def test_financial_fallback_preserves_report_attribution_split_across_caption_rows():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report says the total amount recovered was
+- [02:50:25–02:51:41] 14,100 crore rupees.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "3,000 crore rupees" in fallback
+    assert "4,999 crore rupees" in fallback
+    assert "debt certificate gives a figure of 6,203" in fallback
+    assert re.search(
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore rupees",
+        fallback,
+        re.IGNORECASE,
+    )
+    assert "14,100 crore rupees" in fallback
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
+    for malformed in ("6,23 crores", "6,2003 crores", "6,0002 crores", "9,000 crores"):
+        assert malformed not in fallback
+
+
+@pytest.mark.unit
+def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and even the subtle sound of your eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You may even notice the subtle sound of your eyes in the silence.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_arabic_eye_sound_answer_aligns_to_english_caption_that_only_says_eyes():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You may even notice the subtle sound of your eyes in the silence.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
