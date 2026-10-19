@@ -464,6 +464,22 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
 
 
 @pytest.mark.unit
+def test_prompt_requires_answer_in_question_language_even_when_context_is_english():
+    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": "The transcript is in English and discusses heartbeat and breathing.",
+        "question": question,
+    })
+    messages = chain.prompt_to_messages(prompt)
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+
+    assert question in messages[1]["content"]
+    assert "answer in the same language as the user's question" in normalized_system_prompt
+    assert "do not switch to english merely because the transcript" in normalized_system_prompt
+    assert "for an arabic question, answer in arabic" in normalized_system_prompt
+
+
+@pytest.mark.unit
 def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions():
     question = "What does Vijay Mallya say about the amounts involved?"
     context = (
