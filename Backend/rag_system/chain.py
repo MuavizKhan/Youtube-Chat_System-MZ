@@ -1746,7 +1746,7 @@ def _relevant_financial_amounts(text: str) -> set[float]:
     for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
         left = 0
         right = len(text)
-        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
             if boundary.end() <= match.start():
                 left = boundary.end()
             elif boundary.start() >= match.end():
@@ -2040,13 +2040,18 @@ _BODILY_SOUND_CONCEPTS = (
 )
 
 
+_FINANCIAL_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"[.!?;\n]+|(?<!\d),\s*(?!\d)"
+)
+
+
 def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     """Extract each amount with its local wording for source/claim validation."""
     records = []
     for match in _MONEY_AMOUNT_PATTERN.finditer(text or ""):
         left = 0
         right = len(text)
-        for boundary in _CLAIM_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
+        for boundary in _FINANCIAL_CLAUSE_BOUNDARY_PATTERN.finditer(text or ""):
             if boundary.end() <= match.start():
                 left = boundary.end()
             elif boundary.start() >= match.end():
