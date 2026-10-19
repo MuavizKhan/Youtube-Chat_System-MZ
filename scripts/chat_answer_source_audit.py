@@ -152,6 +152,19 @@ def _amount_clauses(answer: str, pattern: str) -> list[str]:
 
 def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     checks = []
+    verification_abstention = "couldn't reliably verify the financial figures" in (
+        _substantive_answer(answer).casefold()
+    )
+    checks.append(_quality_check(
+        "financial_answer_not_abstained",
+        not verification_abstention,
+        (
+            "The answer must provide source-supported financial claims rather than "
+            "returning the safety abstention."
+            if verification_abstention
+            else "The answer did not trigger the financial verification abstention."
+        ),
+    ))
     claim_specs = [
         (
             "investment_3000",
