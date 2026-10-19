@@ -4092,8 +4092,8 @@ def build_rag_chain(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
                 elif re.search(
-                    r"\\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-                    r"liabilit\\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\\b",
+                    r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                    r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
                     inputs.get("question", ""),
                     re.IGNORECASE,
                 ):
