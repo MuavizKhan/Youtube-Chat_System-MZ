@@ -451,7 +451,7 @@ def _extract_money_amounts(text: str) -> list[float]:
         r"ministry|finance|report|kingfisher|borrowed|owed|owes)\b",
         re.IGNORECASE,
     )
-    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,.:])")
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
     for index, line in enumerate(lines):
         for match in bare_pattern.finditer(line):
             nearby = " ".join(lines[max(0, index - 1): min(len(lines), index + 2)])
@@ -1592,7 +1592,7 @@ def _generation_line_relevance(
         # currency/crore token. Prefer the claim-bearing caption in that case.
         overlap += 4
     if financial_question and re.search(
-        r"(?<![\w,.:])\d{4,6}(?![\w,.:])",
+        r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)",
         transcript_text,
     ) and re.search(
         r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|principal|interest|"
@@ -2299,7 +2299,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     # number ("6203") while its currency/unit appears elsewhere or is omitted.
     # Accept 4–6 digit values only inside timestamped caption rows that have a
     # nearby financial claim label; source IDs/timestamps are never considered.
-    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,.:])")
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
     for row in caption_rows:
         for match in bare_pattern.finditer(row["text"]):
             absolute_start = row["start"] + match.start()
