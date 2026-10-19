@@ -650,10 +650,10 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
     {
         # Some captions name the eyes but omit a direct verb for blinking;
         # retain that interval as evidence for an answer about audible eye/eyelid sounds.
-        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye|(?:sound|noise|hear\w*|audible|notice|silence).{0,45}\beyes?\b|\beyes?\b.{0,45}(?:sound|noise|hear\w*|audible|silence)",
         # Accept formal Arabic and dialectal references to eyes, eyelids,
-        # blinking, and closing the eyes.
-        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
+        # blinking, closing, or an explicitly audible eye-related sound.
+        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)|صوت.{0,40}(?:عين|جفن)|(?:عين|جفن).{0,40}(?:صوت|سمع|هدوء|صمت)",
         "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
@@ -671,6 +671,11 @@ _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
     "up", "out", "than", "then", "very", "التي", "الذي", "الذين", "اللواتي",
     "الناس", "قد", "يبدأ", "يبدأون", "بسماع", "سماع", "داخل", "الغرفة",
     "أجسامهم", "اجسامهم", "أصوات", "اصوات", "صوت", "الأصوات", "الاصوات",
+    # Generic eye mentions are not enough to support an *audible* eye/eyelid
+    # claim. The concept matcher below requires an eyelid/blink/close verb or
+    # nearby sound/hearing/silence wording before cross-lingual expansion.
+    "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes",
+    "عين", "العين", "العينين", "عينك", "عيني", "عينيك", "عيون", "عيونك",
     "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
     "و", "أو", "او", "حتى", "مثل", "كما", "لأن", "لان", "يمكن", "يكون",
     "تكون", "نفس", "هذا", "هذه", "ذلك",
