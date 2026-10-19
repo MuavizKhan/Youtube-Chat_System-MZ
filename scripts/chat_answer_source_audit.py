@@ -40,7 +40,13 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
             {"label": "Kingfisher investment: 3,000 crore", "candidate_chunk_ids": [108]},
             {"label": "DRT judgment debt figure: 4,999 crore", "candidate_chunk_ids": [124]},
             {"label": "debt-certificate figure: 6,203 crore", "candidate_chunk_ids": [221]},
-            {"label": "Ministry of Finance recovery figure: 14,100 crore", "candidate_chunk_ids": [153, 159]},
+            {
+                "label": "Ministry of Finance recovery figure: 14,100 crore",
+                # Chunk 221 also mentions the Ministry report while discussing
+                # the DRT certificate figure, so its interval can support both
+                # adjacent transcript claims without inventing a source.
+                "candidate_chunk_ids": [153, 159, 221],
+            },
         ],
     },
     {
