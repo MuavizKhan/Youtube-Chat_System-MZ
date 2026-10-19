@@ -210,6 +210,24 @@ def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     assert "unclear_relationship_preserved" in failed
 
 
+def test_q07_quality_gate_rejects_known_malformed_extra_amounts():
+    answer = (
+        "Mallya invested 3,000 crore in Kingfisher. The DRT judgment debt was 4,999 crore. "
+        "The debt certificate gives a figure of 6,203. A Ministry of Finance report says "
+        "14,100 crore was recovered. The amounts 6,23 crore, 6,2003 crore and 6,0002 crore "
+        "were stated, and 9,000 crore was the official debt-recovery amount. "
+        "The transcript does not clearly explain how the DRT judgment and certificate figures relate."
+    )
+
+    failed = {
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    }
+
+    assert "malformed_or_unsupported_financial_amounts_absent" in failed
+
+
 def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
     english_answer = (
         "In the quiet room people may hear their heartbeat, blood rushing through "
