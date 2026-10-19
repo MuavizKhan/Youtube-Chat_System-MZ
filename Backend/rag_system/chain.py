@@ -1353,8 +1353,8 @@ def build_generation_context(
 
     Whole groups are prioritized by their best retrieval distance and then
     restored to chronological order. Retrieved candidates and returned source
-    links are not changed. A single oversized group is shortened only if it
-    cannot fit the budget by itself.
+    links are not changed. A source is excerpted only when no complete group
+    can fit the available budget.
     """
     budget = (
         RAG_GENERATION_CONTEXT_MAX_CHARS
@@ -1365,16 +1365,21 @@ def build_generation_context(
         raise ValueError("max_chars must be a positive integer.")
 
     if not source_groups:
-        context = "No relevant transcript context was retrieved."
+        original_context = "No relevant transcript context was retrieved."
+        context = (
+            original_context
+            if len(original_context) <= budget
+            else _truncate_formatted_source(original_context, budget)
+        )
         return {
             "context": context,
             "diagnostics": {
                 "budget_chars": budget,
-                "original_chars": len(context),
+                "original_chars": len(original_context),
                 "final_chars": len(context),
                 "groups_available": 0,
                 "groups_included": 0,
-                "reduced": False,
+                "reduced": context != original_context,
             },
         }
 
