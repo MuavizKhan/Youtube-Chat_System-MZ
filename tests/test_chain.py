@@ -463,6 +463,43 @@ def test_build_generation_context_prioritizes_relevance_then_restores_chronology
 
 
 @pytest.mark.unit
+def test_build_generation_context_does_not_let_oversized_top_group_exclude_smaller_groups():
+    groups = [
+        {
+            "documents": [doc(1, 0, 10, "OVERSIZED_TOP " + "x" * 3000)],
+            "start": 0,
+            "end": 10,
+            "distance": 0.01,
+        },
+        {
+            "documents": [doc(2, 100, 110, "SECONDARY_EVIDENCE " + "y" * 250)],
+            "start": 100,
+            "end": 110,
+            "distance": 0.1,
+        },
+        {
+            "documents": [doc(3, 200, 210, "TERTIARY_EVIDENCE " + "z" * 250)],
+            "start": 200,
+            "end": 210,
+            "distance": 0.2,
+        },
+    ]
+    budget = (
+        len(chain.format_source_group(groups[1], 2))
+        + len(chain.format_source_group(groups[2], 3))
+        + 2
+    )
+
+    result = chain.build_generation_context(groups, max_chars=budget)
+
+    assert len(result["context"]) <= budget
+    assert "OVERSIZED_TOP" not in result["context"]
+    assert "SECONDARY_EVIDENCE" in result["context"]
+    assert "TERTIARY_EVIDENCE" in result["context"]
+    assert result["diagnostics"]["groups_included"] == 2
+
+
+@pytest.mark.unit
 def test_build_generation_context_shortens_single_oversized_source_at_word_boundary():
     large_text = "transcriptword " * 1000
     groups = [
