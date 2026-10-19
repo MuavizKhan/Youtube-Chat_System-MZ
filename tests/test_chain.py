@@ -674,6 +674,24 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
 
 
 @pytest.mark.unit
+def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": (
+            "The captions contain unclear debt figures. An interviewer asks where "
+            "a 9,000-crore figure came from, and another passage contains a garbled "
+            "number for a debt certificate."
+        ),
+        "question": "What does the guest say about the debt figures?",
+    })
+    messages = chain.prompt_to_messages(prompt)
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+
+    assert "do not silently repair the number" in normalized_system_prompt
+    assert 'call one a "misreading" unless the transcript explicitly supports that relationship' in normalized_system_prompt
+    assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
+
+
+@pytest.mark.unit
 def test_prompt_requires_answer_in_question_language_even_when_context_is_english():
     question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
     prompt = chain.RAG_PROMPT.invoke({
