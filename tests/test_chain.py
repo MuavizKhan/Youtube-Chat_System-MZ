@@ -305,11 +305,47 @@ def test_format_source_group_reconstructs_caption_segments_in_order_and_deduplic
         "Transcript caption segments in chronological order "
         "(boundaries are not speaker labels):"
     ) in formatted
+    assert "- [00:10–00:12] First caption." in formatted
+    assert "- [00:12–00:15] Shared caption." in formatted
+    assert "- [00:30–00:32] Final caption." in formatted
     assert formatted.index("First caption.") < formatted.index("Shared caption.")
     assert formatted.index("Shared caption.") < formatted.index("Final caption.")
     assert formatted.count("Shared caption.") == 1
     assert "flattened chunk one" not in formatted
     assert "flattened chunk two" not in formatted
+
+
+@pytest.mark.unit
+def test_format_source_group_includes_original_caption_timestamps_for_long_video():
+    document = doc(108, 7267.92, 7351.84, "flattened transcript chunk")
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 1080,
+            "start": 7267.92,
+            "end": 7274.0,
+            "text": "Guest answers.",
+        },
+        {
+            "segment_id": 1081,
+            "start": 7274.0,
+            "end": 7280.0,
+            "text": "Interviewer follows up.",
+        },
+    ]
+
+    formatted = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 7267.92,
+            "end": 7351.84,
+            "distance": 0.5,
+        },
+        1,
+    )
+
+    assert "- [02:01:07–02:01:14] Guest answers." in formatted
+    assert "- [02:01:14–02:01:20] Interviewer follows up." in formatted
+    assert formatted.index("Guest answers.") < formatted.index("Interviewer follows up.")
 
 
 @pytest.mark.unit
@@ -415,6 +451,14 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
     )
     assert (
         "Caption boundaries and timestamps do not prove"
+        in normalized_system_prompt
+    )
+    assert (
+        "reconstructed caption line includes that snippet's original start and end times"
+        in normalized_system_prompt
+    )
+    assert (
+        "the timestamps do not establish who spoke"
         in normalized_system_prompt
     )
 
