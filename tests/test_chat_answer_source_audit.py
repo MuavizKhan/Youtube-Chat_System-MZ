@@ -239,6 +239,13 @@ Transcript caption segments in chronological order:
         if not check["passed"]
     ]
     assert failures == [], f"Extractive fallback failed Q07 audit checks: {failures}"
+    for raw_timestamp in (
+        "[02:01:07–02:02:31]",
+        "[02:18:34–02:20:28]",
+        "[02:49:56–02:50:25]",
+        "[02:50:25–02:51:41]",
+    ):
+        assert raw_timestamp not in answer
     recovery_claim = next(
         line for line in answer.splitlines() if "14,100" in line
     )
