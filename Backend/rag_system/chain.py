@@ -115,6 +115,15 @@ FALLBACK_ANSWER = (
     "in the video. It may not be covered by this video."
 )
 
+# Use this when an answer to a financial question fails the deterministic repair
+# check and there is not enough source-bound evidence to build a safe extractive
+# answer. Unlike FALLBACK_ANSWER, keep the retrieved sources visible for review.
+FINANCIAL_VERIFICATION_FALLBACK = (
+    "I couldn't reliably verify the financial figures from the retrieved "
+    "transcript. I won't guess at or reconcile amounts that the available "
+    "evidence does not establish."
+)
+
 
 # ============================================================
 # 1. SYSTEM INSTRUCTIONS
@@ -4053,6 +4062,7 @@ def build_rag_chain(
         repair_attempted = repair_instruction is not None
         repair_passed = None
         grounded_financial_fallback_used = False
+        financial_answer_suppressed = False
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -4081,6 +4091,21 @@ def build_rag_chain(
                     logger.warning(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
+                elif re.search(
+                    r"\\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                    r"liabilit\\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\\b",
+                    inputs.get("question", ""),
+                    re.IGNORECASE,
+                ):
+                    # Never return a known-invalid financial draft merely because
+                    # its evidence is too fragmented to support an extractive
+                    # fallback. Keep sources available, but suppress its numbers.
+                    answer = FINANCIAL_VERIFICATION_FALLBACK
+                    financial_answer_suppressed = True
+                    logger.warning(
+                        "Suppressing financial draft after failed repair because "
+                        "no source-bound extractive fallback was available"
+                    )
 
         return {
             "answer": answer,
@@ -4095,6 +4120,7 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
+                "financial_answer_suppressed": financial_answer_suppressed,
             },
         }
 
