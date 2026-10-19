@@ -439,6 +439,33 @@ def _extract_money_amounts(text: str) -> list[float]:
             continue
         if math.isfinite(amount):
             amounts.append(amount)
+
+    # Some transcript captions record a bare financial figure (for example
+    # "certificate number 6203") without repeating the unit in that caption.
+    # Restrict this fallback to four-to-six digit numbers near financial terms
+    # and use caption-line neighbors when the claim label is in the adjacent line.
+    lines = text.splitlines()
+    financial_terms = re.compile(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|principal|interest|"
+        r"liabilit\w*|loan|recover(?:ed|y|ies)?|recovery|invest(?:ed|ment)?|"
+        r"ministry|finance|report|kingfisher|borrowed|owed|owes)\b",
+        re.IGNORECASE,
+    )
+    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,.:])")
+    for index, line in enumerate(lines):
+        for match in bare_pattern.finditer(line):
+            nearby = " ".join(lines[max(0, index - 1): min(len(lines), index + 2)])
+            if not financial_terms.search(nearby):
+                continue
+            try:
+                amount = float(match.group(0))
+            except ValueError:
+                continue
+            if math.isfinite(amount) and not any(
+                math.isclose(amount, existing, rel_tol=0.0, abs_tol=0.1)
+                for existing in amounts
+            ):
+                amounts.append(amount)
     return amounts
 
 
