@@ -1,5 +1,6 @@
 import json
 
+import scripts.chat_answer_source_audit as audit_module
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
     analyze_response,
@@ -185,6 +186,47 @@ def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
     assert "sound_lungs_or_breathing" in failed
     assert "sound_stomach" in failed
     assert "sound_eyelids_blinking" in failed
+
+
+def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_path, monkeypatch):
+    shared_config = {
+        "embedding_model": "BAAI/bge-m3",
+        "index_namespace": "experiment-caption-segments",
+        "citation_policy": "selected_anchors",
+    }
+
+    def fake_post_chat(_base_url, case, _timeout_seconds):
+        quality_passed = case["id"] != "AR08"
+        return {
+            "case_id": case["id"],
+            "status": "success",
+            "audit": {
+                "effective_retrieval_config": shared_config,
+                "quality": {
+                    "passed": quality_passed,
+                    "failed_checks": [] if quality_passed else ["sound_stomach"],
+                },
+            },
+        }
+
+    monkeypatch.setattr(audit_module, "_post_chat", fake_post_chat)
+    output_path = tmp_path / "phase10_8_6_audit.json"
+    report = audit_module.run_audit(
+        base_url="http://127.0.0.1:8000",
+        output_path=output_path,
+        timeout_seconds=5.0,
+    )
+
+    assert report["cases_attempted"] == 3
+    assert report["cases_succeeded"] == 3
+    assert report["cases_failed"] == 0
+    assert report["effective_server_configuration_consistent_across_cases"] is True
+    assert report["quality_passed"] is False
+    assert report["quality_failures"] == [
+        {"case_id": "AR08", "failed_checks": ["sound_stomach"]}
+    ]
+    saved_report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved_report["quality_passed"] is False
 
 
 def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
