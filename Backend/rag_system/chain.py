@@ -2374,7 +2374,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         if own_caption:
             local_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(nearby_captions)
-            topic = local_topic or topic or nearby_topic
+            topic = local_topic or nearby_topic or topic
             # A caption may say only "recovered" while the immediately adjacent
             # caption names the Ministry/Finance report. Promote that local
             # recovery claim to the more specific report attribution.
@@ -2682,20 +2682,24 @@ def _build_financial_evidence_fallback(
         source_block = (
             source_blocks.get(source_id, "")
             if isinstance(source_id, int)
-            else (context or "")
+            else ((context or "") if not source_blocks else "")
         )
         topic = claim.get("topic")
         local_topic = _financial_claim_topic(claim_text)
         if local_topic is not None:
             topic = local_topic
 
-        # If the amount caption only says that money was recovered, use a
-        # Ministry/Finance/report attribution only when that attribution occurs
-        # in the same retrieved SOURCE block. This handles split caption rows
-        # without borrowing a report label from an unrelated source.
+        # Attribution is source-local. In caption-aware contexts, a broad
+        # clause may span adjacent SOURCE blocks even when its amount belongs
+        # to only one block; never let that wider clause borrow a report label.
         has_recovery_context = bool(re.search(
             r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
             claim_text,
+            re.IGNORECASE,
+        ))
+        has_recovery_in_source = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            source_block,
             re.IGNORECASE,
         ))
         has_report_in_source = bool(re.search(
@@ -2703,15 +2707,24 @@ def _build_financial_evidence_fallback(
             source_block,
             re.IGNORECASE,
         ))
+        source_bound_context = bool(source_blocks)
+        has_source_local_recovery_report = (
+            has_report_in_source and has_recovery_in_source
+        )
+        if (
+            source_bound_context
+            and topic == "recovery_report"
+            and not has_source_local_recovery_report
+        ):
+            topic = (
+                "recovery"
+                if has_recovery_context or has_recovery_in_source
+                else None
+            )
         if (
             topic == "recovery"
-            and has_recovery_context
-            and has_report_in_source
-            and re.search(
-                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
-                source_block,
-                re.IGNORECASE,
-            )
+            and (has_recovery_context or has_recovery_in_source)
+            and has_source_local_recovery_report
         ):
             topic = "recovery_report"
 
