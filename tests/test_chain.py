@@ -403,6 +403,97 @@ def test_sanitize_generated_answer_removes_model_authored_timestamp_summary():
     assert chain.sanitize_generated_answer(answer) == "A grounded answer."
 
 
+def _caption_group(chunk_id, start, captions, distance):
+    document = doc(chunk_id, start, start + 120, "flattened chunk content")
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": chunk_id * 100 + index,
+            "start": start + index * 2,
+            "end": start + index * 2 + 1.5,
+            "text": text,
+        }
+        for index, text in enumerate(captions)
+    ]
+    return {
+        "documents": [document],
+        "start": start,
+        "end": start + max(1, len(captions)) * 2,
+        "distance": distance,
+    }
+
+
+@pytest.mark.unit
+def test_generation_context_preserves_query_relevant_captions_across_regions():
+    filler = [
+        "Unrelated ordinary narration describes the scene in ordinary words."
+        for _ in range(24)
+    ]
+    first_group = _caption_group(
+        41,
+        10,
+        [*filler, "People can hear the sounds of their heartbeat in a quiet room."],
+        0.2,
+    )
+    second_group = _caption_group(
+        42,
+        600,
+        [*filler, "People can also hear breathing and stomach sounds in the room."],
+        0.25,
+    )
+
+    result = chain.build_generation_context(
+        [first_group, second_group],
+        question="What bodily sounds might people hear in a quiet room?",
+        max_chars=1800,
+    )
+
+    assert len(result["context"]) <= 1800
+    assert "People can hear the sounds of their heartbeat in a quiet room." in result["context"]
+    assert "People can also hear breathing and stomach sounds in the room." in result["context"]
+    assert result["diagnostics"]["groups_included"] == 2
+    assert result["diagnostics"]["reduced"] is True
+
+
+@pytest.mark.unit
+def test_generation_context_keeps_distinct_money_evidence_lines_for_amount_question():
+    filler = [
+        "The conversation briefly moves to an unrelated point in the interview."
+        for _ in range(22)
+    ]
+    groups = [
+        _caption_group(
+            51,
+            100,
+            [*filler, "I put 3,000 crores of UB Group money into Kingfisher Airlines to keep it afloat."],
+            0.82,
+        ),
+        _caption_group(
+            52,
+            500,
+            [*filler, "The DRT debt certificate referred to 4,999 crore rupees plus interest."],
+            0.91,
+        ),
+        _caption_group(
+            53,
+            900,
+            [*filler, "The Ministry of Finance report showed 14,100 crore recovered from me."],
+            0.83,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts were mentioned about the debt and money recovered?",
+        max_chars=2400,
+    )
+
+    assert len(result["context"]) <= 2400
+    assert "3,000 crores of UB Group money into Kingfisher Airlines" in result["context"]
+    assert "4,999 crore rupees plus interest" in result["context"]
+    assert "14,100 crore recovered from me" in result["context"]
+    assert result["diagnostics"]["groups_included"] == 3
+
+
 @pytest.mark.unit
 def test_build_generation_context_keeps_all_groups_when_within_budget():
     groups = [
@@ -484,19 +575,21 @@ def test_build_generation_context_does_not_let_oversized_top_group_exclude_small
             "distance": 0.2,
         },
     ]
-    budget = (
+    budget = max(
         len(chain.format_source_group(groups[1], 2))
         + len(chain.format_source_group(groups[2], 3))
-        + 2
+        + 2,
+        2100,
     )
 
     result = chain.build_generation_context(groups, max_chars=budget)
 
     assert len(result["context"]) <= budget
-    assert "OVERSIZED_TOP" not in result["context"]
+    # The large top-ranked group may contribute a short excerpt, but it must
+    # not consume the context budget or crowd the other retrieved regions out.
     assert "SECONDARY_EVIDENCE" in result["context"]
     assert "TERTIARY_EVIDENCE" in result["context"]
-    assert result["diagnostics"]["groups_included"] == 2
+    assert result["diagnostics"]["groups_included"] == 3
 
 
 @pytest.mark.unit
@@ -578,6 +671,24 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
         "the timestamps do not establish who spoke"
         in normalized_system_prompt
     )
+
+
+@pytest.mark.unit
+def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": (
+            "The captions contain unclear debt figures. An interviewer asks where "
+            "a 9,000-crore figure came from, and another passage contains a garbled "
+            "number for a debt certificate."
+        ),
+        "question": "What does the guest say about the debt figures?",
+    })
+    messages = chain.prompt_to_messages(prompt)
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+
+    assert "do not silently repair the number" in normalized_system_prompt
+    assert 'call one a "misreading" unless the transcript explicitly supports that relationship' in normalized_system_prompt
+    assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
 
 
 @pytest.mark.unit

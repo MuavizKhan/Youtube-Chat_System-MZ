@@ -272,7 +272,11 @@ SOURCE / TIMESTAMP RULES
     to and retain its attribution to the speaker or named source. Do not round,
     merge, or treat different figures as interchangeable unless the transcript
     explicitly says they describe the same measure. If the transcript distinguishes
-    a component figure from a total, state that distinction.
+    a component figure from a total, state that distinction. When automatic captions
+    garble a number or speakers appear to disagree about a figure, do not silently
+    repair the number, reconcile the figures, or call one a "misreading" unless the
+    transcript explicitly supports that relationship. State the uncertainty or
+    attribute the separate figures to the speakers discussing them.
 
 22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
     guest's statements from an interviewer's questions, premises, allegations, or
@@ -1288,17 +1292,45 @@ def build_context(
     )
 
 
+def _generation_context_query_terms(question: str | None) -> set[str]:
+    """Extract conservative English query terms used only for excerpt selection."""
+    return _claim_terms(question or "")
+
+
+def _generation_line_relevance(
+    line: str,
+    question_terms: set[str],
+    *,
+    financial_question: bool,
+) -> int:
+    """Score one transcript line for evidence selection, never as a hard gate."""
+    transcript_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
+    overlap = len(question_terms & _claim_terms(transcript_text))
+    if financial_question and _extract_money_amounts(transcript_text):
+        # For amount questions, retain lines containing actual monetary figures
+        # even when the transcript uses different wording from the question.
+        overlap += 5
+    return overlap
+
+
 def _truncate_formatted_source(
     source_text: str,
     max_chars: int,
+    question: str | None = None,
 ) -> str:
-    """Shorten one oversized source, preferring complete caption lines."""
+    """Excerpt a source under budget, preferring question-relevant transcript lines."""
     if max_chars <= 0:
         return ""
     if len(source_text) <= max_chars:
         return source_text
 
     marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
+    question_terms = _generation_context_query_terms(question)
+    financial_question = bool(re.search(
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
+        question or "",
+        re.IGNORECASE,
+    ))
     lines = source_text.splitlines()
     caption_start = next(
         (index for index, line in enumerate(lines) if line.startswith("- [")),
@@ -1307,26 +1339,70 @@ def _truncate_formatted_source(
 
     if caption_start is not None:
         header = "\n".join(lines[:caption_start])
-        kept_lines = []
-        for line in lines[caption_start:]:
-            candidate = header + "\n" + "\n".join([*kept_lines, line]) + marker
-            if len(candidate) <= max_chars:
-                kept_lines.append(line)
+        available = max_chars - len(header) - 1 - len(marker)
+        if available <= 0:
+            return source_text[:max_chars]
+
+        captions = lines[caption_start:]
+        scored = [
+            (
+                _generation_line_relevance(
+                    line,
+                    question_terms,
+                    financial_question=financial_question,
+                ),
+                index,
+                line,
+            )
+            for index, line in enumerate(captions)
+        ]
+        if any(score > 0 for score, _, _ in scored):
+            ranked = sorted(scored, key=lambda item: (-item[0], item[1]))
+        else:
+            # If scripts differ (for example, an Arabic question over English
+            # captions), preserve temporal coverage rather than taking only
+            # the first captions from the source.
+            slots = max(1, min(len(captions), available // max(
+                1,
+                int(sum(len(line) for line in captions) / max(1, len(captions))),
+            )))
+            if slots == 1:
+                chosen_indices = [len(captions) // 2]
             else:
-                break
-        if kept_lines:
-            return header + "\n" + "\n".join(kept_lines) + marker
+                chosen_indices = sorted({
+                    round(index * (len(captions) - 1) / (slots - 1))
+                    for index in range(slots)
+                })
+            ranked = [(0, index, captions[index]) for index in chosen_indices]
 
-        prefix = header + "\n"
-        available = max_chars - len(prefix) - len(marker)
-        if available > 0:
-            first_caption = lines[caption_start]
-            excerpt = first_caption[:available].rsplit(" ", 1)[0].rstrip()
-            candidate = prefix + excerpt + marker
-            if len(candidate) <= max_chars:
-                return candidate
+        chosen = []
+        used = 0
+        for score, index, line in ranked:
+            extra = len(line) + (1 if chosen else 0)
+            if extra <= available - used:
+                chosen.append((index, line))
+                used += extra
 
-    # Legacy source blocks contain unstructured transcript text.
+        if not chosen and ranked:
+            _, _, line = ranked[0]
+            timestamp_end = line.find("] ")
+            if line.startswith("- [") and timestamp_end >= 0:
+                prefix = line[:timestamp_end + 2]
+                tail_available = available - len(prefix)
+                if tail_available > 0:
+                    excerpt = line[timestamp_end + 2:][:tail_available].rsplit(" ", 1)[0].rstrip()
+                    chosen = [(0, prefix + excerpt)]
+
+        if chosen:
+            chosen.sort(key=lambda item: item[0])
+            excerpt = header + "\n" + "\n".join(
+                line for _, line in chosen
+            ) + marker
+            return excerpt[:max_chars]
+
+    # Legacy chunks lack caption rows. Select relevant sentences when possible
+    # and otherwise sample across the transcript rather than always taking its
+    # beginning.
     transcript_start = next(
         (index for index, line in enumerate(lines) if line.strip() == "Transcript:"),
         None,
@@ -1335,26 +1411,83 @@ def _truncate_formatted_source(
         header = "\n".join(lines[:transcript_start + 1])
         transcript = "\n".join(lines[transcript_start + 1:])
         available = max_chars - len(header) - 1 - len(marker)
-        if available > 0:
-            excerpt = transcript[:available].rsplit(" ", 1)[0].rstrip()
-            candidate = header + "\n" + excerpt + marker
-            if len(candidate) <= max_chars:
-                return candidate
+        if available <= 0:
+            return source_text[:max_chars]
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", transcript)
+            if sentence.strip()
+        ]
+        if sentences:
+            scored = [
+                (
+                    _generation_line_relevance(
+                        sentence,
+                        question_terms,
+                        financial_question=financial_question,
+                    ),
+                    index,
+                    sentence,
+                )
+                for index, sentence in enumerate(sentences)
+            ]
+            if any(score > 0 for score, _, _ in scored):
+                ranked = sorted(scored, key=lambda item: (-item[0], item[1]))
+            else:
+                slots = max(1, min(len(sentences), available // max(
+                    1,
+                    int(sum(len(sentence) for sentence in sentences) / len(sentences)),
+                )))
+                if slots == 1:
+                    sample_indices = [len(sentences) // 2]
+                else:
+                    sample_indices = sorted({
+                        round(index * (len(sentences) - 1) / (slots - 1))
+                        for index in range(slots)
+                    })
+                ranked = [(0, index, sentences[index]) for index in sample_indices]
 
-    # Last-resort guard for malformed blocks or a very small custom budget.
+            chosen_sentences = []
+            used = 0
+            for _score, index, sentence in ranked:
+                extra = len(sentence) + (1 if chosen_sentences else 0)
+                if extra <= available - used:
+                    chosen_sentences.append((index, sentence))
+                    used += extra
+            if chosen_sentences:
+                chosen_sentences.sort(key=lambda item: item[0])
+                excerpt = header + "\n" + " ".join(
+                    sentence for _, sentence in chosen_sentences
+                ) + marker
+                return excerpt[:max_chars]
+
+            if ranked:
+                # Keep a concise fragment of the strongest sentence when even
+                # that sentence cannot fit in full.
+                best_sentence = ranked[0][2]
+                sentence_budget = available
+                if sentence_budget > 0:
+                    excerpt_text = best_sentence[:sentence_budget].rsplit(" ", 1)[0].rstrip()
+                    excerpt = header + "\n" + excerpt_text + marker
+                    if len(excerpt) <= max_chars:
+                        return excerpt
+
+    # Defensive last resort for malformed blocks or extremely small budgets.
     return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
 
 
 def build_generation_context(
     source_groups: list[dict],
+    question: str | None = None,
     max_chars: int | None = None,
 ) -> dict[str, Any]:
-    """Pack relevant source groups under a generation-only character ceiling.
+    """Pack diverse, relevant source excerpts under a generation-only character ceiling.
 
-    Whole groups are prioritized by their best retrieval distance and then
-    restored to chronological order. Retrieved candidates and returned source
-    links are not changed. A source is excerpted only when no complete group
-    can fit the available budget.
+    Retrieval and clickable source metadata are left untouched. Up to eight
+    source groups are ranked using retrieval distance, query-term overlap, and
+    a monetary-evidence bonus for amount-focused questions. Their character
+    shares are bounded independently so one large group cannot crowd all other
+    retrieved regions out of the generation prompt.
     """
     budget = (
         RAG_GENERATION_CONTEXT_MAX_CHARS
@@ -1369,7 +1502,7 @@ def build_generation_context(
         context = (
             original_context
             if len(original_context) <= budget
-            else _truncate_formatted_source(original_context, budget)
+            else _truncate_formatted_source(original_context, budget, question)
         )
         return {
             "context": context,
@@ -1383,6 +1516,12 @@ def build_generation_context(
             },
         }
 
+    question_terms = _generation_context_query_terms(question)
+    financial_question = bool(re.search(
+        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
+        question or "",
+        re.IGNORECASE,
+    ))
     records = []
     for index, source_group in enumerate(source_groups):
         rendered = format_source_group(
@@ -1399,11 +1538,21 @@ def build_generation_context(
             start = float(source_group.get("start", index))
         except (TypeError, ValueError):
             start = float(index)
+        overlap = len(question_terms & _claim_terms(rendered))
+        amount_count = (
+            len(_extract_money_amounts(rendered))
+            if financial_question
+            else 0
+        )
+        # Retrieval distance remains the dominant signal. Small evidence
+        # bonuses break near-ties in favor of question-relevant material.
+        priority = distance - min(0.12, overlap * 0.015) - min(0.12, amount_count * 0.03)
         records.append({
             "index": index,
             "text": rendered,
             "distance": distance,
             "start": start,
+            "priority": priority,
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
@@ -1422,41 +1571,39 @@ def build_generation_context(
             },
         }
 
+    # A 500-character share is enough to retain a source header and a compact
+    # evidence excerpt, while avoiding needless single-group packing at small
+    # budgets. The hard eight-group ceiling still bounds prompt overhead.
+    selected_count = min(len(records), 8, max(1, budget // 500))
     priority_records = sorted(
         records,
-        key=lambda record: (record["distance"], record["start"], record["index"]),
+        key=lambda record: (
+            record["priority"],
+            record["distance"],
+            record["start"],
+            record["index"],
+        ),
+    )[:selected_count]
+    # Reserve two characters for each separator so the final concatenation
+    # can never exceed the budget due to inter-group whitespace.
+    per_group_budget = max(
+        1,
+        (budget - 2 * max(0, selected_count - 1)) // selected_count,
     )
     selected = []
-    used_chars = 0
-    highest_priority_oversized = None
     for record in priority_records:
-        separator_chars = 2 if selected else 0
-        available = budget - used_chars - separator_chars
-        if len(record["text"]) <= available:
-            selected.append(record)
-            used_chars += separator_chars + len(record["text"])
-            continue
-
-        if highest_priority_oversized is None:
-            highest_priority_oversized = record
-        # Skip an oversized group and see whether other complete, lower-ranked
-        # groups can fit. Only excerpt a group if no complete group fits at all.
-
-    if not selected and highest_priority_oversized is not None:
-        shortened = _truncate_formatted_source(
-            highest_priority_oversized["text"],
-            budget,
+        excerpt = _truncate_formatted_source(
+            record["text"],
+            per_group_budget,
+            question,
         )
-        if shortened:
-            selected.append({
-                **highest_priority_oversized,
-                "text": shortened,
-            })
+        if excerpt:
+            selected.append({**record, "text": excerpt})
 
     selected.sort(key=lambda record: record["index"])
     context = "\n\n".join(record["text"] for record in selected)
     if len(context) > budget:
-        context = _truncate_formatted_source(context, budget)
+        context = context[:budget]
 
     diagnostics = {
         "budget_chars": budget,
@@ -1467,7 +1614,7 @@ def build_generation_context(
         "reduced": True,
     }
     logger.warning(
-        "Bounded generation transcript context "
+        "Evidence-aware generation context packing "
         "original_chars=%s final_chars=%s budget_chars=%s "
         "groups_available=%s groups_included=%s",
         original_chars,
@@ -1477,6 +1624,8 @@ def build_generation_context(
         len(selected),
     )
     return {"context": context, "diagnostics": diagnostics}
+
+
 
 
 # ============================================================
@@ -2625,7 +2774,8 @@ def build_rag_chain(
 
     generation_context_runnable = RunnableLambda(
         lambda inputs: build_generation_context(
-            inputs["source_groups"]
+            inputs["source_groups"],
+            question=inputs.get("question"),
         )
     )
 
