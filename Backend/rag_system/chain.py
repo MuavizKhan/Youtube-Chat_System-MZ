@@ -892,7 +892,10 @@ def append_relevant_source_timestamps(
     if (
         not isinstance(answer, str)
         or not answer.strip()
-        or answer.strip() == FALLBACK_ANSWER
+        or answer.strip() in {
+            FALLBACK_ANSWER,
+            FINANCIAL_VERIFICATION_FALLBACK,
+        }
     ):
         return answer
 
