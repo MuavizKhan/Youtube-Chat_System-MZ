@@ -321,3 +321,53 @@ def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
 
     assert audit["answer_text_encoding_suspect"] is True
     assert audit["possible_mojibake_markers"]
+
+
+def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chunks():
+    response = {
+        "answer": (
+            "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
+            "وأصوات الرئتين والمعدة، ورمش الجفون.\n\n"
+            "Relevant timestamps: 02:33–03:37, 09:49–10:58"
+        ),
+        "retrieval_config": {
+            "embedding_model": "BAAI/bge-m3",
+            "index_namespace": "experiment-caption-segments",
+            "citation_policy": "selected_anchors",
+        },
+        "sources": [
+            {
+                "source_id": 1, "chunk_ids": [2],
+                "start": 153.05, "end": 217.615, "distance": 0.84,
+            },
+            {
+                "source_id": 2, "chunk_ids": [11],
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+            },
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": [2, 11],
+                "citation_chunk_ids": [2, 11],
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": 14430,
+                    "final_chars": 7902,
+                    "groups_available": 3,
+                    "groups_included": 2,
+                    "included_chunk_ids": [2],
+                    "reduced": True,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("AR08"), response)
+
+    assert audit["final_context_chunk_ids"] == ["2"]
+    assert audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
+    assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
+    assert audit["quality"]["passed"] is False
+    assert "annotated_evidence_in_retrieved_context" in audit["quality"]["failed_checks"]
