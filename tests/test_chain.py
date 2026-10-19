@@ -3048,6 +3048,7 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert result["generation_trace"]["quality_repair_attempted"] is True
     assert result["generation_trace"]["quality_repair_passed"] is False
     assert result["generation_trace"]["grounded_financial_fallback_used"] is True
+    assert result["generation_trace"]["financial_answer_suppressed"] is False
     assert "3,000 crore" in answer
     assert "4,999 crore" in answer
     assert "certificate gives a figure of 6,203" in answer
@@ -3235,6 +3236,28 @@ def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
 
     assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
     assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_financial_verification_fallback_does_not_add_unaligned_timestamps():
+    answer = chain.FINANCIAL_VERIFICATION_FALLBACK
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 7267.92, "end": 7351.84, "distance": 0.7,
+                "transcript_text": "I invested 3,000 crore rupees into Kingfisher Airlines.",
+            },
+            {
+                "start": 10196.399, "end": 10301.84, "distance": 0.9,
+                "transcript_text": "A Ministry of Finance report said 14,100 crore rupees were recovered.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result == answer
+    assert "Relevant timestamps:" not in result
 
 
 @pytest.mark.unit
