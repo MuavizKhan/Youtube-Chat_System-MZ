@@ -384,6 +384,80 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         )
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
+    quality_checks = _answer_quality_checks(str(case.get("id", "")), answer)
+
+    missing_context_groups = [
+        group["label"]
+        for group in evidence_group_results
+        if not group["present_in_final_context"]
+    ]
+    quality_checks.append(_quality_check(
+        "annotated_evidence_in_generation_context",
+        not missing_context_groups,
+        (
+            "All annotated evidence groups are represented in the retrieved context."
+            if not missing_context_groups
+            else "Evidence groups missing from the retrieved context: "
+            + ", ".join(missing_context_groups)
+        ),
+    ))
+
+    timestamp_alignment_failures = []
+    for group in evidence_group_results:
+        if not group["present_in_final_context"]:
+            continue
+        if not group["present_in_returned_sources"]:
+            timestamp_alignment_failures.append(
+                f"{group['label']}: no returned clickable source"
+            )
+        elif not group["represented_in_plain_text_timestamp_summary"]:
+            timestamp_alignment_failures.append(
+                f"{group['label']}: not represented by the timestamp summary"
+            )
+    quality_checks.append(_quality_check(
+        "evidence_source_and_timestamp_alignment",
+        not timestamp_alignment_failures,
+        (
+            "Annotated answer evidence is represented by returned sources and the timestamp summary."
+            if not timestamp_alignment_failures
+            else "; ".join(timestamp_alignment_failures)
+        ),
+    ))
+    quality_checks.append(_quality_check(
+        "encoding_integrity",
+        not bool(mojibake_markers),
+        (
+            "No configured mojibake markers were detected."
+            if not mojibake_markers
+            else "Potential mojibake markers: " + ", ".join(mojibake_markers)
+        ),
+    ))
+
+    generation = observability.get("generation")
+    if not isinstance(generation, dict):
+        generation = {}
+    budget = generation.get("context_budget")
+    budget_valid = (
+        isinstance(budget, dict)
+        and isinstance(budget.get("budget_chars"), int)
+        and isinstance(budget.get("final_chars"), int)
+        and 0 < budget["final_chars"] <= budget["budget_chars"]
+    )
+    quality_checks.append(_quality_check(
+        "generation_context_budget",
+        budget_valid,
+        (
+            f"Generation context is {budget['final_chars']} / {budget['budget_chars']} characters."
+            if budget_valid
+            else "Generation context-budget diagnostics are missing or exceed the configured budget."
+        ),
+    ))
+
+    quality = {
+        "passed": all(item["passed"] for item in quality_checks),
+        "checks": quality_checks,
+        "failed_checks": [item["name"] for item in quality_checks if not item["passed"]],
+    }
     return {
         "effective_retrieval_config": response.get("retrieval_config"),
         "retrieval_method": response.get("retrieval_method"),
@@ -398,6 +472,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         "answer_text_encoding_suspect": bool(mojibake_markers),
         "possible_mojibake_markers": mojibake_markers,
         "annotated_evidence_groups": evidence_group_results,
+        "quality": quality,
     }
 
 
@@ -515,17 +590,37 @@ def run_audit(
     effective_config = configs[0] if configs else None
     configs_consistent = bool(configs) and all(config == configs[0] for config in configs)
 
+    cases_succeeded = sum(item.get("status") == "success" for item in results)
+    cases_failed = sum(item.get("status") != "success" for item in results)
+    quality_failures = [
+        {
+            "case_id": item.get("case_id"),
+            "failed_checks": item.get("audit", {}).get("quality", {}).get("failed_checks", []),
+        }
+        for item in results
+        if item.get("status") != "success"
+        or not item.get("audit", {}).get("quality", {}).get("passed", False)
+    ]
+    quality_passed = (
+        cases_succeeded == len(AUDIT_CASES)
+        and cases_failed == 0
+        and configs_consistent
+        and not quality_failures
+    )
+
     report = {
-        "report_schema_version": "1.0.0",
-        "report_id": "phase10_8_answer_source_audit",
+        "report_schema_version": "1.1.0",
+        "report_id": "phase10_8_6_answer_source_audit",
         "generated_at": datetime.now().astimezone().isoformat(),
         "backend_base_url": base_url.rstrip("/"),
         **_read_git_state(),
         "effective_server_configuration": effective_config,
         "effective_server_configuration_consistent_across_cases": configs_consistent,
         "cases_attempted": len(AUDIT_CASES),
-        "cases_succeeded": sum(item.get("status") == "success" for item in results),
-        "cases_failed": sum(item.get("status") != "success" for item in results),
+        "cases_succeeded": cases_succeeded,
+        "cases_failed": cases_failed,
+        "quality_passed": quality_passed,
+        "quality_failures": quality_failures,
         "results": results,
     }
 
@@ -574,6 +669,8 @@ def main() -> int:
                 "cases_attempted": report["cases_attempted"],
                 "cases_succeeded": report["cases_succeeded"],
                 "cases_failed": report["cases_failed"],
+                "quality_passed": report["quality_passed"],
+                "quality_failures": report["quality_failures"],
                 "effective_server_configuration": report["effective_server_configuration"],
                 "effective_server_configuration_consistent_across_cases": (
                     report["effective_server_configuration_consistent_across_cases"]
@@ -583,7 +680,7 @@ def main() -> int:
             indent=2,
         )
     )
-    return 0 if report["cases_failed"] == 0 else 1
+    return 0 if report["quality_passed"] else 1
 
 
 if __name__ == "__main__":
