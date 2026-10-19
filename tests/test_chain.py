@@ -196,6 +196,44 @@ def test_append_relevant_source_timestamps_aligns_multi_amount_claims_to_transcr
 
 
 @pytest.mark.unit
+def test_append_relevant_source_timestamps_prefers_arabic_answer_evidence_over_nearest_source():
+    answer = (
+        "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
+        "حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 10,
+                "end": 20,
+                "distance": 0.05,
+                "transcript_text": "الهدوء التام لا يعطي الراحة التي يتوقعها الإنسان.",
+            },
+            {
+                "start": 153.05,
+                "end": 217.615,
+                "distance": 0.9,
+                "transcript_text": (
+                    "فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599,
+                "end": 658.17,
+                "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert "Relevant timestamps: 02:33–03:37, 09:49–10:58" in result
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
 def test_append_relevant_source_timestamps_skips_fallback_missing_evidence_and_invalid_ranges():
     sources = [{"start": 10, "end": 20, "distance": 0.1}]
 
@@ -686,9 +724,11 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
     messages = chain.prompt_to_messages(prompt)
     normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
 
-    assert "do not silently repair the number" in normalized_system_prompt
+    assert "do not silently repair a number" in normalized_system_prompt
     assert 'call one a "misreading" unless the transcript explicitly supports that relationship' in normalized_system_prompt
     assert "attribute the separate figures to the speakers discussing them" in normalized_system_prompt
+    assert "never describe a recovery figure as a company debt total" in normalized_system_prompt
+    assert "map every figure to its nearby claim, subject, qualifier, and source/speaker" in normalized_system_prompt
 
 
 @pytest.mark.unit
