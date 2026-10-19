@@ -190,12 +190,6 @@ The next Phase 8 slice expands strong retrieval hits with a small, chronological
 
 This improves continuity for questions that depend on what was said immediately before or after a retrieved passage while keeping the existing FAISS/MMR/lexical retrieval strategy intact.
 
-## Phase 10.8 — Generation context budget
-
-Retrieval breadth and prompt size are controlled separately. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to the generation model. When all retrieved source groups fit, the full context is preserved. Otherwise, groups with stronger retrieval distances are packed first, with selected groups restored to chronological order; one source that alone exceeds the budget is shortened as a last resort.
-
-This guard does not change retrieved candidates, distance thresholds, citation selection, or the clickable source metadata returned to the client. The answer's `generation.context_budget` diagnostics report the original/final context sizes and how many source groups were included. The character ceiling is a conservative size guard, not an exact provider-token counter; a provider can still reject requests for account-level rate limits or other limits.
-
 ## Phase 8 — Answer-quality evaluation
 
 The next Phase 8 slice strengthens the deterministic RAG evaluation harness. The live end-to-end evaluator now checks not only the answer text but also the evidence provenance returned by the RAG chain.
@@ -602,3 +596,8 @@ Per-caption timestamps provide temporal cues for following nearby dialogue, not 
 
 After merging this change, start the backend with the existing isolated `experiment-caption-segments` namespace and unchanged retrieval settings, and rerun Q07, AR03, and AR08 using a new audit output path. Reindexing is not required for this formatter-only change. Inspect Q07 amounts claim-by-claim against transcript wording and source timestamps. AR08's answer-language mismatch is a separate generation requirement and is not claimed to be fixed by this change.
 
+## Phase 10.8.4 — Generation context budget
+
+The Q07 live audit showed a provider request rejected at 12,732 requested tokens against a 8,000-token-per-minute allowance. This was a prompt-size/budget error, not a retrieval failure. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to generation. If the full context does not fit, the packer prioritizes complete source groups by retrieval distance and restores those groups to chronological order; an individual source is excerpted only when no complete source group fits at all.
+
+Retrieval candidates, ranking, thresholds, citation selection, clickable sources, and index files remain unchanged. The API's `observability.generation.context_budget` diagnostics expose original/final context character counts and source-group counts. The character ceiling is a conservative size guard, not an exact tokenizer or a guarantee against account-level TPM limits. Reindexing is not required for this generation-only change.
