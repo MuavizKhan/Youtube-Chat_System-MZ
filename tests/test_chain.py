@@ -2940,19 +2940,19 @@ def test_generation_context_reserves_bare_certificate_claim_when_topic_is_alread
 @pytest.mark.unit
 def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_interval():
     answer = (
-        "The investment was 3,000 crore rupees. The DRT judgment debt was "
-        "4,999 crore rupees. The debt certificate gives a figure of 6203. "
+        "I invested 3,000 crore rupees into Kingfisher Airlines. The DRT judgment "
+        "debt was 4,999 crore rupees. The debt certificate gives a figure of 6203. "
         "The Ministry of Finance report says 14,100 crore rupees were recovered."
     )
     result = chain.append_relevant_source_timestamps(
         answer=answer,
         sources=[
             {
-                "start": 100, "end": 140, "distance": 0.7,
+                "start": 7267.92, "end": 7351.84, "distance": 0.7,
                 "transcript_text": "I invested 3,000 crore rupees into Kingfisher Airlines.",
             },
             {
-                "start": 200, "end": 240, "distance": 0.8,
+                "start": 8314.519, "end": 8428.16, "distance": 0.8,
                 "transcript_text": "The DRT judgment debt was 4,999 crore rupees plus interest.",
             },
             {
@@ -2960,7 +2960,7 @@ def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_inte
                 "transcript_text": "The debt certificate gives a figure of 6203. The principal carries unapplied interest at 11.5% per annum.",
             },
             {
-                "start": 300, "end": 340, "distance": 0.9,
+                "start": 10196.399, "end": 10301.84, "distance": 0.9,
                 "transcript_text": "The Ministry of Finance report said 14,100 crore rupees were recovered.",
             },
         ],
@@ -2968,8 +2968,8 @@ def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_inte
     )
 
     assert result.endswith(
-        "Relevant timestamps: 01:40–02:20, 03:20–04:00, "
-        "04:08:59–04:10:15, 05:00–05:40"
+        "Relevant timestamps: 02:01:07–02:02:31, 02:18:34–02:20:28, "
+        "02:49:56–02:51:41, 04:08:59–04:10:15"
     )
 
 
