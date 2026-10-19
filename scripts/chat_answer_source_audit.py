@@ -23,11 +23,11 @@ from urllib.request import Request, urlopen
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_answer_source_audit.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_6_answer_source_audit.json"
 
-# Chunk IDs refer to the annotated evidence from the Phase 10.7 local audit.
-# For Q07, each group includes alternatives: one candidate may be missing from
-# retrieval while another supplies equivalent evidence in context or citations.
+# Evidence groups are pinned to chunk IDs observed in the current isolated
+# experiment-caption-segments namespace. Keep this registry aligned with
+# verified local captions; do not infer chunk IDs from timestamps alone.
 AUDIT_CASES: tuple[dict[str, Any], ...] = (
     {
         "id": "Q07",
@@ -37,12 +37,10 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
             "involved in the Kingfisher situation?"
         ),
         "evidence_groups": [
-            {"label": "DRT judgment debt: 4,999 crore", "candidate_chunk_ids": [9, 124]},
-            {"label": "principal plus unapplied interest: 6,203 crore", "candidate_chunk_ids": [10, 221]},
-            {
-                "label": "recovery figure: 14,100 crore",
-                "candidate_chunk_ids": [9, 10, 106, 111, 112, 129, 130, 153, 159],
-            },
+            {"label": "Kingfisher investment: 3,000 crore", "candidate_chunk_ids": [108]},
+            {"label": "DRT judgment debt figure: 4,999 crore", "candidate_chunk_ids": [124]},
+            {"label": "debt-certificate figure: 6,203 crore", "candidate_chunk_ids": [221]},
+            {"label": "Ministry of Finance recovery figure: 14,100 crore", "candidate_chunk_ids": [153, 159]},
         ],
     },
     {
@@ -120,6 +118,173 @@ def _answer_timestamp_ranges(answer: str) -> list[str]:
     if not match:
         return []
     return [item.group(0).strip() for item in _TIMESTAMP_RANGE_PATTERN.finditer(match.group(1))]
+
+
+def _substantive_answer(answer: str) -> str:
+    """Remove the application timestamp footer before checking answer content."""
+    return re.sub(
+        r"(?im)^[ \\t]*Relevant timestamps?[ \\t]*:[^\\r\\n]*(?:\\r?\\n|$)",
+        "",
+        answer,
+    ).strip()
+
+
+def _quality_check(name: str, passed: bool, detail: str) -> dict[str, Any]:
+    return {"name": name, "passed": bool(passed), "detail": detail}
+
+
+def _amount_clauses(answer: str, pattern: str) -> list[str]:
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"(?<=[.!?;])\\s+|[\\r\\n]+", _substantive_answer(answer))
+        if clause.strip()
+    ]
+    return [clause for clause in clauses if re.search(pattern, clause, re.IGNORECASE)]
+
+
+def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
+    checks = []
+    claim_specs = [
+        (
+            "investment_3000",
+            r"(?<!\\d)3[ ,\\u202f]?000(?!\\d)",
+            r"\\b(invest(?:ed|ment)?|injected|infused|put)\\b",
+            "The 3,000-crore figure must be attributed to an investment into Kingfisher.",
+        ),
+        (
+            "drt_4999",
+            r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)",
+            r"\\b(drt|debt|tribunal|judg(?:e)?ment)\\b",
+            "The 4,999-crore figure must remain tied to the DRT/debt passage.",
+        ),
+        (
+            "certificate_6203",
+            r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)",
+            r"\\b(certificate|drt|debt)\\b",
+            "The 6,203-crore figure must remain tied to the debt-certificate passage.",
+        ),
+        (
+            "recovery_14100",
+            r"(?<!\\d)14[ ,\\u202f]?100(?!\\d)",
+            r"\\b(recover(?:ed|y|ies)?|recovery)\\b",
+            "The 14,100-crore figure must be described as a recovery, not debt.",
+        ),
+    ]
+    for name, amount_pattern, attribution_pattern, detail in claim_specs:
+        matching_clauses = _amount_clauses(answer, amount_pattern)
+        attributed = any(
+            re.search(attribution_pattern, clause, re.IGNORECASE)
+            for clause in matching_clauses
+        )
+        checks.append(_quality_check(name, attributed, detail))
+
+    recovery_clauses = _amount_clauses(answer, r"(?<!\\d)14[ ,\\u202f]?100(?!\\d)")
+    has_report_attribution = any(
+        re.search(r"\\b(ministry|finance|report)\\b", clause, re.IGNORECASE)
+        and re.search(r"\\b(recover(?:ed|y|ies)?|recovery)\\b", clause, re.IGNORECASE)
+        for clause in recovery_clauses
+    )
+    debt_total_misattributed = any(
+        re.search(
+            r"(?:company(?:['’]s)?|kingfisher(?: airlines?)?)\\s+(?:company\\s+)?debt.{0,35}(?:total|totals|amount|14[ ,\\u202f]?100)"
+            r"|(?:total debt|company debt|debt total).{0,35}14[ ,\\u202f]?100",
+            clause,
+            re.IGNORECASE,
+        )
+        for clause in recovery_clauses
+    )
+    checks.append(_quality_check(
+        "recovery_source_attribution",
+        has_report_attribution and not debt_total_misattributed,
+        "The recovery amount must be attributed to the Ministry/Finance report and not asserted as the company debt total.",
+    ))
+
+    uncertainty_terms = (
+        r"unclear|not clear|does not explain|doesn't explain|not explained|"
+        r"cannot reconcile|can't reconcile|relationship between|separately|"
+        r"different figures|distinct figures|does not establish"
+    )
+    figures_all_present = (
+        any(re.search(spec[1], clause) for clause in _amount_clauses(answer, r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)") for spec in [("x", r"(?<!\\d)4[ ,\\u202f]?999(?!\\d)")])
+        and any(re.search(r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)", clause) for clause in _amount_clauses(answer, r"(?<!\\d)6[ ,\\u202f]?203(?!\\d)"))
+    )
+    uncertainty_preserved = figures_all_present and bool(
+        re.search(uncertainty_terms, _substantive_answer(answer), re.IGNORECASE)
+    )
+    checks.append(_quality_check(
+        "unclear_relationship_preserved",
+        uncertainty_preserved,
+        "The 4,999- and 6,203-crore figures must not be silently reconciled when the captions do not clearly explain their relationship.",
+    ))
+    return checks
+
+
+def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
+    text = _substantive_answer(answer)
+    if case_id == "AR03":
+        requirements = [
+            ("heartbeat", r"heart\\s*beat|heartbeat"),
+            ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
+            ("lungs_or_breathing", r"lung|breath"),
+            ("stomach", r"stomach|rumbl|belly"),
+            ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
+        ]
+        checks = [
+            _quality_check(
+                f"sound_{name}",
+                bool(re.search(pattern, text, re.IGNORECASE)),
+                f"The answer must mention the transcript-supported {name.replace('_', ' ')} sound.",
+            )
+            for name, pattern in requirements
+        ]
+        checks.append(_quality_check(
+            "question_language",
+            not bool(re.search(r"[\\u0600-\\u06ff]", text)),
+            "The English question must receive an English answer.",
+        ))
+        return checks
+
+    requirements = [
+        ("heartbeat", r"نبض.{0,20}قلب|قلب.{0,20}نبض"),
+        ("blood_movement", r"(?:حركة|تدفق|جريان).{0,20}الدم|الدم.{0,25}(?:حركة|تدفق|جريان|عروق|شرايين|أوعية)"),
+        ("lungs_or_breathing", r"رئتين|الرئتين|الرئة|تنفس"),
+        ("stomach", r"المعدة|معدتك|صوت المعدة"),
+        ("eyelids_blinking", r"(?:عين|عيني|جفن).{0,25}(?:ترمش|تومض|ترف|رمش)|(?:ترمش|تومض|ترف|رمش).{0,25}(?:عين|جفن)"),
+    ]
+    checks = [
+        _quality_check(
+            f"sound_{name}",
+            bool(re.search(pattern, text, re.IGNORECASE)),
+            f"The Arabic answer must mention the transcript-supported {name.replace('_', ' ')} sound.",
+        )
+        for name, pattern in requirements
+    ]
+    arabic_chars = len(re.findall(r"[\\u0600-\\u06ff]", text))
+    latin_chars = len(re.findall(r"[A-Za-z]", text))
+    checks.append(_quality_check(
+        "question_language",
+        arabic_chars >= 12 and arabic_chars > latin_chars,
+        "The Arabic question must receive a substantive Arabic answer, not an English response.",
+    ))
+    return checks
+
+
+def _answer_quality_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
+    substantive = _substantive_answer(answer)
+    checks = [
+        _quality_check(
+            "substantive_answer",
+            bool(substantive) and substantive != (
+                "I couldn't find enough information about that in the video. It may not be covered by this video."
+            ),
+            "The answer must contain a substantive response rather than the fallback.",
+        )
+    ]
+    if case_id == "Q07":
+        checks.extend(_q07_answer_checks(answer))
+    elif case_id in {"AR03", "AR08"}:
+        checks.extend(_bodily_sound_checks(case_id, answer))
+    return checks
 
 
 def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
