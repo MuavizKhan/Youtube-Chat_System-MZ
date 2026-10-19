@@ -1423,6 +1423,7 @@ def build_generation_context(
     )
     selected = []
     used_chars = 0
+    highest_priority_oversized = None
     for record in priority_records:
         separator_chars = 2 if selected else 0
         available = budget - used_chars - separator_chars
@@ -1431,15 +1432,21 @@ def build_generation_context(
             used_chars += separator_chars + len(record["text"])
             continue
 
-        if not selected:
-            shortened = _truncate_formatted_source(record["text"], budget)
-            if shortened:
-                selected.append({**record, "text": shortened})
-            break
+        if highest_priority_oversized is None:
+            highest_priority_oversized = record
+        # Skip an oversized group and see whether other complete, lower-ranked
+        # groups can fit. Only excerpt a group if no complete group fits at all.
 
-        # A lower-priority group that does not fit is skipped; smaller groups
-        # later in the ranking can still contribute evidence.
-        continue
+    if not selected and highest_priority_oversized is not None:
+        shortened = _truncate_formatted_source(
+            highest_priority_oversized["text"],
+            budget,
+        )
+        if shortened:
+            selected.append({
+                **highest_priority_oversized,
+                "text": shortened,
+            })
 
     selected.sort(key=lambda record: record["index"])
     context = "\n\n".join(record["text"] for record in selected)
