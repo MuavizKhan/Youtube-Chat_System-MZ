@@ -93,6 +93,53 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     assert evidence["represented_in_plain_text_timestamp_summary"] is True
 
 
+def test_ar08_requires_both_bodily_sound_source_intervals_in_timestamp_summary():
+    answer_text = (
+        "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
+        "حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش."
+    )
+    response = {
+        "answer": answer_text + "\n\nRelevant timestamps: 02:33–03:37, 09:49–10:58",
+        "retrieval_config": {
+            "embedding_model": "BAAI/bge-m3",
+            "index_namespace": "experiment-caption-segments",
+            "citation_policy": "selected_anchors",
+        },
+        "sources": [
+            {
+                "source_id": 1, "chunk_ids": [2],
+                "start": 153.05, "end": 217.615, "distance": 0.84,
+            },
+            {
+                "source_id": 2, "chunk_ids": [11],
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+            },
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": [2, 11],
+                "citation_chunk_ids": [2, 11],
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000, "original_chars": 14430,
+                    "final_chars": 7902, "groups_available": 3,
+                    "groups_included": 3, "reduced": True,
+                }
+            },
+        },
+    }
+
+    accepted = analyze_response(_case("AR08"), response)
+    assert accepted["quality"]["passed"] is True
+    assert accepted["quality"]["failed_checks"] == []
+
+    response["answer"] = answer_text + "\n\nRelevant timestamps: 04:15–05:18, 09:49–10:58"
+    rejected = analyze_response(_case("AR08"), response)
+    assert rejected["quality"]["passed"] is False
+    assert "evidence_source_and_timestamp_alignment" in rejected["quality"]["failed_checks"]
+
+
 def test_q07_evidence_groups_distinguish_context_sources_and_summary():
     response = {
         "answer": (
