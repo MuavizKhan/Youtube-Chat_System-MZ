@@ -1569,6 +1569,7 @@ def _generation_line_relevance(
     question_terms: set[str],
     *,
     financial_question: bool,
+    financial_group_context: str = "",
 ) -> int:
     """Score one transcript line for evidence selection, never as a hard gate."""
     transcript_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
@@ -1590,6 +1591,19 @@ def _generation_line_relevance(
         # Some captions give a material figure as a bare number without a nearby
         # currency/crore token. Prefer the claim-bearing caption in that case.
         overlap += 4
+    if financial_question and re.search(
+        r"(?<![\w,.:])\d{4,6}(?![\w,.:])",
+        transcript_text,
+    ) and re.search(
+        r"\b(?:certificate|drt|tribunal|judg(?:e)?ment|debt|principal|interest|"
+        r"liabilit\w*|loan|recover(?:ed|y|ies)?|recovery|invest(?:ed|ment)?|"
+        r"ministry|finance|report|kingfisher|borrowed|owed|owes)\b",
+        financial_group_context,
+        re.IGNORECASE,
+    ):
+        # When a source group carries financial context but captions split the
+        # label from a bare numeric line, keep the number line with its label.
+        overlap += 6
     return overlap
 
 
@@ -1616,6 +1630,15 @@ def _truncate_formatted_source(
         (index for index, line in enumerate(lines) if line.startswith("- [")),
         None,
     )
+    financial_group_context = (
+        "\n".join(
+            line.split("] ", 1)[-1]
+            for line in lines[caption_start:]
+            if line.startswith("- [")
+        )
+        if caption_start is not None
+        else source_text
+    )
 
     if caption_start is not None:
         header = "\n".join(lines[:caption_start])
@@ -1630,6 +1653,7 @@ def _truncate_formatted_source(
                     line,
                     question_terms,
                     financial_question=financial_question,
+                    financial_group_context=financial_group_context,
                 ),
                 index,
                 line,
@@ -1705,6 +1729,7 @@ def _truncate_formatted_source(
                         sentence,
                         question_terms,
                         financial_question=financial_question,
+                        financial_group_context=financial_group_context,
                     ),
                     index,
                     sentence,
