@@ -2472,3 +2472,214 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
     assert trace["final_stage"] == "temporal_window_empty"
     assert trace["recovery_used"] is False
     assert trace["planner_used"] is False
+
+
+@pytest.mark.unit
+def test_generation_context_query_terms_bridge_arabic_bodily_sound_question():
+    terms = chain._generation_context_query_terms(
+        "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    )
+
+    assert {"heartbeat", "blood", "vein", "lungs", "breathing", "stomach", "eyelids", "blinking"} <= terms
+
+
+@pytest.mark.unit
+def test_generation_context_preserves_arabic_question_evidence_across_budgeted_caption_groups():
+    filler = [
+        "The presenter briefly discusses an unrelated scene in the room."
+        for _ in range(24)
+    ]
+    first_group = _caption_group(
+        81,
+        150,
+        [
+            *filler,
+            "You may hear your heartbeat, the blood rushing through your veins, "
+            "the sounds of your lungs and stomach.",
+        ],
+        0.3,
+    )
+    second_group = _caption_group(
+        82,
+        590,
+        [*filler, "You might even hear the subtle sound of your eyelids blinking."],
+        0.4,
+    )
+
+    result = chain.build_generation_context(
+        [first_group, second_group],
+        question="ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
+        max_chars=1800,
+    )
+
+    assert len(result["context"]) <= 1800
+    assert "heartbeat" in result["context"].lower()
+    assert "blood rushing through your veins" in result["context"].lower()
+    assert "lungs and stomach" in result["context"].lower()
+    assert "eyelids blinking" in result["context"].lower()
+    assert set(result["diagnostics"]["included_chunk_ids"]) == {"81", "82"}
+
+
+@pytest.mark.unit
+def test_generation_context_prioritizes_distinct_material_money_claims_over_nearby_distractors():
+    filler = [
+        "The interview briefly shifts to another point before returning to the figures."
+        for _ in range(20)
+    ]
+    groups = [
+        _caption_group(
+            91, 100,
+            [*filler, "I invested 3,000 crore rupees in Kingfisher Airlines."],
+            0.72,
+        ),
+        _caption_group(
+            92, 500,
+            [*filler, "The DRT judgment debt was 4,999 crore rupees plus interest."],
+            0.84,
+        ),
+        _caption_group(
+            93, 900,
+            [*filler, "The debt certificate gives a figure of 6,203 crore rupees."],
+            0.92,
+        ),
+        _caption_group(
+            94, 1300,
+            [*filler, "The Ministry of Finance report said 14,100 crore rupees had been recovered."],
+            1.00,
+        ),
+        _caption_group(
+            95, 1700,
+            [*filler, "The ticket for the unrelated event cost 500 rupees."],
+            0.05,
+        ),
+        _caption_group(
+            96, 2100,
+            [*filler, "Catering for the unrelated event cost 1,200 rupees."],
+            0.10,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts were mentioned about Kingfisher debt, investment, and recovery?",
+        max_chars=2400,
+    )
+    context = result["context"]
+
+    assert len(context) <= 2400
+    assert "3,000 crore rupees in Kingfisher Airlines" in context
+    assert "4,999 crore rupees plus interest" in context
+    assert "6,203 crore rupees" in context
+    assert "14,100 crore rupees had been recovered" in context
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert set(result["diagnostics"]["included_chunk_ids"]) >= {"91", "92", "93", "94"}
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_missing_and_unsupported_financial_amounts():
+    context = (
+        "I invested 3,000 crore rupees in Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6,203 crore rupees. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    bad_answer = (
+        "I invested 3,000 crore rupees, the airline's debt was around 6 crore, "
+        "and 14,100 crore was recovered."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        bad_answer,
+        context,
+    )
+    assert instruction is not None
+    assert "4,999" in instruction
+    assert "6,203" in instruction
+    assert "unsupported amount" in instruction.lower()
+
+    complete_answer = (
+        "I invested 3,000 crore rupees in Kingfisher. The DRT judgment debt was "
+        "4,999 crore rupees plus interest, while the debt certificate gave a "
+        "separate figure of 6,203 crore rupees. The Ministry of Finance report "
+        "said 14,100 crore rupees had been recovered. The transcript does not "
+        "clearly explain how the DRT and certificate figures relate."
+    )
+    assert chain._generation_repair_instruction(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        complete_answer,
+        context,
+    ) is None
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
+    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    context = (
+        "You may hear your heartbeat, the blood rushing through your veins, "
+        "the sounds of your lungs and stomach, and even your eyelids blinking."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        "الأصوات التي قد يبدأ الناس في سماعها من أجسامهم هي نبضات قلبهم.",
+        context,
+    )
+
+    assert instruction is not None
+    assert "Arabic" in instruction
+    assert "حركة أو جريان الدم في العروق" in instruction
+    assert "أصوات الرئتين أو التنفس" in instruction
+    assert "أصوات المعدة" in instruction
+    assert "رمش الجفون" in instruction
+
+
+@pytest.mark.unit
+def test_rag_chain_retries_once_when_financial_draft_drops_source_amounts(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees in Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6,203 crore rupees. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(101, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [101],
+                "citation_chunk_ids": [101],
+            },
+        ),
+    )
+    outputs = iter([
+        "I invested 3,000 crore rupees, the airline's debt was around 6 crore, "
+        "and 14,100 crore was recovered.",
+        "I invested 3,000 crore rupees in Kingfisher. The DRT judgment debt was "
+        "4,999 crore rupees plus interest, while the debt certificate gave a "
+        "separate figure of 6,203 crore rupees. The Ministry of Finance report "
+        "said 14,100 crore rupees had been recovered. The transcript does not "
+        "clearly explain how the DRT and certificate figures relate.",
+    ])
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    assert len(calls) == 2
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is True
+    assert "4,999 crore" in result["answer"]
+    assert "6,203 crore" in result["answer"]
