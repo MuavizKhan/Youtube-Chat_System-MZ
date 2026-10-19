@@ -1,6 +1,7 @@
 import json
 
 import scripts.chat_answer_source_audit as audit_module
+from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
     analyze_response,
@@ -208,6 +209,41 @@ def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     assert "recovery_14100" in failed
     assert "recovery_source_attribution" in failed
     assert "unclear_relationship_preserved" in failed
+
+
+def test_source_bound_financial_fallback_satisfies_q07_quality_contract():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report says the total amount recovered was
+- [02:50:25–02:51:41] 14,100 crore rupees.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+    )
+
+    assert answer is not None
+    failures = [
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    ]
+    assert failures == [], f"Extractive fallback failed Q07 audit checks: {failures}"
+    recovery_claim = next(
+        line for line in answer.splitlines() if "14,100" in line
+    )
+    assert "report" in recovery_claim.casefold()
+    assert "recover" in recovery_claim.casefold()
 
 
 def test_q07_quality_gate_rejects_financial_verification_abstention():
