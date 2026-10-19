@@ -604,6 +604,16 @@ The system prompt also instructs the model to answer in the question's language 
 
 ## Phase 10.8.4 — Generation context budget
 
-The Q07 live audit showed a provider request rejected at 12,732 requested tokens against a 8,000-token-per-minute allowance. This was a prompt-size/budget error, not a retrieval failure. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to generation. If the full context does not fit, the packer prioritizes complete source groups by retrieval distance and restores those groups to chronological order; an individual source is excerpted only when no complete source group fits at all.
+The Q07 live audit showed a provider request rejected at 12,732 requested tokens against an 8,000-token-per-minute allowance. This was a prompt-size/budget error, not a retrieval failure. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to generation.
+
+The first whole-group packer resolved the oversized request, but the following live audit exposed a quality problem: a few large groups could crowd other answer-bearing transcript regions out of the prompt. Phase 10.8.5 improves context packing by selecting multiple relevant groups and excerpting caption lines under per-group shares.
 
 Retrieval candidates, ranking, thresholds, citation selection, clickable sources, and index files remain unchanged. The API's `observability.generation.context_budget` diagnostics expose original/final context character counts and source-group counts. The character ceiling is a conservative size guard, not an exact tokenizer or a guarantee against account-level TPM limits. Reindexing is not required for this generation-only change.
+
+## Phase 10.8.5 — Evidence-aware context packing
+
+Live audits showed that an API-level success is not enough to establish answer quality: after the generation ceiling was introduced, Q07 completed, but AR03 returned the fallback despite available evidence and AR08 answered that relevant information was absent. The packer now selects up to eight source groups using retrieval distance as the dominant signal, with conservative query-term and monetary-evidence bonuses. The selected groups receive bounded per-group context shares and are restored to chronological order.
+
+When a source must be excerpted, caption lines that overlap the question are preferred; for amount-focused questions, transcript lines containing monetary figures receive an additional selection bonus. When question and transcript languages differ, the excerpt selector samples across the source timeline rather than always taking only the opening captions. Legacy unsegmented chunks use sentence-level selection as a fallback.
+
+The original retrieved candidates and source metadata remain intact for the response and citation path. These rules affect only the generation prompt. Tests cover preserving relevant later captions, retaining distinct financial-amount passages across regions, and preventing a single large group from crowding all other selected groups out. A new live audit must still verify Q07 attribution and AR03/AR08 answer quality; tests and HTTP 200 alone are not acceptance criteria.
