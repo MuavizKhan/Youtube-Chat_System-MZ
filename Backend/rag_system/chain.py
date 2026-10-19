@@ -1572,8 +1572,8 @@ def build_generation_context(
         }
 
     # A 500-character share is enough to retain a source header and a compact
-# evidence excerpt, while avoiding needless single-group packing at small
-# budgets. The hard eight-group ceiling still bounds prompt overhead.
+    # evidence excerpt, while avoiding needless single-group packing at small
+    # budgets. The hard eight-group ceiling still bounds prompt overhead.
     selected_count = min(len(records), 8, max(1, budget // 500))
     priority_records = sorted(
         records,
