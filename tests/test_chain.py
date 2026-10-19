@@ -3279,7 +3279,7 @@ def test_eye_anatomy_without_sound_context_does_not_add_eye_sound_timestamp():
             {
                 "start": 589.599, "end": 658.17, "distance": 0.2,
                 "transcript_text": (
-                    "The presenter has blue eyes and wears glasses."
+                    "The presenter has eyelid irritation, blue eyes, and wears glasses."
                 ),
             },
         ],
@@ -3288,6 +3288,33 @@ def test_eye_anatomy_without_sound_context_does_not_add_eye_sound_timestamp():
 
     assert result.endswith("Relevant timestamps: 00:13–03:37")
     assert "09:49–10:58" not in result
+
+
+@pytest.mark.unit
+def test_arabic_eye_sound_caption_with_hearing_verb_gets_timestamp():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "هتلاقي نفسك في أوضة صامتة، وتسمع نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
 
 
 @pytest.mark.unit
