@@ -2669,7 +2669,7 @@ def _build_financial_evidence_fallback(
             bare_value = str(int(float(amount)))
             if len(bare_value) >= 4:
                 claim_text = re.sub(
-                    rf"(?<![\\w,:]){re.escape(bare_value)}(?![\\w,:]|\\.\\d)",
+                    rf"(?<![\w,:]){re.escape(bare_value)}(?![\w,:]|\.\d)",
                     f"{int(float(amount)):,}",
                     claim_text,
                 )
