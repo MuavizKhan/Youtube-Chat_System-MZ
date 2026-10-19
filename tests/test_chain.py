@@ -2683,3 +2683,27 @@ def test_rag_chain_retries_once_when_financial_draft_drops_source_amounts(monkey
     assert result["generation_trace"]["quality_repair_passed"] is True
     assert "4,999 crore" in result["answer"]
     assert "6,203 crore" in result["answer"]
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_detects_misattributed_financial_figures():
+    context = (
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a separate figure of 6,203 crore rupees."
+    )
+    wrong_attribution = (
+        "The debt certificate figure was 4,999 crore rupees. "
+        "The DRT judgment debt was 6,203 crore rupees. "
+        "The transcript does not clearly explain how the figures relate."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        "What does the transcript say about the debt amounts?",
+        wrong_attribution,
+        context,
+    )
+
+    assert instruction is not None
+    assert "misattributed amount-to-claim association" in instruction.lower()
+    assert "4999 should remain associated with drt_debt" in instruction.lower()
+    assert "6203 should remain associated with certificate" in instruction.lower()
