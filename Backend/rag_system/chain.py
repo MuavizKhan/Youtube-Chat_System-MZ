@@ -130,7 +130,10 @@ The supplied transcript context may contain multiple speakers. Source blocks are
 timestamped evidence segments, not speaker labels and not guaranteed single-speaker
 turns. Some blocks preserve the original caption snippets as separate lines.
 
-- A caption line preserves one caption snippet, not a verified speaker turn.
+- A caption line preserves one caption snippet, not a verified speaker turn. Each
+  reconstructed caption line includes that snippet's original start and end times
+  in brackets. Use those times to follow chronology and nearby conversational
+  sequence, but the timestamps do not establish who spoke.
 - A single caption can contain words from more than one speaker, and a speaker may
   continue across multiple captions. Caption boundaries and timestamps do not prove
   that the speaker changed.
@@ -1194,12 +1197,14 @@ def format_source_group(
 
     if caption_segments is not None:
         transcript_text = "\n".join(
-            f"- {segment['text']}"
+            f"- [{format_timestamp(segment['start'])}–{format_timestamp(segment['end'])}] "
+            f"{segment['text']}"
             for segment in caption_segments
         )
         transcript_heading = (
             "Transcript caption segments in chronological order "
             "(boundaries are not speaker labels):\n"
+            "Each line includes its caption snippet's start and end time:\n"
         )
     else:
         transcript_parts = []

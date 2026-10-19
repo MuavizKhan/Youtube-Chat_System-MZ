@@ -588,3 +588,11 @@ $env:HF_EMBEDDING_MODEL = "BAAI/bge-m3"
 Request indexing for the benchmark videos using the normal `POST /index` endpoint and wait for each index status to become `ready` before running the answer/source audit. Evaluate Q07, AR03, and AR08 with the existing retrieval settings. Compare the generated answer, available transcript context, source intervals, and timestamps against the Phase 10.8 baseline. Do not claim the attribution issue is fixed solely because the new metadata exists or unit tests pass.
 
 
+## Phase 10.8.2 — Timestamp each reconstructed caption line
+
+The follow-up to Phase 10.8.1 keeps the original caption start/end times visible to the generation model. Each reconstructed caption line is prefixed with its own timestamp range, while caption order and overlap deduplication remain unchanged. The outer source interval, returned source objects, embedding text, index metadata, chunk size/overlap, retrieval candidates, ranking, thresholds, and citation policy are unchanged; existing indexes can be reused.
+
+Per-caption timestamps provide temporal cues for following nearby dialogue, not verified speaker labels. They cannot identify a voice or prove that a line is spoken by the guest rather than the interviewer. No speaker labels are inferred or added. The change is experimental until a fresh live-model audit shows better claim attribution without regressions; passing unit tests alone does not establish that outcome.
+
+After merging this change, start the backend with the existing isolated `experiment-caption-segments` namespace and unchanged retrieval settings, and rerun Q07, AR03, and AR08 using a new audit output path. Reindexing is not required for this formatter-only change. Inspect Q07 amounts claim-by-claim against transcript wording and source timestamps. AR08's answer-language mismatch is a separate generation requirement and is not claimed to be fixed by this change.
+
