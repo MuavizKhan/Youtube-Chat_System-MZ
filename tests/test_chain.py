@@ -575,10 +575,11 @@ def test_build_generation_context_does_not_let_oversized_top_group_exclude_small
             "distance": 0.2,
         },
     ]
-    budget = (
+    budget = max(
         len(chain.format_source_group(groups[1], 2))
         + len(chain.format_source_group(groups[2], 3))
-        + 2
+        + 2,
+        2100,
     )
 
     result = chain.build_generation_context(groups, max_chars=budget)
