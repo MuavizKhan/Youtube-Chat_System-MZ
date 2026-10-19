@@ -53,6 +53,7 @@ from .config import (
     HF_TOKEN,
     CONTEXT_EXPANSION_CHUNKS,
     CONTEXT_MAX_CHUNKS,
+    RAG_GENERATION_CONTEXT_MAX_CHARS,
     DENSE_ANCHOR_LIMIT,
     DENSE_ANCHOR_MIN_CHUNK_GAP,
     DENSE_CONTEXT_MAX_CHUNKS,
@@ -1287,6 +1288,185 @@ def build_context(
     )
 
 
+def _truncate_formatted_source(
+    source_text: str,
+    max_chars: int,
+) -> str:
+    """Shorten one oversized source, preferring complete caption lines."""
+    if max_chars <= 0:
+        return ""
+    if len(source_text) <= max_chars:
+        return source_text
+
+    marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
+    lines = source_text.splitlines()
+    caption_start = next(
+        (index for index, line in enumerate(lines) if line.startswith("- [")),
+        None,
+    )
+
+    if caption_start is not None:
+        header = "\n".join(lines[:caption_start])
+        kept_lines = []
+        for line in lines[caption_start:]:
+            candidate = header + "\n" + "\n".join([*kept_lines, line]) + marker
+            if len(candidate) <= max_chars:
+                kept_lines.append(line)
+            else:
+                break
+        if kept_lines:
+            return header + "\n" + "\n".join(kept_lines) + marker
+
+        prefix = header + "\n"
+        available = max_chars - len(prefix) - len(marker)
+        if available > 0:
+            first_caption = lines[caption_start]
+            excerpt = first_caption[:available].rsplit(" ", 1)[0].rstrip()
+            candidate = prefix + excerpt + marker
+            if len(candidate) <= max_chars:
+                return candidate
+
+    # Legacy source blocks contain unstructured transcript text.
+    transcript_start = next(
+        (index for index, line in enumerate(lines) if line.strip() == "Transcript:"),
+        None,
+    )
+    if transcript_start is not None:
+        header = "\n".join(lines[:transcript_start + 1])
+        transcript = "\n".join(lines[transcript_start + 1:])
+        available = max_chars - len(header) - 1 - len(marker)
+        if available > 0:
+            excerpt = transcript[:available].rsplit(" ", 1)[0].rstrip()
+            candidate = header + "\n" + excerpt + marker
+            if len(candidate) <= max_chars:
+                return candidate
+
+    # Last-resort guard for malformed blocks or a very small custom budget.
+    return source_text[:max_chars].rsplit(" ", 1)[0].rstrip()
+
+
+def build_generation_context(
+    source_groups: list[dict],
+    max_chars: int | None = None,
+) -> dict[str, Any]:
+    """Pack relevant source groups under a generation-only character ceiling.
+
+    Whole groups are prioritized by their best retrieval distance and then
+    restored to chronological order. Retrieved candidates and returned source
+    links are not changed. A single oversized group is shortened only if it
+    cannot fit the budget by itself.
+    """
+    budget = (
+        RAG_GENERATION_CONTEXT_MAX_CHARS
+        if max_chars is None
+        else max_chars
+    )
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        raise ValueError("max_chars must be a positive integer.")
+
+    if not source_groups:
+        context = "No relevant transcript context was retrieved."
+        return {
+            "context": context,
+            "diagnostics": {
+                "budget_chars": budget,
+                "original_chars": len(context),
+                "final_chars": len(context),
+                "groups_available": 0,
+                "groups_included": 0,
+                "reduced": False,
+            },
+        }
+
+    records = []
+    for index, source_group in enumerate(source_groups):
+        rendered = format_source_group(
+            source_group=source_group,
+            source_number=index + 1,
+        )
+        try:
+            distance = float(source_group.get("distance", math.inf))
+        except (TypeError, ValueError):
+            distance = math.inf
+        if not math.isfinite(distance):
+            distance = math.inf
+        try:
+            start = float(source_group.get("start", index))
+        except (TypeError, ValueError):
+            start = float(index)
+        records.append({
+            "index": index,
+            "text": rendered,
+            "distance": distance,
+            "start": start,
+        })
+
+    original_chars = sum(len(record["text"]) for record in records) + (
+        2 * max(0, len(records) - 1)
+    )
+    if original_chars <= budget:
+        return {
+            "context": "\n\n".join(record["text"] for record in records),
+            "diagnostics": {
+                "budget_chars": budget,
+                "original_chars": original_chars,
+                "final_chars": original_chars,
+                "groups_available": len(records),
+                "groups_included": len(records),
+                "reduced": False,
+            },
+        }
+
+    priority_records = sorted(
+        records,
+        key=lambda record: (record["distance"], record["start"], record["index"]),
+    )
+    selected = []
+    used_chars = 0
+    for record in priority_records:
+        separator_chars = 2 if selected else 0
+        available = budget - used_chars - separator_chars
+        if len(record["text"]) <= available:
+            selected.append(record)
+            used_chars += separator_chars + len(record["text"])
+            continue
+
+        if not selected:
+            shortened = _truncate_formatted_source(record["text"], budget)
+            if shortened:
+                selected.append({**record, "text": shortened})
+            break
+
+        # A lower-priority group that does not fit is skipped; smaller groups
+        # later in the ranking can still contribute evidence.
+        continue
+
+    selected.sort(key=lambda record: record["index"])
+    context = "\n\n".join(record["text"] for record in selected)
+    if len(context) > budget:
+        context = _truncate_formatted_source(context, budget)
+
+    diagnostics = {
+        "budget_chars": budget,
+        "original_chars": original_chars,
+        "final_chars": len(context),
+        "groups_available": len(records),
+        "groups_included": len(selected),
+        "reduced": True,
+    }
+    logger.warning(
+        "Bounded generation transcript context "
+        "original_chars=%s final_chars=%s budget_chars=%s "
+        "groups_available=%s groups_included=%s",
+        original_chars,
+        len(context),
+        budget,
+        len(records),
+        len(selected),
+    )
+    return {"context": context, "diagnostics": diagnostics}
+
+
 # ============================================================
 # 6. INFERENCE CLIENTS
 # ============================================================
@@ -2431,8 +2611,8 @@ def build_rag_chain(
     # 3. Build context from source groups
     # --------------------------------------------------------
 
-    context_runnable = RunnableLambda(
-        lambda inputs: build_context(
+    generation_context_runnable = RunnableLambda(
+        lambda inputs: build_generation_context(
             inputs["source_groups"]
         )
     )
@@ -2473,8 +2653,15 @@ def build_rag_chain(
         )
 
         .assign(
+            generation_context=
+                generation_context_runnable
+        )
+
+        .assign(
             context=
-                context_runnable
+                RunnableLambda(
+                    lambda inputs: inputs["generation_context"]["context"]
+                )
         )
     )
 
@@ -2512,6 +2699,7 @@ def build_rag_chain(
     ) -> dict[str, object]:
 
         started = time.perf_counter()
+        context_budget = inputs["generation_context"]["diagnostics"]
 
         if not inputs["retrieved_results"]:
             return {
@@ -2520,6 +2708,7 @@ def build_rag_chain(
                     "generated": False,
                     "fallback_used": True,
                     "latency_ms": 0.0,
+                    "context_budget": context_budget,
                 },
             }
 
@@ -2536,9 +2725,9 @@ def build_rag_chain(
                     (time.perf_counter() - started) * 1000,
                     2,
                 ),
+                "context_budget": context_budget,
             },
         }
-
 
     # --------------------------------------------------------
     # 7. Final chain
