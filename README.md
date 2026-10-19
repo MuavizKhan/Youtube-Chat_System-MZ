@@ -596,6 +596,12 @@ Per-caption timestamps provide temporal cues for following nearby dialogue, not 
 
 After merging this change, start the backend with the existing isolated `experiment-caption-segments` namespace and unchanged retrieval settings, and rerun Q07, AR03, and AR08 using a new audit output path. Reindexing is not required for this formatter-only change. Inspect Q07 amounts claim-by-claim against transcript wording and source timestamps. AR08's answer-language mismatch is a separate generation requirement and is not claimed to be fixed by this change.
 
+## Phase 10.8.3 — Transient inference retries and response language
+
+The generation layer retries recognized transient Hugging Face and Groq provider failures within configured retry budgets, while authentication, permission, unsupported-model, and malformed-request errors fail fast. Server-side retry logs include safe status/type metadata, not prompts, transcript text, or credentials.
+
+The system prompt also instructs the model to answer in the question's language even when the transcript is in another language. Live validation is still required: a successful HTTP response alone does not prove answer quality or language fidelity.
+
 ## Phase 10.8.4 — Generation context budget
 
 The Q07 live audit showed a provider request rejected at 12,732 requested tokens against a 8,000-token-per-minute allowance. This was a prompt-size/budget error, not a retrieval failure. `RAG_GENERATION_CONTEXT_MAX_CHARS` defaults to `8000` characters and caps only the transcript context passed to generation. If the full context does not fit, the packer prioritizes complete source groups by retrieval distance and restores those groups to chronological order; an individual source is excerpted only when no complete source group fits at all.
