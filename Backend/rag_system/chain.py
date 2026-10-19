@@ -650,10 +650,12 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
     {
         # Some captions name the eyes but omit a direct verb for blinking;
         # retain that interval as evidence for an answer about audible eye/eyelid sounds.
-        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye|(?:sound|noise|hear\w*|audible|notice|silence).{0,45}\beyes?\b|\beyes?\b.{0,45}(?:sound|noise|hear\w*|audible|silence)",
-        # Accept formal Arabic and dialectal references to eyes, eyelids,
-        # blinking, closing, or an explicitly audible eye-related sound.
-        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)|صوت.{0,40}(?:عين|جفن)|(?:عين|جفن).{0,40}(?:صوت|سمع|هدوء|صمت)",
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
+        "source_english_pattern": r"\bblink\w*\b|\beyelids?\b.{0,25}(?:blink|clos|mov)|(?:blink|clos|mov).{0,25}\beyelids?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye|(?:sound|noise|hear\w*|audible|notice|silence).{0,45}\beyes?\b|\beyes?\b.{0,45}(?:sound|noise|hear\w*|audible|silence)",
+        # Answer-side matching recognizes short eye references; source-side
+        # matching below requires a blink/closing verb or audible-sound context.
+        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
+        "source_arabic_pattern": r"جفون?.{0,25}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|صوت.{0,40}(?:عين|جفن)|(?:عين|جفن).{0,40}(?:صوت|سمع|هدوء|صمت)",
         "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
@@ -682,8 +684,12 @@ _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
 })
 
 
-def _answer_alignment_terms(text: str) -> set[str]:
-    """Extract informative English/Arabic answer words for source alignment."""
+def _answer_alignment_terms(text: str, *, source: bool = False) -> set[str]:
+    """Extract informative English/Arabic terms for answer-to-source alignment.
+
+    Source mode uses stricter concept patterns where a broad word alone (for
+    example, "eyes") would not prove the specific claim being timestamped.
+    """
     normalized = unicodedata.normalize(
         "NFKC", _strip_unverified_timestamp_summary(text)
     ).lower()
@@ -736,9 +742,19 @@ def _answer_alignment_terms(text: str) -> set[str]:
     # being aligned. This supports Arabic answers over English captions and vice
     # versa without applying blanket translation to unrelated queries.
     for concept in _ANSWER_ALIGNMENT_CONCEPTS:
+        english_pattern = (
+            concept.get("source_english_pattern")
+            if source
+            else concept.get("english_pattern")
+        ) or concept["english_pattern"]
+        arabic_pattern = (
+            concept.get("source_arabic_pattern")
+            if source
+            else concept.get("arabic_pattern")
+        ) or concept["arabic_pattern"]
         if (
-            re.search(concept["english_pattern"], normalized, re.IGNORECASE)
-            or re.search(concept["arabic_pattern"], normalized, re.IGNORECASE)
+            re.search(english_pattern, normalized, re.IGNORECASE)
+            or re.search(arabic_pattern, normalized, re.IGNORECASE)
         ):
             terms.update(concept["aliases"])
     return terms
@@ -771,14 +787,22 @@ def _select_answer_aligned_timestamp_candidates(
         transcript_text = candidate.get("transcript_text", "")
         if not isinstance(transcript_text, str) or not transcript_text.strip():
             continue
-        source_terms = _answer_alignment_terms(transcript_text)
+        source_terms = _answer_alignment_terms(transcript_text, source=True)
         overlap = answer_terms & source_terms
         normalized_source = unicodedata.normalize("NFKC", transcript_text).lower()
         source_concepts = {
             index
             for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
-            if re.search(concept["english_pattern"], normalized_source, re.IGNORECASE)
-            or re.search(concept["arabic_pattern"], normalized_source, re.IGNORECASE)
+            if re.search(
+                concept.get("source_english_pattern") or concept["english_pattern"],
+                normalized_source,
+                re.IGNORECASE,
+            )
+            or re.search(
+                concept.get("source_arabic_pattern") or concept["arabic_pattern"],
+                normalized_source,
+                re.IGNORECASE,
+            )
         }
         # Direct concept matches let the selector align a translated answer to
         # dialect captions even when token overlap is weak or normalization
