@@ -3049,7 +3049,7 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert result["generation_trace"]["grounded_financial_fallback_used"] is True
     assert "3,000 crore" in answer
     assert "4,999 crore" in answer
-    assert "certificate gives a figure of 6203" in answer
+    assert "certificate gives a figure of 6,203" in answer
     assert "14,100 crore" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
     assert "6,2003" not in answer
