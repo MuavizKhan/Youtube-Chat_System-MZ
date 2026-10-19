@@ -232,15 +232,15 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     # were observed in live Q07 generations. Keep the audit from passing just
     # because the four expected claims are also present in the same answer.
     known_unsupported_patterns = (
-        ("malformed_623", r"(?<!\\d)6\\s*,\\s*23(?!\\d)"),
-        ("malformed_62003", r"(?<!\\d)6\\s*,?\\s*2003(?!\\d)"),
-        ("malformed_60002", r"(?<!\\d)6\\s*,?\\s*0002(?!\\d)"),
+        ("malformed_623", r"(?<!\d)6\s*,\s*23(?!\d)"),
+        ("malformed_62003", r"(?<!\d)6\s*,?\s*2003(?!\d)"),
+        ("malformed_60002", r"(?<!\d)6\s*,?\s*0002(?!\d)"),
         (
             "unsupported_official_9000_recovery",
-            r"(?:(?:official|debt[\\s\\-‑–—]*recovery|recovery).{0,60}"
-            r"9[ ,\\u202f]?000(?!\\d)|"
-            r"9[ ,\\u202f]?000(?!\\d).{0,60}"
-            r"(?:official|debt[\\s\\-‑–—]*recovery|recovery))",
+            r"(?:(?:official|debt[\s\-‑–—]*recovery|recovery).{0,60}"
+            r"9[ ,\u202f]?000(?!\d)|"
+            r"9[ ,\u202f]?000(?!\d).{0,60}"
+            r"(?:official|debt[\s\-‑–—]*recovery|recovery))",
         ),
     )
     unsupported_found = [
