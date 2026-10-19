@@ -464,6 +464,22 @@ def test_prompt_handles_temporal_absence_and_requested_timestamp():
 
 
 @pytest.mark.unit
+def test_prompt_requires_answer_in_question_language_even_when_context_is_english():
+    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": "The transcript is in English and discusses heartbeat and breathing.",
+        "question": question,
+    })
+    messages = chain.prompt_to_messages(prompt)
+    normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+
+    assert question in messages[1]["content"]
+    assert "answer in the same language as the user's question" in normalized_system_prompt
+    assert "do not switch to english merely because the transcript" in normalized_system_prompt
+    assert "for an arabic question, answer in arabic" in normalized_system_prompt
+
+
+@pytest.mark.unit
 def test_prompt_prioritizes_claim_by_claim_attribution_for_named_guest_questions():
     question = "What does Vijay Mallya say about the amounts involved?"
     context = (
@@ -561,7 +577,9 @@ def test_groq_generation_returns_clean_answer(monkeypatch):
         ("network timeout", "generation failed"),
     ],
 )
-def test_groq_generation_translates_errors(error_text, expected):
+def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
     fake, _ = client(error=RuntimeError(error_text))
     prompt = chain.RAG_PROMPT.invoke(
         {
@@ -630,6 +648,75 @@ def test_build_rag_chain_uses_separate_generation_client(monkeypatch):
     assert observed["client"] is generation_client
 
 @pytest.mark.unit
+def test_huggingface_generation_retries_transient_upstream_failure(monkeypatch):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 1)
+    monkeypatch.setattr(chain, "HF_RETRY_DELAY_SECONDS", 0)
+
+    success = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="grounded answer"))]
+    )
+
+    class FlakyCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise RuntimeError("503 Service Unavailable")
+            return success
+
+    completions = FlakyCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    assert chain.generate_with_huggingface(fake, prompt) == "grounded answer"
+    assert completions.call_count == 2
+
+
+@pytest.mark.unit
+def test_groq_generation_retries_transient_upstream_failure(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 1)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+
+    success = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="grounded answer"))]
+    )
+
+    class FlakyCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise RuntimeError("429 rate limit")
+            return success
+
+    completions = FlakyCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    assert chain.generate_with_groq(fake, prompt) == "grounded answer"
+    assert completions.call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (RuntimeError("401 unauthorized"), False),
+        (RuntimeError("invalid request"), False),
+        (RuntimeError("network timeout"), True),
+        (RuntimeError("503 Service Unavailable"), True),
+        (RuntimeError("429 rate limit"), True),
+    ],
+)
+def test_provider_retry_classifier(error, expected):
+    assert chain._is_retryable_provider_error(error) is expected
+
+
+@pytest.mark.unit
 def test_generation_returns_clean_answer():
     response=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="  grounded answer  "))])
     fake,completions=client(response=response)
@@ -645,7 +732,9 @@ def test_generation_returns_clean_answer():
     ("403 forbidden","rejected the inference request"),
     ("network timeout","generation failed"),
 ])
-def test_generation_translates_errors(error_text,expected):
+def test_generation_translates_errors(monkeypatch, error_text, expected):
+    monkeypatch.setattr(chain, "HF_MAX_RETRIES", 0)
+    monkeypatch.setattr(chain, "HF_RETRY_DELAY_SECONDS", 0)
     fake,_=client(error=RuntimeError(error_text))
     prompt=chain.RAG_PROMPT.invoke({"context":"X","question":"Q"})
     with pytest.raises(RuntimeError,match=expected):

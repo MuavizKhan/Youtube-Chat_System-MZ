@@ -124,6 +124,18 @@ You are a YouTube video question-answering assistant.
 Your task is to answer the user's question using ONLY the
 transcript evidence provided in the context.
 
+RESPONSE LANGUAGE — HIGH PRIORITY
+---------------------------------
+- Answer in the same language as the user's question, unless the user explicitly
+  requests a different language.
+- Do not switch to English merely because the transcript, retrieved context, or
+  video captions are in English. For an Arabic question, answer in Arabic; for a
+  Hindi question, answer in Hindi; use the same principle for other languages.
+- Keep names, product names, numbers, currencies, and source-grounded facts
+  accurate while expressing the answer naturally in the requested language.
+- If the question deliberately uses multiple languages and no output language is
+  requested, answer in the language used for the main question.
+
 SPEAKER AND CLAIM ATTRIBUTION — HIGH PRIORITY
 ---------------------------------------------
 The supplied transcript context may contain multiple speakers. Source blocks are
@@ -1511,6 +1523,66 @@ def sanitize_generated_answer(answer: str) -> str:
     return cleaned or FALLBACK_ANSWER
 
 
+def _provider_error_status(error: Exception) -> int | None:
+    """Return an upstream HTTP status code when the SDK exposes one."""
+    candidates = [error, getattr(error, "response", None)]
+    for candidate in candidates:
+        status = getattr(candidate, "status_code", None)
+        if status is None:
+            continue
+        try:
+            return int(status)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _is_retryable_provider_error(error: Exception) -> bool:
+    """Recognize transient upstream failures without retrying bad requests/auth."""
+    status = _provider_error_status(error)
+    if status is not None:
+        return status in {408, 425, 429, 500, 502, 503, 504}
+
+    error_text = str(error).lower()
+    non_retryable_markers = (
+        "unauthorized",
+        "authentication failed",
+        "invalid api key",
+        "forbidden",
+        "permission denied",
+        "model_not_supported",
+        "model not found",
+        "invalid request",
+        "bad request",
+    )
+    if any(marker in error_text for marker in non_retryable_markers):
+        return False
+
+    retryable_markers = (
+        "rate limit",
+        "too many requests",
+        "timed out",
+        "timeout",
+        "temporary failure",
+        "temporarily unavailable",
+        "connection reset",
+        "connection refused",
+        "connection error",
+        "server error",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "http 408",
+        "http 425",
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+    )
+    return any(marker in error_text for marker in retryable_markers)
+
+
 # ============================================================
 # 9. MODEL GENERATION
 # ============================================================
@@ -1523,10 +1595,9 @@ def generate_with_huggingface(
     Send the LangChain prompt to Hugging Face and return
     the generated text.
 
-    Empty model responses are retried because the inference
-    provider can occasionally return an empty content field.
-    Configuration/request errors are translated and raised
-    immediately.
+    Empty model responses and recognized transient upstream failures are retried
+    within the configured attempt budget. Authentication, permission, model, and
+    request-configuration errors fail immediately.
     """
 
     messages = prompt_to_messages(prompt_value)
@@ -1584,6 +1655,26 @@ def generate_with_huggingface(
                     "Check token permissions and the selected "
                     "model/provider."
                 ) from error
+
+            if _is_retryable_provider_error(error):
+                if attempt < HF_MAX_RETRIES:
+                    logger.warning(
+                        "Transient Hugging Face generation failure; retrying "
+                        "attempt=%s max_attempts=%s status_code=%s error_type=%s",
+                        attempt + 1,
+                        HF_MAX_RETRIES + 1,
+                        _provider_error_status(error),
+                        type(error).__name__,
+                    )
+                    time.sleep(HF_RETRY_DELAY_SECONDS * (attempt + 1))
+                    continue
+
+                if "429" in error_text or "rate limit" in error_text or "too many requests" in error_text:
+                    raise RuntimeError(
+                        "Hugging Face rate limit was reached after "
+                        f"{HF_MAX_RETRIES + 1} attempts. Retry after the "
+                        "current rate-limit window."
+                    ) from error
 
             raise RuntimeError(
                 f"Hugging Face generation failed: {error}"
@@ -1670,11 +1761,25 @@ def generate_with_groq(
                     "Check API key permissions and the selected model."
                 ) from error
 
-            if "429" in error_text or "rate limit" in error_text:
-                raise RuntimeError(
-                    "Groq rate limit was reached.\n\n"
-                    "Retry after the current rate-limit window."
-                ) from error
+            if _is_retryable_provider_error(error):
+                if attempt < GROQ_MAX_RETRIES:
+                    logger.warning(
+                        "Transient Groq generation failure; retrying "
+                        "attempt=%s max_attempts=%s status_code=%s error_type=%s",
+                        attempt + 1,
+                        GROQ_MAX_RETRIES + 1,
+                        _provider_error_status(error),
+                        type(error).__name__,
+                    )
+                    time.sleep(GROQ_RETRY_DELAY_SECONDS * (attempt + 1))
+                    continue
+
+                if "429" in error_text or "rate limit" in error_text or "too many requests" in error_text:
+                    raise RuntimeError(
+                        "Groq rate limit was reached after "
+                        f"{GROQ_MAX_RETRIES + 1} attempts. Retry after the "
+                        "current rate-limit window."
+                    ) from error
 
             raise RuntimeError(
                 f"Groq generation failed: {error}"
