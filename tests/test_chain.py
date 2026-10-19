@@ -2871,4 +2871,9 @@ def test_timestamp_alignment_matches_bare_certificate_number_in_source_caption()
         has_evidence=True,
     )
 
-    assert result.endswith("Relevant timestamps: 01:40–02:20, 03:20–03:40, 05:00–05:40")
+    # The fixture exposes only the full source interval (200–240 seconds), not
+    # caption-level boundaries; preserve that evidence range instead of
+    # inventing a narrower end timestamp.
+    assert result.endswith(
+        "Relevant timestamps: 01:40–02:20, 03:20–04:00, 05:00–05:40"
+    )
