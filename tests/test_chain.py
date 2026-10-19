@@ -2788,19 +2788,18 @@ def test_answer_alignment_maps_english_sound_list_to_arabic_caption_intervals():
 
 @pytest.mark.unit
 def test_financial_repair_detects_bare_certificate_figure_and_split_recovery_attribution():
-    context = (
-        "[SOURCE 1]\\n"
-        "Transcript caption segments in chronological order:\\n"
-        "- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.\\n"
-        "[SOURCE 2]\\n"
-        "Transcript caption segments in chronological order:\\n"
-        "- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.\\n"
-        "- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum.\\n"
-        "[SOURCE 3]\\n"
-        "Transcript caption segments in chronological order:\\n"
-        "- [02:49:56–02:51:41] The Ministry of Finance report says the total amount recovered was\\n"
-        "- [02:51:41–02:52:10] 14,100 crore rupees."
-    )
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:51:41] The Ministry of Finance report says the total amount recovered was
+- [02:51:41–02:52:10] 14,100 crore rupees."""
+
     answer = (
         "The DRT debt was 4,999 crore rupees and another debt figure was 6,23 crore. "
         "The interest rate was 11.5%."
@@ -2818,7 +2817,6 @@ def test_financial_repair_detects_bare_certificate_figure_and_split_recovery_att
     assert instruction is not None
     assert "6203" in instruction
     assert "14100" in instruction
-
 
 @pytest.mark.unit
 def test_generation_context_diagnostics_report_certificate_topic_coverage():
