@@ -2316,6 +2316,13 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         (match.start(), int(match.group(1)))
         for match in re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text)
     ]
+
+    def source_id_at(position: int) -> int | None:
+        """Return the nearest enclosing [SOURCE n] marker, even for prose chunks."""
+        return next(
+            (number for start, number in reversed(source_markers) if start < position),
+            None,
+        )
     for match in re.finditer(r"(?m)^\s*-\s*\[([^\]]+)\]\s*(.+)$", text):
         source_id = next(
             (number for start, number in reversed(source_markers) if start < match.start()),
@@ -2369,6 +2376,8 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             continue
 
         own_caption, nearby_captions, source_id = caption_context(match.start())
+        if source_id is None:
+            source_id = source_id_at(match.start())
         topic = _financial_claim_topic(clause)
         claim_text = clause
         if own_caption:
@@ -2405,6 +2414,8 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
             own_caption, nearby_captions, source_id = caption_context(absolute_start)
+            if source_id is None:
+                source_id = source_id_at(absolute_start)
             local_text = nearby_captions or own_caption
             own_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(local_text)
@@ -2450,7 +2461,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "amount": amount,
                 "text": clause,
                 "topic": topic,
-                "source_id": None,
+                "source_id": source_id_at(match.start()),
             })
     return records
 
