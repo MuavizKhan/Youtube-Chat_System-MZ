@@ -2539,7 +2539,7 @@ def test_generation_context_prioritizes_distinct_material_money_claims_over_near
         ),
         _caption_group(
             93, 900,
-            [*filler, "The debt certificate gives a figure of 6,203 crore rupees."],
+            [*filler, "The debt certificate gives a figure of 6203." , "The principal amount carries unapplied interest at 11.5% per annum."],
             0.92,
         ),
         _caption_group(
@@ -2569,7 +2569,8 @@ def test_generation_context_prioritizes_distinct_material_money_claims_over_near
     assert len(context) <= 2400
     assert "3,000 crore rupees in Kingfisher Airlines" in context
     assert "4,999 crore rupees plus interest" in context
-    assert "6,203 crore rupees" in context
+    assert "6203" in context
+    assert "principal amount carries unapplied interest" in context
     assert "14,100 crore rupees had been recovered" in context
     assert "included_chunk_ids" in result["diagnostics"]
     assert set(result["diagnostics"]["included_chunk_ids"]) >= {"91", "92", "93", "94"}
@@ -2719,3 +2720,123 @@ def test_generation_repair_instruction_detects_misattributed_financial_figures()
     assert "misattributed amount-to-claim association" in instruction.lower()
     assert "4999 should remain associated with drt_debt" in instruction.lower()
     assert "6203 should remain associated with certificate" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_answer_alignment_maps_arabic_sound_list_to_english_caption_intervals():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You might even hear the subtle sound of your eyelids blinking.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_answer_alignment_maps_english_sound_list_to_arabic_caption_intervals():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 153.05, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "الهدوء التام لا يعطي الراحة التي يتوقعها الإنسان.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 02:33–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+def test_financial_repair_detects_bare_certificate_figure_and_split_recovery_attribution():
+    context = (
+        "[SOURCE 1]\\n"
+        "Transcript caption segments in chronological order:\\n"
+        "- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.\\n"
+        "[SOURCE 2]\\n"
+        "Transcript caption segments in chronological order:\\n"
+        "- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.\\n"
+        "- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum.\\n"
+        "[SOURCE 3]\\n"
+        "Transcript caption segments in chronological order:\\n"
+        "- [02:49:56–02:51:41] The Ministry of Finance report says the total amount recovered was\\n"
+        "- [02:51:41–02:52:10] 14,100 crore rupees."
+    )
+    answer = (
+        "The DRT debt was 4,999 crore rupees and another debt figure was 6,23 crore. "
+        "The interest rate was 11.5%."
+    )
+
+    claims = chain._money_amount_clauses(context)
+    assert any(item["amount"] == 6203 and item["topic"] == "certificate" for item in claims)
+    assert any(item["amount"] == 14100 and item["topic"] == "recovery_report" for item in claims)
+
+    instruction = chain._generation_repair_instruction(
+        "What amounts were mentioned about the debt and money recovered?",
+        answer,
+        context,
+    )
+    assert instruction is not None
+    assert "6203" in instruction
+    assert "14100" in instruction
+
+
+@pytest.mark.unit
+def test_generation_context_diagnostics_report_certificate_topic_coverage():
+    groups = [
+        _caption_group(111, 0, ["I invested 3,000 crore rupees in Kingfisher."], 0.2),
+        _caption_group(112, 100, ["The DRT judgment debt was 4,999 crore rupees."], 0.3),
+        _caption_group(113, 200, ["The debt certificate gives a figure of 6203."], 0.4),
+        _caption_group(114, 300, ["The Ministry of Finance report says 14,100 crore was recovered."], 0.5),
+        _caption_group(115, 400, ["Unrelated ticket cost 500 rupees."], 0.01),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What debt and money amounts are mentioned?",
+        max_chars=2400,
+    )
+
+    assert len(result["context"]) <= 2400
+    assert "The debt certificate gives a figure of 6203." in result["context"]
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert "113" in result["diagnostics"]["included_chunk_ids"]
