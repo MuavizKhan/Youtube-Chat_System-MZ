@@ -406,6 +406,14 @@ CONTEXT_MAX_CHUNKS = _get_int(
     12,
 )
 
+# Character ceiling for the final prompt's transcript context. This is a
+# generation-only guard for providers with strict request/TPM budgets; it does
+# not alter retrieval candidates or the source metadata returned to the client.
+RAG_GENERATION_CONTEXT_MAX_CHARS = _get_int(
+    "RAG_GENERATION_CONTEXT_MAX_CHARS",
+    8000,
+)
+
 
 # Evidence-dense questions need more semantic and downstream capacity because
 # one answer can require multiple transcript regions.
@@ -856,6 +864,13 @@ if CONTEXT_MAX_CHUNKS <= 0:
 
     raise RuntimeError(
         "RAG_CONTEXT_MAX_CHUNKS must be greater than 0."
+    )
+
+
+if RAG_GENERATION_CONTEXT_MAX_CHARS <= 0:
+
+    raise RuntimeError(
+        "RAG_GENERATION_CONTEXT_MAX_CHARS must be greater than 0."
     )
 
 
