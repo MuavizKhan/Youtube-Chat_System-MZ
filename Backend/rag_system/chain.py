@@ -655,7 +655,7 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         # A bare anatomy mention is not evidence for an audible sound. Require
         # an acoustic cue near the eye/eyelid in the source transcript.
         "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
-        "source_arabic_pattern": r"(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع).{0,70}(?:عين|عيون|جفن|جفون)|(?:عين|عيون|جفن|جفون).{0,70}(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)",
+        "source_arabic_pattern": r"(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)[^\.\!\?؟؛;]{0,45}(?:عين|عيون|جفن|جفون)|(?:عين|عيون|جفن|جفون).{0,70}(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)",
         "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
@@ -673,9 +673,9 @@ _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
     "up", "out", "than", "then", "very", "التي", "الذي", "الذين", "اللواتي",
     "الناس", "قد", "يبدأ", "يبدأون", "بسماع", "سماع", "داخل", "الغرفة",
     "أجسامهم", "اجسامهم", "أصوات", "اصوات", "صوت", "الأصوات", "الاصوات",
-    # Generic eye mentions are not enough to support an *audible* eye/eyelid
-    # claim. The concept matcher below requires an eyelid/blink/close verb or
-    # nearby sound/hearing/silence wording before cross-lingual expansion.
+    # Keep anatomy/blink words out of raw token-overlap matching. Eye-sound
+    # cross-lingual expansion below requires a nearby acoustic cue in the same
+    # caption sentence, not merely an eye/eyelid mention.
     # Keep anatomy / blink words out of raw token-overlap matching. The eye
     # concept is added via the stricter source acoustic pattern below instead.
     "eye", "eyes", "eyelid", "eyelids", "eyeball", "eyeballs", "eyelash", "eyelashes",
