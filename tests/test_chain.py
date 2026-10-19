@@ -2877,3 +2877,130 @@ def test_timestamp_alignment_matches_bare_certificate_number_in_source_caption()
     assert result.endswith(
         "Relevant timestamps: 01:40–02:20, 03:20–04:00, 05:00–05:40"
     )
+
+@pytest.mark.unit
+def test_generation_context_reserves_bare_certificate_claim_when_topic_is_already_covered():
+    filler = [
+        "The presenter continues with general interview context that does not add a financial claim."
+        for _ in range(18)
+    ]
+    groups = [
+        _caption_group(
+            108, 7267.92,
+            [*filler, "I invested 3,000 crore rupees into Kingfisher Airlines."],
+            0.82,
+        ),
+        _caption_group(
+            124, 8314.519,
+            [*filler, "The DRT judgment debt was 4,999 crore rupees plus interest."],
+            0.91,
+        ),
+        _caption_group(
+            153, 10196.399,
+            [*filler, "The Ministry of Finance report says 14,100 crore rupees were recovered."],
+            0.82,
+        ),
+        # A nearer source uses the certificate topic but has no monetary figure.
+        _caption_group(
+            199, 12000,
+            [*filler, "The debt certificate is mentioned, but this caption gives no figure."],
+            0.10,
+        ),
+        _caption_group(202, 12100, [*filler, "The presenter asks a follow-up question."], 0.15),
+        _caption_group(205, 12300, [*filler, "The guest pauses before answering."], 0.18),
+        _caption_group(208, 14068.199, [*filler, "The interview continues with another topic."], 0.89),
+        _caption_group(210, 14206.199, [*filler, "The interviewer asks for clarification."], 0.81),
+        _caption_group(213, 14350, [*filler, "The speaker changes to a different subject."], 0.77),
+        _caption_group(217, 14500, [*filler, "A general statement about the airline follows."], 0.68),
+        _caption_group(219, 14700, [*filler, "The recording continues with no new amount."], 0.73),
+        _caption_group(
+            221, 14939.359,
+            [
+                *filler,
+                "The debt certificate gives a figure of 6203.",
+                "The principal carries unapplied interest at 11.5% per annum.",
+                "The Ministry of Finance report also says 14,100 crore rupees were recovered.",
+            ],
+            1.12,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts of debt, investment, and money recovered are mentioned?",
+        max_chars=4000,
+    )
+
+    assert len(result["context"]) <= 4000
+    assert "The debt certificate gives a figure of 6203." in result["context"]
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert "221" in result["diagnostics"]["included_chunk_ids"]
+
+
+@pytest.mark.unit
+def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_interval():
+    answer = (
+        "The investment was 3,000 crore rupees. The DRT judgment debt was "
+        "4,999 crore rupees. The debt certificate gives a figure of 6203. "
+        "The Ministry of Finance report says 14,100 crore rupees were recovered."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 100, "end": 140, "distance": 0.7,
+                "transcript_text": "I invested 3,000 crore rupees into Kingfisher Airlines.",
+            },
+            {
+                "start": 200, "end": 240, "distance": 0.8,
+                "transcript_text": "The DRT judgment debt was 4,999 crore rupees plus interest.",
+            },
+            {
+                "start": 14939.359, "end": 15015.239, "distance": 1.0,
+                "transcript_text": "The debt certificate gives a figure of 6203. The principal carries unapplied interest at 11.5% per annum.",
+            },
+            {
+                "start": 300, "end": 340, "distance": 0.9,
+                "transcript_text": "The Ministry of Finance report said 14,100 crore rupees were recovered.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith(
+        "Relevant timestamps: 01:40–02:20, 03:20–04:00, "
+        "04:08:59–04:10:15, 05:00–05:40"
+    )
+
+
+@pytest.mark.unit
+def test_english_sound_answer_aligns_to_arabic_eye_closing_caption_variant():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 153.05, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "وقد تسمع صوت عينيك عند إغلاقهما.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "الهدوء التام لا يعطي الراحة التي يتوقعها الإنسان.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 02:33–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
