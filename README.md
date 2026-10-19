@@ -636,3 +636,27 @@ After CI passes, start the local backend with the unchanged experiment-caption-s
     .\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_6_answer_source_audit_20261019.json
 
 **Final closure criteria:** all three requests return valid responses; quality_passed is true; retrieval configuration is consistent; all answer-content, evidence-source, timestamp-alignment, encoding, and context-budget checks pass; and the full CI suite is green. A report with cases_succeeded: 3 but quality_passed: false is a failed acceptance run and must not be treated as Phase 10.8 completion. This phase changes prompt guidance, generation-context prioritization and truncation diagnostics, a bounded corrective generation pass, response timestamp selection, audit annotations/checks, tests, and documentation. Embeddings, retrieval ranking, retrieval thresholds, source-link policy, and index format remain unchanged, so reindexing is not required. The corrective pass can incur one additional inference request for an answer that fails its completeness check; clean drafts use the existing single-generation path.
+
+
+## Phase 10.8.8 — Source-bound financial attribution and cross-lingual timestamp coverage
+
+The follow-up to the Phase 10.8.7 live audit hardens two answer/source contracts without changing retrieval ranking, thresholds, embeddings, citation policy, or index format:
+
+- **Financial fallback is source-bound.** If the corrective generation pass still fails, the extractive fallback is allowed only when it can find the four distinct claim families in the supplied context: Kingfisher investment, DRT judgment debt, debt-certificate figure, and Ministry/Finance recovery report. When a caption puts the report attribution and amount on adjacent rows, they may be joined only inside the same `[SOURCE n]` block. A broad text clause that spans source blocks is not enough to attribute a recovery figure to a report. If the required source-local attribution cannot be established, the fallback declines rather than inventing the relationship. Bare values such as `6203` may be formatted as `6,203` for readability, but no unit or scale is inferred.
+- **Cross-lingual timestamp matching recognizes concise eye references.** A source caption can support an English or Arabic eye/eyelid sound claim even when it mentions only “eyes” and omits a repeated blink/closing verb. The timestamp still comes from returned source metadata; the text matcher does not generate timecodes or label a speaker.
+
+Focused regression tests cover report attribution split across neighboring caption rows, rejection of report labels borrowed from a different source block, and the late eye-sound interval in English and Arabic answers.
+
+Run the full backend suite after CI dependency/compile checks:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m pytest -q
+```
+
+Then start the backend against the already-indexed `experiment-caption-segments` namespace with the existing retrieval configuration and run a fresh audit:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_8_answer_source_audit_20261019.json
+```
+
+**Phase 10.8 is not complete until the live report passes.** Require `cases_succeeded = 3`, `cases_failed = 0`, consistent effective server configuration, `quality_passed = true`, and an empty `quality_failures` array. In Q07, confirm the recovery amount remains explicitly attributed to the source report and malformed amounts are absent; in AR03 and AR08, confirm the plain-text timestamp summary includes the late eye-sound interval (`09:49–10:58)) as well as the relevant early interval. No reindexing is expected for these generation/attribution/timestamp changes. The five-video retrieval benchmark is a separate gate and must be reviewed from its own saved multi-video report; a passing answer/source audit does not imply that every pilot-video retrieval case passes.
