@@ -202,7 +202,7 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     has_4999 = bool(_amount_clauses(answer, r"(?<!\d)4[ ,\u202f]?999(?!\d)"))
     has_6203 = bool(_amount_clauses(answer, r"(?<!\d)6[ ,\u202f]?203(?!\d)"))
     uncertainty_terms = (
-        r"unclear|not clear|does not explain|doesn't explain|not explained|"
+        r"unclear|not clear|does not (?:clearly )?explain|doesn't (?:clearly )?explain|not explained|"
         r"cannot reconcile|can't reconcile|relationship between|separately|"
         r"different figures|distinct figures|does not establish"
     )
