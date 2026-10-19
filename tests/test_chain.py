@@ -2539,7 +2539,12 @@ def test_generation_context_prioritizes_distinct_material_money_claims_over_near
         ),
         _caption_group(
             93, 900,
-            [*filler, "The debt certificate gives a figure of 6203." , "The principal amount carries unapplied interest at 11.5% per annum."],
+            [
+                *filler,
+                "The debt certificate gives a figure.",
+                "6203",
+                "The principal amount carries unapplied interest at 11.5% per annum.",
+            ],
             0.92,
         ),
         _caption_group(
@@ -2569,6 +2574,7 @@ def test_generation_context_prioritizes_distinct_material_money_claims_over_near
     assert len(context) <= 2400
     assert "3,000 crore rupees in Kingfisher Airlines" in context
     assert "4,999 crore rupees plus interest" in context
+    assert "The debt certificate gives a figure." in context
     assert "6203" in context
     assert "principal amount carries unapplied interest" in context
     assert "14,100 crore rupees had been recovered" in context
