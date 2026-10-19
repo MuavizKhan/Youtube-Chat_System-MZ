@@ -648,8 +648,8 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
     },
     {
-        # Some captions name the eyes but omit a direct verb for blinking;
-        # retain that interval as evidence for an answer about audible eye/eyelid sounds.
+        # Captions may omit the explicit blink verb, but source-side matching
+        # must still establish an acoustic cue near the eye/eyelid reference.
         "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
         "source_english_pattern": r"\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*).{0,70}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b|\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b.{0,70}\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)\b",
         # A bare anatomy mention is not evidence for an audible sound. Require
