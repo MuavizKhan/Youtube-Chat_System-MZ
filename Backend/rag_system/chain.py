@@ -2549,19 +2549,28 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             source_id = source_id_at(match.start())
         topic = _financial_claim_topic(clause)
         claim_text = clause
+        amount_caption = own_caption or clause
         if own_caption:
             local_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(nearby_captions)
             topic = local_topic or nearby_topic or topic
+            # Keep a specific topic anchored to the caption that contains the
+            # amount. A report label in the adjacent caption may complete an
+            # otherwise bare recovery amount, but must not override a local
+            # DRT judgment or debt-certificate claim.
+            if local_topic is not None:
+                claim_text = own_caption
+            elif not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
+                claim_text = nearby_captions or own_caption
+            elif topic is None and nearby_topic is not None:
+                topic = nearby_topic
+                claim_text = nearby_captions
+
             # A caption may say only "recovered" while the immediately adjacent
             # caption names the Ministry/Finance report. Promote that local
             # recovery claim to the more specific report attribution.
             if local_topic == "recovery" and nearby_topic == "recovery_report":
                 topic = "recovery_report"
-            if not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
-                claim_text = nearby_captions or own_caption
-            elif topic is None and nearby_topic is not None:
-                topic = nearby_topic
                 claim_text = nearby_captions
 
             # If a report/recovery label and its numeric amount occupy
@@ -2573,17 +2582,15 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 topic == "recovery_report"
                 and nearby_topic == "recovery_report"
                 and own_caption
-                and not (
-                    re.search(r"\b(?:ministry|finance|report)\b", own_caption, re.IGNORECASE)
-                    and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", own_caption, re.IGNORECASE)
-                )
+                and local_topic is None
             ):
-                claim_text = nearby_captions
+                claim_text = nearby_captions or own_caption
         records.append({
             "amount": amount,
             "text": claim_text,
             "topic": topic,
             "source_id": source_id,
+            "amount_caption": amount_caption,
         })
         recognized_spans.append((match.start(), match.end()))
 
@@ -2618,6 +2625,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "text": local_text,
                 "topic": topic,
                 "source_id": source_id,
+                "amount_caption": own_caption,
             })
 
     # Validation also runs on plain generated prose, which has no timestamped
@@ -2647,6 +2655,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "text": clause,
                 "topic": topic,
                 "source_id": source_id_at(match.start()),
+                "amount_caption": clause,
             })
     return records
 
@@ -2654,11 +2663,18 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
 def _financial_claim_topic(clause: str) -> str | None:
     """Assign a conservative primary topic to distinguish similar financial figures."""
     text = (clause or "").lower()
-    # Prefer the compound report/recovery attribution over broad words like
-    # "certificate" when a single caption group discusses both claims.
+    # "Debt recovery certificate" is a document name, not evidence that the
+    # figure is recovery proceeds. Remove that phrase before looking for a
+    # separate recovery claim so an adjacent Ministry/report mention cannot
+    # relabel the certificate figure as money recovered.
+    recovery_attribution_text = re.sub(
+        r"\bdebt\s+recovery\s+certificate\b",
+        "debt certificate",
+        text,
+    )
     if (
-        re.search(r"\b(?:ministry|finance|report)\b", text)
-        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text)
+        re.search(r"\b(?:ministry|finance|report)\b", recovery_attribution_text)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", recovery_attribution_text)
     ):
         return "recovery_report"
     if re.search(r"\bcertificate\b", text):
@@ -2891,7 +2907,11 @@ def _build_financial_evidence_fallback(
             else ((context or "") if not source_blocks else "")
         )
         topic = claim.get("topic")
-        local_topic = _financial_claim_topic(claim_text)
+        # Prefer the caption that contains the number over nearby captions
+        # added to recover a split label. Nearby context may complete an
+        # otherwise bare amount, but it must not relabel a specific local claim.
+        amount_caption = str(claim.get("amount_caption") or claim_text)
+        local_topic = _financial_claim_topic(amount_caption)
         if local_topic is not None:
             topic = local_topic
 
