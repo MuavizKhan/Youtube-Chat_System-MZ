@@ -132,7 +132,8 @@ def _index_blocker(
     expected_language: str,
 ) -> str | None:
     """Prevent a trace from being misinterpreted when its index is not comparable."""
-    if index_snapshot.get("state") != "valid":
+    state = index_snapshot.get("state")
+    if state != "valid":
         return "index_state_not_valid"
 
     files = index_snapshot.get("files")
