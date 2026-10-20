@@ -2042,8 +2042,9 @@ def _financial_claim_keys_for_context(
         blocks[int(marker.group(1))] = text[marker.end():block_end]
 
     claim_keys: set[tuple[str, float]] = set()
+    target_source_id = source_id
     for claim in _money_amount_clauses(text):
-        if source_id is not None and claim.get("source_id") != source_id:
+        if target_source_id is not None and claim.get("source_id") != target_source_id:
             continue
         amount = claim.get("amount")
         topic = claim.get("topic")
@@ -2055,10 +2056,10 @@ def _financial_claim_keys_for_context(
         ):
             continue
 
-        source_id = claim.get("source_id")
+        claim_source_id = claim.get("source_id")
         source_block = (
-            blocks.get(source_id, "")
-            if markers and isinstance(source_id, int)
+            blocks.get(claim_source_id, "")
+            if markers and isinstance(claim_source_id, int)
             else ("" if markers else text)
         )
         report_in_source = bool(re.search(
@@ -2641,19 +2642,19 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     # same amount as 14,100 crore(s) recovered. This is not a general number
     # repair rule and never transfers report attribution across source blocks.
     split_amount_pattern = re.compile(
-        r"(?<![\\w,:])(?P<thousands>\\d{1,2},000)\\s+(?P<remainder>\\d{1,3})(?![\\d,])"
+        r"(?<![\w,:])(?P<thousands>\d{1,2},000)\s+(?P<remainder>\d{1,3})(?![\d,])"
     )
     independently_supported_recoveries = {
         float(record["amount"])
         for record in records
         if record.get("topic") in {"recovery", "recovery_report"}
         and re.search(
-            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
             str(record.get("text", "")),
             re.IGNORECASE,
         )
         and re.search(
-            r"\\b(?:crores?|cr|rupees?)\\b",
+            r"\b(?:crores?|cr|rupees?)\b",
             str(record.get("amount_caption") or record.get("text", "")),
             re.IGNORECASE,
         )
@@ -2662,7 +2663,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     for row_index, row in enumerate(caption_rows):
         if (
             row.get("source_id") is None
-            or not re.search(r"(?<![\\w,:])\\d{1,2},000", row.get("text", ""))
+            or not re.search(r"(?<![\w,:])\d{1,2},000", row.get("text", ""))
         ):
             continue
         window_rows = [
@@ -2683,9 +2684,9 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             ):
                 continue
             if not (
-                re.search(r"\\b(?:ministry|finance|report)\\b", window_text, re.IGNORECASE)
+                re.search(r"\b(?:ministry|finance|report)\b", window_text, re.IGNORECASE)
                 and re.search(
-                    r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+                    r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
                     window_text,
                     re.IGNORECASE,
                 )
@@ -2697,17 +2698,17 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             identity = (
                 row["source_id"],
                 amount,
-                re.sub(r"\\s+", " ", window_text).casefold(),
+                re.sub(r"\s+", " ", window_text).casefold(),
             )
             if identity in seen_split_claims:
                 continue
             seen_split_claims.add(identity)
 
-            if re.search(r"\\bministry\\b.*\\bfinance\\b.*\\breport\\b", window_text, re.IGNORECASE):
+            if re.search(r"\bministry\b.*\bfinance\b.*\breport\b", window_text, re.IGNORECASE):
                 report_label = "Ministry of Finance report"
-            elif re.search(r"\\bfinance\\s+report\\b", window_text, re.IGNORECASE):
+            elif re.search(r"\bfinance\s+report\b", window_text, re.IGNORECASE):
                 report_label = "Finance report"
-            elif re.search(r"\\bministry\\s+report\\b", window_text, re.IGNORECASE):
+            elif re.search(r"\bministry\s+report\b", window_text, re.IGNORECASE):
                 report_label = "Ministry report"
             else:
                 report_label = "report"
@@ -3094,14 +3095,14 @@ def _build_financial_evidence_fallback(
             # leaking the malformed ASR numeral into the model answer.
             attribution_text = amount_caption or claim_text
             if re.search(
-                r"\\bministry\\b.*\\bfinance\\b.*\\breport\\b",
+                r"\bministry\b.*\bfinance\b.*\breport\b",
                 attribution_text,
                 re.IGNORECASE,
             ):
                 report_label = "Ministry of Finance report"
-            elif re.search(r"\\bfinance\\s+report\\b", attribution_text, re.IGNORECASE):
+            elif re.search(r"\bfinance\s+report\b", attribution_text, re.IGNORECASE):
                 report_label = "Finance report"
-            elif re.search(r"\\bministry\\s+report\\b", attribution_text, re.IGNORECASE):
+            elif re.search(r"\bministry\s+report\b", attribution_text, re.IGNORECASE):
                 report_label = "Ministry report"
             else:
                 report_label = "report"
