@@ -2843,6 +2843,7 @@ def _generation_repair_instruction(
 def _build_financial_evidence_fallback(
     question: str,
     context: str,
+    diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
     """Build a conservative extractive answer when financial generation repair fails.
 
@@ -2857,6 +2858,15 @@ def _build_financial_evidence_fallback(
         question or "",
         re.IGNORECASE,
     ):
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({
+                "rejection_reason": "question_not_recognized_as_financial",
+                "required_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
+                "missing_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
+                "recognized_topics": {},
+                "source_block_count": 0,
+            })
         return None
 
     required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
@@ -2967,7 +2977,29 @@ def _build_financial_evidence_fallback(
             {**claim, "topic": topic, "text": claim_text},
         )
 
-    if any(topic not in claims_by_topic for topic in required_topics):
+    missing_topics = [
+        topic for topic in required_topics
+        if topic not in claims_by_topic
+    ]
+    if diagnostics is not None:
+        diagnostics.clear()
+        diagnostics.update({
+            "rejection_reason": (
+                "missing_required_topics" if missing_topics else None
+            ),
+            "required_topics": list(required_topics),
+            "missing_topics": missing_topics,
+            "recognized_topics": {
+                topic: {
+                    "amount": claim.get("amount"),
+                    "excerpt": str(claim.get("text", ""))[:240],
+                    "source_id": claim.get("source_id"),
+                }
+                for topic, claim in claims_by_topic.items()
+            },
+            "source_block_count": len(source_blocks),
+        })
+    if missing_topics:
         return None
 
     labels = (
@@ -4262,6 +4294,7 @@ def build_rag_chain(
         repair_passed = None
         grounded_financial_fallback_used = False
         financial_answer_suppressed = False
+        financial_fallback_diagnostics: dict[str, Any] = {}
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -4283,6 +4316,7 @@ def build_rag_chain(
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
+                    diagnostics=financial_fallback_diagnostics,
                 )
                 if extractive_answer is not None:
                     answer = extractive_answer
@@ -4322,6 +4356,7 @@ def build_rag_chain(
             extractive_answer = _build_financial_evidence_fallback(
                 question=question_text,
                 context=financial_evidence_context,
+                diagnostics=financial_fallback_diagnostics,
             )
             if extractive_answer is not None:
                 answer = extractive_answer
@@ -4355,6 +4390,9 @@ def build_rag_chain(
                     "full_retrieved_source_groups"
                     if grounded_financial_fallback_used
                     else None
+                ),
+                "financial_fallback_diagnostics": (
+                    financial_fallback_diagnostics if is_financial_question else None
                 ),
             },
         }
