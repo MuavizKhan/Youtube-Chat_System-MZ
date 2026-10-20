@@ -3230,7 +3230,7 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     # Keep the prompt too small to include all four claim families. The
     # extractive fallback must still inspect all retrieved source groups.
     monkeypatch.setattr(chain, "merge_overlapping_results", lambda _results: source_groups)
-    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1200)
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 500)
 
     prompt_human_messages = []
 
@@ -3248,7 +3248,7 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     })
 
     # The model was given a bounded subset, not every required fact.
-    assert len(prompt_human_messages) == 2
+    assert len(prompt_human_messages) == 1
     assert not all(
         phrase in prompt_human_messages[0]
         for phrase in (
