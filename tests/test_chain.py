@@ -3484,11 +3484,7 @@ Transcript caption segments in chronological order:
     assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
     assert "Debt certificate: the transcript identifies a certificate amount of 6,203 crore" in fallback
     assert re.search(
-        r"ministry of finance report.{0,100}14,100 crore rupees.{0,20}recover",
-        fallback,
-        re.IGNORECASE,
-    ) or re.search(
-        r"ministry of finance report.{0,100}total amount recovered.{0,100}14,100 crore rupees",
+        r"Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore rupees with that report",
         fallback,
         re.IGNORECASE,
     )

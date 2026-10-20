@@ -78,7 +78,7 @@ _MOJIBAKE_MARKERS = (
     "Ø", "Ù", "â", "Ã", "\ufffd",
     # Common Windows-1252 spellings of UTF-8 punctuation; "â" catches
     # a different Latin-1/control-code variant.
-    "â€“", "â€”", "â€™", "â€œ", "â€",
+    "â€“", "â€”", "â€™", "â€œ", "â€", "â€˜", "â€¦",
 )
 _TIMESTAMP_RANGE_PATTERN = re.compile(
     r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[–—-]\s*"
