@@ -133,7 +133,7 @@ def _index_blocker(
     if not isinstance(actual_language, str) or not actual_language.strip():
         return "index_transcript_language_unverifiable"
 
-    normalized_language = actual_language.strip().casefold().replace("_", "-").split("-", 1)[0]
+    normalized_language = (\n        actual_language.strip().casefold().replace("_", "-").split("-", 1)[0]\n    )
     if normalized_language != expected_language.casefold():
         return "index_transcript_language_mismatch"
 
@@ -288,15 +288,25 @@ def run_phase10_9_triage(
                 for item in trace["diagnostics"]
                 if isinstance(item, dict)
             ]
-            missing_questions = [
-                question_id
-                for question_id in question_ids
-                if question_id not in observed_question_ids
-            ]
-            if missing_questions:
+            if observed_question_ids != question_ids:
                 raise ValueError(
-                    f"Diagnostic trace omitted requested questions: {missing_questions}."
+                    "Diagnostic trace question IDs did not exactly match the "
+                    f"requested order: expected {question_ids}, got {observed_question_ids}."
                 )
+
+            for item in trace["diagnostics"]:
+                question_id = item["id"]
+                expected_group_count = len(
+                    benchmark.gold_evidence_by_question[question_id].groups
+                )
+                observed_groups = item.get("groups")
+                if not isinstance(observed_groups, list) or len(
+                    observed_groups
+                ) != expected_group_count:
+                    raise ValueError(
+                        f"Diagnostic trace for {question_id} did not include all "
+                        f"gold groups: expected {expected_group_count}."
+                    )
 
             videos.append(
                 {
