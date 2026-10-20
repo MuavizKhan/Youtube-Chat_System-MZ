@@ -241,3 +241,28 @@ def test_cli_saves_report_and_returns_nonzero_for_blocked_targets(tmp_path, monk
 
     assert exit_code == 1
     assert json.loads(output.read_text(encoding="utf-8")) == report
+
+def test_triage_does_not_mark_incomplete_gold_group_trace_as_completed():
+    def incomplete_trace(_video_url, question_ids, *, display):
+        return {
+            "questions": list(question_ids),
+            "diagnostics": [
+                {"id": question_id, "groups": []}
+                for question_id in question_ids
+            ],
+        }
+
+    report = triage.run_phase10_9_triage(
+        video_ids=["MdeQMVBuGgY"],
+        diagnostic_runner=incomplete_trace,
+        provenance_builder=dict,
+        index_snapshot_builder=_snapshot,
+    )
+
+    assert report["videos"][0]["status"] == "error"
+    assert report["videos"][0]["failure_reasons"] == [
+        "diagnostic_execution_failed"
+    ]
+    assert "did not include all gold groups" in report["videos"][0]["error"]["message"]
+    assert report["summary"]["diagnostics_completed"] is False
+
