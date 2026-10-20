@@ -31,17 +31,62 @@ $prior = Get-Content ".\evaluation_reports\phase10_4_multivideo_topk7_distance15
 $prior.experiment_metadata | ConvertTo-Json -Depth 8
 ```
 
-For comparison with that recorded run, the known key settings were `RAG_TOP_K=7`, `RAG_MAX_DISTANCE=1.50`, and `RAG_MMR_LAMBDA=0.70`. Reuse the embedding model and index namespace from the prior report; do not guess them. Set any remaining settings to match its recorded effective configuration. If that report is unavailable or the matching index is missing, label the run a new baseline rather than claiming a direct comparison.
+For comparison with that recorded run, the known key settings were `RAG_TOP_K=7`, `RAG_MAX_DISTANCE=1.50`, and `RAG_MMR_LAMBDA=0.70`. The following restores the embedding model, namespace, chunking settings, and all retrieval knobs recorded in the old report so unrelated shell or `.env` overrides do not silently change the baseline.
+
+```powershell
+$meta = $prior.experiment_metadata
+$env:HF_EMBEDDING_MODEL = [string]$meta.embedding_model
+$env:RAG_INDEX_NAMESPACE = [string]$meta.index_namespace
+$env:RAG_CHUNK_SIZE = [string]$meta.index_config.chunk_size
+$env:RAG_CHUNK_OVERLAP = [string]$meta.index_config.chunk_overlap
+
+$envMap = @{
+    top_k = "RAG_TOP_K"
+    fetch_k = "RAG_MMR_FETCH_K"
+    lambda_mult = "RAG_MMR_LAMBDA"
+    max_distance = "RAG_MAX_DISTANCE"
+    recovery_max_distance = "RAG_RECOVERY_MAX_DISTANCE"
+    recovery_top_k = "RAG_RECOVERY_TOP_K"
+    recovery_fetch_k = "RAG_RECOVERY_FETCH_K"
+    rrf_k = "RAG_RRF_K"
+    dense_lexical_rrf_weight = "RAG_DENSE_LEXICAL_RRF_WEIGHT"
+    context_expansion_chunks = "RAG_CONTEXT_EXPANSION_CHUNKS"
+    context_max_chunks = "RAG_CONTEXT_MAX_CHUNKS"
+    dense_semantic_k = "RAG_DENSE_SEMANTIC_K"
+    dense_semantic_fetch_k = "RAG_DENSE_SEMANTIC_FETCH_K"
+    dense_anchor_limit = "RAG_DENSE_ANCHOR_LIMIT"
+    dense_anchor_min_chunk_gap = "RAG_DENSE_ANCHOR_MIN_CHUNK_GAP"
+    dense_context_max_chunks = "RAG_DENSE_CONTEXT_MAX_CHUNKS"
+    dense_facet_rerank_weight = "RAG_DENSE_FACET_RERANK_WEIGHT"
+    rerank_enabled = "RAG_RERANK_ENABLED"
+    rerank_model = "RAG_RERANK_MODEL"
+    rerank_candidate_k = "RAG_RERANK_CANDIDATE_K"
+    rerank_batch_size = "RAG_RERANK_BATCH_SIZE"
+    rerank_max_length = "RAG_RERANK_MAX_LENGTH"
+}
+foreach ($key in $envMap.Keys) {
+    $setting = $meta.effective_retrieval_config.PSObject.Properties[$key]
+    if ($null -eq $setting) {
+        throw "Prior report is missing effective retrieval setting: $key"
+    }
+    [Environment]::SetEnvironmentVariable($envMap[$key], [string]$setting.Value, "Process")
+}
+
+if ([int]$meta.effective_retrieval_config.top_k -ne 7 -or
+    [double]$meta.effective_retrieval_config.max_distance -ne 1.50 -or
+    [double]$meta.effective_retrieval_config.lambda_mult -ne 0.70) {
+    throw "The selected prior report does not contain the documented top_k=7, max_distance=1.50, lambda=0.70 baseline."
+}
+
+$env:PYTHONIOENCODING = "utf-8"
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+```
+
+If the prior report is unavailable, its metadata is incomplete, or the matching index is missing, stop and label the next run a new baseline rather than claiming a direct comparison.
 
 From the repository root, after matching the configuration:
 
 ```powershell
-$env:PYTHONIOENCODING = "utf-8"
-$env:RAG_TOP_K = "7"
-$env:RAG_MAX_DISTANCE = "1.50"
-$env:RAG_MMR_LAMBDA = "0.70"
-
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $baseline = ".\evaluation_reports\phase10_9_multivideo_baseline_$stamp.json"
 
 .\.venv\Scripts\python.exe -m Backend.rag_system.multi_video_evaluation --output $baseline
