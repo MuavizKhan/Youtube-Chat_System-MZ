@@ -2016,6 +2016,66 @@ def _financial_topics_in_text(text: str) -> set[str]:
     return topics
 
 
+def _financial_claim_keys_for_context(text: str) -> set[tuple[str, float]]:
+    """Collect amount/topic keys using the same source-local recovery rule as the safe extractor.
+
+    A recovery amount can count as a report-attributed claim for context
+    selection only when the amount claim and report/recovery wording belong to
+    the same formatted [SOURCE n] block. This prevents a duplicated,
+    unattributed recovery amount from displacing the source that establishes
+    report attribution.
+    """
+    text = text or ""
+    markers = list(re.finditer(r"(?m)^\\[SOURCE\\s+(\\d+)\\]\\s*$", text))
+    blocks: dict[int, str] = {}
+    for index, marker in enumerate(markers):
+        block_end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+        blocks[int(marker.group(1))] = text[marker.end():block_end]
+
+    claim_keys: set[tuple[str, float]] = set()
+    for claim in _money_amount_clauses(text):
+        amount = claim.get("amount")
+        topic = claim.get("topic")
+        claim_text = str(claim.get("text", ""))
+        if (
+            topic is None
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+        ):
+            continue
+
+        source_id = claim.get("source_id")
+        source_block = (
+            blocks.get(source_id, "")
+            if markers and isinstance(source_id, int)
+            else ("" if markers else text)
+        )
+        report_in_source = bool(re.search(
+            r"\\b(?:ministry|finance|report)\\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        recovery_in_source = bool(re.search(
+            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        recovery_in_claim = bool(re.search(
+            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            claim_text,
+            re.IGNORECASE,
+        ))
+
+        if recovery_in_claim and report_in_source and recovery_in_source:
+            topic = "recovery_report"
+        elif topic == "recovery_report" and not (report_in_source and recovery_in_source):
+            topic = "recovery" if recovery_in_claim else None
+
+        if topic is not None:
+            claim_keys.add((str(topic), float(amount)))
+    return claim_keys
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
@@ -2108,13 +2168,11 @@ def build_generation_context(
             # state it as a bare number (for example, "certificate ... 6203").
             # Keep amount+topic identities so a different certificate caption
             # cannot accidentally count as coverage for this distinct claim.
-            "financial_claims": {
-                (str(claim["topic"]), float(claim["amount"]))
-                for claim in (_money_amount_clauses(rendered) if financial_question else [])
-                if claim.get("topic") is not None
-                and isinstance(claim.get("amount"), (int, float))
-                and math.isfinite(float(claim["amount"]))
-            },
+            "financial_claims": (
+                _financial_claim_keys_for_context(rendered)
+                if financial_question
+                else set()
+            ),
         })
 
     original_chars = sum(len(record["text"]) for record in records) + (
