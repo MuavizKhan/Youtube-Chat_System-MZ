@@ -3263,6 +3263,12 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     assert result["generation_trace"]["grounded_financial_fallback_used"] is True
     assert result["generation_trace"]["financial_answer_suppressed"] is False
     assert result["generation_trace"]["financial_fallback_context_source"] == "full_retrieved_source_groups"
+    fallback_diagnostics = result["generation_trace"]["financial_fallback_diagnostics"]
+    assert fallback_diagnostics["rejection_reason"] is None
+    assert fallback_diagnostics["missing_topics"] == []
+    assert set(fallback_diagnostics["recognized_topics"]) == {
+        "investment", "drt_debt", "certificate", "recovery_report"
+    }
     assert "3,000 crore rupees" in answer
     assert "4,999 crore rupees" in answer
     assert "debt certificate gives a figure of 6,203" in answer
@@ -3460,15 +3466,24 @@ Transcript caption segments in chronological order:
 - [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
 - [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
 
+    diagnostics = {}
     fallback = chain._build_financial_evidence_fallback(
         "What debt and money amounts are mentioned in the Kingfisher case?",
         context,
+        diagnostics=diagnostics,
     )
 
     # An attribution from another returned source is not evidence for this
     # recovery claim; the extractor must decline rather than join unrelated
-    # source blocks into one assertion.
+    # source blocks into one assertion. Diagnostics make the reason visible
+    # in live audit traces without relaxing this attribution boundary.
     assert fallback is None
+    assert diagnostics["rejection_reason"] == "missing_required_topics"
+    assert diagnostics["missing_topics"] == ["recovery_report"]
+    assert set(diagnostics["recognized_topics"]) == {
+        "investment", "drt_debt", "certificate"
+    }
+    assert diagnostics["source_block_count"] == 5
 
 
 @pytest.mark.unit
