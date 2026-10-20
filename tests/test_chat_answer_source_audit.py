@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 import scripts.chat_answer_source_audit as audit_module
+from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
     analyze_response,
@@ -93,13 +96,24 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     assert evidence["represented_in_plain_text_timestamp_summary"] is True
 
 
-def test_ar08_requires_both_bodily_sound_source_intervals_in_timestamp_summary():
-    answer_text = (
-        "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
-        "حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش."
-    )
+@pytest.mark.parametrize(
+    ("case_id", "answer_text"),
+    [
+        (
+            "AR03",
+            "Your own heartbeat, the blood rushing through your veins, the sounds of your lungs and stomach, and even the subtle noise of your eyelids blinking.",
+        ),
+        (
+            "AR08",
+            "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش.",
+        ),
+    ],
+)
+def test_bodily_sound_timestamp_uses_the_chunk_containing_the_eyelid_phrase(
+    case_id, answer_text
+):
     response = {
-        "answer": answer_text + "\n\nRelevant timestamps: 02:33–03:37, 09:49–10:58",
+        "answer": answer_text + "\n\nRelevant timestamps: 02:33–03:37",
         "retrieval_config": {
             "embedding_model": "BAAI/bge-m3",
             "index_namespace": "experiment-caption-segments",
@@ -125,17 +139,20 @@ def test_ar08_requires_both_bodily_sound_source_intervals_in_timestamp_summary()
                     "budget_chars": 8000, "original_chars": 14430,
                     "final_chars": 7902, "groups_available": 3,
                     "groups_included": 3, "reduced": True,
+                    "included_chunk_ids": ["2", "11"],
                 }
             },
         },
     }
 
-    accepted = analyze_response(_case("AR08"), response)
+    accepted = analyze_response(_case(case_id), response)
     assert accepted["quality"]["passed"] is True
     assert accepted["quality"]["failed_checks"] == []
 
-    response["answer"] = answer_text + "\n\nRelevant timestamps: 04:15–05:18, 09:49–10:58"
-    rejected = analyze_response(_case("AR08"), response)
+    # Chunk 11 is a later sound-wave explanation, not evidence for the eyelid
+    # claim. Its range alone must not satisfy this check.
+    response["answer"] = answer_text + "\n\nRelevant timestamps: 09:49–10:58"
+    rejected = analyze_response(_case(case_id), response)
     assert rejected["quality"]["passed"] is False
     assert "evidence_source_and_timestamp_alignment" in rejected["quality"]["failed_checks"]
 
@@ -208,6 +225,82 @@ def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     assert "recovery_14100" in failed
     assert "recovery_source_attribution" in failed
     assert "unclear_relationship_preserved" in failed
+
+
+def test_source_bound_financial_fallback_satisfies_q07_quality_contract():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report says the total amount recovered was
+- [02:50:25–02:51:41] 14,100 crore rupees.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+    )
+
+    assert answer is not None
+    failures = [
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    ]
+    assert failures == [], f"Extractive fallback failed Q07 audit checks: {failures}"
+    for raw_timestamp in (
+        "[02:01:07–02:02:31]",
+        "[02:18:34–02:20:28]",
+        "[02:49:56–02:50:25]",
+        "[02:50:25–02:51:41]",
+    ):
+        assert raw_timestamp not in answer
+    recovery_claim = next(
+        line for line in answer.splitlines() if "14,100" in line
+    )
+    assert "report" in recovery_claim.casefold()
+    assert "recover" in recovery_claim.casefold()
+
+
+def test_q07_quality_gate_rejects_financial_verification_abstention():
+    answer = (
+        "I couldn't reliably verify the financial figures from the retrieved "
+        "transcript. I won't guess at or reconcile amounts that the available "
+        "evidence does not establish."
+    )
+
+    failed = {
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    }
+
+    assert "financial_answer_not_abstained" in failed
+
+
+def test_q07_quality_gate_rejects_known_malformed_extra_amounts():
+    answer = (
+        "Mallya invested 3,000 crore in Kingfisher. The DRT judgment debt was 4,999 crore. "
+        "The debt certificate gives a figure of 6,203. A Ministry of Finance report says "
+        "14,100 crore was recovered. The amounts 6,23 crore, 6,2003 crore and 6,0002 crore "
+        "were stated, and 9,000 crore was the official debt-recovery amount. "
+        "The transcript does not clearly explain how the DRT judgment and certificate figures relate."
+    )
+
+    failed = {
+        check["name"]
+        for check in _answer_quality_checks("Q07", answer)
+        if not check["passed"]
+    }
+
+    assert "malformed_or_unsupported_financial_amounts_absent" in failed
 
 
 def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
@@ -323,12 +416,12 @@ def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
     assert audit["possible_mojibake_markers"]
 
 
-def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chunks():
+def test_audit_separates_verified_context_evidence_from_retrieved_only_chunks():
     response = {
         "answer": (
             "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
             "وأصوات الرئتين والمعدة، ورمش الجفون.\n\n"
-            "Relevant timestamps: 02:33–03:37, 09:49–10:58"
+            "Relevant timestamps: 02:33–03:37"
         ),
         "retrieval_config": {
             "embedding_model": "BAAI/bge-m3",
@@ -364,13 +457,40 @@ def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chun
         },
     }
 
+    # Production audit oracle: both the bodily-sound phrase and the eyelid
+    # phrase are verified in chunk 2, which is included in the generation
+    # context and represented by the 02:33–03:37 source range.
     audit = analyze_response(_case("AR08"), response)
 
     assert audit["final_context_chunk_ids"] == ["2"]
     assert audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
-    assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
-    assert audit["quality"]["passed"] is False
-    assert "annotated_evidence_in_retrieved_context" in audit["quality"]["failed_checks"]
+    assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is True
+    assert audit["quality"]["passed"] is True
+    assert audit["quality"]["failed_checks"] == []
+
+    # Separate context-budget contract: chunk 11 is retrieved and returned as
+    # a clickable source, but was deliberately excluded from the generation
+    # context. A synthetic required group pinned to that retrieved-only chunk
+    # must not be counted as evidence that the model actually saw.
+    production_case = _case("AR08")
+    context_budget_case = {
+        **production_case,
+        "evidence_groups": [
+            production_case["evidence_groups"][0],
+            {
+                "label": "retrieved-only control chunk excluded from generation context",
+                "candidate_chunk_ids": [11],
+            },
+        ],
+    }
+    truncated_audit = analyze_response(context_budget_case, response)
+
+    assert truncated_audit["final_context_chunk_ids"] == ["2"]
+    assert truncated_audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
+    assert truncated_audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
+    assert truncated_audit["annotated_evidence_groups"][1]["present_in_returned_sources"] is True
+    assert truncated_audit["quality"]["passed"] is False
+    assert "annotated_evidence_in_retrieved_context" in truncated_audit["quality"]["failed_checks"]
 
 
 def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figures():
@@ -389,3 +509,146 @@ def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figure
     assert results["certificate_6203"] is True
     assert results["recovery_source_attribution"] is True
     assert results["unclear_relationship_preserved"] is False
+
+
+def test_q07_live_shaped_context_fallback_passes_financial_and_timestamp_contract():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the amount of debt or money involved in the Kingfisher situation?",
+        context,
+    )
+    assert answer is not None
+
+    source_texts = [
+        {
+            "source_id": 1, "chunk_ids": [108],
+            "start": 7267.92, "end": 7351.84, "distance": 0.82,
+            "transcript_text": "I invested 3,000 crores of UB Group money into Kingfisher Airlines.",
+        },
+        {
+            "source_id": 2, "chunk_ids": [124],
+            "start": 8314.519, "end": 8428.16, "distance": 0.91,
+            "transcript_text": "4,999 crores was a debt. The debt recovery tribunal's own admission.",
+        },
+        {
+            "source_id": 3, "chunk_ids": [153],
+            "start": 10196.399, "end": 10301.84, "distance": 0.87,
+            "transcript_text": "That's how you've recovered 14,100 crores from me.",
+        },
+        {
+            "source_id": 4, "chunk_ids": [221],
+            "start": 14939.359, "end": 15015.239, "distance": 0.81,
+            "transcript_text": (
+                "I showed you the debt recovery certificate amount 6203 crores. "
+                "I've shown you the Ministry of Finance report 14,000 100 recovered."
+            ),
+        },
+    ]
+    answer = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=source_texts,
+        has_evidence=True,
+    )
+
+    response = {
+        "answer": answer,
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": source_texts,
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": [108, 124, 153, 221],
+                "citation_chunk_ids": [108, 124, 153, 221],
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": len(context),
+                    "final_chars": min(len(context), 7900),
+                    "groups_available": 4,
+                    "groups_included": 4,
+                    "included_chunk_ids": ["108", "124", "153", "221"],
+                    "reduced": True,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("Q07"), response)
+    assert audit["quality"]["passed"] is True, audit["quality"]["failed_checks"]
+    assert audit["quality"]["failed_checks"] == []
+    assert len(audit["plain_text_timestamp_ranges"]) >= 4
+    assert all(
+        group["represented_in_plain_text_timestamp_summary"]
+        for group in audit["annotated_evidence_groups"]
+    )
+
+
+def test_timestamp_mojibake_using_windows_punctuation_is_detected():
+    response = {
+        "answer": "A grounded answer.\n\nRelevant timestamps: 00:10â€“00:20",
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": [{"source_id": 1, "chunk_ids": [2], "start": 10, "end": 20}],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [2], "citation_chunk_ids": [2]},
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000, "original_chars": 1000, "final_chars": 1000,
+                    "groups_available": 1, "groups_included": 1, "included_chunk_ids": ["2"],
+                    "reduced": False,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("AR03"), response)
+
+    assert audit["answer_text_encoding_suspect"] is True
+    assert audit["possible_mojibake_markers"] == ["â€“"]
+    assert "encoding_integrity" in audit["quality"]["failed_checks"]
+
+
+def test_q07_audit_rejects_unstructured_deterministic_financial_fallback():
+    response = {
+        "answer": (
+            "The transcript supports these distinct financial statements:\n\n"
+            "- put in 3,000 crores of UB group's money\n"
+            "- debt recovery tribunal's own admission 4,999 crores was a debt right rest is all\n"
+            "- right I showed you the debt recovery certificate amount 6,203 crores I've shown you the ministry of\n"
+            "- The transcript cites the Ministry of Finance report with a recovery figure of 14,100 crore.\n\n"
+            "The transcript does not clearly explain how the DRT judgment and debt-certificate figures relate, so they should not be treated as one total."
+        ),
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": [
+            {"source_id": 1, "chunk_ids": [108], "start": 7267.92, "end": 7351.84},
+            {"source_id": 2, "chunk_ids": [124], "start": 8314.519, "end": 8428.16},
+            {"source_id": 3, "chunk_ids": [153], "start": 10196.399, "end": 10301.84},
+            {"source_id": 4, "chunk_ids": [221], "start": 14939.359, "end": 15015.239},
+        ],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [108, 124, 153, 221], "citation_chunk_ids": [108, 124, 153, 221]},
+            "generation": {
+                "grounded_financial_fallback_used": True,
+                "context_budget": {
+                    "budget_chars": 8000, "original_chars": 5000, "final_chars": 5000,
+                    "groups_available": 4, "groups_included": 4,
+                    "included_chunk_ids": ["108", "124", "153", "221"], "reduced": False,
+                },
+            },
+        },
+    }
+
+    audit = analyze_response(_case("Q07"), response)
+
+    assert "financial_fallback_statements_are_structured" in audit["quality"]["failed_checks"]

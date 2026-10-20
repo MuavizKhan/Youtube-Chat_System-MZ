@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import re
 import pytest
 from langchain_core.documents import Document
 from Backend.rag_system import chain
@@ -2937,6 +2938,182 @@ def test_generation_context_reserves_bare_certificate_claim_when_topic_is_alread
     assert "221" in result["diagnostics"]["included_chunk_ids"]
 
 
+
+@pytest.mark.unit
+def test_generation_context_reserves_report_recovery_before_noisy_financial_distractors():
+    filler = [
+        "General narration continues without adding another financial claim."
+        for _ in range(18)
+    ]
+    groups = [
+        _caption_group(
+            108, 7267.92,
+            [*filler, "I put in 3,000 crores of UB Group money into Kingfisher Airlines."],
+            0.82,
+        ),
+        _caption_group(
+            114, 7680.0,
+            [
+                *filler,
+                "The tribunal discussed 3,400 crore, 5,600 crore and 7,800 crore in unrelated proceedings.",
+            ],
+            0.72,
+        ),
+        _caption_group(
+            124, 8314.519,
+            [*filler, "The debt recovery tribunal says 4,999 crores was a debt."],
+            0.91,
+        ),
+        _caption_group(
+            153, 10196.399,
+            [*filler, "That's how you've recovered 14,100 crores, right?"],
+            0.82,
+        ),
+        _caption_group(
+            159, 10630.88,
+            [
+                *filler,
+                "It is through the statement in Parliament of the finance minister and the printed report of the Ministry of Finance that they have shown",
+                "The government and the banks have not rendered a statement of account.",
+                "14,100 crores recovered from me.",
+            ],
+            0.83,
+        ),
+        _caption_group(
+            179, 12023.0,
+            [*filler, "A separate account discusses 2,700 crore in payments and expenses."],
+            0.91,
+        ),
+        _caption_group(
+            189, 12705.08,
+            [
+                *filler,
+                "The debt recovery tribunal discussed 6,23 crores plus interest at 11.5%.",
+                "They said the debt was 6,2003 crores and the judgment debt was 6,0002 crores.",
+                "An official recovery of 9,000 crores was also claimed in this noisy passage.",
+            ],
+            0.77,
+        ),
+        _caption_group(
+            192, 12989.64,
+            [*filler, "A financial statement lists 1,200 crore, 2,300 crore and 3,100 crore."],
+            0.81,
+        ),
+        _caption_group(
+            208, 14068.199,
+            [*filler, "Another account refers to payments of 4,200 crore and 8,100 crore."],
+            0.89,
+        ),
+        _caption_group(
+            210, 14206.199,
+            [*filler, "The interviewer mentions a separate debt of 5,300 crore and interest."],
+            0.81,
+        ),
+        _caption_group(
+            221, 14939.359,
+            [
+                *filler,
+                "The debt recovery certificate amount is 6203 crores.",
+                "I showed you the Ministry of Finance report, 14,000 100 recovered.",
+            ],
+            1.12,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts of debt, investment, and money recovered are mentioned?",
+        max_chars=4000,
+    )
+
+    context = result["context"]
+    included_ids = result["diagnostics"]["included_chunk_ids"]
+    assert len(context) <= 4000
+    assert "159" in included_ids
+    assert "14,100 crores recovered from me." in context
+    assert "printed report of the Ministry of Finance" in context
+    # The certificate and malformed financial distractors must not prevent
+    # the higher-quality source-local recovery claim from reaching generation.
+    fallback = chain._build_financial_evidence_fallback(
+        "What amounts of debt, investment, and money recovered are mentioned?",
+        context,
+    )
+    assert fallback is not None
+    assert "Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore with that report." in fallback
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
+
+
+@pytest.mark.unit
+def test_generation_context_reserves_source_local_report_recovery_amount():
+    filler = [
+        "General narration continues without adding another financial claim."
+        for _ in range(18)
+    ]
+    groups = [
+        _caption_group(
+            108, 7267.92,
+            [*filler, "I put in 3,000 crores of UB Group money into Kingfisher Airlines."],
+            0.82,
+        ),
+        _caption_group(
+            124, 8314.519,
+            [*filler, "The debt recovery tribunal says 4,999 crores was a debt."],
+            0.91,
+        ),
+        # This nearer source repeats the recovery amount but does not identify
+        # the report or authority to which the figure is attributed.
+        _caption_group(
+            153, 10196.399,
+            [*filler, "That's how you've recovered 14,100 crores, right?"],
+            0.82,
+        ),
+        # Report wording and the amount are separated by another caption but
+        # remain in the same source block. Preserve this source for fallback.
+        _caption_group(
+            159, 10630.88,
+            [
+                *filler,
+                "It is through the statement in Parliament of the finance minister and the printed report of the Ministry of Finance that they have shown",
+                "The government and the banks have not rendered a statement of account.",
+                "14,100 crores recovered from me.",
+            ],
+            0.83,
+        ),
+        _caption_group(
+            199, 12000,
+            [*filler, "The debt certificate is mentioned but this passage gives no amount."],
+            0.10,
+        ),
+        _caption_group(202, 12100, [*filler, "The presenter asks a follow-up question."], 0.15),
+        _caption_group(205, 12300, [*filler, "The guest pauses before answering."], 0.18),
+        _caption_group(208, 14068.199, [*filler, "The interview continues with another topic."], 0.89),
+        _caption_group(210, 14206.199, [*filler, "The interviewer asks for clarification."], 0.81),
+        _caption_group(213, 14350, [*filler, "The speaker changes to a different subject."], 0.77),
+        _caption_group(217, 14500, [*filler, "A general statement about the airline follows."], 0.68),
+        _caption_group(219, 14700, [*filler, "The recording continues with no new amount."], 0.73),
+        _caption_group(
+            221, 14939.359,
+            [
+                *filler,
+                "The debt recovery certificate amount is 6203 crores.",
+                "I showed you the Ministry of Finance report, 14,000 100 recovered.",
+            ],
+            1.12,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts of debt, investment, and money recovered are mentioned?",
+        max_chars=4000,
+    )
+
+    assert len(result["context"]) <= 4000
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert "159" in result["diagnostics"]["included_chunk_ids"]
+    assert "14,100 crores recovered from me." in result["context"]
+    assert "printed report of the Ministry of Finance" in result["context"]
+
 @pytest.mark.unit
 def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_interval():
     answer = (
@@ -3005,6 +3182,104 @@ def test_english_sound_answer_aligns_to_arabic_eye_closing_caption_variant():
     assert "04:15–05:18" not in result
 
 @pytest.mark.unit
+def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_is_truncated(monkeypatch):
+    question = (
+        "What does Vijay Mallya say about the amount of debt or money "
+        "involved in the Kingfisher situation?"
+    )
+    filler = (
+        "The speaker describes an unrelated part of the interview without adding "
+        "financial facts. "
+    ) * 12
+    source_groups = [
+        {
+            "documents": [doc(108, 7267, 7351, filler + "I invested 3,000 crore rupees into Kingfisher Airlines.")],
+            "start": 7267, "end": 7351, "distance": 0.2,
+        },
+        {
+            "documents": [doc(124, 8314, 8428, filler + "The DRT judgment debt was 4,999 crore rupees plus interest.")],
+            "start": 8314, "end": 8428, "distance": 0.25,
+        },
+        {
+            "documents": [doc(221, 14939, 15015, filler + "The debt certificate gives a figure of 6203.")],
+            "start": 14939, "end": 15015, "distance": 0.3,
+        },
+        {
+            "documents": [doc(159, 10630, 10698, filler + "A Ministry of Finance report says 14,100 crore rupees were recovered from me.")],
+            "start": 10630, "end": 10698, "distance": 0.35,
+        },
+    ]
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [108, 124, 221, 159],
+                "citation_chunk_ids": [108, 124, 221, 159],
+            },
+        ),
+    )
+    # Keep the prompt too small to include all four claim families. The
+    # extractive fallback must still inspect all retrieved source groups.
+    monkeypatch.setattr(chain, "merge_overlapping_results", lambda _results: source_groups)
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 500)
+
+    prompt_human_messages = []
+
+    def fake_generate_with_llm(**kwargs):
+        prompt_value = kwargs["prompt_value"]
+        prompt_human_messages.append(
+            next(message.content for message in prompt_value.messages if message.type == "human")
+        )
+        return chain.FINANCIAL_VERIFICATION_FALLBACK
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    # The model was given a bounded subset, not every required fact.
+    assert len(prompt_human_messages) == 1
+    assert not all(
+        phrase in prompt_human_messages[0]
+        for phrase in (
+            "3,000 crore rupees",
+            "4,999 crore rupees",
+            "figure of 6203",
+            "14,100 crore rupees",
+        )
+    )
+
+    answer = result["answer"]
+    assert result["generation_trace"]["grounded_financial_fallback_used"] is True
+    assert result["generation_trace"]["financial_answer_suppressed"] is False
+    assert result["generation_trace"]["financial_fallback_context_source"] == "full_retrieved_source_groups"
+    fallback_diagnostics = result["generation_trace"]["financial_fallback_diagnostics"]
+    assert fallback_diagnostics["rejection_reason"] is None
+    assert fallback_diagnostics["missing_topics"] == []
+    assert set(fallback_diagnostics["recognized_topics"]) == {
+        "investment", "drt_debt", "certificate", "recovery_report"
+    }
+    assert fallback_diagnostics["candidate_claims"]
+    assert all("amount_caption_topic" in claim for claim in fallback_diagnostics["candidate_claims"])
+    assert len(fallback_diagnostics["source_financial_excerpts"]) == 4
+    assert "3,000 crore rupees" in answer
+    assert "4,999 crore rupees" in answer
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
+    assert "recovery figure of 14,100 crore rupees" in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
 def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still_fails(monkeypatch):
     context = (
         "I invested 3,000 crore rupees into Kingfisher Airlines. "
@@ -3047,12 +3322,598 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert result["generation_trace"]["quality_repair_attempted"] is True
     assert result["generation_trace"]["quality_repair_passed"] is False
     assert result["generation_trace"]["grounded_financial_fallback_used"] is True
+    assert result["generation_trace"]["financial_answer_suppressed"] is False
     assert "3,000 crore" in answer
     assert "4,999 crore" in answer
-    assert "certificate gives a figure of 6,203" in answer
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
     assert "14,100 crore" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
     assert "6,2003" not in answer
     assert "6,0002" not in answer
     assert "9,000 crore recovered" not in answer
 
+@pytest.mark.unit
+def test_rag_chain_suppresses_unverified_financial_draft_when_safe_extraction_fails(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees into Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6203. "
+        "A Ministry of Finance report discusses recovery of 14,100 crore rupees."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(102, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [102],
+                "citation_chunk_ids": [102],
+            },
+        ),
+    )
+    # Simulate evidence that fails the stricter source-local fallback contract.
+    # The repair can still fail, but its unsupported numeric draft must not leak.
+    monkeypatch.setattr(
+        chain,
+        "_build_financial_evidence_fallback",
+        lambda **kwargs: None,
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return (
+            "The debt was 6,23 crore and 6,2003 crore, and 14,100 crore was recovered."
+            if len(calls) == 1
+            else "The debt is 6,0002 crore, with 9,000 crore recovered."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    assert len(calls) == 2
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is False
+    assert result["generation_trace"]["grounded_financial_fallback_used"] is False
+    assert result["generation_trace"]["financial_answer_suppressed"] is True
+    assert result["answer"] == chain.FINANCIAL_VERIFICATION_FALLBACK
+    assert "6,23" not in result["answer"]
+    assert "6,2003" not in result["answer"]
+    assert "6,0002" not in result["answer"]
+    assert "9,000" not in result["answer"]
+
+
+@pytest.mark.unit
+def test_financial_fallback_preserves_report_attribution_split_across_caption_rows():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report says the total amount recovered was
+- [02:50:25–02:51:41] 14,100 crore rupees.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "3,000 crore rupees" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
+    assert re.search(
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
+        fallback,
+        re.IGNORECASE,
+    )
+    assert "14,100 crore" in fallback
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
+    for malformed in ("6,23 crores", "6,2003 crores", "6,0002 crores", "9,000 crores"):
+        assert malformed not in fallback
+
+
+@pytest.mark.unit
+def test_financial_fallback_maps_plain_prose_amounts_to_their_source_block():
+    context = """[SOURCE 1]
+I invested 3,000 crore rupees into Kingfisher Airlines.
+The DRT judgment debt was 4,999 crore rupees plus interest.
+The debt certificate gives a figure of 6203.
+The Ministry of Finance report said 14,100 crore rupees had been recovered."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What amounts were mentioned about Kingfisher debt and money involved?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "3,000 crore rupees" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
+    assert re.search(
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
+        fallback,
+        re.IGNORECASE,
+    )
+
+
+@pytest.mark.unit
+def test_financial_fallback_keeps_debt_recovery_certificate_distinct_from_recovery_report():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [00:00–00:10] I put in 3,000 crores of the UB group's money.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [00:10–00:20] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [00:20–00:30] I showed you the debt recovery certificate amount 6,203 crores.
+- [00:30–00:40] I've shown you the Ministry of Finance report.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [00:40–00:50] The Ministry of Finance report says the total amount recovered was
+- [00:50–01:00] 14,100 crore rupees."""
+
+    claims = chain._money_amount_clauses(context)
+    certificate_claim = next(item for item in claims if item["amount"] == 6203)
+    recovery_claim = next(item for item in claims if item["amount"] == 14100)
+    assert certificate_claim["topic"] == "certificate"
+    assert "debt recovery certificate" in certificate_claim["amount_caption"].casefold()
+    assert recovery_claim["topic"] == "recovery_report"
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "Investment: the transcript says the speaker put in 3,000 crore of UB Group money" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies a certificate amount of 6,203 crore" in fallback
+    assert re.search(
+        r"Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore rupees with that report",
+        fallback,
+        re.IGNORECASE,
+    )
+    assert "does not clearly explain how the drt judgment and debt-certificate figures relate" in fallback.casefold()
+
+
+@pytest.mark.unit
+def test_financial_fallback_formats_claims_as_complete_labeled_statements():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] put in 3,000 crores of UB group's money
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission right rest is all
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+    )
+
+    assert answer is not None
+    assert "- Investment: the transcript says the speaker put in 3,000 crore of UB Group money." in answer
+    assert "- DRT debt: the transcript describes 4,999 crore as a debt in a passage that mentions the Debt Recovery Tribunal." in answer
+    assert "- Debt certificate: the transcript identifies a certificate amount of 6,203 crore." in answer
+    assert "- Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore with that report." in answer
+    assert "right rest is all" not in answer
+    assert "I've shown you the ministry of" not in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
+def test_financial_fallback_does_not_borrow_recovery_report_attribution_from_other_source_blocks():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report was published for Parliament.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [02:50:25–02:51:41] The total amount recovered was 14,100 crore rupees.
+[SOURCE 5]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    # An attribution from another returned source is not evidence for this
+    # recovery claim; the extractor must decline rather than join unrelated
+    # source blocks into one assertion. Diagnostics make the reason visible
+    # in live audit traces without relaxing this attribution boundary.
+    assert fallback is None
+    assert diagnostics["rejection_reason"] == "missing_required_topics"
+    assert diagnostics["missing_topics"] == ["recovery_report"]
+    assert set(diagnostics["recognized_topics"]) == {
+        "investment", "drt_debt", "certificate"
+    }
+    assert diagnostics["source_block_count"] == 5
+    assert diagnostics["candidate_claims"]
+    recovered_amount_candidates = [
+        claim for claim in diagnostics["candidate_claims"]
+        if claim["amount"] == 14100
+    ]
+    assert len(recovered_amount_candidates) == 1
+    assert recovered_amount_candidates[0]["classified_topic"] == "recovery"
+    assert "Finance report" in diagnostics["source_financial_excerpts"]["3"][0]
+    assert any(
+        "14,100 crore rupees" in excerpt
+        for excerpt in diagnostics["source_financial_excerpts"]["4"]
+    )
+
+
+@pytest.mark.unit
+def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and even the subtle sound of your eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You may even notice the subtle sound of your eyes in the silence.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+@pytest.mark.unit
+@pytest.mark.unit
+def test_verified_chunk2_caption_aligns_eye_sound_only_query_to_early_source():
+    answer = "You may even hear the sound of your eyelids blinking."
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 153.05, "end": 217.615, "distance": 0.84,
+                "transcript_text": (
+                    "In a quiet room, you can hear your own heartbeat, blood rushing "
+                    "through your veins, your lungs, your stomach, and even your "
+                    "eyelids blinking."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.10,
+                "transcript_text": (
+                    "Sound waves travel through the air to the eardrum, and the "
+                    "cochlea processes the different frequencies."
+                ),
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.05,
+                "transcript_text": (
+                    "A loud noise came from the hallway. The presenter has eyelid "
+                    "irritation, blue eyes, and wears glasses."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    # The source cue "hear" governs the bodily-sound list, and "eyelids
+    # blinking" is part of that same sentence. The later sound-wave segment
+    # and a closer anatomy-only segment must not win timestamp selection.
+    assert result.endswith("Relevant timestamps: 02:33–03:37")
+    assert "09:49–10:58" not in result
+    assert "04:15–05:18" not in result
+
+
+def test_financial_verification_fallback_does_not_add_unaligned_timestamps():
+    answer = chain.FINANCIAL_VERIFICATION_FALLBACK
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 7267.92, "end": 7351.84, "distance": 0.7,
+                "transcript_text": "I invested 3,000 crore rupees into Kingfisher Airlines.",
+            },
+            {
+                "start": 10196.399, "end": 10301.84, "distance": 0.9,
+                "transcript_text": "A Ministry of Finance report said 14,100 crore rupees were recovered.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result == answer
+    assert "Relevant timestamps:" not in result
+
+
+@pytest.mark.unit
+def test_eye_anatomy_without_sound_context_does_not_add_eye_sound_timestamp():
+    answer = (
+        "Your heartbeat, blood moving through veins, lungs and stomach sounds, "
+        "and even the subtle sound of your eyelids blinking."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.2,
+                "transcript_text": (
+                    "The presenter has eyelid irritation, blue eyes, and wears glasses."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37")
+    assert "09:49–10:58" not in result
+
+
+@pytest.mark.unit
+def test_eye_sound_claim_gets_no_timestamp_when_noise_is_unrelated_to_eye_source():
+    answer = "You may even notice the subtle sound of your eyelids blinking."
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.2,
+                "transcript_text": (
+                    "A loud noise came from the hallway. "
+                    "The presenter has eyelid irritation, blue eyes, and wears glasses."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result == answer
+    assert "Relevant timestamps:" not in result
+
+
+@pytest.mark.unit
+def test_arabic_eye_sound_caption_with_hearing_verb_gets_timestamp():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "هتلاقي نفسك في أوضة صامتة، وتسمع نبض قلبك، حركة الدم في عروقك، "
+                    "صوت الرئتين أو صوت المعدة."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "حتى عينيك وهي بترمش بقيت بتسمعها.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+
+
+@pytest.mark.unit
+def test_arabic_eye_sound_answer_aligns_to_english_caption_that_only_says_eyes():
+    answer = (
+        "نبض القلب، حركة الدم في العروق، أصوات الرئتين والمعدة، "
+        "ورمش الجفون."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 13.996, "end": 217.615, "distance": 0.85,
+                "transcript_text": (
+                    "You may hear your heartbeat, blood rushing through your veins, "
+                    "the sounds of your lungs and stomach."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.95,
+                "transcript_text": "You may even notice the subtle sound of your eyes in the silence.",
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.2,
+                "transcript_text": "The room is quiet and the presenter changes the audio level.",
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
+    assert "04:15–05:18" not in result
+
+
+
+@pytest.mark.unit
+def test_financial_claim_refines_generic_debt_to_drt_only_within_same_source():
+    same_source = """[SOURCE 1]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission"""
+
+    claim = next(
+        item for item in chain._money_amount_clauses(same_source)
+        if item["amount"] == 4999
+    )
+    assert claim["topic"] == "drt_debt"
+    assert "tribunal" in claim["text"].casefold()
+    assert "tribunal" in claim["amount_caption"].casefold()
+
+    # A separate source block may not lend its DRT label to an otherwise
+    # generic debt amount.
+    split_sources = """[SOURCE 1]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+[SOURCE 2]
+- [02:19:01–02:20:28] debt recovery tribunal's own admission"""
+    separate_claim = next(
+        item for item in chain._money_amount_clauses(split_sources)
+        if item["amount"] == 4999
+    )
+    assert separate_claim["topic"] == "debt"
+    assert "tribunal" not in separate_claim["amount_caption"].casefold()
+
+
+@pytest.mark.unit
+def test_financial_fallback_normalizes_only_corroborated_report_recovery_asr_split():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    claims = chain._money_amount_clauses(context)
+    report_claim = next(
+        item for item in claims
+        if item["amount"] == 14100 and item.get("asr_split_amount")
+    )
+    assert report_claim["topic"] == "recovery_report"
+    assert report_claim["source_id"] == 4
+    assert "finance report" in report_claim["amount_caption"].casefold()
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the debt and money involved?",
+        context,
+        diagnostics=diagnostics,
+    )
+    assert answer is not None
+    assert diagnostics["missing_topics"] == []
+    assert diagnostics["recognized_topics"]["investment"]["amount"] == 3000
+    assert diagnostics["recognized_topics"]["drt_debt"]["amount"] == 4999
+    assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
+    assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
+    # A source can name a "debt recovery certificate" and a separate Finance
+    # report. The document title must not relabel the 6,203 figure as proceeds.
+    source_four_claim_keys = chain._financial_claim_keys_for_context(
+        context,
+        source_id=4,
+    )
+    assert ("certificate", 6203.0) in source_four_claim_keys
+    assert ("recovery_report", 6203.0) not in source_four_claim_keys
+    assert ("recovery_report", 14100.0) in source_four_claim_keys
+    assert "Ministry of Finance recovery report" in answer
+    assert "14,100 crore" in answer
+    assert "14,000 100" not in answer
+    assert "does not clearly explain" in answer
+
+    # Without an independently clear 14,100-crore recovery mention, the same
+    # ASR split is ambiguous and must remain unaccepted.
+    uncorroborated = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [04:08:59–04:09:30] debt recovery certificate amount 6203 crores
+[SOURCE 4]
+- [04:09:58–04:10:04] Ministry of Finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+    uncorroborated_diagnostics = {}
+    assert chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the debt and money involved?",
+        uncorroborated,
+        diagnostics=uncorroborated_diagnostics,
+    ) is None
+    assert "recovery_report" in uncorroborated_diagnostics["missing_topics"]
+
+
+@pytest.mark.unit
+def test_financial_context_packer_reserves_split_report_claim_using_global_corroboration():
+    filler = "The interview briefly discusses an unrelated business point. " * 36
+    groups = [
+        _caption_group(108, 7267.92, [
+            filler, "I invested 3,000 crores of UB Group money into Kingfisher Airlines."
+        ], 0.2),
+        _caption_group(124, 8314.519, [
+            filler, "4,999 crores was a debt", "debt recovery tribunal's own admission"
+        ], 0.25),
+        _caption_group(153, 10196.399, [
+            filler, "That's how you've recovered 14,100 crores from me."
+        ], 0.3),
+        _caption_group(221, 14939.359, [
+            filler,
+            "I showed you the debt recovery",
+            "certificate amount 6203 crores I've shown you the ministry of",
+            "finance report 14,000",
+            "100 recovered.",
+        ], 1.8),
+    ]
+    groups.extend(
+        _caption_group(
+            300 + index,
+            16000 + index * 120,
+            [filler, f"Unrelated financial discussion about expenses of {800 + index} rupees."],
+            0.35 + index * 0.05,
+        )
+        for index in range(6)
+    )
+
+    result = chain.build_generation_context(
+        groups,
+        question="What debt and money recovery figures are mentioned?",
+        max_chars=4000,
+    )
+
+    assert len(result["context"]) <= 4000
+    assert "221" in result["diagnostics"]["included_chunk_ids"]
+    assert "finance report" in result["context"].casefold()
+    assert "100 recovered" in result["context"].casefold()

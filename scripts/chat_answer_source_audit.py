@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_6_answer_source_audit.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_8_answer_source_audit.json"
 
 # Evidence groups are pinned to chunk IDs observed in the current isolated
 # experiment-caption-segments namespace. Keep this registry aligned with
@@ -49,13 +49,15 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
             },
         ],
     },
+    # Verified caption text for "and even your eyelids blinking" is in chunk 2
+    # (02:33–03:37). Chunk 11 (09:49–10:58) discusses sound-wave propagation.
     {
         "id": "AR03",
         "video_id": "fAd2nKfrDB8",
         "question": "What bodily sounds might people begin to hear in the room?",
         "evidence_groups": [
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
-            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
         ],
     },
     {
@@ -64,7 +66,7 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
         "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
         "evidence_groups": [
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
-            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
         ],
     },
 )
@@ -72,7 +74,12 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
 # These marker sequences are strong indicators that non-ASCII answer text has
 # already been decoded with the wrong character encoding. They are warnings,
 # not an automatic repair, because the client must not rewrite model output.
-_MOJIBAKE_MARKERS = ("Ø", "Ù", "â", "Ã", "\ufffd")
+_MOJIBAKE_MARKERS = (
+    "Ø", "Ù", "â", "Ã", "\ufffd",
+    # Common Windows-1252 spellings of UTF-8 punctuation; "â" catches
+    # a different Latin-1/control-code variant.
+    "â€“", "â€”", "â€™", "â€œ", "â€", "â€˜", "â€¦",
+)
 _TIMESTAMP_RANGE_PATTERN = re.compile(
     r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[–—-]\s*"
     r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
@@ -152,6 +159,19 @@ def _amount_clauses(answer: str, pattern: str) -> list[str]:
 
 def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
     checks = []
+    verification_abstention = "couldn't reliably verify the financial figures" in (
+        _substantive_answer(answer).casefold()
+    )
+    checks.append(_quality_check(
+        "financial_answer_not_abstained",
+        not verification_abstention,
+        (
+            "The answer must provide source-supported financial claims rather than "
+            "returning the safety abstention."
+            if verification_abstention
+            else "The answer did not trigger the financial verification abstention."
+        ),
+    ))
     claim_specs = [
         (
             "investment_3000",
@@ -226,6 +246,37 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
         "unclear_relationship_preserved",
         uncertainty_preserved,
         "The 4,999- and 6,203-crore figures must not be silently reconciled when the captions do not clearly explain their relationship.",
+    ))
+
+    # These malformed figures and the "official 9,000-crore recovery" claim
+    # were observed in live Q07 generations. Keep the audit from passing just
+    # because the four expected claims are also present in the same answer.
+    known_unsupported_patterns = (
+        ("malformed_623", r"(?<!\d)6\s*,\s*23(?!\d)"),
+        ("malformed_62003", r"(?<!\d)6\s*,?\s*2003(?!\d)"),
+        ("malformed_60002", r"(?<!\d)6\s*,?\s*0002(?!\d)"),
+        (
+            "unsupported_official_9000_recovery",
+            r"(?:(?:official|debt[\s\-‑–—]*recovery|recovery).{0,60}"
+            r"9[ ,\u202f]?000(?!\d)|"
+            r"9[ ,\u202f]?000(?!\d).{0,60}"
+            r"(?:official|debt[\s\-‑–—]*recovery|recovery))",
+        ),
+    )
+    unsupported_found = [
+        label
+        for label, pattern in known_unsupported_patterns
+        if re.search(pattern, _substantive_answer(answer), re.IGNORECASE)
+    ]
+    checks.append(_quality_check(
+        "malformed_or_unsupported_financial_amounts_absent",
+        not unsupported_found,
+        (
+            "No known malformed extra financial amounts or unsupported official "
+            "9,000-crore recovery claim were detected."
+            if not unsupported_found
+            else "Unsupported financial claims detected: " + ", ".join(unsupported_found)
+        ),
     ))
     return checks
 
@@ -408,6 +459,30 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
     quality_checks = _answer_quality_checks(str(case.get("id", "")), answer)
+
+    generation_used_fallback = generation.get("grounded_financial_fallback_used") is True
+    if str(case.get("id", "")) == "Q07" and generation_used_fallback:
+        required_fallback_labels = (
+            ("Investment", r"(?im)^\s*-\s*Investment:"),
+            ("DRT debt", r"(?im)^\s*-\s*DRT debt:"),
+            ("Debt certificate", r"(?im)^\s*-\s*Debt certificate:"),
+            ("Ministry of Finance recovery report",
+             r"(?im)^\s*-\s*Ministry of Finance recovery report:"),
+        )
+        missing_fallback_labels = [
+            label for label, pattern in required_fallback_labels
+            if not re.search(pattern, _substantive_answer(answer))
+        ]
+        quality_checks.append(_quality_check(
+            "financial_fallback_statements_are_structured",
+            not missing_fallback_labels,
+            (
+                "The deterministic financial fallback uses complete, topic-labeled statements."
+                if not missing_fallback_labels
+                else "Missing complete financial statement labels: "
+                + ", ".join(missing_fallback_labels)
+            ),
+        ))
 
     missing_context_groups = [
         group["label"]
@@ -643,7 +718,7 @@ def run_audit(
 
     report = {
         "report_schema_version": "1.1.0",
-        "report_id": "phase10_8_6_answer_source_audit",
+        "report_id": "phase10_8_8_answer_source_audit",
         "generated_at": datetime.now().astimezone().isoformat(),
         "backend_base_url": base_url.rstrip("/"),
         **_read_git_state(),

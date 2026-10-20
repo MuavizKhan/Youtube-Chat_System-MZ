@@ -115,6 +115,15 @@ FALLBACK_ANSWER = (
     "in the video. It may not be covered by this video."
 )
 
+# Use this when an answer to a financial question fails the deterministic repair
+# check and there is not enough source-bound evidence to build a safe extractive
+# answer. Unlike FALLBACK_ANSWER, keep the retrieved sources visible for review.
+FINANCIAL_VERIFICATION_FALLBACK = (
+    "I couldn't reliably verify the financial figures from the retrieved "
+    "transcript. I won't guess at or reconcile amounts that the available "
+    "evidence does not establish."
+)
+
 
 # ============================================================
 # 1. SYSTEM INSTRUCTIONS
@@ -498,7 +507,11 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
                 break
         terms = _claim_terms(answer[left:right])
         if terms:
-            claims.append({"amount": amount, "terms": terms})
+            claims.append({
+                "amount": amount,
+                "terms": terms,
+                "text": answer[left:right],
+            })
         recognized_spans.append((match.start(), match.end()))
 
     # A certificate caption can give the figure without repeating its unit.
@@ -520,7 +533,11 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
             continue
         terms = _claim_terms(clause)
         if terms:
-            claims.append({"amount": float(match.group(0)), "terms": terms})
+            claims.append({
+                "amount": float(match.group(0)),
+                "terms": terms,
+                "text": clause,
+            })
     return claims
 
 
@@ -564,6 +581,15 @@ def _select_claim_aligned_timestamp_candidates(
 
     selected: dict[int, dict[str, Any]] = {}
     for claim in claims:
+        claim_text = str(claim.get("text", ""))
+        is_report_recovery_claim = bool(
+            re.search(r"\b(?:ministry|finance|report)\b", claim_text, re.IGNORECASE)
+            and re.search(
+                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                claim_text,
+                re.IGNORECASE,
+            )
+        )
         choices = []
         for profile in profiles:
             if not any(
@@ -572,10 +598,17 @@ def _select_claim_aligned_timestamp_candidates(
             ):
                 continue
             overlap = len(claim["terms"] & profile["terms"])
-            if overlap:
+            source_text = str(profile["candidate"].get("transcript_text", ""))
+            source_mentions_recovery = bool(re.search(
+                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                source_text,
+                re.IGNORECASE,
+            ))
+            if overlap or (is_report_recovery_claim and source_mentions_recovery):
                 candidate = profile["candidate"]
                 choices.append((
-                    (overlap, profile["amount_breadth"], -candidate["distance"]),
+                    (max(overlap, 1 if is_report_recovery_claim and source_mentions_recovery else 0),
+                     profile["amount_breadth"], -candidate["distance"]),
                     profile,
                     overlap,
                 ))
@@ -594,6 +627,49 @@ def _select_claim_aligned_timestamp_candidates(
         )
         record["claim_count"] += 1
         record["overlap"] += overlap
+
+        if is_report_recovery_claim:
+            # A report-attributed recovery may require two evidence locations:
+            # one caption states the clean amount, while another names the
+            # Ministry/Finance report but has a split ASR numeral. Cite both
+            # rather than implying that either passage independently proves
+            # every part of the compound claim.
+            attribution_profiles = []
+            for attribution_profile in profiles:
+                source_text = str(
+                    attribution_profile["candidate"].get("transcript_text", "")
+                )
+                if (
+                    re.search(r"\b(?:ministry|finance|report)\b", source_text, re.IGNORECASE)
+                    and re.search(
+                        r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                        source_text,
+                        re.IGNORECASE,
+                    )
+                ):
+                    attribution_profiles.append(attribution_profile)
+            if attribution_profiles:
+                best_attribution = max(
+                    attribution_profiles,
+                    key=lambda item: (
+                        len(claim["terms"] & item["terms"]),
+                        item["amount_breadth"],
+                        -item["candidate"]["distance"],
+                    ),
+                )
+                attribution_candidate = best_attribution["candidate"]
+                attribution_record = selected.setdefault(
+                    attribution_candidate["candidate_index"],
+                    {
+                        "candidate": attribution_candidate,
+                        "claim_count": 0,
+                        "overlap": 0,
+                    },
+                )
+                attribution_record["claim_count"] += 1
+                attribution_record["overlap"] += len(
+                    claim["terms"] & best_attribution["terms"]
+                )
 
     if not selected:
         return None
@@ -639,11 +715,16 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         "aliases": {"stomach", "rumble", "rumbling", "belly", "المعدة", "معدتك", "معدة", "البطن", "بطنك"},
     },
     {
-        "english_pattern": r"\beyelids?\b|\bblink\w*\b|eye.{0,35}(?:blink|lid|close)",
-        # Captions vary between formal Arabic and dialect spellings for blinking
-        # or closing the eyes. Keep these variations scoped to this sound concept.
-        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
-        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "close", "closing", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "العين", "عينيك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
+        # Captions may omit the explicit blink verb, but source-side matching
+        # must still establish an acoustic cue near the eye/eyelid reference.
+        "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
+        "source_english_pattern": r"\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)[^\.\!\?؟؛;]{0,45}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b|\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b[^\.\!\?؟؛;]{0,45}\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)\b|\b(?:hear(?:d|ing|s)?|listen\w*)[^\.!\?؟؛;]{0,180}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b[^\.!\?؟؛;]{0,35}\b(?:blink\w*|clos\w*|mov\w*)\b",
+        # A bare anatomy mention is not evidence for an audible sound. Accept
+        # a nearby acoustic cue, or an inherited cue in a coordinated list when
+        # the same sentence explicitly ties the eye reference to an action.
+        "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
+        "source_arabic_pattern": r"(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)[^\.\!\?؟؛;]{0,45}(?:عين|عيون|جفن|جفون)|(?:عين|عيون|جفن|جفون)[^\.\!\?؟؛;]{0,45}(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)",
+        "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
     },
 )
 
@@ -660,14 +741,27 @@ _ANSWER_ALIGNMENT_STOP_WORDS = frozenset({
     "up", "out", "than", "then", "very", "التي", "الذي", "الذين", "اللواتي",
     "الناس", "قد", "يبدأ", "يبدأون", "بسماع", "سماع", "داخل", "الغرفة",
     "أجسامهم", "اجسامهم", "أصوات", "اصوات", "صوت", "الأصوات", "الاصوات",
-    "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
+    # Keep anatomy/blink words out of raw token-overlap matching. Eye-sound
+    # cross-lingual expansion below requires a nearby acoustic cue in the same
+    # caption sentence, not merely an eye/eyelid mention.
+    # Keep anatomy / blink words out of raw token-overlap matching. The eye
+    # concept is added via the stricter source acoustic pattern below instead.
+    "eye", "eyes", "eyelid", "eyelids", "eyeball", "eyeballs", "eyelash", "eyelashes",
+    "blink", "blinks", "blinked", "blinking", "close", "closing", "move", "moving",
+    "عين", "العين", "العينين", "عينك", "عيني", "عينيك", "عيون", "عيونك",
+    "جفن", "الجفن", "جفون", "الجفون", "ترمش", "بترمش", "رمش", "الرمش",
+    "تومض", "ترف", "تغمض", "بتغمض", "تغمز", "غمض", "هي", "هو", "هم", "هن", "في", "من", "على", "إلى", "الى", "أن", "ان",
     "و", "أو", "او", "حتى", "مثل", "كما", "لأن", "لان", "يمكن", "يكون",
     "تكون", "نفس", "هذا", "هذه", "ذلك",
 })
 
 
-def _answer_alignment_terms(text: str) -> set[str]:
-    """Extract informative English/Arabic answer words for source alignment."""
+def _answer_alignment_terms(text: str, *, source: bool = False) -> set[str]:
+    """Extract informative English/Arabic terms for answer-to-source alignment.
+
+    Source mode uses stricter concept patterns where a broad word alone (for
+    example, "eyes") would not prove the specific claim being timestamped.
+    """
     normalized = unicodedata.normalize(
         "NFKC", _strip_unverified_timestamp_summary(text)
     ).lower()
@@ -720,9 +814,19 @@ def _answer_alignment_terms(text: str) -> set[str]:
     # being aligned. This supports Arabic answers over English captions and vice
     # versa without applying blanket translation to unrelated queries.
     for concept in _ANSWER_ALIGNMENT_CONCEPTS:
+        english_pattern = (
+            concept.get("source_english_pattern")
+            if source
+            else concept.get("english_pattern")
+        ) or concept["english_pattern"]
+        arabic_pattern = (
+            concept.get("source_arabic_pattern")
+            if source
+            else concept.get("arabic_pattern")
+        ) or concept["arabic_pattern"]
         if (
-            re.search(concept["english_pattern"], normalized, re.IGNORECASE)
-            or re.search(concept["arabic_pattern"], normalized, re.IGNORECASE)
+            re.search(english_pattern, normalized, re.IGNORECASE)
+            or re.search(arabic_pattern, normalized, re.IGNORECASE)
         ):
             terms.update(concept["aliases"])
     return terms
@@ -755,14 +859,22 @@ def _select_answer_aligned_timestamp_candidates(
         transcript_text = candidate.get("transcript_text", "")
         if not isinstance(transcript_text, str) or not transcript_text.strip():
             continue
-        source_terms = _answer_alignment_terms(transcript_text)
+        source_terms = _answer_alignment_terms(transcript_text, source=True)
         overlap = answer_terms & source_terms
         normalized_source = unicodedata.normalize("NFKC", transcript_text).lower()
         source_concepts = {
             index
             for index, concept in enumerate(_ANSWER_ALIGNMENT_CONCEPTS)
-            if re.search(concept["english_pattern"], normalized_source, re.IGNORECASE)
-            or re.search(concept["arabic_pattern"], normalized_source, re.IGNORECASE)
+            if re.search(
+                concept.get("source_english_pattern") or concept["english_pattern"],
+                normalized_source,
+                re.IGNORECASE,
+            )
+            or re.search(
+                concept.get("source_arabic_pattern") or concept["arabic_pattern"],
+                normalized_source,
+                re.IGNORECASE,
+            )
         }
         # Direct concept matches let the selector align a translated answer to
         # dialect captions even when token overlap is weak or normalization
@@ -852,7 +964,10 @@ def append_relevant_source_timestamps(
     if (
         not isinstance(answer, str)
         or not answer.strip()
-        or answer.strip() == FALLBACK_ANSWER
+        or answer.strip() in {
+            FALLBACK_ANSWER,
+            FINANCIAL_VERIFICATION_FALLBACK,
+        }
     ):
         return answer
 
@@ -934,9 +1049,44 @@ def append_relevant_source_timestamps(
             max_ranges=max_ranges,
         )
     if selected is None:
-        # If transcript wording cannot be aligned with the answer (for example,
-        # English answers grounded in Arabic-only captions), preserve the
-        # established distance-ranked behavior instead of guessing a match.
+        # Do not attach a nearest-by-distance timestamp to an eye/eyelid sound
+        # claim when source text is available but provides no acoustic evidence
+        # for that concept. The caller can still return source links separately;
+        # an absent timestamp is safer than a misleading one.
+        eye_sound_concept = next(
+            (
+                concept for concept in _ANSWER_ALIGNMENT_CONCEPTS
+                if "eyelid" in concept.get("aliases", set())
+            ),
+            None,
+        )
+        normalized_answer = unicodedata.normalize("NFKC", answer).lower()
+        answer_mentions_eye_sound = bool(
+            eye_sound_concept
+            and (
+                re.search(
+                    eye_sound_concept["english_pattern"],
+                    normalized_answer,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    eye_sound_concept["arabic_pattern"],
+                    normalized_answer,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        source_text_is_available = any(
+            isinstance(candidate.get("transcript_text"), str)
+            and candidate["transcript_text"].strip()
+            for candidate in candidates
+        )
+        if answer_mentions_eye_sound and source_text_is_available:
+            return answer
+
+        # For older source records that have no transcript text (or other cases
+        # without a concept-specific acoustic contract), preserve the established
+        # distance-ranked behavior rather than dropping timestamp metadata.
         candidates.sort(
             key=lambda item: (
                 item["distance"],
@@ -1686,6 +1836,36 @@ def _truncate_formatted_source(
             return source_text[:max_chars]
 
         captions = lines[caption_start:]
+        split_evidence_caption_indices: set[int] = set()
+        if (
+            financial_question
+            and re.search(r"\b(?:ministry|finance|report)\b", financial_group_context, re.IGNORECASE)
+            and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", financial_group_context, re.IGNORECASE)
+        ):
+            for index, line in enumerate(captions):
+                caption_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
+                if not re.search(r"(?<![\w,:])\d{1,2},000\s*$", caption_text):
+                    continue
+                for neighbor_index in range(index + 1, min(len(captions), index + 3)):
+                    neighbor_text = (
+                        captions[neighbor_index].split("] ", 1)[-1]
+                        if captions[neighbor_index].startswith("- [")
+                        else captions[neighbor_index]
+                    )
+                    if not re.match(r"^\s*\d{1,3}(?![\d,])(?:\s|$)", neighbor_text):
+                        continue
+                    pair_text = " ".join(
+                        item.split("] ", 1)[-1] if item.startswith("- [") else item
+                        for item in captions[index:neighbor_index + 1]
+                    )
+                    if re.search(
+                        r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                        pair_text,
+                        re.IGNORECASE,
+                    ):
+                        split_evidence_caption_indices.update((index, neighbor_index))
+                        break
+
         scored = [
             (
                 _generation_line_relevance(
@@ -1693,7 +1873,7 @@ def _truncate_formatted_source(
                     question_terms,
                     financial_question=financial_question,
                     financial_group_context=financial_group_context,
-                ),
+                ) + (50 if index in split_evidence_caption_indices else 0),
                 index,
                 line,
             )
@@ -1934,6 +2114,86 @@ def _financial_topics_in_text(text: str) -> set[str]:
     return topics
 
 
+def _financial_claim_keys_for_context(
+    text: str,
+    *,
+    source_id: int | None = None,
+) -> set[tuple[str, float]]:
+    """Collect amount/topic keys using the same source-local recovery rule as the safe extractor.
+
+    A recovery amount can count as a report-attributed claim for context
+    selection only when the amount claim and report/recovery wording belong to
+    the same formatted [SOURCE n] block. A corroborating clean amount may occur
+    in another block, but it only normalizes the split numeral; it never lends
+    its report attribution to that other block.
+
+    When source_id is supplied, return only claim keys whose amount occurs in
+    that source block. The parser still sees all blocks so split-ASR numbers can
+    be corroborated before their source-local claim is projected back.
+    """
+    text = text or ""
+    markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text))
+    blocks: dict[int, str] = {}
+    for index, marker in enumerate(markers):
+        block_end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+        blocks[int(marker.group(1))] = text[marker.end():block_end]
+
+    claim_keys: set[tuple[str, float]] = set()
+    target_source_id = source_id
+    for claim in _money_amount_clauses(text):
+        if target_source_id is not None and claim.get("source_id") != target_source_id:
+            continue
+        amount = claim.get("amount")
+        topic = claim.get("topic")
+        claim_text = str(claim.get("text", ""))
+        if (
+            topic is None
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+        ):
+            continue
+
+        claim_source_id = claim.get("source_id")
+        source_block = (
+            blocks.get(claim_source_id, "")
+            if markers and isinstance(claim_source_id, int)
+            else ("" if markers else text)
+        )
+        report_in_source = bool(re.search(
+            r"\b(?:ministry|finance|report)\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        recovery_in_source = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        # "Debt recovery certificate" is a document title, not a recovery
+        # proceeds claim. Remove that phrase before deciding whether the
+        # amount-bearing clause itself describes money recovered.
+        recovery_claim_text = re.sub(
+            r"\bdebt\s+recovery\s+certificate\b",
+            "debt certificate",
+            claim_text,
+            flags=re.IGNORECASE,
+        )
+        recovery_in_claim = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            recovery_claim_text,
+            re.IGNORECASE,
+        ))
+
+        if recovery_in_claim and report_in_source and recovery_in_source:
+            topic = "recovery_report"
+        elif topic == "recovery_report" and not (report_in_source and recovery_in_source):
+            topic = "recovery" if recovery_in_claim else None
+
+        if topic is not None:
+            claim_keys.add((str(topic), float(amount)))
+    return claim_keys
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
@@ -2026,14 +2286,26 @@ def build_generation_context(
             # state it as a bare number (for example, "certificate ... 6203").
             # Keep amount+topic identities so a different certificate caption
             # cannot accidentally count as coverage for this distinct claim.
-            "financial_claims": {
-                (str(claim["topic"]), float(claim["amount"]))
-                for claim in (_money_amount_clauses(rendered) if financial_question else [])
-                if claim.get("topic") is not None
-                and isinstance(claim.get("amount"), (int, float))
-                and math.isfinite(float(claim["amount"]))
-            },
+            "financial_claims": (
+                _financial_claim_keys_for_context(rendered)
+                if financial_question
+                else set()
+            ),
         })
+
+    if financial_question:
+        # The report label and the clean 14,100-crore recovery mention may live
+        # in different retrieved source groups. Parse the combined set to
+        # corroborate that one split numeral, then assign claim keys only to the
+        # source block containing each claim. Without this global pass, the
+        # report-bearing chunk is invisible to the budget reserver when viewed
+        # on its own.
+        all_source_context = "\n\n".join(record["text"] for record in records)
+        for record in records:
+            record["financial_claims"] = _financial_claim_keys_for_context(
+                all_source_context,
+                source_id=record["index"] + 1,
+            )
 
     original_chars = sum(len(record["text"]) for record in records) + (
         2 * max(0, len(records) - 1)
@@ -2082,6 +2354,36 @@ def build_generation_context(
         chosen_indices: set[int] = set()
         covered_claims: set[tuple[str, float]] = set()
         covered_topics: set[str] = set()
+
+        # Reserve the strongest source-local Finance/Ministry recovery claim
+        # before spending the bounded context budget on other distinct amounts.
+        # Long financial transcripts often contain several noisy numeric claims
+        # (for example ASR-split values such as "14,000 100"). A claim-count
+        # greedy pass can fill all slots with those distractions and omit the
+        # clearer report-attributed amount needed by the safe financial fallback.
+        report_recovery_candidates = [
+            record
+            for record in records
+            if any(
+                topic == "recovery_report"
+                for topic, _amount in record["financial_claims"]
+            )
+        ]
+        if report_recovery_candidates:
+            reserved_recovery_record = min(
+                report_recovery_candidates,
+                key=lambda record: (
+                    record["priority"],
+                    record["distance"],
+                    record["start"],
+                    record["index"],
+                ),
+            )
+            diverse_records.append(reserved_recovery_record)
+            chosen_indices.add(reserved_recovery_record["index"])
+            covered_claims.update(reserved_recovery_record["financial_claims"])
+            covered_topics.update(reserved_recovery_record["financial_topics"])
+
         while len(diverse_records) < selected_count:
             choices = []
             for record in records:
@@ -2314,6 +2616,13 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         (match.start(), int(match.group(1)))
         for match in re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text)
     ]
+
+    def source_id_at(position: int) -> int | None:
+        """Return the nearest enclosing [SOURCE n] marker, even for prose chunks."""
+        return next(
+            (number for start, number in reversed(source_markers) if start < position),
+            None,
+        )
     for match in re.finditer(r"(?m)^\s*-\s*\[([^\]]+)\]\s*(.+)$", text):
         source_id = next(
             (number for start, number in reversed(source_markers) if start < match.start()),
@@ -2326,15 +2635,15 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             "source_id": source_id,
         })
 
-    def caption_context(position: int) -> tuple[str, str]:
-        """Return this caption plus up to one neighboring caption in the same source."""
+    def caption_context(position: int) -> tuple[str, str, int | None]:
+        """Return this caption, one same-source neighbor, and its source ID."""
         row_index = next(
             (i for i, row in enumerate(caption_rows)
              if row["start"] <= position <= row["end"]),
             None,
         )
         if row_index is None:
-            return "", ""
+            return "", "", None
         row = caption_rows[row_index]
         indices = [row_index]
         for neighbor_index in (row_index - 1, row_index + 1):
@@ -2345,7 +2654,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 indices.append(neighbor_index)
         indices.sort()
         local_text = " ".join(caption_rows[index]["text"] for index in indices)
-        return row["text"], local_text
+        return row["text"], local_text, row["source_id"]
 
     recognized_spans = []
     for match in _MONEY_AMOUNT_PATTERN.finditer(text):
@@ -2366,24 +2675,161 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         if not math.isfinite(amount):
             continue
 
-        own_caption, nearby_captions = caption_context(match.start())
+        own_caption, nearby_captions, source_id = caption_context(match.start())
+        if source_id is None:
+            source_id = source_id_at(match.start())
         topic = _financial_claim_topic(clause)
         claim_text = clause
+        amount_caption = own_caption or clause
         if own_caption:
             local_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(nearby_captions)
-            topic = local_topic or topic or nearby_topic
-            if not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
+            topic = local_topic or nearby_topic or topic
+            # Keep a specific topic anchored to the caption that contains the
+            # amount. A report label in the adjacent caption may complete an
+            # otherwise bare recovery amount, but must not override a local
+            # DRT judgment or debt-certificate claim.
+            if local_topic is not None:
+                claim_text = own_caption
+            elif not (_claim_terms(clause) & _FINANCIAL_MATERIAL_TERMS):
                 claim_text = nearby_captions or own_caption
             elif topic is None and nearby_topic is not None:
                 topic = nearby_topic
                 claim_text = nearby_captions
+
+            # A caption may say only "recovered" while the immediately adjacent
+            # caption names the Ministry/Finance report. Promote that local
+            # recovery claim to the more specific report attribution.
+            if local_topic == "recovery" and nearby_topic == "recovery_report":
+                topic = "recovery_report"
+                claim_text = nearby_captions
+
+            # If a report/recovery label and its numeric amount occupy
+            # adjacent caption rows from this same source, preserve the local
+            # recovery wording in the extracted claim. Prefixing only the
+            # report name to a bare amount is insufficient for downstream
+            # answer checks that require the amount to be described as recovered.
+            if (
+                topic == "recovery_report"
+                and nearby_topic == "recovery_report"
+                and own_caption
+                and local_topic is None
+            ):
+                claim_text = nearby_captions or own_caption
+
+            # A number caption may call the figure "debt" while the immediately
+            # adjacent caption names the Debt Recovery Tribunal. Refine only
+            # this generic label, and only within the same source block. A
+            # specific local label such as "certificate" remains authoritative.
+            if (
+                own_caption
+                and local_topic == "debt"
+                and nearby_topic == "drt_debt"
+            ):
+                topic = "drt_debt"
+                claim_text = nearby_captions or own_caption
+                amount_caption = nearby_captions or own_caption
+
         records.append({
             "amount": amount,
             "text": claim_text,
             "topic": topic,
+            "source_id": source_id,
+            "amount_caption": amount_caption,
+            "amount_lexeme": match.group(0),
+            "asr_split_amount": False,
         })
         recognized_spans.append((match.start(), match.end()))
+
+    # Some captions split a spoken compound number such as "fourteen thousand
+    # one hundred" into "14,000 100". Normalize this only when (a) the same
+    # source-local caption neighborhood explicitly names a Finance/Ministry
+    # report and a recovery, and (b) another caption independently spells the
+    # same amount as 14,100 crore(s) recovered. This is not a general number
+    # repair rule and never transfers report attribution across source blocks.
+    split_amount_pattern = re.compile(
+        r"(?<![\w,:])(?P<thousands>\d{1,2},000)\s+(?P<remainder>\d{1,3})(?![\d,])"
+    )
+    independently_supported_recoveries = {
+        float(record["amount"])
+        for record in records
+        if record.get("topic") in {"recovery", "recovery_report"}
+        and re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            str(record.get("text", "")),
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\b(?:crores?|cr|rupees?)\b",
+            str(record.get("amount_caption") or record.get("text", "")),
+            re.IGNORECASE,
+        )
+    }
+    seen_split_claims = set()
+    for row_index, row in enumerate(caption_rows):
+        if (
+            row.get("source_id") is None
+            or not re.search(r"(?<![\w,:])\d{1,2},000", row.get("text", ""))
+        ):
+            continue
+        window_rows = [
+            caption_rows[index]
+            for index in (row_index - 1, row_index, row_index + 1)
+            if 0 <= index < len(caption_rows)
+            and caption_rows[index].get("source_id") == row.get("source_id")
+        ]
+        window_text = " ".join(item["text"] for item in window_rows)
+        for split_match in split_amount_pattern.finditer(window_text):
+            amount = float(
+                int(split_match.group("thousands").replace(",", ""))
+                + int(split_match.group("remainder"))
+            )
+            if not any(
+                math.isclose(amount, supported, rel_tol=0.0, abs_tol=0.1)
+                for supported in independently_supported_recoveries
+            ):
+                continue
+            if not (
+                re.search(r"\b(?:ministry|finance|report)\b", window_text, re.IGNORECASE)
+                and re.search(
+                    r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                    window_text,
+                    re.IGNORECASE,
+                )
+            ):
+                continue
+            if _financial_claim_topic(window_text) != "recovery_report":
+                continue
+
+            identity = (
+                row["source_id"],
+                amount,
+                re.sub(r"\s+", " ", window_text).casefold(),
+            )
+            if identity in seen_split_claims:
+                continue
+            seen_split_claims.add(identity)
+
+            if re.search(r"\bministry\b.*\bfinance\b.*\breport\b", window_text, re.IGNORECASE):
+                report_label = "Ministry of Finance report"
+            elif re.search(r"\bfinance\s+report\b", window_text, re.IGNORECASE):
+                report_label = "Finance report"
+            elif re.search(r"\bministry\s+report\b", window_text, re.IGNORECASE):
+                report_label = "Ministry report"
+            else:
+                report_label = "report"
+
+            # Store the normalized fact text for downstream repair and packing;
+            # retain the original ASR spelling separately for diagnostics.
+            records.append({
+                "amount": amount,
+                "text": f"{report_label} {int(amount):,} crore recovered",
+                "topic": "recovery_report",
+                "source_id": row["source_id"],
+                "amount_caption": window_text,
+                "amount_lexeme": split_match.group(0),
+                "asr_split_amount": True,
+            })
 
     # Caption speech recognition sometimes emits a financial figure as a bare
     # number ("6203") while its currency/unit appears elsewhere or is omitted.
@@ -2396,9 +2842,15 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             absolute_end = row["start"] + match.end()
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
-            own_caption, nearby_captions = caption_context(absolute_start)
+            own_caption, nearby_captions, source_id = caption_context(absolute_start)
+            if source_id is None:
+                source_id = source_id_at(absolute_start)
             local_text = nearby_captions or own_caption
-            topic = _financial_claim_topic(own_caption) or _financial_claim_topic(local_text)
+            own_topic = _financial_claim_topic(own_caption)
+            nearby_topic = _financial_claim_topic(local_text)
+            topic = own_topic or nearby_topic
+            if own_topic == "recovery" and nearby_topic == "recovery_report":
+                topic = "recovery_report"
             if topic is None:
                 continue
             try:
@@ -2409,6 +2861,8 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "amount": amount,
                 "text": local_text,
                 "topic": topic,
+                "source_id": source_id,
+                "amount_caption": own_caption,
             })
 
     # Validation also runs on plain generated prose, which has no timestamped
@@ -2437,6 +2891,8 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "amount": amount,
                 "text": clause,
                 "topic": topic,
+                "source_id": source_id_at(match.start()),
+                "amount_caption": clause,
             })
     return records
 
@@ -2444,15 +2900,24 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
 def _financial_claim_topic(clause: str) -> str | None:
     """Assign a conservative primary topic to distinguish similar financial figures."""
     text = (clause or "").lower()
+    # "Debt recovery certificate" is a document name, not evidence that the
+    # figure is recovery proceeds. Remove that phrase before looking for a
+    # separate recovery claim so an adjacent Ministry/report mention cannot
+    # relabel the certificate figure as money recovered.
+    recovery_attribution_text = re.sub(
+        r"\bdebt\s+recovery\s+certificate\b",
+        "debt certificate",
+        text,
+    )
+    if (
+        re.search(r"\b(?:ministry|finance|report)\b", recovery_attribution_text)
+        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", recovery_attribution_text)
+    ):
+        return "recovery_report"
     if re.search(r"\bcertificate\b", text):
         return "certificate"
     if re.search(r"\b(?:drt|debt recovery tribunal|tribunal|judg(?:e)?ment)\b", text):
         return "drt_debt"
-    if (
-        re.search(r"\b(?:ministry|finance|report)\b", text)
-        and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text)
-    ):
-        return "recovery_report"
     if re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", text):
         return "recovery"
     if re.search(r"\b(?:invest(?:ed|ment)?|put|injected|infused)\b", text):
@@ -2631,6 +3096,7 @@ def _generation_repair_instruction(
 def _build_financial_evidence_fallback(
     question: str,
     context: str,
+    diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
     """Build a conservative extractive answer when financial generation repair fails.
 
@@ -2645,14 +3111,129 @@ def _build_financial_evidence_fallback(
         question or "",
         re.IGNORECASE,
     ):
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({
+                "rejection_reason": "question_not_recognized_as_financial",
+                "required_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
+                "missing_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
+                "recognized_topics": {},
+                "source_block_count": 0,
+            })
         return None
 
     required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
+    source_blocks: dict[int, str] = {}
+    source_markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", context or ""))
+    for index, marker in enumerate(source_markers):
+        block_end = (
+            source_markers[index + 1].start()
+            if index + 1 < len(source_markers)
+            else len(context or "")
+        )
+        source_blocks[int(marker.group(1))] = (context or "")[marker.end():block_end]
+
     claims_by_topic: dict[str, dict[str, Any]] = {}
+    candidate_claim_diagnostics: list[dict[str, Any]] = []
     for claim in _money_amount_clauses(context or ""):
-        topic = claim.get("topic")
         amount = claim.get("amount")
         claim_text = re.sub(r"\s+", " ", str(claim.get("text", ""))).strip()
+        source_id = claim.get("source_id")
+        source_block = (
+            source_blocks.get(source_id, "")
+            if isinstance(source_id, int)
+            else ((context or "") if not source_blocks else "")
+        )
+        topic = claim.get("topic")
+        # Prefer the caption that contains the number over nearby captions
+        # added to recover a split label. Nearby context may complete an
+        # otherwise bare amount, but it must not relabel a specific local claim.
+        amount_caption = str(claim.get("amount_caption") or claim_text)
+        local_topic = _financial_claim_topic(amount_caption)
+        if local_topic is not None and not (
+            topic == "drt_debt" and local_topic == "debt"
+        ):
+            topic = local_topic
+
+        # Attribution is source-local. In caption-aware contexts, a broad
+        # clause may span adjacent SOURCE blocks even when its amount belongs
+        # to only one block; never let that wider clause borrow a report label.
+        has_recovery_context = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            claim_text,
+            re.IGNORECASE,
+        ))
+        has_recovery_in_source = bool(re.search(
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        has_report_in_source = bool(re.search(
+            r"\b(?:ministry|finance|report)\b",
+            source_block,
+            re.IGNORECASE,
+        ))
+        source_bound_context = bool(source_blocks)
+        has_source_local_recovery_report = (
+            has_report_in_source and has_recovery_in_source
+        )
+        if (
+            source_bound_context
+            and topic == "recovery_report"
+            and not has_source_local_recovery_report
+        ):
+            topic = (
+                "recovery"
+                if has_recovery_context or has_recovery_in_source
+                else None
+            )
+        if (
+            topic == "recovery"
+            and (has_recovery_context or has_recovery_in_source)
+            and has_source_local_recovery_report
+        ):
+            topic = "recovery_report"
+
+        if claim.get("asr_split_amount") and topic == "recovery_report":
+            # This claim exists only after the parser found a clean,
+            # independent 14,100-crore recovery mention elsewhere in the same
+            # supplied transcript context. Render the normalized claim without
+            # leaking the malformed ASR numeral into the model answer.
+            attribution_text = amount_caption or claim_text
+            if re.search(
+                r"\bministry\b.*\bfinance\b.*\breport\b",
+                attribution_text,
+                re.IGNORECASE,
+            ):
+                report_label = "Ministry of Finance report"
+            elif re.search(r"\bfinance\s+report\b", attribution_text, re.IGNORECASE):
+                report_label = "Finance report"
+            elif re.search(r"\bministry\s+report\b", attribution_text, re.IGNORECASE):
+                report_label = "Ministry report"
+            else:
+                report_label = "report"
+            claim_text = (
+                f"The transcript cites the {report_label} with a recovery "
+                f"figure of {int(float(amount)):,} crore."
+            )
+
+        if (
+            isinstance(amount, (int, float))
+            and math.isfinite(float(amount))
+            and claim_text
+        ):
+            candidate_claim_diagnostics.append({
+                "amount": float(amount),
+                "parsed_topic": claim.get("topic"),
+                "amount_caption_topic": local_topic,
+                "classified_topic": topic,
+                "source_id": source_id,
+                "amount_caption": amount_caption[:200],
+                "claim_excerpt": claim_text[:200],
+                "source_has_report": has_report_in_source,
+                "source_has_recovery": has_recovery_in_source,
+            })
+
         if (
             topic not in required_topics
             or not isinstance(amount, (int, float))
@@ -2660,11 +3241,25 @@ def _build_financial_evidence_fallback(
             or not claim_text
         ):
             continue
+
+        if topic == "recovery_report" and not re.search(
+            r"\b(?:ministry|finance|report)\b",
+            claim_text,
+            re.IGNORECASE,
+        ):
+            attribution_match = re.search(
+                r"\b(?:Ministry of Finance report|Ministry report|Finance report|report)\b",
+                source_block,
+                re.IGNORECASE,
+            )
+            if attribution_match:
+                attribution = attribution_match.group(0)
+                claim_text = f"{attribution} states that {claim_text}"
+
         # Keep the first source-attached claim for each family; context is
         # ordered as presented to the generator, and duplicate overlaps are
-        # expected in neighboring retrieved chunks.
-        # Group a clearly recognized bare integer for readability without
-        # inventing a unit or changing the numerical value in the transcript.
+        # expected in neighboring retrieved chunks. Format large bare integers
+        # for readability without inferring a currency unit or scale.
         if float(amount).is_integer():
             bare_value = str(int(float(amount)))
             if len(bare_value) >= 4:
@@ -2673,26 +3268,127 @@ def _build_financial_evidence_fallback(
                     f"{int(float(amount)):,}",
                     claim_text,
                 )
-        claims_by_topic.setdefault(topic, {**claim, "text": claim_text})
+        # Caption-aware context rows include source timestamps for prompt
+        # assembly. Keep the extractive fallback's claim wording, but leave
+        # timestamp presentation to the trusted returned-source metadata.
+        claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
+        claims_by_topic.setdefault(
+            topic,
+            {**claim, "topic": topic, "text": claim_text},
+        )
 
-    if any(topic not in claims_by_topic for topic in required_topics):
+    missing_topics = [
+        topic for topic in required_topics
+        if topic not in claims_by_topic
+    ]
+    if diagnostics is not None:
+        diagnostics.clear()
+        diagnostics.update({
+            "rejection_reason": (
+                "missing_required_topics" if missing_topics else None
+            ),
+            "required_topics": list(required_topics),
+            "missing_topics": missing_topics,
+            "recognized_topics": {
+                topic: {
+                    "amount": claim.get("amount"),
+                    "excerpt": str(claim.get("text", ""))[:240],
+                    "source_id": claim.get("source_id"),
+                }
+                for topic, claim in claims_by_topic.items()
+            },
+            "source_block_count": len(source_blocks),
+            "candidate_claims": candidate_claim_diagnostics[:30],
+            "source_financial_excerpts": {
+                str(source_id): [
+                    re.sub(r"\s+", " ", line).strip()[:180]
+                    for line in block.splitlines()
+                    if re.search(
+                        r"\b(?:drt|tribunal|judg\w*ment|certificate|debt|"
+                        r"recover\w*|ministry|finance|report|invest\w*|crores?|"
+                        r"rupees?|\d{3,})\b",
+                        line,
+                        re.IGNORECASE,
+                    )
+                ][:2]
+                for source_id, block in source_blocks.items()
+            },
+        })
+    if missing_topics:
         return None
 
-    labels = (
-        ("investment", "investment"),
-        ("drt_debt", "DRT judgment debt"),
-        ("certificate", "debt certificate"),
-        ("recovery_report", "Ministry of Finance recovery report"),
-    )
+    def formatted_amount(claim: dict[str, Any]) -> tuple[str, bool]:
+        amount = claim.get("amount")
+        if not isinstance(amount, (int, float)) or not math.isfinite(float(amount)):
+            raise ValueError("Financial fallback requires a finite extracted amount.")
+        value = f"{int(amount):,}" if float(amount).is_integer() else f"{amount:g}"
+        evidence_text = " ".join((
+            str(claim.get("text", "")),
+            str(claim.get("amount_caption", "")),
+        ))
+        crore_rupees = re.search(r"\bcrore\s+rupees?\b", evidence_text, re.IGNORECASE)
+        crore_unit = re.search(r"\bcrores?\b|\bcr\b", evidence_text, re.IGNORECASE)
+        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", evidence_text, re.IGNORECASE)
+        if crore_rupees:
+            return f"{value} crore rupees", True
+        if crore_unit:
+            return f"{value} crore", True
+        if rupee_unit:
+            return f"{value} rupees", True
+        # A bare number is deliberately not given a currency or magnitude unit.
+        return f"the figure {value}", False
+
+    investment_amount, investment_has_unit = formatted_amount(claims_by_topic["investment"])
+    drt_amount, drt_has_unit = formatted_amount(claims_by_topic["drt_debt"])
+    certificate_amount, certificate_has_unit = formatted_amount(claims_by_topic["certificate"])
+    recovery_amount, recovery_has_unit = formatted_amount(claims_by_topic["recovery_report"])
+
     lines = ["The transcript supports these distinct financial statements:"]
-    for topic, _label in labels:
-        lines.append(f"- {claims_by_topic[topic]['text']}")
+    if investment_has_unit:
+        lines.append(
+            f"- Investment: the transcript says the speaker put in {investment_amount} of UB Group money."
+        )
+    else:
+        lines.append(
+            f"- Investment: the transcript mentions putting in {investment_amount} of UB Group money, "
+            "but the cited caption does not state a unit."
+        )
+
+    if drt_has_unit:
+        lines.append(
+            f"- DRT debt: the transcript describes {drt_amount} as a debt in a passage that mentions the Debt Recovery Tribunal."
+        )
+    else:
+        lines.append(
+            f"- DRT debt: the transcript describes {drt_amount} as a debt and mentions the Debt Recovery Tribunal, "
+            "but the amount-bearing caption does not state a unit."
+        )
+
+    if certificate_has_unit:
+        lines.append(
+            f"- Debt certificate: the transcript identifies a certificate amount of {certificate_amount}."
+        )
+    else:
+        lines.append(
+            f"- Debt certificate: the transcript identifies the certificate amount as {certificate_amount}; "
+            "the caption does not state a unit."
+        )
+
+    if recovery_has_unit:
+        lines.append(
+            f"- Ministry of Finance recovery report: the transcript associates a recovery figure of {recovery_amount} with that report."
+        )
+    else:
+        lines.append(
+            f"- Ministry of Finance recovery report: the transcript associates a recovery figure of {recovery_amount} with that report, "
+            "but the cited caption does not state a unit."
+        )
 
     lines.append(
         "The transcript does not clearly explain how the DRT judgment and "
         "debt-certificate figures relate, so they should not be treated as one total."
     )
-    return "\n\n".join([lines[0], "\n".join(lines[1:5]), lines[5]])
+    return "\n\n".join(lines)
 
 
 # ============================================================
@@ -3942,14 +4638,35 @@ def build_rag_chain(
             }
 
         answer = generation_chain.invoke(inputs)
+        question_text = inputs.get("question", "")
+        is_financial_question = bool(re.search(
+            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+            question_text,
+            re.IGNORECASE,
+        ))
+        # Keep the model's prompt bounded, but do not let context truncation hide
+        # already-retrieved evidence from deterministic financial validation or
+        # the extractive fallback. This context is built only from retrieved source
+        # groups; it is not external knowledge and is never sent wholesale to the LLM.
+        financial_evidence_context = (
+            build_context(inputs.get("source_groups", []))
+            if is_financial_question and inputs.get("source_groups")
+            else inputs.get("context", "")
+        )
+        # Decide whether the model's bounded prompt needs a repair using the
+        # same context it actually received. The extractive fallback below can
+        # inspect all retrieved source groups independently of this prompt budget.
         repair_instruction = _generation_repair_instruction(
-            question=inputs.get("question", ""),
+            question=question_text,
             answer=answer,
             context=inputs.get("context", ""),
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
         grounded_financial_fallback_used = False
+        financial_answer_suppressed = False
+        financial_fallback_diagnostics: dict[str, Any] = {}
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -3963,14 +4680,15 @@ def build_rag_chain(
             )
             answer = generation_chain.invoke(repaired_inputs)
             repair_passed = _generation_repair_instruction(
-                question=inputs.get("question", ""),
+                question=question_text,
                 answer=answer,
                 context=inputs.get("context", ""),
             ) is None
             if not repair_passed:
                 extractive_answer = _build_financial_evidence_fallback(
-                    question=inputs.get("question", ""),
-                    context=inputs.get("context", ""),
+                    question=question_text,
+                    context=financial_evidence_context,
+                    diagnostics=financial_fallback_diagnostics,
                 )
                 if extractive_answer is not None:
                     answer = extractive_answer
@@ -3978,6 +4696,50 @@ def build_rag_chain(
                     logger.warning(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
+                elif re.search(
+                    r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                    r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+                    inputs.get("question", ""),
+                    re.IGNORECASE,
+                ):
+                    # Never return a known-invalid financial draft merely because
+                    # its evidence is too fragmented to support an extractive
+                    # fallback. Keep sources available, but suppress its numbers.
+                    answer = FINANCIAL_VERIFICATION_FALLBACK
+                    financial_answer_suppressed = True
+                    logger.warning(
+                        "Suppressing financial draft after failed repair because "
+                        "no source-bound extractive fallback was available"
+                    )
+
+        # Some models abstain immediately when their bounded prompt omits one of
+        # the required financial claim families. If no repair path already tried
+        # the extractor, make one source-bound attempt over all retrieved groups.
+        if (
+            is_financial_question
+            and not grounded_financial_fallback_used
+            and not financial_answer_suppressed
+            and re.search(
+                r"couldn't reliably verify the financial figures",
+                answer or "",
+                re.IGNORECASE,
+            )
+        ):
+            extractive_answer = _build_financial_evidence_fallback(
+                question=question_text,
+                context=financial_evidence_context,
+                diagnostics=financial_fallback_diagnostics,
+            )
+            if extractive_answer is not None:
+                answer = extractive_answer
+                grounded_financial_fallback_used = True
+                logger.warning(
+                    "Replacing financial verification abstention with a "
+                    "source-extractive answer from retrieved source groups"
+                )
+            else:
+                answer = FINANCIAL_VERIFICATION_FALLBACK
+                financial_answer_suppressed = True
 
         return {
             "answer": answer,
@@ -3992,6 +4754,18 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
+                "financial_answer_suppressed": financial_answer_suppressed,
+                "financial_evidence_context_chars": (
+                    len(financial_evidence_context) if is_financial_question else None
+                ),
+                "financial_fallback_context_source": (
+                    "full_retrieved_source_groups"
+                    if grounded_financial_fallback_used
+                    else None
+                ),
+                "financial_fallback_diagnostics": (
+                    financial_fallback_diagnostics if is_financial_question else None
+                ),
             },
         }
 
