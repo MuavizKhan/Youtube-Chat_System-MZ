@@ -115,7 +115,7 @@ This command uses the existing gold-evidence retrieval trace and captures:
 - Git/runtime and effective retrieval configuration provenance.
 - SHA-256 hashes and sizes for each target's `index.faiss`, `index.pkl`, and `metadata.json`, plus metadata schema, transcript language code, chunk count, and index state. Index files are hashed with streaming reads, and full transcript text is not copied into the snapshot.
 - Candidate membership/rank evidence from raw FAISS, semantic MMR, semantic fusion, lexical retrieval, hybrid fusion, facet reranking, anchor selection, and production context.
-- The repository's existing group/candidate diagnosis and a concise stage-presence summary.
+- The repository's existing group/candidate diagnosis and a concise stage-presence summary. The existing trace returns at most 12 detailed candidate rows per gold group; the report explicitly marks when stage-count summaries are partial because of that detail cap.
 
 The runner does not generate final chatbot answers, modify indexes, or change retrieval behavior. It deliberately blocks a trace when the index is missing/stale/invalid or its recorded transcript language conflicts with the registered benchmark. Such a result means the diagnostic run is not comparable yet; it is not a retrieval-quality conclusion.
 
