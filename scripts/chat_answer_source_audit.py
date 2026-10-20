@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_6_answer_source_audit.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_8_answer_source_audit.json"
 
 # Evidence groups are pinned to chunk IDs observed in the current isolated
 # experiment-caption-segments namespace. Keep this registry aligned with
@@ -49,13 +49,15 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
             },
         ],
     },
+    # Verified caption text for "and even your eyelids blinking" is in chunk 2
+    # (02:33–03:37). Chunk 11 (09:49–10:58) discusses sound-wave propagation.
     {
         "id": "AR03",
         "video_id": "fAd2nKfrDB8",
         "question": "What bodily sounds might people begin to hear in the room?",
         "evidence_groups": [
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
-            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
         ],
     },
     {
@@ -64,7 +66,7 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
         "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
         "evidence_groups": [
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
-            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [11]},
+            {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
         ],
     },
 )
@@ -687,7 +689,7 @@ def run_audit(
 
     report = {
         "report_schema_version": "1.1.0",
-        "report_id": "phase10_8_6_answer_source_audit",
+        "report_id": "phase10_8_8_answer_source_audit",
         "generated_at": datetime.now().astimezone().isoformat(),
         "backend_base_url": base_url.rstrip("/"),
         **_read_git_state(),
