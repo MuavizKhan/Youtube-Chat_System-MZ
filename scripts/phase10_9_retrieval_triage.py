@@ -137,11 +137,6 @@ def _index_blocker(
     if normalized_language != expected_language.casefold():
         return "index_transcript_language_mismatch"
 
-    if metadata.get("video_id") != metadata.get("video_id"):
-        # A no-op defensive placeholder is intentionally avoided below; identity
-        # consistency is verified against the requested video in the caller.
-        return "index_video_identity_mismatch"
-
     return None
 
 
