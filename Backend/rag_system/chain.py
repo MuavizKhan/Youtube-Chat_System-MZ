@@ -2169,9 +2169,18 @@ def _financial_claim_keys_for_context(
             source_block,
             re.IGNORECASE,
         ))
+        # "Debt recovery certificate" is a document title, not a recovery
+        # proceeds claim. Remove that phrase before deciding whether the
+        # amount-bearing clause itself describes money recovered.
+        recovery_claim_text = re.sub(
+            r"\bdebt\s+recovery\s+certificate\b",
+            "debt certificate",
+            claim_text,
+            flags=re.IGNORECASE,
+        )
         recovery_in_claim = bool(re.search(
             r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
-            claim_text,
+            recovery_claim_text,
             re.IGNORECASE,
         ))
 

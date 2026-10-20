@@ -3815,6 +3815,15 @@ def test_financial_fallback_normalizes_only_corroborated_report_recovery_asr_spl
     assert diagnostics["recognized_topics"]["drt_debt"]["amount"] == 4999
     assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
     assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
+    # A source can name a "debt recovery certificate" and a separate Finance
+    # report. The document title must not relabel the 6,203 figure as proceeds.
+    source_four_claim_keys = chain._financial_claim_keys_for_context(
+        context,
+        source_id=4,
+    )
+    assert ("certificate", 6203.0) in source_four_claim_keys
+    assert ("recovery_report", 6203.0) not in source_four_claim_keys
+    assert ("recovery_report", 14100.0) in source_four_claim_keys
     assert "Ministry of Finance report" in answer
     assert "14,100 crore" in answer
     assert "14,000 100" not in answer
