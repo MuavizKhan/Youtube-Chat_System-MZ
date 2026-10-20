@@ -416,7 +416,7 @@ def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
     assert audit["possible_mojibake_markers"]
 
 
-def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chunks():
+def test_audit_separates_verified_context_evidence_from_retrieved_only_chunks():
     response = {
         "answer": (
             "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
@@ -457,16 +457,40 @@ def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chun
         },
     }
 
+    # Production audit oracle: both the bodily-sound phrase and the eyelid
+    # phrase are verified in chunk 2, which is included in the generation
+    # context and represented by the 02:33–03:37 source range.
     audit = analyze_response(_case("AR08"), response)
 
     assert audit["final_context_chunk_ids"] == ["2"]
     assert audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
-    # The eyelid phrase is verified in chunk 2. Chunk 11 is a later sound-wave
-    # explanation, not evidence for that claim. A retrieved-only fact must not
-    # be treated as evidence present in generation context.
     assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is True
-    assert audit["quality"]["passed"] is False
-    assert "evidence_source_and_timestamp_alignment" in audit["quality"]["failed_checks"]
+    assert audit["quality"]["passed"] is True
+    assert audit["quality"]["failed_checks"] == []
+
+    # Separate context-budget contract: chunk 11 is retrieved and returned as
+    # a clickable source, but was deliberately excluded from the generation
+    # context. A synthetic required group pinned to that retrieved-only chunk
+    # must not be counted as evidence that the model actually saw.
+    production_case = _case("AR08")
+    context_budget_case = {
+        **production_case,
+        "evidence_groups": [
+            production_case["evidence_groups"][0],
+            {
+                "label": "retrieved-only control chunk excluded from generation context",
+                "candidate_chunk_ids": [11],
+            },
+        ],
+    }
+    truncated_audit = analyze_response(context_budget_case, response)
+
+    assert truncated_audit["final_context_chunk_ids"] == ["2"]
+    assert truncated_audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
+    assert truncated_audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
+    assert truncated_audit["annotated_evidence_groups"][1]["present_in_returned_sources"] is True
+    assert truncated_audit["quality"]["passed"] is False
+    assert "annotated_evidence_in_retrieved_context" in truncated_audit["quality"]["failed_checks"]
 
 
 def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figures():
