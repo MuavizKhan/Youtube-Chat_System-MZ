@@ -24,41 +24,49 @@ def _snapshot(video_id, language=None, state="valid"):
     }
 
 
-def _trace(_video_url, question_ids, *, display):
+def _trace(video_url, question_ids, *, display):
     assert display is False
+    video_id = video_url.rsplit("v=", 1)[-1]
+    benchmark = triage.VIDEO_BENCHMARKS[video_id]
+    gold_cases = benchmark.gold_evidence_by_question
     diagnostics = []
     for question_id in question_ids:
+        groups = []
+        gold_case = gold_cases[question_id]
+        for group_index, phrases in enumerate(gold_case.groups):
+            chunk_id = f"chunk-{group_index + 4}"
+            groups.append(
+                {
+                    "group": group_index,
+                    "matched_index_phrase": phrases[0],
+                    "candidate_count": 1,
+                    "candidate_chunk_ids": [chunk_id],
+                    "raw_anchor_top_k_status": "evidence_in_top_k",
+                    "diagnosis": "evidence_in_top_k",
+                    "candidates": [
+                        {
+                            "chunk_id": chunk_id,
+                            "raw_faiss_rank": 1,
+                            "semantic_mmr_rank": 1,
+                            "semantic_fused_rank": 1,
+                            "lexical_rank": None,
+                            "hybrid_fused_rank": 1,
+                            "facet_soft_reranked_rank": 1,
+                            "anchor_rank": 1,
+                            "final_context_rank": 1,
+                        }
+                    ],
+                }
+            )
         diagnostics.append(
             {
                 "id": question_id,
                 "question": f"Question for {question_id}",
-                "groups": [
-                    {
-                        "group": 0,
-                        "matched_index_phrase": "curated evidence",
-                        "candidate_count": 1,
-                        "candidate_chunk_ids": ["chunk-4"],
-                        "raw_anchor_top_k_status": "evidence_in_top_k",
-                        "diagnosis": "evidence_in_top_k",
-                        "candidates": [
-                            {
-                                "chunk_id": "chunk-4",
-                                "raw_faiss_rank": 1,
-                                "semantic_mmr_rank": 1,
-                                "semantic_fused_rank": 1,
-                                "lexical_rank": None,
-                                "hybrid_fused_rank": 1,
-                                "facet_soft_reranked_rank": 1,
-                                "anchor_rank": 1,
-                                "final_context_rank": 1,
-                            }
-                        ],
-                    }
-                ],
+                "groups": groups,
             }
         )
     return {
-        "video_id": _video_url.rsplit("v=", 1)[-1],
+        "video_id": video_id,
         "questions": list(question_ids),
         "diagnostics": diagnostics,
     }
