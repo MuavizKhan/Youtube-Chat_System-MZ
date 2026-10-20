@@ -3325,7 +3325,7 @@ def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still
     assert result["generation_trace"]["financial_answer_suppressed"] is False
     assert "3,000 crore" in answer
     assert "4,999 crore" in answer
-    assert "certificate gives a figure of 6,203" in answer
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
     assert "14,100 crore" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
     assert "6,2003" not in answer
@@ -3850,7 +3850,7 @@ def test_financial_fallback_normalizes_only_corroborated_report_recovery_asr_spl
     assert ("certificate", 6203.0) in source_four_claim_keys
     assert ("recovery_report", 6203.0) not in source_four_claim_keys
     assert ("recovery_report", 14100.0) in source_four_claim_keys
-    assert "Ministry of Finance report" in answer
+    assert "Ministry of Finance recovery report" in answer
     assert "14,100 crore" in answer
     assert "14,000 100" not in answer
     assert "does not clearly explain" in answer
