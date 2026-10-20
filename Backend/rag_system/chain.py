@@ -4276,9 +4276,13 @@ def build_rag_chain(
             )
             answer = generation_chain.invoke(repaired_inputs)
             repair_passed = _generation_repair_instruction(
-                question=inputs.get("question", ""),
+                question=question_text,
                 answer=answer,
-                context=inputs.get("context", ""),
+                context=(
+                    financial_evidence_context
+                    if is_financial_question
+                    else inputs.get("context", "")
+                ),
             ) is None
             if not repair_passed:
                 extractive_answer = _build_financial_evidence_fallback(
