@@ -2938,6 +2938,78 @@ def test_generation_context_reserves_bare_certificate_claim_when_topic_is_alread
     assert "221" in result["diagnostics"]["included_chunk_ids"]
 
 
+
+@pytest.mark.unit
+def test_generation_context_reserves_source_local_report_recovery_amount():
+    filler = [
+        "General narration continues without adding another financial claim."
+        for _ in range(18)
+    ]
+    groups = [
+        _caption_group(
+            108, 7267.92,
+            [*filler, "I put in 3,000 crores of UB Group money into Kingfisher Airlines."],
+            0.82,
+        ),
+        _caption_group(
+            124, 8314.519,
+            [*filler, "The debt recovery tribunal says 4,999 crores was a debt."],
+            0.91,
+        ),
+        # This nearer source repeats the recovery amount but does not identify
+        # the report or authority to which the figure is attributed.
+        _caption_group(
+            153, 10196.399,
+            [*filler, "That's how you've recovered 14,100 crores, right?"],
+            0.82,
+        ),
+        # Report wording and the amount are separated by another caption but
+        # remain in the same source block. Preserve this source for fallback.
+        _caption_group(
+            159, 10630.88,
+            [
+                *filler,
+                "It is through the statement in Parliament of the finance minister and the printed report of the Ministry of Finance that they have shown",
+                "The government and the banks have not rendered a statement of account.",
+                "14,100 crores recovered from me.",
+            ],
+            0.83,
+        ),
+        _caption_group(
+            199, 12000,
+            [*filler, "The debt certificate is mentioned but this passage gives no amount."],
+            0.10,
+        ),
+        _caption_group(202, 12100, [*filler, "The presenter asks a follow-up question."], 0.15),
+        _caption_group(205, 12300, [*filler, "The guest pauses before answering."], 0.18),
+        _caption_group(208, 14068.199, [*filler, "The interview continues with another topic."], 0.89),
+        _caption_group(210, 14206.199, [*filler, "The interviewer asks for clarification."], 0.81),
+        _caption_group(213, 14350, [*filler, "The speaker changes to a different subject."], 0.77),
+        _caption_group(217, 14500, [*filler, "A general statement about the airline follows."], 0.68),
+        _caption_group(219, 14700, [*filler, "The recording continues with no new amount."], 0.73),
+        _caption_group(
+            221, 14939.359,
+            [
+                *filler,
+                "The debt recovery certificate amount is 6203 crores.",
+                "I showed you the Ministry of Finance report, 14,000 100 recovered.",
+            ],
+            1.12,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts of debt, investment, and money recovered are mentioned?",
+        max_chars=4000,
+    )
+
+    assert len(result["context"]) <= 4000
+    assert "included_chunk_ids" in result["diagnostics"]
+    assert "159" in result["diagnostics"]["included_chunk_ids"]
+    assert "14,100 crores recovered from me." in result["context"]
+    assert "printed report of the Ministry of Finance" in result["context"]
+
 @pytest.mark.unit
 def test_timestamp_alignment_maps_unitless_certificate_figure_to_its_source_interval():
     answer = (
