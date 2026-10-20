@@ -3182,6 +3182,91 @@ def test_english_sound_answer_aligns_to_arabic_eye_closing_caption_variant():
     assert "04:15–05:18" not in result
 
 @pytest.mark.unit
+def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_is_truncated(monkeypatch):
+    question = (
+        "What does Vijay Mallya say about the amount of debt or money "
+        "involved in the Kingfisher situation?"
+    )
+    source_groups = [
+        {
+            "documents": [doc(108, 7267, 7351, "I invested 3,000 crore rupees into Kingfisher Airlines.")],
+            "start": 7267, "end": 7351, "distance": 0.2,
+        },
+        {
+            "documents": [doc(124, 8314, 8428, "The DRT judgment debt was 4,999 crore rupees plus interest.")],
+            "start": 8314, "end": 8428, "distance": 0.25,
+        },
+        {
+            "documents": [doc(221, 14939, 15015, "The debt certificate gives a figure of 6203.")],
+            "start": 14939, "end": 15015, "distance": 0.3,
+        },
+        {
+            "documents": [doc(159, 10630, 10698, "A Ministry of Finance report says 14,100 crore rupees were recovered from me.")],
+            "start": 10630, "end": 10698, "distance": 0.35,
+        },
+    ]
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [108, 124, 221, 159],
+                "citation_chunk_ids": [108, 124, 221, 159],
+            },
+        ),
+    )
+    # Keep the prompt too small to include all four claim families. The
+    # extractive fallback must still inspect all retrieved source groups.
+    monkeypatch.setattr(chain, "merge_overlapping_results", lambda _results: source_groups)
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1200)
+
+    prompt_human_messages = []
+
+    def fake_generate_with_llm(**kwargs):
+        prompt_value = kwargs["prompt_value"]
+        prompt_human_messages.append(
+            next(message.content for message in prompt_value.messages if message.type == "human")
+        )
+        return chain.FINANCIAL_VERIFICATION_FALLBACK
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    # The model was given a bounded subset, not every required fact.
+    assert len(prompt_human_messages) == 2
+    assert not all(
+        phrase in prompt_human_messages[0]
+        for phrase in (
+            "3,000 crore rupees",
+            "4,999 crore rupees",
+            "figure of 6203",
+            "14,100 crore rupees",
+        )
+    )
+
+    answer = result["answer"]
+    assert result["generation_trace"]["grounded_financial_fallback_used"] is True
+    assert result["generation_trace"]["financial_answer_suppressed"] is False
+    assert result["generation_trace"]["financial_fallback_context_source"] == "full_retrieved_source_groups"
+    assert "3,000 crore rupees" in answer
+    assert "4,999 crore rupees" in answer
+    assert "debt certificate gives a figure of 6,203" in answer
+    assert "14,100 crore rupees" in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
 def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still_fails(monkeypatch):
     context = (
         "I invested 3,000 crore rupees into Kingfisher Airlines. "
