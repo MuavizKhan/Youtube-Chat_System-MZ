@@ -27,7 +27,7 @@ Start from the main commit that contains Phase 10.8.8. Preserve the old five-vid
 Inspect the prior report before setting any namespace or model override:
 
 ```powershell
-$prior = Get-Content ".\\evaluation_reports\\phase10_4_multivideo_topk7_distance150_lambda070_20261017.json" -Raw | ConvertFrom-Json
+$prior = Get-Content ".\evaluation_reports\phase10_4_multivideo_topk7_distance150_lambda070_20261017.json" -Raw | ConvertFrom-Json
 $prior.experiment_metadata | ConvertTo-Json -Depth 8
 ```
 
@@ -42,9 +42,9 @@ $env:RAG_MAX_DISTANCE = "1.50"
 $env:RAG_MMR_LAMBDA = "0.70"
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$baseline = ".\\evaluation_reports\\phase10_9_multivideo_baseline_$stamp.json"
+$baseline = ".\evaluation_reports\phase10_9_multivideo_baseline_$stamp.json"
 
-.\\.venv\\Scripts\\python.exe -m Backend.rag_system.multi_video_evaluation --output $baseline
+.\.venv\Scripts\python.exe -m Backend.rag_system.multi_video_evaluation --output $baseline
 $baselineExitCode = $LASTEXITCODE
 Write-Host "Baseline report: $baseline"
 Write-Host "Exit code: $baselineExitCode"
@@ -57,9 +57,9 @@ Before interpreting quality results, check the report's five selected videos, ev
 ### 2. Run the focused stage-by-stage triage
 
 ```powershell
-$triage = ".\\evaluation_reports\\phase10_9_retrieval_triage_$stamp.json"
+$triage = ".\evaluation_reports\phase10_9_retrieval_triage_$stamp.json"
 
-.\\.venv\\Scripts\\python.exe -m scripts.phase10_9_retrieval_triage --output $triage
+.\.venv\Scripts\python.exe -m scripts.phase10_9_retrieval_triage --output $triage
 $triageExitCode = $LASTEXITCODE
 Write-Host "Triage report: $triage"
 Write-Host "Exit code: $triageExitCode"
@@ -77,7 +77,7 @@ The runner does not generate final chatbot answers, modify indexes, or change re
 To rerun one target only:
 
 ```powershell
-.\\.venv\\Scripts\\python.exe -m scripts.phase10_9_retrieval_triage --videos fAd2nKfrDB8 --output ".\\evaluation_reports\\phase10_9_arabic_triage_$stamp.json"
+.\.venv\Scripts\python.exe -m scripts.phase10_9_retrieval_triage --videos fAd2nKfrDB8 --output ".\evaluation_reports\phase10_9_arabic_triage_$stamp.json"
 ```
 
 ### 3. Classify the first evidence-loss point
