@@ -119,6 +119,8 @@ def test_run_triage_records_provenance_index_and_per_stage_group_summary():
     group = arabic["group_summaries"][0]
     assert group["question_id"] == "AR01"
     assert group["existing_group_diagnosis"] == "evidence_in_top_k"
+    assert group["candidate_details_truncated"] is False
+    assert group["stage_counts_partial"] is False
     assert group["returned_gold_candidates_by_stage"] == {
         "raw_faiss": 1,
         "semantic_mmr": 1,
