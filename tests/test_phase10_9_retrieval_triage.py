@@ -12,7 +12,14 @@ def _snapshot(video_id, language=None, state="valid"):
     return {
         "state": state,
         "directory_label": f"Backend/rag_system/vector_stores/{video_id}",
-        "files": {},
+        "files": {
+            filename: {
+                "exists": True,
+                "size_bytes": 10,
+                "sha256": ("a" * 64),
+            }
+            for filename in ("index.faiss", "index.pkl", "metadata.json")
+        },
         "metadata_sha256": "example-hash",
         "metadata": {
             "video_id": video_id,
@@ -274,4 +281,24 @@ def test_triage_does_not_mark_incomplete_gold_group_trace_as_completed():
     ]
     assert "did not include all gold groups" in report["videos"][0]["error"]["message"]
     assert report["summary"]["diagnostics_completed"] is False
+
+def test_triage_blocks_index_when_file_fingerprint_is_unavailable():
+    def incomplete_snapshot(video_id):
+        snapshot = _snapshot(video_id)
+        del snapshot["files"]["index.pkl"]["sha256"]
+        return snapshot
+
+    calls = []
+    report = triage.run_phase10_9_triage(
+        video_ids=["MdeQMVBuGgY"],
+        diagnostic_runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+        provenance_builder=dict,
+        index_snapshot_builder=incomplete_snapshot,
+    )
+
+    assert calls == []
+    assert report["videos"][0]["status"] == "blocked"
+    assert report["videos"][0]["failure_reasons"] == [
+        "index_file_identity_unavailable"
+    ]
 
