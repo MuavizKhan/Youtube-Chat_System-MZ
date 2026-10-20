@@ -69,6 +69,15 @@ def _project_relative_label(path: Path) -> str:
         return "external-configured-index-path"
 
 
+def _sha256_file(path: Path) -> str:
+    """Hash a file without loading the entire index into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as file_handle:
+        for block in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def build_index_snapshot(video_id: str) -> dict[str, Any]:
     """Capture the persisted index state and identity without exposing transcript text."""
     index_dir = Path(rag_config.VECTOR_STORE_ROOT) / video_id
@@ -84,8 +93,9 @@ def build_index_snapshot(video_id: str) -> dict[str, Any]:
         if path.is_file():
             try:
                 record["size_bytes"] = path.stat().st_size
+                record["sha256"] = _sha256_file(path)
             except OSError:
-                record["stat_error"] = True
+                record["hash_error"] = True
         files[filename] = record
 
     metadata_summary = None
