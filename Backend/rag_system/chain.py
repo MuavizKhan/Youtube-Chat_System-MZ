@@ -507,7 +507,11 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
                 break
         terms = _claim_terms(answer[left:right])
         if terms:
-            claims.append({"amount": amount, "terms": terms})
+            claims.append({
+                "amount": amount,
+                "terms": terms,
+                "text": answer[left:right],
+            })
         recognized_spans.append((match.start(), match.end()))
 
     # A certificate caption can give the figure without repeating its unit.
@@ -529,7 +533,11 @@ def _money_claims(answer: str) -> list[dict[str, Any]]:
             continue
         terms = _claim_terms(clause)
         if terms:
-            claims.append({"amount": float(match.group(0)), "terms": terms})
+            claims.append({
+                "amount": float(match.group(0)),
+                "terms": terms,
+                "text": clause,
+            })
     return claims
 
 
@@ -573,6 +581,15 @@ def _select_claim_aligned_timestamp_candidates(
 
     selected: dict[int, dict[str, Any]] = {}
     for claim in claims:
+        claim_text = str(claim.get("text", ""))
+        is_report_recovery_claim = bool(
+            re.search(r"\b(?:ministry|finance|report)\b", claim_text, re.IGNORECASE)
+            and re.search(
+                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                claim_text,
+                re.IGNORECASE,
+            )
+        )
         choices = []
         for profile in profiles:
             if not any(
@@ -581,10 +598,17 @@ def _select_claim_aligned_timestamp_candidates(
             ):
                 continue
             overlap = len(claim["terms"] & profile["terms"])
-            if overlap:
+            source_text = str(profile["candidate"].get("transcript_text", ""))
+            source_mentions_recovery = bool(re.search(
+                r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                source_text,
+                re.IGNORECASE,
+            ))
+            if overlap or (is_report_recovery_claim and source_mentions_recovery):
                 candidate = profile["candidate"]
                 choices.append((
-                    (overlap, profile["amount_breadth"], -candidate["distance"]),
+                    (max(overlap, 1 if is_report_recovery_claim and source_mentions_recovery else 0),
+                     profile["amount_breadth"], -candidate["distance"]),
                     profile,
                     overlap,
                 ))
@@ -603,6 +627,49 @@ def _select_claim_aligned_timestamp_candidates(
         )
         record["claim_count"] += 1
         record["overlap"] += overlap
+
+        if is_report_recovery_claim:
+            # A report-attributed recovery may require two evidence locations:
+            # one caption states the clean amount, while another names the
+            # Ministry/Finance report but has a split ASR numeral. Cite both
+            # rather than implying that either passage independently proves
+            # every part of the compound claim.
+            attribution_profiles = []
+            for attribution_profile in profiles:
+                source_text = str(
+                    attribution_profile["candidate"].get("transcript_text", "")
+                )
+                if (
+                    re.search(r"\b(?:ministry|finance|report)\b", source_text, re.IGNORECASE)
+                    and re.search(
+                        r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                        source_text,
+                        re.IGNORECASE,
+                    )
+                ):
+                    attribution_profiles.append(attribution_profile)
+            if attribution_profiles:
+                best_attribution = max(
+                    attribution_profiles,
+                    key=lambda item: (
+                        len(claim["terms"] & item["terms"]),
+                        item["amount_breadth"],
+                        -item["candidate"]["distance"],
+                    ),
+                )
+                attribution_candidate = best_attribution["candidate"]
+                attribution_record = selected.setdefault(
+                    attribution_candidate["candidate_index"],
+                    {
+                        "candidate": attribution_candidate,
+                        "claim_count": 0,
+                        "overlap": 0,
+                    },
+                )
+                attribution_record["claim_count"] += 1
+                attribution_record["overlap"] += len(
+                    claim["terms"] & best_attribution["terms"]
+                )
 
     if not selected:
         return None
@@ -1769,6 +1836,36 @@ def _truncate_formatted_source(
             return source_text[:max_chars]
 
         captions = lines[caption_start:]
+        split_evidence_caption_indices: set[int] = set()
+        if (
+            financial_question
+            and re.search(r"\b(?:ministry|finance|report)\b", financial_group_context, re.IGNORECASE)
+            and re.search(r"\b(?:recover(?:ed|y|ies)?|recovery)\b", financial_group_context, re.IGNORECASE)
+        ):
+            for index, line in enumerate(captions):
+                caption_text = line.split("] ", 1)[-1] if line.startswith("- [") else line
+                if not re.search(r"(?<![\w,:])\d{1,2},000\s*$", caption_text):
+                    continue
+                for neighbor_index in range(index + 1, min(len(captions), index + 3)):
+                    neighbor_text = (
+                        captions[neighbor_index].split("] ", 1)[-1]
+                        if captions[neighbor_index].startswith("- [")
+                        else captions[neighbor_index]
+                    )
+                    if not re.match(r"^\s*\d{1,3}(?![\d,])(?:\s|$)", neighbor_text):
+                        continue
+                    pair_text = " ".join(
+                        item.split("] ", 1)[-1] if item.startswith("- [") else item
+                        for item in captions[index:neighbor_index + 1]
+                    )
+                    if re.search(
+                        r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
+                        pair_text,
+                        re.IGNORECASE,
+                    ):
+                        split_evidence_caption_indices.update((index, neighbor_index))
+                        break
+
         scored = [
             (
                 _generation_line_relevance(
@@ -1776,7 +1873,7 @@ def _truncate_formatted_source(
                     question_terms,
                     financial_question=financial_question,
                     financial_group_context=financial_group_context,
-                ),
+                ) + (50 if index in split_evidence_caption_indices else 0),
                 index,
                 line,
             )
