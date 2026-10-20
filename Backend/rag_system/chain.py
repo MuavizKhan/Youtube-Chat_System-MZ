@@ -4250,14 +4250,13 @@ def build_rag_chain(
             if is_financial_question and inputs.get("source_groups")
             else inputs.get("context", "")
         )
+        # Decide whether the model's bounded prompt needs a repair using the
+        # same context it actually received. The extractive fallback below can
+        # inspect all retrieved source groups independently of this prompt budget.
         repair_instruction = _generation_repair_instruction(
             question=question_text,
             answer=answer,
-            context=(
-                financial_evidence_context
-                if is_financial_question
-                else inputs.get("context", "")
-            ),
+            context=inputs.get("context", ""),
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
@@ -4278,11 +4277,7 @@ def build_rag_chain(
             repair_passed = _generation_repair_instruction(
                 question=question_text,
                 answer=answer,
-                context=(
-                    financial_evidence_context
-                    if is_financial_question
-                    else inputs.get("context", "")
-                ),
+                context=inputs.get("context", ""),
             ) is None
             if not repair_passed:
                 extractive_answer = _build_financial_evidence_fallback(
