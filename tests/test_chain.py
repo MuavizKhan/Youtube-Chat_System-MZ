@@ -3039,7 +3039,7 @@ def test_generation_context_reserves_report_recovery_before_noisy_financial_dist
         context,
     )
     assert fallback is not None
-    assert "14,100 crores recovered from me." in fallback
+    assert "Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore with that report." in fallback
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
 
 
@@ -3274,8 +3274,8 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     assert len(fallback_diagnostics["source_financial_excerpts"]) == 4
     assert "3,000 crore rupees" in answer
     assert "4,999 crore rupees" in answer
-    assert "debt certificate gives a figure of 6,203" in answer
-    assert "14,100 crore rupees" in answer
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
+    assert "recovery figure of 14,100 crore rupees" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
 
 
