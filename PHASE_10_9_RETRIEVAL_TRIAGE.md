@@ -113,7 +113,7 @@ Write-Host "Exit code: $triageExitCode"
 This command uses the existing gold-evidence retrieval trace and captures:
 
 - Git/runtime and effective retrieval configuration provenance.
-- A hash of each index's `metadata.json`, index-file presence and sizes, metadata schema, transcript language code, chunk count, and index state. Full transcript text is not copied into the index snapshot.
+- SHA-256 hashes and sizes for each target's `index.faiss`, `index.pkl`, and `metadata.json`, plus metadata schema, transcript language code, chunk count, and index state. Index files are hashed with streaming reads, and full transcript text is not copied into the snapshot.
 - Candidate membership/rank evidence from raw FAISS, semantic MMR, semantic fusion, lexical retrieval, hybrid fusion, facet reranking, anchor selection, and production context.
 - The repository's existing group/candidate diagnosis and a concise stage-presence summary.
 
