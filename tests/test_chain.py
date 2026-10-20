@@ -3749,3 +3749,136 @@ def test_arabic_eye_sound_answer_aligns_to_english_caption_that_only_says_eyes()
     assert result.endswith("Relevant timestamps: 00:13–03:37, 09:49–10:58")
     assert "04:15–05:18" not in result
 
+
+
+@pytest.mark.unit
+def test_financial_claim_refines_generic_debt_to_drt_only_within_same_source():
+    same_source = """[SOURCE 1]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission"""
+
+    claim = next(
+        item for item in chain._money_amount_clauses(same_source)
+        if item["amount"] == 4999
+    )
+    assert claim["topic"] == "drt_debt"
+    assert "tribunal" in claim["text"].casefold()
+    assert "tribunal" in claim["amount_caption"].casefold()
+
+    # A separate source block may not lend its DRT label to an otherwise
+    # generic debt amount.
+    split_sources = """[SOURCE 1]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+[SOURCE 2]
+- [02:19:01–02:20:28] debt recovery tribunal's own admission"""
+    separate_claim = next(
+        item for item in chain._money_amount_clauses(split_sources)
+        if item["amount"] == 4999
+    )
+    assert separate_claim["topic"] == "debt"
+    assert "tribunal" not in separate_claim["amount_caption"].casefold()
+
+
+@pytest.mark.unit
+def test_financial_fallback_normalizes_only_corroborated_report_recovery_asr_split():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    claims = chain._money_amount_clauses(context)
+    report_claim = next(
+        item for item in claims
+        if item["amount"] == 14100 and item.get("asr_split_amount")
+    )
+    assert report_claim["topic"] == "recovery_report"
+    assert report_claim["source_id"] == 4
+    assert "finance report" in report_claim["amount_caption"].casefold()
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the debt and money involved?",
+        context,
+        diagnostics=diagnostics,
+    )
+    assert answer is not None
+    assert diagnostics["missing_topics"] == []
+    assert diagnostics["recognized_topics"]["investment"]["amount"] == 3000
+    assert diagnostics["recognized_topics"]["drt_debt"]["amount"] == 4999
+    assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
+    assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
+    assert "Ministry of Finance report" in answer
+    assert "14,100 crore" in answer
+    assert "14,000 100" not in answer
+    assert "does not clearly explain" in answer
+
+    # Without an independently clear 14,100-crore recovery mention, the same
+    # ASR split is ambiguous and must remain unaccepted.
+    uncorroborated = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [04:08:59–04:09:30] debt recovery certificate amount 6203 crores
+[SOURCE 4]
+- [04:09:58–04:10:04] Ministry of Finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+    uncorroborated_diagnostics = {}
+    assert chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the debt and money involved?",
+        uncorroborated,
+        diagnostics=uncorroborated_diagnostics,
+    ) is None
+    assert "recovery_report" in uncorroborated_diagnostics["missing_topics"]
+
+
+@pytest.mark.unit
+def test_financial_context_packer_reserves_split_report_claim_using_global_corroboration():
+    filler = "The interview briefly discusses an unrelated business point. " * 36
+    groups = [
+        _caption_group(108, 7267.92, [
+            filler, "I invested 3,000 crores of UB Group money into Kingfisher Airlines."
+        ], 0.2),
+        _caption_group(124, 8314.519, [
+            filler, "4,999 crores was a debt", "debt recovery tribunal's own admission"
+        ], 0.25),
+        _caption_group(153, 10196.399, [
+            filler, "That's how you've recovered 14,100 crores from me."
+        ], 0.3),
+        _caption_group(221, 14939.359, [
+            filler,
+            "I showed you the debt recovery",
+            "certificate amount 6203 crores I've shown you the ministry of",
+            "finance report 14,000",
+            "100 recovered.",
+        ], 1.8),
+    ]
+    groups.extend(
+        _caption_group(
+            300 + index,
+            16000 + index * 120,
+            [filler, f"Unrelated financial discussion about expenses of {800 + index} rupees."],
+            0.35 + index * 0.05,
+        )
+        for index in range(6)
+    )
+
+    result = chain.build_generation_context(
+        groups,
+        question="What debt and money recovery figures are mentioned?",
+        max_chars=4000,
+    )
+
+    assert len(result["context"]) <= 4000
+    assert "221" in result["diagnostics"]["included_chunk_ids"]
+    assert "finance report" in result["context"].casefold()
+    assert "100 recovered" in result["context"].casefold()

@@ -2017,14 +2017,22 @@ def _financial_topics_in_text(text: str) -> set[str]:
     return topics
 
 
-def _financial_claim_keys_for_context(text: str) -> set[tuple[str, float]]:
+def _financial_claim_keys_for_context(
+    text: str,
+    *,
+    source_id: int | None = None,
+) -> set[tuple[str, float]]:
     """Collect amount/topic keys using the same source-local recovery rule as the safe extractor.
 
     A recovery amount can count as a report-attributed claim for context
     selection only when the amount claim and report/recovery wording belong to
-    the same formatted [SOURCE n] block. This prevents a duplicated,
-    unattributed recovery amount from displacing the source that establishes
-    report attribution.
+    the same formatted [SOURCE n] block. A corroborating clean amount may occur
+    in another block, but it only normalizes the split numeral; it never lends
+    its report attribution to that other block.
+
+    When source_id is supplied, return only claim keys whose amount occurs in
+    that source block. The parser still sees all blocks so split-ASR numbers can
+    be corroborated before their source-local claim is projected back.
     """
     text = text or ""
     markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text))
@@ -2035,6 +2043,8 @@ def _financial_claim_keys_for_context(text: str) -> set[tuple[str, float]]:
 
     claim_keys: set[tuple[str, float]] = set()
     for claim in _money_amount_clauses(text):
+        if source_id is not None and claim.get("source_id") != source_id:
+            continue
         amount = claim.get("amount")
         topic = claim.get("topic")
         claim_text = str(claim.get("text", ""))
@@ -2175,6 +2185,20 @@ def build_generation_context(
                 else set()
             ),
         })
+
+    if financial_question:
+        # The report label and the clean 14,100-crore recovery mention may live
+        # in different retrieved source groups. Parse the combined set to
+        # corroborate that one split numeral, then assign claim keys only to the
+        # source block containing each claim. Without this global pass, the
+        # report-bearing chunk is invisible to the budget reserver when viewed
+        # on its own.
+        all_source_context = "\\n\\n".join(record["text"] for record in records)
+        for record in records:
+            record["financial_claims"] = _financial_claim_keys_for_context(
+                all_source_context,
+                source_id=record["index"] + 1,
+            )
 
     original_chars = sum(len(record["text"]) for record in records) + (
         2 * max(0, len(records) - 1)
@@ -2585,14 +2609,120 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 and local_topic is None
             ):
                 claim_text = nearby_captions or own_caption
+
+            # A number caption may call the figure "debt" while the immediately
+            # adjacent caption names the Debt Recovery Tribunal. Refine only
+            # this generic label, and only within the same source block. A
+            # specific local label such as "certificate" remains authoritative.
+            if (
+                own_caption
+                and local_topic == "debt"
+                and nearby_topic == "drt_debt"
+            ):
+                topic = "drt_debt"
+                claim_text = nearby_captions or own_caption
+                amount_caption = nearby_captions or own_caption
+
         records.append({
             "amount": amount,
             "text": claim_text,
             "topic": topic,
             "source_id": source_id,
             "amount_caption": amount_caption,
+            "amount_lexeme": match.group(0),
+            "asr_split_amount": False,
         })
         recognized_spans.append((match.start(), match.end()))
+
+    # Some captions split a spoken compound number such as "fourteen thousand
+    # one hundred" into "14,000 100". Normalize this only when (a) the same
+    # source-local caption neighborhood explicitly names a Finance/Ministry
+    # report and a recovery, and (b) another caption independently spells the
+    # same amount as 14,100 crore(s) recovered. This is not a general number
+    # repair rule and never transfers report attribution across source blocks.
+    split_amount_pattern = re.compile(
+        r"(?<![\\w,:])(?P<thousands>\\d{1,2},000)\\s+(?P<remainder>\\d{1,3})(?![\\d,])"
+    )
+    independently_supported_recoveries = {
+        float(record["amount"])
+        for record in records
+        if record.get("topic") in {"recovery", "recovery_report"}
+        and re.search(
+            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            str(record.get("text", "")),
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\\b(?:crores?|cr|rupees?)\\b",
+            str(record.get("amount_caption") or record.get("text", "")),
+            re.IGNORECASE,
+        )
+    }
+    seen_split_claims = set()
+    for row_index, row in enumerate(caption_rows):
+        if (
+            row.get("source_id") is None
+            or not re.search(r"(?<![\\w,:])\\d{1,2},000", row.get("text", ""))
+        ):
+            continue
+        window_rows = [
+            caption_rows[index]
+            for index in (row_index - 1, row_index, row_index + 1)
+            if 0 <= index < len(caption_rows)
+            and caption_rows[index].get("source_id") == row.get("source_id")
+        ]
+        window_text = " ".join(item["text"] for item in window_rows)
+        for split_match in split_amount_pattern.finditer(window_text):
+            amount = float(
+                int(split_match.group("thousands").replace(",", ""))
+                + int(split_match.group("remainder"))
+            )
+            if not any(
+                math.isclose(amount, supported, rel_tol=0.0, abs_tol=0.1)
+                for supported in independently_supported_recoveries
+            ):
+                continue
+            if not (
+                re.search(r"\\b(?:ministry|finance|report)\\b", window_text, re.IGNORECASE)
+                and re.search(
+                    r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+                    window_text,
+                    re.IGNORECASE,
+                )
+            ):
+                continue
+            if _financial_claim_topic(window_text) != "recovery_report":
+                continue
+
+            identity = (
+                row["source_id"],
+                amount,
+                re.sub(r"\\s+", " ", window_text).casefold(),
+            )
+            if identity in seen_split_claims:
+                continue
+            seen_split_claims.add(identity)
+
+            if re.search(r"\\bministry\\b.*\\bfinance\\b.*\\breport\\b", window_text, re.IGNORECASE):
+                report_label = "Ministry of Finance report"
+            elif re.search(r"\\bfinance\\s+report\\b", window_text, re.IGNORECASE):
+                report_label = "Finance report"
+            elif re.search(r"\\bministry\\s+report\\b", window_text, re.IGNORECASE):
+                report_label = "Ministry report"
+            else:
+                report_label = "report"
+
+            # Store the normalized fact text for downstream repair and packing;
+            # retain the original ASR spelling separately for diagnostics.
+            records.append({
+                "amount": amount,
+                "text": f"{report_label} {int(amount):,} crore recovered",
+                "topic": "recovery_report",
+                "source_id": row["source_id"],
+                "amount_caption": window_text,
+                "amount_lexeme": split_match.group(0),
+                "asr_split_amount": True,
+            })
 
     # Caption speech recognition sometimes emits a financial figure as a bare
     # number ("6203") while its currency/unit appears elsewhere or is omitted.
@@ -2913,7 +3043,9 @@ def _build_financial_evidence_fallback(
         # otherwise bare amount, but it must not relabel a specific local claim.
         amount_caption = str(claim.get("amount_caption") or claim_text)
         local_topic = _financial_claim_topic(amount_caption)
-        if local_topic is not None:
+        if local_topic is not None and not (
+            topic == "drt_debt" and local_topic == "debt"
+        ):
             topic = local_topic
 
         # Attribution is source-local. In caption-aware contexts, a broad
@@ -2954,6 +3086,29 @@ def _build_financial_evidence_fallback(
             and has_source_local_recovery_report
         ):
             topic = "recovery_report"
+
+        if claim.get("asr_split_amount") and topic == "recovery_report":
+            # This claim exists only after the parser found a clean,
+            # independent 14,100-crore recovery mention elsewhere in the same
+            # supplied transcript context. Render the normalized claim without
+            # leaking the malformed ASR numeral into the model answer.
+            attribution_text = amount_caption or claim_text
+            if re.search(
+                r"\\bministry\\b.*\\bfinance\\b.*\\breport\\b",
+                attribution_text,
+                re.IGNORECASE,
+            ):
+                report_label = "Ministry of Finance report"
+            elif re.search(r"\\bfinance\\s+report\\b", attribution_text, re.IGNORECASE):
+                report_label = "Finance report"
+            elif re.search(r"\\bministry\\s+report\\b", attribution_text, re.IGNORECASE):
+                report_label = "Ministry report"
+            else:
+                report_label = "report"
+            claim_text = (
+                f"The transcript cites the {report_label} with a recovery "
+                f"figure of {int(float(amount)):,} crore."
+            )
 
         if (
             isinstance(amount, (int, float))

@@ -509,3 +509,87 @@ def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figure
     assert results["certificate_6203"] is True
     assert results["recovery_source_attribution"] is True
     assert results["unclear_relationship_preserved"] is False
+
+
+def test_q07_live_shaped_context_fallback_passes_financial_and_timestamp_contract():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] I invested 3,000 crores of UB Group money into Kingfisher Airlines.
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about the amount of debt or money involved in the Kingfisher situation?",
+        context,
+    )
+    assert answer is not None
+
+    source_texts = [
+        {
+            "source_id": 1, "chunk_ids": [108],
+            "start": 7267.92, "end": 7351.84, "distance": 0.82,
+            "transcript_text": "I invested 3,000 crores of UB Group money into Kingfisher Airlines.",
+        },
+        {
+            "source_id": 2, "chunk_ids": [124],
+            "start": 8314.519, "end": 8428.16, "distance": 0.91,
+            "transcript_text": "4,999 crores was a debt. The debt recovery tribunal's own admission.",
+        },
+        {
+            "source_id": 3, "chunk_ids": [153],
+            "start": 10196.399, "end": 10301.84, "distance": 0.87,
+            "transcript_text": "That's how you've recovered 14,100 crores from me.",
+        },
+        {
+            "source_id": 4, "chunk_ids": [221],
+            "start": 14939.359, "end": 15015.239, "distance": 0.81,
+            "transcript_text": (
+                "I showed you the debt recovery certificate amount 6203 crores. "
+                "I've shown you the Ministry of Finance report 14,000 100 recovered."
+            ),
+        },
+    ]
+    answer = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=source_texts,
+        has_evidence=True,
+    )
+
+    response = {
+        "answer": answer,
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": source_texts,
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": [108, 124, 153, 221],
+                "citation_chunk_ids": [108, 124, 153, 221],
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": len(context),
+                    "final_chars": min(len(context), 7900),
+                    "groups_available": 4,
+                    "groups_included": 4,
+                    "included_chunk_ids": ["108", "124", "153", "221"],
+                    "reduced": True,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("Q07"), response)
+    assert audit["quality"]["passed"] is True, audit["quality"]["failed_checks"]
+    assert audit["quality"]["failed_checks"] == []
+    assert len(audit["plain_text_timestamp_ranges"]) >= 4
+    assert all(
+        group["represented_in_plain_text_timestamp_summary"]
+        for group in audit["annotated_evidence_groups"]
+    )
