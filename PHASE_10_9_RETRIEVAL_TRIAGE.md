@@ -123,7 +123,9 @@ This command uses the existing gold-evidence retrieval trace and captures:
 - Candidate membership/rank evidence from raw FAISS, semantic MMR, semantic fusion, lexical retrieval, hybrid fusion, facet reranking, anchor selection, and production context.
 - The repository's existing group/candidate diagnosis and a concise stage-presence summary. The existing trace returns at most 12 detailed candidate rows per gold group; the report explicitly marks when stage-count summaries are partial because of that detail cap.
 
-The runner does not generate final chatbot answers, modify indexes, or change retrieval behavior. It deliberately blocks a trace when the index is missing/stale/invalid or its recorded transcript language conflicts with the registered benchmark. Such a result means the diagnostic run is not comparable yet; it is not a retrieval-quality conclusion.
+The runner does not generate final chatbot answers, modify indexes, or change retrieval behavior. It blocks missing/invalid indexes, stale indexes with embedding/chunk configuration differences, and indexes whose recorded transcript language conflicts with the registered benchmark.
+
+There is one deliberately narrow exception for diagnosis: an otherwise valid legacy index may be traced read-only when its *only* stale condition is that `transcript_segment_schema_version` is absent, while its embedding model and chunk size/overlap match the current configuration. Such videos still show `index_snapshot.state = "stale"` and are marked with `index_compatibility.mode = "legacy_schema_marker_missing_read_only_trace"`. This permits evidence-loss diagnosis against the existing persisted chunks without rebuilding them. It does **not** make those indexes production-ready, prove that the run reproduces an older benchmark configuration, or authorize relaxing other index guards. Any other stale state remains blocked.
 
 To rerun one target only:
 
