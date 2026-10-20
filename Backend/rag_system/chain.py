@@ -2194,7 +2194,7 @@ def build_generation_context(
         # source block containing each claim. Without this global pass, the
         # report-bearing chunk is invisible to the budget reserver when viewed
         # on its own.
-        all_source_context = "\\n\\n".join(record["text"] for record in records)
+        all_source_context = "\n\n".join(record["text"] for record in records)
         for record in records:
             record["financial_claims"] = _financial_claim_keys_for_context(
                 all_source_context,
