@@ -3269,6 +3269,9 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     assert set(fallback_diagnostics["recognized_topics"]) == {
         "investment", "drt_debt", "certificate", "recovery_report"
     }
+    assert fallback_diagnostics["candidate_claims"]
+    assert all("amount_caption_topic" in claim for claim in fallback_diagnostics["candidate_claims"])
+    assert len(fallback_diagnostics["source_financial_excerpts"]) == 4
     assert "3,000 crore rupees" in answer
     assert "4,999 crore rupees" in answer
     assert "debt certificate gives a figure of 6,203" in answer
@@ -3529,6 +3532,18 @@ Transcript caption segments in chronological order:
         "investment", "drt_debt", "certificate"
     }
     assert diagnostics["source_block_count"] == 5
+    assert diagnostics["candidate_claims"]
+    recovered_amount_candidates = [
+        claim for claim in diagnostics["candidate_claims"]
+        if claim["amount"] == 14100
+    ]
+    assert len(recovered_amount_candidates) == 1
+    assert recovered_amount_candidates[0]["classified_topic"] == "recovery"
+    assert "Finance report" in diagnostics["source_financial_excerpts"]["3"][0]
+    assert any(
+        "14,100 crore rupees" in excerpt
+        for excerpt in diagnostics["source_financial_excerpts"]["4"]
+    )
 
 
 @pytest.mark.unit
