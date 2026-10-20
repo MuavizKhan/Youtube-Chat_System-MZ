@@ -2897,6 +2897,7 @@ def _build_financial_evidence_fallback(
         source_blocks[int(marker.group(1))] = (context or "")[marker.end():block_end]
 
     claims_by_topic: dict[str, dict[str, Any]] = {}
+    candidate_claim_diagnostics: list[dict[str, Any]] = []
     for claim in _money_amount_clauses(context or ""):
         amount = claim.get("amount")
         claim_text = re.sub(r"\s+", " ", str(claim.get("text", ""))).strip()
@@ -2953,6 +2954,23 @@ def _build_financial_evidence_fallback(
             and has_source_local_recovery_report
         ):
             topic = "recovery_report"
+
+        if (
+            isinstance(amount, (int, float))
+            and math.isfinite(float(amount))
+            and claim_text
+        ):
+            candidate_claim_diagnostics.append({
+                "amount": float(amount),
+                "parsed_topic": claim.get("topic"),
+                "amount_caption_topic": local_topic,
+                "classified_topic": topic,
+                "source_id": source_id,
+                "amount_caption": amount_caption[:200],
+                "claim_excerpt": claim_text[:200],
+                "source_has_report": has_report_in_source,
+                "source_has_recovery": has_recovery_in_source,
+            })
 
         if (
             topic not in required_topics
@@ -3018,6 +3036,21 @@ def _build_financial_evidence_fallback(
                 for topic, claim in claims_by_topic.items()
             },
             "source_block_count": len(source_blocks),
+            "candidate_claims": candidate_claim_diagnostics[:30],
+            "source_financial_excerpts": {
+                str(source_id): [
+                    re.sub(r"\\s+", " ", line).strip()[:180]
+                    for line in block.splitlines()
+                    if re.search(
+                        r"\\b(?:drt|tribunal|judg\\w*ment|certificate|debt|"
+                        r"recover\\w*|ministry|finance|report|invest\\w*|crores?|"
+                        r"rupees?|\\d{3,})\\b",
+                        line,
+                        re.IGNORECASE,
+                    )
+                ][:2]
+                for source_id, block in source_blocks.items()
+            },
         })
     if missing_topics:
         return None
