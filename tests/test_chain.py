@@ -3311,6 +3311,46 @@ def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
 
 
 @pytest.mark.unit
+@pytest.mark.unit
+def test_verified_chunk2_caption_aligns_eye_sound_only_query_to_early_source():
+    answer = "You may even hear the sound of your eyelids blinking."
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 153.05, "end": 217.615, "distance": 0.84,
+                "transcript_text": (
+                    "In a quiet room, you can hear your own heartbeat, blood rushing "
+                    "through your veins, your lungs, your stomach, and even your "
+                    "eyelids blinking."
+                ),
+            },
+            {
+                "start": 589.599, "end": 658.17, "distance": 0.10,
+                "transcript_text": (
+                    "Sound waves travel through the air to the eardrum, and the "
+                    "cochlea processes the different frequencies."
+                ),
+            },
+            {
+                "start": 255.0, "end": 318.0, "distance": 0.05,
+                "transcript_text": (
+                    "A loud noise came from the hallway. The presenter has eyelid "
+                    "irritation, blue eyes, and wears glasses."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    # The source cue "hear" governs the bodily-sound list, and "eyelids
+    # blinking" is part of that same sentence. The later sound-wave segment
+    # and a closer anatomy-only segment must not win timestamp selection.
+    assert result.endswith("Relevant timestamps: 02:33–03:37")
+    assert "09:49–10:58" not in result
+    assert "04:15–05:18" not in result
+
+
 def test_financial_verification_fallback_does_not_add_unaligned_timestamps():
     answer = chain.FINANCIAL_VERIFICATION_FALLBACK
     result = chain.append_relevant_source_timestamps(

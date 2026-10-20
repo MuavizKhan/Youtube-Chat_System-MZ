@@ -651,9 +651,10 @@ _ANSWER_ALIGNMENT_CONCEPTS = (
         # Captions may omit the explicit blink verb, but source-side matching
         # must still establish an acoustic cue near the eye/eyelid reference.
         "english_pattern": r"\beyelids?\b|\bblink\w*\b|\beyes?\b|\beyeballs?\b|\beyelashes?\b|eye.{0,50}(?:blink|lid|close|mov)|(?:blink|lid|clos|mov).{0,50}\beye",
-        "source_english_pattern": r"\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)[^\.\!\?؟؛;]{0,45}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b|\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b[^\.\!\?؟؛;]{0,45}\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)\b",
-        # A bare anatomy mention is not evidence for an audible sound. Require
-        # an acoustic cue near the eye/eyelid in the source transcript.
+        "source_english_pattern": r"\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)[^\.\!\?؟؛;]{0,45}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b|\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b[^\.\!\?؟؛;]{0,45}\b(?:sound|noise|hear(?:d|ing|s)?|audible|listen\w*)\b|\b(?:hear(?:d|ing|s)?|listen\w*)[^\.!\?؟؛;]{0,180}\b(?:eyes?|eyelids?|eyeballs?|eyelashes?)\b[^\.!\?؟؛;]{0,35}\b(?:blink\w*|clos\w*|mov\w*)\b",
+        # A bare anatomy mention is not evidence for an audible sound. Accept
+        # a nearby acoustic cue, or an inherited cue in a coordinated list when
+        # the same sentence explicitly ties the eye reference to an action.
         "arabic_pattern": r"جفونك?|الجفون|جفن|الجفن|عيونك?|عيون|عينيك?|عينك?|العينين|العين|عين.{0,40}(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض)|(?:ترمش|بترمش|تومض|ترف|رمش|تغمض|بتغمض|تغمز|غمض|إغلاق|اغلاق|تغلق|يغلق|إغماض|اغماض).{0,40}(?:عين|جفن)",
         "source_arabic_pattern": r"(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)[^\.\!\?؟؛;]{0,45}(?:عين|عيون|جفن|جفون)|(?:عين|عيون|جفن|جفون)[^\.\!\?؟؛;]{0,45}(?:صوت|أصوات|اصوات|بتسمع\w*|تسمع\w*|سمع\w*|أسمع|اسمع)",
         "aliases": {"eyelid", "eyelids", "blink", "blinking", "eye", "eyes", "eyeball", "eyeballs", "eyelash", "eyelashes", "close", "closing", "move", "moving", "جفون", "جفونك", "الجفون", "جفن", "الجفن", "جفنك", "عين", "عينك", "العين", "العينين", "عيني", "عينيك", "عيون", "عيونك", "رمش", "الرمش", "ترمش", "بترمش", "ترف", "تومض", "تغمض", "بتغمض", "تغمز", "غمض", "إغلاق", "اغلاق", "تغلق", "يغلق", "إغماض", "اغماض"},
