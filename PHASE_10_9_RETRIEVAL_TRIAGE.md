@@ -22,7 +22,7 @@ The Urdu benchmark is explicitly blocked pending verification of a genuine Urdu-
 
 ### 1. Freeze and record the baseline
 
-Start from the main commit that contains Phase 10.8.8. Preserve the old five-video JSON report. Its `experiment_metadata` is the reference for the embedding model, index namespace, Python version, Git revision, and effective retrieval settings.
+This branch is based on main commit `4a3d636` (Phase 10.8.8). The Phase 10.9 changes in this PR are diagnostic-only, so the production retrieval path under test is unchanged. Preserve the old five-video JSON report. Its `experiment_metadata` is the reference for the embedding model, index namespace, Python version, Git revision, and effective retrieval settings. New reports will record the Phase 10.9 branch commit as their current Git provenance.
 
 Inspect the prior report before setting any namespace or model override:
 
