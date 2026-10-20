@@ -94,13 +94,24 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     assert evidence["represented_in_plain_text_timestamp_summary"] is True
 
 
-def test_ar08_requires_both_bodily_sound_source_intervals_in_timestamp_summary():
-    answer_text = (
-        "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
-        "حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش."
-    )
+@pytest.mark.parametrize(
+    ("case_id", "answer_text"),
+    [
+        (
+            "AR03",
+            "Your own heartbeat, the blood rushing through your veins, the sounds of your lungs and stomach, and even the subtle noise of your eyelids blinking.",
+        ),
+        (
+            "AR08",
+            "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش.",
+        ),
+    ],
+)
+def test_bodily_sound_timestamp_uses_the_chunk_containing_the_eyelid_phrase(
+    case_id, answer_text
+):
     response = {
-        "answer": answer_text + "\n\nRelevant timestamps: 02:33–03:37, 09:49–10:58",
+        "answer": answer_text + "\n\nRelevant timestamps: 02:33–03:37",
         "retrieval_config": {
             "embedding_model": "BAAI/bge-m3",
             "index_namespace": "experiment-caption-segments",
@@ -126,17 +137,20 @@ def test_ar08_requires_both_bodily_sound_source_intervals_in_timestamp_summary()
                     "budget_chars": 8000, "original_chars": 14430,
                     "final_chars": 7902, "groups_available": 3,
                     "groups_included": 3, "reduced": True,
+                    "included_chunk_ids": ["2", "11"],
                 }
             },
         },
     }
 
-    accepted = analyze_response(_case("AR08"), response)
+    accepted = analyze_response(_case(case_id), response)
     assert accepted["quality"]["passed"] is True
     assert accepted["quality"]["failed_checks"] == []
 
-    response["answer"] = answer_text + "\n\nRelevant timestamps: 04:15–05:18, 09:49–10:58"
-    rejected = analyze_response(_case("AR08"), response)
+    # Chunk 11 is a later sound-wave explanation, not evidence for the eyelid
+    # claim. Its range alone must not satisfy this check.
+    response["answer"] = answer_text + "\n\nRelevant timestamps: 09:49–10:58"
+    rejected = analyze_response(_case(case_id), response)
     assert rejected["quality"]["passed"] is False
     assert "evidence_source_and_timestamp_alignment" in rejected["quality"]["failed_checks"]
 
