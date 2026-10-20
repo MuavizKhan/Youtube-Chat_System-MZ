@@ -218,6 +218,7 @@ def test_index_snapshot_records_metadata_hash_without_returning_transcript_text(
     assert snapshot["state"] == "valid"
     assert snapshot["metadata_sha256"] == hashlib.sha256(raw_metadata).hexdigest()
     assert snapshot["files"]["index.faiss"]["size_bytes"] == len(b"test-faiss")
+    assert snapshot["files"]["index.faiss"]["sha256"] == hashlib.sha256(b"test-faiss").hexdigest()
     assert snapshot["metadata"]["transcript_language_code"] == "en"
     assert "private_transcript_text" not in snapshot["metadata"]
     assert "must never be included" not in json.dumps(snapshot)
