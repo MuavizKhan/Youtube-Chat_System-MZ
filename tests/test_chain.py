@@ -3187,21 +3187,25 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
         "What does Vijay Mallya say about the amount of debt or money "
         "involved in the Kingfisher situation?"
     )
+    filler = (
+        "The speaker describes an unrelated part of the interview without adding "
+        "financial facts. "
+    ) * 12
     source_groups = [
         {
-            "documents": [doc(108, 7267, 7351, "I invested 3,000 crore rupees into Kingfisher Airlines.")],
+            "documents": [doc(108, 7267, 7351, filler + "I invested 3,000 crore rupees into Kingfisher Airlines.")],
             "start": 7267, "end": 7351, "distance": 0.2,
         },
         {
-            "documents": [doc(124, 8314, 8428, "The DRT judgment debt was 4,999 crore rupees plus interest.")],
+            "documents": [doc(124, 8314, 8428, filler + "The DRT judgment debt was 4,999 crore rupees plus interest.")],
             "start": 8314, "end": 8428, "distance": 0.25,
         },
         {
-            "documents": [doc(221, 14939, 15015, "The debt certificate gives a figure of 6203.")],
+            "documents": [doc(221, 14939, 15015, filler + "The debt certificate gives a figure of 6203.")],
             "start": 14939, "end": 15015, "distance": 0.3,
         },
         {
-            "documents": [doc(159, 10630, 10698, "A Ministry of Finance report says 14,100 crore rupees were recovered from me.")],
+            "documents": [doc(159, 10630, 10698, filler + "A Ministry of Finance report says 14,100 crore rupees were recovered from me.")],
             "start": 10630, "end": 10698, "distance": 0.35,
         },
     ]
