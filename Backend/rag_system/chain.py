@@ -2026,7 +2026,7 @@ def _financial_claim_keys_for_context(text: str) -> set[tuple[str, float]]:
     report attribution.
     """
     text = text or ""
-    markers = list(re.finditer(r"(?m)^\\[SOURCE\\s+(\\d+)\\]\\s*$", text))
+    markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", text))
     blocks: dict[int, str] = {}
     for index, marker in enumerate(markers):
         block_end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
@@ -2051,17 +2051,17 @@ def _financial_claim_keys_for_context(text: str) -> set[tuple[str, float]]:
             else ("" if markers else text)
         )
         report_in_source = bool(re.search(
-            r"\\b(?:ministry|finance|report)\\b",
+            r"\b(?:ministry|finance|report)\b",
             source_block,
             re.IGNORECASE,
         ))
         recovery_in_source = bool(re.search(
-            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
             source_block,
             re.IGNORECASE,
         ))
         recovery_in_claim = bool(re.search(
-            r"\\b(?:recover(?:ed|y|ies)?|recovery)\\b",
+            r"\b(?:recover(?:ed|y|ies)?|recovery)\b",
             claim_text,
             re.IGNORECASE,
         ))
