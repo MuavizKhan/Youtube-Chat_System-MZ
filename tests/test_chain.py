@@ -2940,6 +2940,110 @@ def test_generation_context_reserves_bare_certificate_claim_when_topic_is_alread
 
 
 @pytest.mark.unit
+def test_generation_context_reserves_report_recovery_before_noisy_financial_distractors():
+    filler = [
+        "General narration continues without adding another financial claim."
+        for _ in range(18)
+    ]
+    groups = [
+        _caption_group(
+            108, 7267.92,
+            [*filler, "I put in 3,000 crores of UB Group money into Kingfisher Airlines."],
+            0.82,
+        ),
+        _caption_group(
+            114, 7680.0,
+            [
+                *filler,
+                "The tribunal discussed 3,400 crore, 5,600 crore and 7,800 crore in unrelated proceedings.",
+            ],
+            0.72,
+        ),
+        _caption_group(
+            124, 8314.519,
+            [*filler, "The debt recovery tribunal says 4,999 crores was a debt."],
+            0.91,
+        ),
+        _caption_group(
+            153, 10196.399,
+            [*filler, "That's how you've recovered 14,100 crores, right?"],
+            0.82,
+        ),
+        _caption_group(
+            159, 10630.88,
+            [
+                *filler,
+                "It is through the statement in Parliament of the finance minister and the printed report of the Ministry of Finance that they have shown",
+                "The government and the banks have not rendered a statement of account.",
+                "14,100 crores recovered from me.",
+            ],
+            0.83,
+        ),
+        _caption_group(
+            179, 12023.0,
+            [*filler, "A separate account discusses 2,700 crore in payments and expenses."],
+            0.91,
+        ),
+        _caption_group(
+            189, 12705.08,
+            [
+                *filler,
+                "The debt recovery tribunal discussed 6,23 crores plus interest at 11.5%.",
+                "They said the debt was 6,2003 crores and the judgment debt was 6,0002 crores.",
+                "An official recovery of 9,000 crores was also claimed in this noisy passage.",
+            ],
+            0.77,
+        ),
+        _caption_group(
+            192, 12989.64,
+            [*filler, "A financial statement lists 1,200 crore, 2,300 crore and 3,100 crore."],
+            0.81,
+        ),
+        _caption_group(
+            208, 14068.199,
+            [*filler, "Another account refers to payments of 4,200 crore and 8,100 crore."],
+            0.89,
+        ),
+        _caption_group(
+            210, 14206.199,
+            [*filler, "The interviewer mentions a separate debt of 5,300 crore and interest."],
+            0.81,
+        ),
+        _caption_group(
+            221, 14939.359,
+            [
+                *filler,
+                "The debt recovery certificate amount is 6203 crores.",
+                "I showed you the Ministry of Finance report, 14,000 100 recovered.",
+            ],
+            1.12,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question="What amounts of debt, investment, and money recovered are mentioned?",
+        max_chars=4000,
+    )
+
+    context = result["context"]
+    included_ids = result["diagnostics"]["included_chunk_ids"]
+    assert len(context) <= 4000
+    assert "159" in included_ids
+    assert "14,100 crores recovered from me." in context
+    assert "printed report of the Ministry of Finance" in context
+    # The certificate and malformed financial distractors must not prevent
+    # the higher-quality source-local recovery claim from reaching generation.
+    fallback = chain._build_financial_evidence_fallback(
+        "What amounts of debt, investment, and money recovered are mentioned?",
+        context,
+    )
+    assert fallback is not None
+    assert "14,100 crores recovered from me." in fallback
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
+
+
+@pytest.mark.unit
 def test_generation_context_reserves_source_local_report_recovery_amount():
     filler = [
         "General narration continues without adding another financial claim."

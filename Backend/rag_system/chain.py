@@ -2223,6 +2223,36 @@ def build_generation_context(
         chosen_indices: set[int] = set()
         covered_claims: set[tuple[str, float]] = set()
         covered_topics: set[str] = set()
+
+        # Reserve the strongest source-local Finance/Ministry recovery claim
+        # before spending the bounded context budget on other distinct amounts.
+        # Long financial transcripts often contain several noisy numeric claims
+        # (for example ASR-split values such as "14,000 100"). A claim-count
+        # greedy pass can fill all slots with those distractions and omit the
+        # clearer report-attributed amount needed by the safe financial fallback.
+        report_recovery_candidates = [
+            record
+            for record in records
+            if any(
+                topic == "recovery_report"
+                for topic, _amount in record["financial_claims"]
+            )
+        ]
+        if report_recovery_candidates:
+            reserved_recovery_record = min(
+                report_recovery_candidates,
+                key=lambda record: (
+                    record["priority"],
+                    record["distance"],
+                    record["start"],
+                    record["index"],
+                ),
+            )
+            diverse_records.append(reserved_recovery_record)
+            chosen_indices.add(reserved_recovery_record["index"])
+            covered_claims.update(reserved_recovery_record["financial_claims"])
+            covered_topics.update(reserved_recovery_record["financial_topics"])
+
         while len(diverse_records) < selected_count:
             choices = []
             for record in records:
