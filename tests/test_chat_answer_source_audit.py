@@ -421,7 +421,7 @@ def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chun
         "answer": (
             "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
             "وأصوات الرئتين والمعدة، ورمش الجفون.\n\n"
-            "Relevant timestamps: 02:33–03:37, 09:49–10:58"
+            "Relevant timestamps: 02:33–03:37"
         ),
         "retrieval_config": {
             "embedding_model": "BAAI/bge-m3",
@@ -461,9 +461,12 @@ def test_audit_uses_chunks_included_in_generation_context_not_all_retrieved_chun
 
     assert audit["final_context_chunk_ids"] == ["2"]
     assert audit["annotated_evidence_groups"][0]["present_in_final_context"] is True
-    assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is False
+    # The eyelid phrase is verified in chunk 2. Chunk 11 is a later sound-wave
+    # explanation, not evidence for that claim. A retrieved-only fact must not
+    # be treated as evidence present in generation context.
+    assert audit["annotated_evidence_groups"][1]["present_in_final_context"] is True
     assert audit["quality"]["passed"] is False
-    assert "annotated_evidence_in_retrieved_context" in audit["quality"]["failed_checks"]
+    assert "evidence_source_and_timestamp_alignment" in audit["quality"]["failed_checks"]
 
 
 def test_q07_requires_explicit_relationship_uncertainty_not_only_separate_figures():
