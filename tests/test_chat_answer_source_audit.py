@@ -593,3 +593,62 @@ def test_q07_live_shaped_context_fallback_passes_financial_and_timestamp_contrac
         group["represented_in_plain_text_timestamp_summary"]
         for group in audit["annotated_evidence_groups"]
     )
+
+
+def test_timestamp_mojibake_using_windows_punctuation_is_detected():
+    response = {
+        "answer": "A grounded answer.\n\nRelevant timestamps: 00:10â€“00:20",
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": [{"source_id": 1, "chunk_ids": [2], "start": 10, "end": 20}],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [2], "citation_chunk_ids": [2]},
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000, "original_chars": 1000, "final_chars": 1000,
+                    "groups_available": 1, "groups_included": 1, "included_chunk_ids": ["2"],
+                    "reduced": False,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("AR03"), response)
+
+    assert audit["answer_text_encoding_suspect"] is True
+    assert audit["possible_mojibake_markers"] == ["â€“"]
+    assert "encoding_integrity" in audit["quality"]["failed_checks"]
+
+
+def test_q07_audit_rejects_unstructured_deterministic_financial_fallback():
+    response = {
+        "answer": (
+            "The transcript supports these distinct financial statements:\n\n"
+            "- put in 3,000 crores of UB group's money\n"
+            "- debt recovery tribunal's own admission 4,999 crores was a debt right rest is all\n"
+            "- right I showed you the debt recovery certificate amount 6,203 crores I've shown you the ministry of\n"
+            "- The transcript cites the Ministry of Finance report with a recovery figure of 14,100 crore.\n\n"
+            "The transcript does not clearly explain how the DRT judgment and debt-certificate figures relate, so they should not be treated as one total."
+        ),
+        "retrieval_config": {"citation_policy": "selected_anchors"},
+        "sources": [
+            {"source_id": 1, "chunk_ids": [108], "start": 7267.92, "end": 7351.84},
+            {"source_id": 2, "chunk_ids": [124], "start": 8314.519, "end": 8428.16},
+            {"source_id": 3, "chunk_ids": [153], "start": 10196.399, "end": 10301.84},
+            {"source_id": 4, "chunk_ids": [221], "start": 14939.359, "end": 15015.239},
+        ],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [108, 124, 153, 221], "citation_chunk_ids": [108, 124, 153, 221]},
+            "generation": {
+                "grounded_financial_fallback_used": True,
+                "context_budget": {
+                    "budget_chars": 8000, "original_chars": 5000, "final_chars": 5000,
+                    "groups_available": 4, "groups_included": 4,
+                    "included_chunk_ids": ["108", "124", "153", "221"], "reduced": False,
+                },
+            },
+        },
+    }
+
+    audit = analyze_response(_case("Q07"), response)
+
+    assert "financial_fallback_statements_are_structured" in audit["quality"]["failed_checks"]

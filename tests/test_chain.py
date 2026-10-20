@@ -3413,14 +3413,14 @@ Transcript caption segments in chronological order:
 
     assert fallback is not None
     assert "3,000 crore rupees" in fallback
-    assert "4,999 crore rupees" in fallback
-    assert "debt certificate gives a figure of 6,203" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
     assert re.search(
-        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore rupees",
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
         fallback,
         re.IGNORECASE,
     )
-    assert "14,100 crore rupees" in fallback
+    assert "14,100 crore" in fallback
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in fallback
     for malformed in ("6,23 crores", "6,2003 crores", "6,0002 crores", "9,000 crores"):
         assert malformed not in fallback
@@ -3441,10 +3441,10 @@ The Ministry of Finance report said 14,100 crore rupees had been recovered."""
 
     assert fallback is not None
     assert "3,000 crore rupees" in fallback
-    assert "4,999 crore rupees" in fallback
-    assert "debt certificate gives a figure of 6,203" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
     assert re.search(
-        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore rupees",
+        r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
         fallback,
         re.IGNORECASE,
     )
@@ -3480,9 +3480,9 @@ Transcript caption segments in chronological order:
     )
 
     assert fallback is not None
-    assert "3,000 crores" in fallback
-    assert "4,999 crore rupees" in fallback
-    assert "debt recovery certificate amount 6,203 crores" in fallback.casefold()
+    assert "Investment: the transcript says the speaker put in 3,000 crore of UB Group money" in fallback
+    assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
+    assert "Debt certificate: the transcript identifies a certificate amount of 6,203 crore" in fallback
     assert re.search(
         r"ministry of finance report.{0,100}14,100 crore rupees.{0,20}recover",
         fallback,
@@ -3493,6 +3493,36 @@ Transcript caption segments in chronological order:
         re.IGNORECASE,
     )
     assert "does not clearly explain how the drt judgment and debt-certificate figures relate" in fallback.casefold()
+
+
+@pytest.mark.unit
+def test_financial_fallback_formats_claims_as_complete_labeled_statements():
+    context = """[SOURCE 1]
+- [02:01:07–02:02:31] put in 3,000 crores of UB group's money
+[SOURCE 2]
+- [02:18:34–02:19:01] 4,999 crores was a debt
+- [02:19:01–02:20:28] debt recovery tribunal's own admission right rest is all
+[SOURCE 3]
+- [02:49:56–02:51:41] That's how you've recovered 14,100 crores from me.
+[SOURCE 4]
+- [04:09:55–04:10:01] I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203 crores I've shown you the ministry of
+- [04:10:01–04:10:07] finance report 14,000
+- [04:10:04–04:10:10] 100 recovered."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+    )
+
+    assert answer is not None
+    assert "- Investment: the transcript says the speaker put in 3,000 crore of UB Group money." in answer
+    assert "- DRT debt: the transcript describes 4,999 crore as a debt in a passage that mentions the Debt Recovery Tribunal." in answer
+    assert "- Debt certificate: the transcript identifies a certificate amount of 6,203 crore." in answer
+    assert "- Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore with that report." in answer
+    assert "right rest is all" not in answer
+    assert "I've shown you the ministry of" not in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
 
 
 @pytest.mark.unit

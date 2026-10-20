@@ -3317,21 +3317,78 @@ def _build_financial_evidence_fallback(
     if missing_topics:
         return None
 
-    labels = (
-        ("investment", "investment"),
-        ("drt_debt", "DRT judgment debt"),
-        ("certificate", "debt certificate"),
-        ("recovery_report", "Ministry of Finance recovery report"),
-    )
+    def formatted_amount(claim: dict[str, Any]) -> tuple[str, bool]:
+        amount = claim.get("amount")
+        if not isinstance(amount, (int, float)) or not math.isfinite(float(amount)):
+            raise ValueError("Financial fallback requires a finite extracted amount.")
+        value = f"{int(amount):,}" if float(amount).is_integer() else f"{amount:g}"
+        evidence_text = " ".join((
+            str(claim.get("text", "")),
+            str(claim.get("amount_caption", "")),
+        ))
+        crore_rupees = re.search(r"\bcrore\s+rupees?\b", evidence_text, re.IGNORECASE)
+        crore_unit = re.search(r"\bcrores?\b|\bcr\b", evidence_text, re.IGNORECASE)
+        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", evidence_text, re.IGNORECASE)
+        if crore_rupees:
+            return f"{value} crore rupees", True
+        if crore_unit:
+            return f"{value} crore", True
+        if rupee_unit:
+            return f"{value} rupees", True
+        # A bare number is deliberately not given a currency or magnitude unit.
+        return f"the figure {value}", False
+
+    investment_amount, investment_has_unit = formatted_amount(claims_by_topic["investment"])
+    drt_amount, drt_has_unit = formatted_amount(claims_by_topic["drt_debt"])
+    certificate_amount, certificate_has_unit = formatted_amount(claims_by_topic["certificate"])
+    recovery_amount, recovery_has_unit = formatted_amount(claims_by_topic["recovery_report"])
+
     lines = ["The transcript supports these distinct financial statements:"]
-    for topic, _label in labels:
-        lines.append(f"- {claims_by_topic[topic]['text']}")
+    if investment_has_unit:
+        lines.append(
+            f"- Investment: the transcript says the speaker put in {investment_amount} of UB Group money."
+        )
+    else:
+        lines.append(
+            f"- Investment: the transcript mentions putting in {investment_amount} of UB Group money, "
+            "but the cited caption does not state a unit."
+        )
+
+    if drt_has_unit:
+        lines.append(
+            f"- DRT debt: the transcript describes {drt_amount} as a debt in a passage that mentions the Debt Recovery Tribunal."
+        )
+    else:
+        lines.append(
+            f"- DRT debt: the transcript describes {drt_amount} as a debt and mentions the Debt Recovery Tribunal, "
+            "but the amount-bearing caption does not state a unit."
+        )
+
+    if certificate_has_unit:
+        lines.append(
+            f"- Debt certificate: the transcript identifies a certificate amount of {certificate_amount}."
+        )
+    else:
+        lines.append(
+            f"- Debt certificate: the transcript identifies the certificate amount as {certificate_amount}; "
+            "the caption does not state a unit."
+        )
+
+    if recovery_has_unit:
+        lines.append(
+            f"- Ministry of Finance recovery report: the transcript associates a recovery figure of {recovery_amount} with that report."
+        )
+    else:
+        lines.append(
+            f"- Ministry of Finance recovery report: the transcript associates a recovery figure of {recovery_amount} with that report, "
+            "but the cited caption does not state a unit."
+        )
 
     lines.append(
         "The transcript does not clearly explain how the DRT judgment and "
         "debt-certificate figures relate, so they should not be treated as one total."
     )
-    return "\n\n".join([lines[0], "\n".join(lines[1:5]), lines[5]])
+    return "\n\n".join(lines)
 
 
 # ============================================================

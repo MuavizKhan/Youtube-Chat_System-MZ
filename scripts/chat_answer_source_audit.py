@@ -74,7 +74,12 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
 # These marker sequences are strong indicators that non-ASCII answer text has
 # already been decoded with the wrong character encoding. They are warnings,
 # not an automatic repair, because the client must not rewrite model output.
-_MOJIBAKE_MARKERS = ("Ø", "Ù", "â", "Ã", "\ufffd")
+_MOJIBAKE_MARKERS = (
+    "Ø", "Ù", "â", "Ã", "\ufffd",
+    # Common Windows-1252 spellings of UTF-8 punctuation; "â" catches
+    # a different Latin-1/control-code variant.
+    "â€“", "â€”", "â€™", "â€œ", "â€",
+)
 _TIMESTAMP_RANGE_PATTERN = re.compile(
     r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[–—-]\s*"
     r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
@@ -454,6 +459,30 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
     quality_checks = _answer_quality_checks(str(case.get("id", "")), answer)
+
+    generation_used_fallback = generation.get("grounded_financial_fallback_used") is True
+    if str(case.get("id", "")) == "Q07" and generation_used_fallback:
+        required_fallback_labels = (
+            ("Investment", r"(?im)^\s*-\s*Investment:"),
+            ("DRT debt", r"(?im)^\s*-\s*DRT debt:"),
+            ("Debt certificate", r"(?im)^\s*-\s*Debt certificate:"),
+            ("Ministry of Finance recovery report",
+             r"(?im)^\s*-\s*Ministry of Finance recovery report:"),
+        )
+        missing_fallback_labels = [
+            label for label, pattern in required_fallback_labels
+            if not re.search(pattern, _substantive_answer(answer))
+        ]
+        quality_checks.append(_quality_check(
+            "financial_fallback_statements_are_structured",
+            not missing_fallback_labels,
+            (
+                "The deterministic financial fallback uses complete, topic-labeled statements."
+                if not missing_fallback_labels
+                else "Missing complete financial statement labels: "
+                + ", ".join(missing_fallback_labels)
+            ),
+        ))
 
     missing_context_groups = [
         group["label"]
