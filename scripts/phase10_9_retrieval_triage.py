@@ -179,6 +179,11 @@ def _group_summaries(diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 for candidate in (group.get("candidates") or [])
                 if isinstance(candidate, dict)
             ]
+            indexed_candidate_count = group.get("candidate_count")
+            candidate_details_truncated = (
+                isinstance(indexed_candidate_count, int)
+                and indexed_candidate_count > len(candidates)
+            )
             stage_counts = {
                 stage: sum(
                     1
@@ -192,7 +197,10 @@ def _group_summaries(diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "question_id": question_id,
                     "group_index": group.get("group"),
                     "matched_index_phrase": group.get("matched_index_phrase"),
-                    "indexed_candidate_count": group.get("candidate_count"),
+                    "indexed_candidate_count": indexed_candidate_count,
+                    "returned_candidate_detail_count": len(candidates),
+                    "candidate_details_truncated": candidate_details_truncated,
+                    "stage_counts_partial": candidate_details_truncated,
                     "candidate_chunk_ids": list(group.get("candidate_chunk_ids") or []),
                     "raw_anchor_top_k_status": group.get("raw_anchor_top_k_status"),
                     "existing_group_diagnosis": group.get("diagnosis"),
