@@ -127,13 +127,32 @@ def build_index_snapshot(video_id: str) -> dict[str, Any]:
     }
 
 
+def _is_legacy_schema_marker_only(index_snapshot: dict[str, Any]) -> bool:
+    """Whether an otherwise current index lacks only the new segment-schema marker.
+
+    Such indexes are stale for normal production use, but can be traced read-only:
+    the retrieval diagnostic does not require the new per-segment context metadata,
+    and the normal context formatter falls back to whole-chunk text when it is absent.
+    """
+    metadata = index_snapshot.get("metadata")
+    return (
+        index_snapshot.get("state") == "stale"
+        and isinstance(metadata, dict)
+        and "transcript_segment_schema_version" not in metadata
+        and metadata.get("embedding_model") == rag_config.EMBEDDING_MODEL
+        and metadata.get("chunk_size") == rag_config.CHUNK_SIZE
+        and metadata.get("chunk_overlap") == rag_config.CHUNK_OVERLAP
+    )
+
+
 def _index_blocker(
     index_snapshot: dict[str, Any],
     expected_language: str,
 ) -> str | None:
     """Prevent a trace from being misinterpreted when its index is not comparable."""
     state = index_snapshot.get("state")
-    if state != "valid":
+    legacy_schema_trace = _is_legacy_schema_marker_only(index_snapshot)
+    if state != "valid" and not legacy_schema_trace:
         return "index_state_not_valid"
 
     files = index_snapshot.get("files")
@@ -310,6 +329,7 @@ def run_phase10_9_triage(
                 )
                 continue
 
+            legacy_schema_trace = _is_legacy_schema_marker_only(index_snapshot)
             trace = diagnostic_runner(
                 benchmark.video_url,
                 question_ids,
@@ -351,6 +371,21 @@ def run_phase10_9_triage(
                     "status": "completed",
                     "failure_reasons": [],
                     "index_snapshot": index_snapshot,
+                    "index_compatibility": {
+                        "mode": (
+                            "legacy_schema_marker_missing_read_only_trace"
+                            if legacy_schema_trace
+                            else "current_schema"
+                        ),
+                        "production_ready": index_snapshot.get("state") == "valid",
+                        "warning": (
+                            "This index remains stale for normal production use; "
+                            "the trace was allowed only because the segment-schema "
+                            "marker is absent and embedding/chunk settings match."
+                            if legacy_schema_trace
+                            else None
+                        ),
+                    },
                     "diagnostics": trace["diagnostics"],
                     "group_summaries": _group_summaries(trace["diagnostics"]),
                 }
@@ -380,7 +415,10 @@ def run_phase10_9_triage(
         "experiment_metadata": provenance_builder(),
         "purpose": (
             "Stage-level retrieval diagnosis only. A completed trace is not an "
-            "answer-quality pass, and this report does not change production behavior."
+            "answer-quality pass and this report does not change production behavior. "
+            "Legacy indexes missing only transcript_segment_schema_version may be "
+            "traced read-only and are explicitly marked; they remain stale for normal "
+            "production use."
         ),
         "summary": {
             "selected_video_count": len(videos),
@@ -392,6 +430,18 @@ def run_phase10_9_triage(
             ),
             "diagnosed_group_count": sum(
                 len(item["group_summaries"]) for item in completed
+            ),
+            "legacy_schema_trace_count": sum(
+                1
+                for item in completed
+                if item.get("index_compatibility", {}).get("mode")
+                == "legacy_schema_marker_missing_read_only_trace"
+            ),
+            "current_schema_trace_count": sum(
+                1
+                for item in completed
+                if item.get("index_compatibility", {}).get("mode")
+                == "current_schema"
             ),
             "diagnostics_completed": len(completed) == len(videos),
         },
