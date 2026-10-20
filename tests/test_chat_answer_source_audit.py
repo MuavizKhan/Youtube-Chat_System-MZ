@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import scripts.chat_answer_source_audit as audit_module
 from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
