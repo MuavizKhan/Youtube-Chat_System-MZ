@@ -3039,12 +3039,12 @@ def _build_financial_evidence_fallback(
             "candidate_claims": candidate_claim_diagnostics[:30],
             "source_financial_excerpts": {
                 str(source_id): [
-                    re.sub(r"\\s+", " ", line).strip()[:180]
+                    re.sub(r"\s+", " ", line).strip()[:180]
                     for line in block.splitlines()
                     if re.search(
-                        r"\\b(?:drt|tribunal|judg\\w*ment|certificate|debt|"
-                        r"recover\\w*|ministry|finance|report|invest\\w*|crores?|"
-                        r"rupees?|\\d{3,})\\b",
+                        r"\b(?:drt|tribunal|judg\w*ment|certificate|debt|"
+                        r"recover\w*|ministry|finance|report|invest\w*|crores?|"
+                        r"rupees?|\d{3,})\b",
                         line,
                         re.IGNORECASE,
                     )
