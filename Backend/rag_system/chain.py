@@ -4234,10 +4234,30 @@ def build_rag_chain(
             }
 
         answer = generation_chain.invoke(inputs)
+        question_text = inputs.get("question", "")
+        is_financial_question = bool(re.search(
+            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+            question_text,
+            re.IGNORECASE,
+        ))
+        # Keep the model's prompt bounded, but do not let context truncation hide
+        # already-retrieved evidence from deterministic financial validation or
+        # the extractive fallback. This context is built only from retrieved source
+        # groups; it is not external knowledge and is never sent wholesale to the LLM.
+        financial_evidence_context = (
+            build_context(inputs.get("source_groups", []))
+            if is_financial_question and inputs.get("source_groups")
+            else inputs.get("context", "")
+        )
         repair_instruction = _generation_repair_instruction(
-            question=inputs.get("question", ""),
+            question=question_text,
             answer=answer,
-            context=inputs.get("context", ""),
+            context=(
+                financial_evidence_context
+                if is_financial_question
+                else inputs.get("context", "")
+            ),
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
@@ -4262,8 +4282,8 @@ def build_rag_chain(
             ) is None
             if not repair_passed:
                 extractive_answer = _build_financial_evidence_fallback(
-                    question=inputs.get("question", ""),
-                    context=inputs.get("context", ""),
+                    question=question_text,
+                    context=financial_evidence_context,
                 )
                 if extractive_answer is not None:
                     answer = extractive_answer
@@ -4287,6 +4307,34 @@ def build_rag_chain(
                         "no source-bound extractive fallback was available"
                     )
 
+        # Some models abstain immediately when their bounded prompt omits one of
+        # the required financial claim families. If no repair path already tried
+        # the extractor, make one source-bound attempt over all retrieved groups.
+        if (
+            is_financial_question
+            and not grounded_financial_fallback_used
+            and not financial_answer_suppressed
+            and re.search(
+                r"couldn't reliably verify the financial figures",
+                answer or "",
+                re.IGNORECASE,
+            )
+        ):
+            extractive_answer = _build_financial_evidence_fallback(
+                question=question_text,
+                context=financial_evidence_context,
+            )
+            if extractive_answer is not None:
+                answer = extractive_answer
+                grounded_financial_fallback_used = True
+                logger.warning(
+                    "Replacing financial verification abstention with a "
+                    "source-extractive answer from retrieved source groups"
+                )
+            else:
+                answer = FINANCIAL_VERIFICATION_FALLBACK
+                financial_answer_suppressed = True
+
         return {
             "answer": answer,
             "generation_trace": {
@@ -4301,6 +4349,14 @@ def build_rag_chain(
                 "quality_repair_passed": repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
+                "financial_evidence_context_chars": (
+                    len(financial_evidence_context) if is_financial_question else None
+                ),
+                "financial_fallback_context_source": (
+                    "full_retrieved_source_groups"
+                    if grounded_financial_fallback_used
+                    else None
+                ),
             },
         }
 
