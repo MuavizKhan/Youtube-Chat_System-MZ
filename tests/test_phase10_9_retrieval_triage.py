@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from scripts import phase10_9_retrieval_triage as triage
+import scripts.phase10_9_retrieval_triage as triage
 
 
 def _snapshot(video_id, language=None, state="valid"):
