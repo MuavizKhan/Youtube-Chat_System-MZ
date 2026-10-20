@@ -93,7 +93,7 @@ def test_run_triage_records_provenance_index_and_per_stage_group_summary():
         "blocked_video_count": 0,
         "error_video_count": 0,
         "diagnosed_question_count": 6,
-        "diagnosed_group_count": 6,
+        "diagnosed_group_count": 8,
         "diagnostics_completed": True,
     }
 
