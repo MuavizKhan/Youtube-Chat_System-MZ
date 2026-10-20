@@ -6,9 +6,20 @@ import pytest
 import scripts.phase10_9_retrieval_triage as triage
 
 
-def _snapshot(video_id, language=None, state="valid"):
+def _snapshot(video_id, language=None, state="valid", *, legacy_schema=False):
     benchmark = triage.VIDEO_BENCHMARKS[video_id]
     actual_language = language or benchmark.transcript_language
+    metadata = {
+        "metadata_version": 1,
+        "video_id": video_id,
+        "transcript_language_code": actual_language,
+        "embedding_model": triage.rag_config.EMBEDDING_MODEL,
+        "chunk_size": triage.rag_config.CHUNK_SIZE,
+        "chunk_overlap": triage.rag_config.CHUNK_OVERLAP,
+        "chunk_count": 12,
+    }
+    if not legacy_schema:
+        metadata["transcript_segment_schema_version"] = 1
     return {
         "state": state,
         "directory_label": f"Backend/rag_system/vector_stores/{video_id}",
@@ -21,12 +32,7 @@ def _snapshot(video_id, language=None, state="valid"):
             for filename in ("index.faiss", "index.pkl", "metadata.json")
         },
         "metadata_sha256": "example-hash",
-        "metadata": {
-            "video_id": video_id,
-            "transcript_language_code": actual_language,
-            "embedding_model": "test-embedding",
-            "chunk_count": 12,
-        },
+        "metadata": metadata,
         "metadata_error": None,
     }
 
@@ -109,6 +115,8 @@ def test_run_triage_records_provenance_index_and_per_stage_group_summary():
         "error_video_count": 0,
         "diagnosed_question_count": 6,
         "diagnosed_group_count": 8,
+        "legacy_schema_trace_count": 0,
+        "current_schema_trace_count": 3,
         "diagnostics_completed": True,
     }
 
@@ -154,6 +162,55 @@ def test_triage_blocks_index_with_wrong_transcript_language_before_tracing():
     assert report["videos"][0]["failure_reasons"] == [
         "index_transcript_language_mismatch"
     ]
+
+
+def test_triage_allows_legacy_schema_marker_missing_index_for_read_only_trace():
+    calls = []
+
+    def runner(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _trace(*args, **kwargs)
+
+    report = triage.run_phase10_9_triage(
+        video_ids=["fAd2nKfrDB8"],
+        diagnostic_runner=runner,
+        provenance_builder=dict,
+        index_snapshot_builder=lambda video_id: _snapshot(
+            video_id, state="stale", legacy_schema=True
+        ),
+    )
+
+    video = report["videos"][0]
+    assert len(calls) == 1
+    assert video["status"] == "completed"
+    assert video["index_snapshot"]["state"] == "stale"
+    assert video["index_compatibility"]["mode"] == (
+        "legacy_schema_marker_missing_read_only_trace"
+    )
+    assert video["index_compatibility"]["production_ready"] is False
+    assert "remains stale" in video["index_compatibility"]["warning"]
+    assert report["summary"]["legacy_schema_trace_count"] == 1
+    assert report["summary"]["current_schema_trace_count"] == 0
+    assert report["summary"]["diagnostics_completed"] is True
+
+
+def test_triage_still_blocks_stale_index_with_config_mismatch():
+    def mismatched_snapshot(video_id):
+        snapshot = _snapshot(video_id, state="stale", legacy_schema=True)
+        snapshot["metadata"]["embedding_model"] = "different-embedding-model"
+        return snapshot
+
+    report = triage.run_phase10_9_triage(
+        video_ids=["MdeQMVBuGgY"],
+        diagnostic_runner=_trace,
+        provenance_builder=dict,
+        index_snapshot_builder=mismatched_snapshot,
+    )
+
+    assert report["videos"][0]["status"] == "blocked"
+    assert report["videos"][0]["failure_reasons"] == ["index_state_not_valid"]
+    assert report["videos"][0]["diagnostics"] == []
+    assert report["summary"]["diagnostics_completed"] is False
 
 
 def test_triage_blocks_missing_index_and_keeps_the_reason_explicit():
