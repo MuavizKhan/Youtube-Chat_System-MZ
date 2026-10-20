@@ -135,6 +135,22 @@ def _index_blocker(
     if index_snapshot.get("state") != "valid":
         return "index_state_not_valid"
 
+    files = index_snapshot.get("files")
+    required_files = ("index.faiss", "index.pkl", "metadata.json")
+    if not isinstance(files, dict):
+        return "index_file_identity_unavailable"
+    for filename in required_files:
+        record = files.get(filename)
+        digest = record.get("sha256") if isinstance(record, dict) else None
+        if (
+            not isinstance(record, dict)
+            or record.get("exists") is not True
+            or not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest.casefold())
+        ):
+            return "index_file_identity_unavailable"
+
     metadata = index_snapshot.get("metadata")
     if not isinstance(metadata, dict):
         return "index_metadata_unavailable"
