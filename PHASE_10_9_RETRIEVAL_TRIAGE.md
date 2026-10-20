@@ -72,6 +72,12 @@ foreach ($key in $envMap.Keys) {
     [Environment]::SetEnvironmentVariable($envMap[$key], [string]$setting.Value, "Process")
 }
 
+# These settings affect prompt context / citation behavior but are not in the
+# multi-video retrieval-config block. Restore them from their documented defaults
+# for this retrieval-only baseline; do not copy arbitrary shell overrides.
+$env:RAG_GENERATION_CONTEXT_MAX_CHARS = "8000"
+$env:RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = "false"
+
 if ([int]$meta.effective_retrieval_config.top_k -ne 7 -or
     [double]$meta.effective_retrieval_config.max_distance -ne 1.50 -or
     [double]$meta.effective_retrieval_config.lambda_mult -ne 0.70) {
