@@ -3448,6 +3448,51 @@ The Ministry of Finance report said 14,100 crore rupees had been recovered."""
 
 
 @pytest.mark.unit
+def test_financial_fallback_keeps_debt_recovery_certificate_distinct_from_recovery_report():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [00:00–00:10] I put in 3,000 crores of the UB group's money.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [00:10–00:20] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [00:20–00:30] I showed you the debt recovery certificate amount 6,203 crores.
+- [00:30–00:40] I've shown you the Ministry of Finance report.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [00:40–00:50] The Ministry of Finance report says the total amount recovered was
+- [00:50–01:00] 14,100 crore rupees."""
+
+    claims = chain._money_amount_clauses(context)
+    certificate_claim = next(item for item in claims if item["amount"] == 6203)
+    recovery_claim = next(item for item in claims if item["amount"] == 14100)
+    assert certificate_claim["topic"] == "certificate"
+    assert "debt recovery certificate" in certificate_claim["amount_caption"].casefold()
+    assert recovery_claim["topic"] == "recovery_report"
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "3,000 crores" in fallback
+    assert "4,999 crore rupees" in fallback
+    assert "debt recovery certificate amount 6,203 crores" in fallback.casefold()
+    assert re.search(
+        r"ministry of finance report.{0,100}14,100 crore rupees.{0,20}recover",
+        fallback,
+        re.IGNORECASE,
+    ) or re.search(
+        r"ministry of finance report.{0,100}total amount recovered.{0,100}14,100 crore rupees",
+        fallback,
+        re.IGNORECASE,
+    )
+    assert "does not clearly explain how the drt judgment and debt-certificate figures relate" in fallback.casefold()
+
+
+@pytest.mark.unit
 def test_financial_fallback_does_not_borrow_recovery_report_attribution_from_other_source_blocks():
     context = """[SOURCE 1]
 Transcript caption segments in chronological order:
