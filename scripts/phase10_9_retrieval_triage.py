@@ -133,7 +133,9 @@ def _index_blocker(
     if not isinstance(actual_language, str) or not actual_language.strip():
         return "index_transcript_language_unverifiable"
 
-    normalized_language = (\n        actual_language.strip().casefold().replace("_", "-").split("-", 1)[0]\n    )
+    normalized_language = (
+        actual_language.strip().casefold().replace("_", "-").split("-", 1)[0]
+    )
     if normalized_language != expected_language.casefold():
         return "index_transcript_language_mismatch"
 
