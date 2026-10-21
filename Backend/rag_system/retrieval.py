@@ -1229,7 +1229,7 @@ SPEAKER_ATTRIBUTION_PATTERN = re.compile(
 def _split_unicode_words(text: str) -> list[str]:
     """Split on Unicode separators without breaking Indic combining sequences.
 
-    Python's standard \w token pattern excludes some combining marks used in
+    Python's standard \\w token pattern excludes some combining marks used in
     Devanagari, truncating Hindi words such as ऑस्ट्रेलिया. Combining marks stay
     attached to the current token while punctuation/whitespace remain boundaries.
     """
