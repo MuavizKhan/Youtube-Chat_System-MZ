@@ -466,6 +466,32 @@ def test_contextual_query_plan_expands_bodily_sounds_for_arabic_index():
 
 
 @pytest.mark.unit
+def test_retrieve_question_context_returns_weak_match_rejection_status(monkeypatch):
+    candidate = doc(16, 880, 890, "History lesson transcript passage.")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **_kwargs: [(candidate, 1.14832)],
+    )
+    monkeypatch.setattr(retrieval, "lexical_search", lambda **_kwargs: [])
+
+    context, anchors, status = retrieval.retrieve_question_context(
+        store,
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+        max_distance=1.50,
+        return_anchors=True,
+        return_status=True,
+    )
+
+    assert context == []
+    assert anchors == []
+    assert status["weak_native_query_rejected"] is True
+
+
+@pytest.mark.unit
 def test_weak_same_language_semantic_only_match_is_rejected():
     candidate = doc(16, 880, 890, "History lesson transcript passage.")
     candidate.metadata["language_code"] = "hi"
