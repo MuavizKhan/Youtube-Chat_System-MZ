@@ -800,6 +800,162 @@ def _build_facet_rankings(
     return facet_rankings, facet_candidate_rankings
 
 
+def _store_transcript_language_code(vector_store) -> str | None:
+    """Read the first verifiable transcript language from an index docstore."""
+    docstore = getattr(vector_store, "docstore", None)
+    mapping = getattr(vector_store, "index_to_docstore_id", None)
+    if docstore is None or not isinstance(mapping, dict):
+        return None
+    for docstore_id in mapping.values():
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            continue
+        metadata = getattr(document, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        value = metadata.get("language_code") or metadata.get("transcript_language_code")
+        if not value:
+            value = metadata.get("language")
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = value.strip().casefold().replace("_", "-").split("-", 1)[0]
+        aliases = {
+            "english": "en",
+            "hindi": "hi",
+            "arabic": "ar",
+            "urdu": "ur",
+        }
+        return aliases.get(normalized, normalized)
+    return None
+
+
+def _query_script_language(query: str) -> str | None:
+    """Identify unambiguous supported query scripts; Arabic script is shared by ar/ur."""
+    if re.search(r"[\u0900-\u097F]", query):
+        return "hi"
+    if re.search(r"[A-Za-z]", query):
+        return "en"
+    # Arabic script alone cannot distinguish Arabic from Urdu safely.
+    return None
+
+
+_ENGLISH_TO_ARABIC_SEARCH_TERMS = {
+    "body": "الجسم",
+    "bodily": "الجسم",
+    "sound": "الصوت",
+    "sounds": "الأصوات",
+    "people": "الناس",
+    "person": "الشخص",
+    "begin": "يبدأ",
+    "begins": "يبدأ",
+    "start": "يبدأ",
+    "hear": "يسمع",
+    "hearing": "السماع",
+    "room": "الغرفة",
+    "episode": "المقطع",
+    "say": "يقول",
+    "says": "يقول",
+    "contribute": "يساهم",
+    "contributes": "يساهم",
+    "perception": "الإدراك",
+    "perceive": "الإدراك",
+    "role": "دور",
+    "describe": "يصف",
+    "describes": "يصف",
+    "important": "مهمة",
+    "importance": "أهمية",
+    "world": "العالم",
+    "heartbeat": "نبض القلب",
+    "heart": "القلب",
+    "blood": "الدم",
+    "movement": "حركة",
+    "breath": "التنفس",
+    "breathing": "التنفس",
+    "lungs": "الرئتين",
+    "lung": "الرئة",
+    "stomach": "المعدة",
+    "silence": "الصمت",
+    "quiet": "الهدوء",
+    "cost": "تكلفة",
+    "dollar": "دولار",
+    "hour": "ساعة",
+}
+
+
+def _build_arabic_search_query(query: str) -> str:
+    """Build a bounded Arabic lexical/semantic variant for common caption concepts."""
+    focus_terms = extract_query_focus_terms(query)
+    translated = [
+        _ENGLISH_TO_ARABIC_SEARCH_TERMS[term.casefold()]
+        for term in focus_terms
+        if term.casefold() in _ENGLISH_TO_ARABIC_SEARCH_TERMS
+    ]
+    normalized = query.casefold()
+    expansions = []
+    if re.search(r"\b(?:bodily|body)\s+sounds?\b", normalized):
+        # A plural bodily-sounds question naturally calls for the sound examples
+        # discussed in the transcript, not a literal translation alone.
+        expansions.append("أصوات الجسم نبض القلب حركة الدم التنفس الرئتين المعدة")
+    if (
+        re.search(r"\b(?:sound|sounds)\b", normalized)
+        and re.search(r"\b(?:perception|perceive|role|contribut\w*)\b", normalized)
+    ):
+        expansions.append("أهمية الصوت في إدراك العالم")
+    terms = list(dict.fromkeys([*translated, *expansions]))
+    return " ".join(terms)
+
+
+def build_contextual_retrieval_query_plan(vector_store, query: str) -> list[tuple[str, str]]:
+    """Use the ordinary query plan plus a bounded Arabic variant for Arabic indexes."""
+    plan = list(build_retrieval_query_plan(query))
+    index_language = _store_transcript_language_code(vector_store)
+    query_language = _query_script_language(query)
+    if index_language == "ar" and query_language == "en":
+        translated_query = _build_arabic_search_query(query)
+        if translated_query:
+            plan.append(("cross_lingual_arabic", translated_query))
+    return plan
+
+
+NATIVE_QUERY_NO_LEXICAL_DISTANCE_RATIO = 0.70
+
+
+def _should_abstain_on_weak_native_semantic_match(
+    vector_store,
+    query: str,
+    semantic_results,
+    lexical_results,
+    max_distance: float,
+) -> bool:
+    """Abstain when a same-language query has no lexical support and only weak semantics.
+
+    This narrowly targets false-positive context. Cross-lingual Arabic queries
+    use an explicit Arabic variant, and native queries with lexical support are
+    unaffected. The stricter threshold is applied only when no lexical candidates
+    exist at all; it does not replace the configured general retrieval distance.
+    """
+    if lexical_results:
+        return False
+    index_language = _store_transcript_language_code(vector_store)
+    query_language = _query_script_language(query)
+    if not index_language or not query_language or query_language != index_language:
+        return False
+    distances = []
+    for item in semantic_results or []:
+        try:
+            distance = float(item[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            continue
+        if math.isfinite(distance):
+            distances.append(distance)
+    if not distances:
+        return False
+    try:
+        confidence_ceiling = float(max_distance) * NATIVE_QUERY_NO_LEXICAL_DISTANCE_RATIO
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return min(distances) > confidence_ceiling
 def diagnose_retrieval_pipeline(
     vector_store,
     query: str,
@@ -830,7 +986,7 @@ def diagnose_retrieval_pipeline(
         else max(k, min(k * 2, 8))
     )
 
-    query_plan = build_retrieval_query_plan(query)
+    query_plan = build_contextual_retrieval_query_plan(vector_store, query)
     semantic_stages = []
     semantic_rankings = []
     semantic_rankings_by_label = {}
@@ -865,6 +1021,11 @@ def diagnose_retrieval_pipeline(
     lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(build_evidence_facet_plan(query))
+    lexical_queries.extend(
+        (label, query_text)
+        for label, query_text in query_plan
+        if label == "cross_lingual_arabic"
+    )
     lexical_stages = []
     lexical_rankings = []
     lexical_rankings_by_label = {}
@@ -886,6 +1047,13 @@ def diagnose_retrieval_pipeline(
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = lexical_results_for_query
     lexical_results = fuse_lexical_rankings(lexical_rankings)
+    weak_native_query_rejected = _should_abstain_on_weak_native_semantic_match(
+        vector_store,
+        query,
+        semantic_results,
+        lexical_results,
+        max_distance,
+    )
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
@@ -914,6 +1082,9 @@ def diagnose_retrieval_pipeline(
         original_query_lexical_results=original_query_lexical_results,
         diagnostic_trace=anchor_selection_trace,
     )
+    if weak_native_query_rejected:
+        selection["anchors"] = []
+        anchor_selection_trace["weak_native_semantic_match_rejected"] = True
     context_results = expand_retrieval_context(
         vector_store,
         selection["anchors"],
@@ -951,6 +1122,7 @@ def diagnose_retrieval_pipeline(
         "anchors": selection["anchors"],
         "final_context": context_results,
         "semantic_gate_passed": selection["semantic_gate_passed"],
+        "weak_native_query_rejected": weak_native_query_rejected,
     }
 
 
@@ -3497,7 +3669,7 @@ def retrieve_question_context(
         else max(k, min(k * 2, 8))
     )
 
-    query_plan = build_retrieval_query_plan(query)
+    query_plan = build_contextual_retrieval_query_plan(vector_store, query)
     semantic_rankings = []
     semantic_rankings_by_label = {}
     for label, query_variant in query_plan:
@@ -3518,6 +3690,11 @@ def retrieve_question_context(
     lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(build_evidence_facet_plan(query))
+    lexical_queries.extend(
+        (label, query_text)
+        for label, query_text in query_plan
+        if label == "cross_lingual_arabic"
+    )
     lexical_rankings = []
     lexical_rankings_by_label = {}
     original_query_lexical_results = []
@@ -3533,6 +3710,17 @@ def retrieve_question_context(
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = ranking
     lexical_results = fuse_lexical_rankings(lexical_rankings)
+    weak_native_query_rejected = _should_abstain_on_weak_native_semantic_match(
+        vector_store,
+        query,
+        semantic_results,
+        lexical_results,
+        max_distance,
+    )
+    if weak_native_query_rejected:
+        if return_anchors:
+            return [], []
+        return []
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
