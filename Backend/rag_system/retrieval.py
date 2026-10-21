@@ -1638,7 +1638,12 @@ def _normalize_lexical_token(token: str) -> str:
 
     if re.search(r"[\u0600-\u06FF]", normalized):
         # Strip one common attached possessive pronoun before the definite article.
-        for suffix in ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها"):
+        # Final kaf/ha/ya are also valid root letters, so strip those
+        # pronoun forms only when the token does not begin with the article.
+        possessive_suffixes = ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها")
+        if not normalized.startswith("ال"):
+            possessive_suffixes = (*possessive_suffixes, "ك", "ه", "ي")
+        for suffix in possessive_suffixes:
             if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
                 normalized = normalized[:-len(suffix)]
                 break
