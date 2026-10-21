@@ -92,6 +92,30 @@ def test_query_focus_terms_remove_arabic_question_boilerplate():
 
 
 @pytest.mark.unit
+def test_query_focus_terms_remove_hindi_question_boilerplate():
+    terms = retrieval.extract_query_focus_terms(
+        "ऑस्ट्रेलिया की राजधानी क्या है?"
+    )
+
+    assert terms == ["ऑस्ट्रेलिया", "राजधानी"]
+
+
+@pytest.mark.unit
+def test_lexical_search_ignores_common_hindi_function_words_for_unrelated_query():
+    documents = {
+        "a": doc(1, 0, 10, "राजस्थान के इतिहास में किसान आंदोलन क्या था और क्यों हुआ।"),
+        "b": doc(2, 10, 20, "वक्ता कहता है कि यह आंदोलन राजस्थान में शुरू हुआ था।"),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+    )
+
+    assert results == []
+
+
+@pytest.mark.unit
 def test_query_variants_keep_original_and_add_content_focus():
     variants = retrieval.build_retrieval_query_variants(
         "What does Vijay Mallya say about building the Kingfisher brand?"
