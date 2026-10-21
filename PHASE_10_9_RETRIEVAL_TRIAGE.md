@@ -14,7 +14,7 @@ These targets are based on the latest recorded five-video evaluation. They are d
 |---|---|---|---|
 | Kingfisher interview — `MdeQMVBuGgY` | `Q03` | Production context missed a required Kingfisher Red evidence group | Confirm gold phrase exists in the actual index, then trace raw FAISS → MMR → fusion → anchors → context |
 | Agentic engineering workflow — `A-JBaNvv3Tk` | `AI01` | At least one required evidence group was missing | Check every required group independently and identify the first stage where its candidates disappear |
-| Arabic silence video — `fAd2nKfrDB8` | `AR01`–`AR04` | Earlier report showed zero evidence for these evaluated cases | Verify index state and actual transcript language first; distinguish a wrong/stale index from a retrieval miss |
+| Arabic silence video — `fAd2nKfrDB8` | `AR01`–`AR04`, `AR08`–`AR09` | English and native-Arabic evidence cases have had retrieval misses | Verify the index language, then compare raw FAISS candidates, MMR, fusion, anchors, and final context |
 
 The Urdu benchmark is explicitly blocked pending verification of a genuine Urdu-script caption track. We must not fabricate a benchmark by treating an unverified translation as source truth.
 
@@ -22,12 +22,19 @@ The Urdu benchmark is explicitly blocked pending verification of a genuine Urdu-
 
 ### 1. Freeze and record the baseline
 
-This branch is based on main commit `4a3d636` (Phase 10.8.8). The Phase 10.9 changes in this PR are diagnostic-only, so the production retrieval path under test is unchanged. Preserve the old five-video JSON report. Its `experiment_metadata` is the reference for the embedding model, index namespace, Python version, Git revision, and effective retrieval settings. New reports will record the Phase 10.9 branch commit as their current Git provenance.
+This branch is based on main commit `4a3d636` (Phase 10.8.8). The Phase 10.9 changes in this PR are diagnostic-only, so the production retrieval path under test is unchanged. Preserve the old five-video JSON report. Use the metadata-bearing October 20 Phase 10.9 triage report for the recorded embedding model, index namespace, Python version, Git revision, and effective retrieval settings. The October 17 `phase10_4_multivideo_...json` benchmark does not contain `experiment_metadata` and must not be used as the settings source. New reports will record the Phase 10.9 branch commit as their current Git provenance.
 
 Inspect the prior report before setting any namespace or model override:
 
 ```powershell
-$prior = Get-Content ".\evaluation_reports\phase10_4_multivideo_topk7_distance150_lambda070_20261017.json" -Raw | ConvertFrom-Json
+$priorPath = "..\Youtube_Video_ChatSystem\evaluation_reports\phase10_9_retrieval_triage_topk7_distance150_lambda070_20261020-204708.json"
+if (-not (Test-Path -LiteralPath $priorPath)) {
+    throw "Metadata-bearing settings report not found: $priorPath"
+}
+$prior = Get-Content -LiteralPath $priorPath -Raw | ConvertFrom-Json
+if ($null -eq $prior.experiment_metadata) {
+    throw "Selected report has no experiment_metadata. Do not use the 2026-10-17 multi-video report as a settings source."
+}
 $prior.experiment_metadata | ConvertTo-Json -Depth 8
 ```
 
