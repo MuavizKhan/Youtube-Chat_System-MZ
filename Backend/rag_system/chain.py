@@ -4175,10 +4175,15 @@ def _retrieve_with_query_recovery_trace(
         lambda_mult=MMR_LAMBDA,
         max_distance=MAX_DISTANCE,
         return_anchors=True,
+        return_status=True,
     )
-    initial_results, citation_results = _split_retrieval_result_bundle(
-        initial_bundle
-    )
+    if isinstance(initial_bundle, tuple) and len(initial_bundle) == 3:
+        initial_results, citation_results, initial_retrieval_status = initial_bundle
+    else:
+        initial_results, citation_results = _split_retrieval_result_bundle(
+            initial_bundle
+        )
+        initial_retrieval_status = {"weak_native_query_rejected": False}
     attempts.append(
         _build_retrieval_attempt_trace(
             "initial_strict",
@@ -4191,6 +4196,27 @@ def _retrieve_with_query_recovery_trace(
         final_results = initial_results
         final_stage = "initial_strict"
     else:
+        if initial_retrieval_status.get("weak_native_query_rejected"):
+            attempts[-1]["weak_native_query_rejected"] = True
+            attempts[-1]["rejection_reason"] = "weak_native_semantic_match"
+            logger.info(
+                "Abstaining before query-rewrite recovery: same-language retrieval "
+                "has no lexical support and lacks strong semantic confidence."
+            )
+            return [], {
+                "recovery_used": False,
+                "final_stage": "no_evidence_weak_native_match_rejected",
+                "planner_used": False,
+                "planner_intent": None,
+                "planner_latency_ms": 0.0,
+                "attempts": attempts,
+                "retrieval_latency_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+                "final_chunk_ids": [],
+            }
+
         if llm_client is None:
             llm_client = create_llm_client()
 
