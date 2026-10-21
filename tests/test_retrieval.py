@@ -372,6 +372,26 @@ def test_quantitative_how_questions_do_not_trigger_dense_retrieval(query):
 def test_explanatory_youtube_questions_trigger_dense_retrieval(query):
     assert retrieval.is_evidence_dense_question(query)
 
+@pytest.mark.unit
+def test_future_prediction_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "What does the guest predict will become easier for anyone?"
+    )
+
+
+@pytest.mark.unit
+def test_arabic_role_perception_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "كيف يصف المقطع دور الصوت في توجيه الإدراك؟"
+    )
+
+
+@pytest.mark.unit
+def test_bodily_sound_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "What bodily sounds might people begin to hear in the room?"
+    )
+
 
 @pytest.mark.unit
 def test_overview_can_select_one_representative_chunk():
@@ -408,7 +428,47 @@ def test_lexical_search_requires_shared_evidence():
 
 
 @pytest.mark.unit
-def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():
+def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():@pytest.mark.unit
+def test_lexical_search_normalizes_arabic_article_and_possessive_suffix():
+    documents = {
+        "gold": doc(
+            1, 190, 205,
+            "ولكن الحقيقة إن الصوت هو بوصلة مهمة جداً لإدراكنا للعالم."
+        ),
+        "neighbor": doc(
+            2, 205, 220,
+            "مبدأ البساطة والاهتمام بتجربة الصوت في الطبيعة."
+        ),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        limit=8,
+    )
+
+    assert results
+    assert results[0][0].metadata["chunk_id"] == 1
+
+
+@pytest.mark.unit
+def test_lexical_search_normalizes_english_comparatives_for_gold_evidence():
+    documents = {
+        "gold": doc(1, 0, 5, "It is about to get really easy to hack anyone."),
+        "other": doc(2, 10, 15, "The guest discusses AI workflows and shipping."),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "What does the guest predict will become easier for anyone?",
+        limit=8,
+    )
+
+    assert results
+    assert results[0][0].metadata["chunk_id"] == 1
+
+
+
     documents = {
         "answer": doc(
             1, 0, 10,
