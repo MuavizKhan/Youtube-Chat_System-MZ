@@ -4,7 +4,7 @@
 
 Reach a reliable, maintainable level of YouTube transcript question answering without open-ended fine-tuning. Phase 10.9 focuses on reproducibly locating the point where required evidence is lost, then applying only corrections supported by the trace.
 
-This PR adds a targeted runner around the repository's existing retrieval diagnostic machinery. It does not change production retrieval, generation, prompts, embeddings, ranking, thresholds, citation policy, or index format.
+This PR combines a reproducible stage-level diagnostic runner with narrowly scoped retrieval changes grounded in the observed failure traces. It does not change the embedding model, global distance threshold, prompts, generation behavior, citation policy, or index format. The behavior changes are limited to lexical normalization, a bounded Arabic query variant for Arabic-caption indexes, broader candidate budgets for identified evidence-dense question types, and conservative rejection of weak same-language semantic-only matches.
 
 ## Known investigation targets
 
@@ -22,7 +22,7 @@ The Urdu benchmark is explicitly blocked pending verification of a genuine Urdu-
 
 ### 1. Freeze and record the baseline
 
-This branch is based on main commit `4a3d636` (Phase 10.8.8). The Phase 10.9 changes in this PR are diagnostic-only, so the production retrieval path under test is unchanged. Preserve the old five-video JSON report. Use the metadata-bearing October 20 Phase 10.9 triage report for the recorded embedding model, index namespace, Python version, Git revision, and effective retrieval settings. The October 17 `phase10_4_multivideo_...json` benchmark does not contain `experiment_metadata` and must not be used as the settings source. New reports will record the Phase 10.9 branch commit as their current Git provenance.
+This branch is based on main commit `4a3d636` (Phase 10.8.8). Preserve the original five-video baseline report and compare every code change against it using the same index namespace, embedding model, and effective retrieval settings. Because this branch now includes targeted retrieval fixes, the post-change run is a comparison run rather than an unchanged baseline. Use the metadata-bearing October 20 Phase 10.9 triage report for the recorded embedding model, index namespace, Python version, Git revision, and effective retrieval settings. The October 17 `phase10_4_multivideo_...json` benchmark does not contain `experiment_metadata` and must not be used as the settings source. New reports will record the Phase 10.9 branch commit as their current Git provenance.
 
 Inspect the prior report before setting any namespace or model override:
 
@@ -130,7 +130,7 @@ This command uses the existing gold-evidence retrieval trace and captures:
 - Candidate membership/rank evidence from raw FAISS, semantic MMR, semantic fusion, lexical retrieval, hybrid fusion, facet reranking, anchor selection, and production context.
 - The repository's existing group/candidate diagnosis and a concise stage-presence summary. The existing trace returns at most 12 detailed candidate rows per gold group; the report explicitly marks when stage-count summaries are partial because of that detail cap.
 
-The runner does not generate final chatbot answers, modify indexes, or change retrieval behavior. It blocks missing/invalid indexes, stale indexes with embedding/chunk configuration differences, and indexes whose recorded transcript language conflicts with the registered benchmark.
+The triage runner does not generate final chatbot answers or modify indexes. It blocks missing/invalid indexes, stale indexes with embedding/chunk configuration differences, and indexes whose recorded transcript language conflicts with the registered benchmark. The surrounding branch includes bounded retrieval behavior changes, so use this runner to compare the first stage where gold evidence appears or disappears before and after a fix.
 
 There is one deliberately narrow exception for diagnosis: an otherwise valid legacy index may be traced read-only when its *only* stale condition is that `transcript_segment_schema_version` is absent, while its embedding model and chunk size/overlap match the current configuration. Such videos still show `index_snapshot.state = "stale"` and are marked with `index_compatibility.mode = "legacy_schema_marker_missing_read_only_trace"`. This permits evidence-loss diagnosis against the existing persisted chunks without rebuilding them. It does **not** make those indexes production-ready, prove that the run reproduces an older benchmark configuration, or authorize relaxing other index guards. Any other stale state remains blocked.
 
@@ -183,6 +183,6 @@ Before calling Phase 10.9 complete:
 
 ## Scope boundary and follow-up work
 
-This first PR only establishes the reproducible diagnostic runbook and runner. It intentionally does not try to close the underlying retrieval failures without the local index traces. After those reports are reviewed, make the minimal validated fixes in this Phase 10.9 branch/PR (or a narrowly scoped follow-up PR if the evidence shows independent defects).
+This PR includes the diagnostic runner and focused first-pass fixes for the three failure patterns: (1) reject weak same-language semantic-only matches without lexical corroboration, (2) preserve candidate recall for prediction/bodily-sound questions and normalize selected English/Arabic lexical forms, and (3) add an Arabic retrieval variant for English questions over verified Arabic-caption indexes. These are hypotheses backed by the current traces, not quality-pass claims. Keep the PR in draft until CI passes and the same five-video evaluation plus answer/source audit confirm the expected improvements without regressions. If one target remains failing, use its updated stage trace to isolate the next smallest change instead of expanding the global configuration.
 
 At the close of Phase 10, return to the earlier phases for a consolidated pass over remaining cross-phase issues. Do not expand this phase into that full-system review prematurely.
