@@ -30,7 +30,7 @@ REPORT_SCHEMA_VERSION = "1.0.0"
 DEFAULT_DIAGNOSTIC_TARGETS: dict[str, tuple[str, ...]] = {
     "MdeQMVBuGgY": ("Q03",),
     "A-JBaNvv3Tk": ("AI01",),
-    "fAd2nKfrDB8": ("AR01", "AR02", "AR03", "AR04"),
+    "fAd2nKfrDB8": ("AR01", "AR02", "AR03", "AR04", "AR08", "AR09"),
 }
 
 _INDEX_METADATA_FIELDS = (
