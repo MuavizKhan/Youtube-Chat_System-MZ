@@ -428,6 +428,89 @@ def test_lexical_search_requires_shared_evidence():
 
 
 @pytest.mark.unit
+def test_contextual_query_plan_adds_arabic_terms_for_english_question_on_arabic_index():
+    candidate = doc(1, 190, 205, "الصوت هو بوصلة مهمة جداً لإدراكنا للعالم.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "What does the episode say sound contributes to perception, and how does it describe sound's role?",
+    )
+
+    translated = [
+        query for label, query in plan if label == "cross_lingual_arabic"
+    ]
+    assert len(translated) == 1
+    assert "الصوت" in translated[0]
+    assert "الإدراك" in translated[0]
+    assert "أهمية الصوت في إدراك العالم" in translated[0]
+
+
+@pytest.mark.unit
+def test_contextual_query_plan_expands_bodily_sounds_for_arabic_index():
+    candidate = doc(1, 190, 205, "نبض قلبك وحركة الدم والتنفس داخل الغرفة.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "What bodily sounds might people begin to hear in the room?",
+    )
+
+    translated = [
+        query for label, query in plan if label == "cross_lingual_arabic"
+    ]
+    assert translated
+    assert "نبض القلب حركة الدم التنفس الرئتين المعدة" in translated[0]
+
+
+@pytest.mark.unit
+def test_weak_same_language_semantic_only_match_is_rejected():
+    candidate = doc(16, 880, 890, "History lesson transcript passage.")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    assert retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+        [(candidate, 1.14832)],
+        [],
+        1.50,
+    )
+
+
+@pytest.mark.unit
+def test_native_semantic_match_is_not_rejected_when_lexical_support_exists():
+    candidate = doc(3, 190, 205, "पहला बड़ा किसान आंदोलन")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    assert not retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "किस किसान आंदोलन को पहला बड़ा आंदोलन बताया गया है?",
+        [(candidate, 0.9)],
+        [(candidate, 0.3)],
+        1.50,
+    )
+
+
+@pytest.mark.unit
+def test_weak_query_is_not_rejected_when_query_and_index_languages_differ():
+    candidate = doc(1, 0, 10, "Arabic transcript passage.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"arabic": candidate})
+
+    assert not retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "What does sound contribute to perception?",
+        [(candidate, 1.4)],
+        [],
+        1.50,
+    )
+
+
+@pytest.mark.unit
 def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():@pytest.mark.unit
 def test_lexical_search_normalizes_arabic_article_and_possessive_suffix():
     documents = {
