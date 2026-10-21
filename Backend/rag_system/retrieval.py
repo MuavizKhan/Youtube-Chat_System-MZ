@@ -1188,7 +1188,24 @@ ARABIC_QUERY_FOCUS_STOPWORDS = {
     "حول", "بين", "اللي", "ايه", "أيه", "يصف", "المقطع",
 }
 
-QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
+# Hindi question/function words should not count as lexical evidence. In
+# particular, "की", "क्या", and "है" occur frequently across unrelated Hindi
+# transcripts and can make an unrelated question look lexically supported.
+HINDI_QUERY_FOCUS_STOPWORDS = {
+    "की", "के", "का", "को", "में", "से", "पर", "और", "या", "लेकिन",
+    "क्या", "कौन", "किस", "किसे", "किसका", "किसकी", "किसके", "किसने",
+    "किसको", "कैसे", "कहाँ", "कहां", "कब", "क्यों", "कितना", "कितने",
+    "कितनी", "है", "हैं", "था", "थी", "थे", "हो", "हूँ", "हूं",
+    "होता", "होती", "होते", "यह", "ये", "वह", "वे", "इस", "उस",
+    "इन", "उन", "अपना", "अपने", "अपनी", "नहीं", "न", "लिए", "तक",
+    "जैसे", "जब", "तब", "भी", "ही", "तो", "वाला", "वाली", "वाले",
+}
+
+QUERY_FOCUS_STOPWORDS = (
+    STOPWORDS
+    | ARABIC_QUERY_FOCUS_STOPWORDS
+    | HINDI_QUERY_FOCUS_STOPWORDS
+    | {
     "he", "she", "his", "her", "their", "them", "me", "my", "your", "our",
     "we", "i", "say", "says", "said", "tell", "tells", "told",
     "discuss", "discusses", "discussed", "describe", "describes",
@@ -1196,7 +1213,8 @@ QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
     "talking", "mention", "mentions", "mentioned", "give", "gives",
     "given", "provide", "provides", "provided", "does", "did",
     "video", "interview",
-}
+    }
+)
 
 SPEAKER_ATTRIBUTION_PATTERN = re.compile(
     r"\b(?:does|did|is|are|was|were|can|could|would|will|has|have|had)"
