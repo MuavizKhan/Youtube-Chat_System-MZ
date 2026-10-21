@@ -956,6 +956,8 @@ def _should_abstain_on_weak_native_semantic_match(
     except (TypeError, ValueError, OverflowError):
         return False
     return min(distances) > confidence_ceiling
+
+
 def diagnose_retrieval_pipeline(
     vector_store,
     query: str,
@@ -1637,9 +1639,7 @@ def _normalize_lexical_token(token: str) -> str:
     }))
 
     if re.search(r"[\u0600-\u06FF]", normalized):
-        # Strip one common attached possessive pronoun before the definite article.
-        # Final kaf/ha/ya are also valid root letters, so strip those
-        # pronoun forms only when the token does not begin with the article.
+        # Strip one common attached possessive pronoun before common clitics.
         possessive_suffixes = ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها")
         if not normalized.startswith("ال"):
             possessive_suffixes = (*possessive_suffixes, "ك")
@@ -1647,6 +1647,14 @@ def _normalize_lexical_token(token: str) -> str:
             if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
                 normalized = normalized[:-len(suffix)]
                 break
+        # Normalize common proclitics only when followed by the definite article
+        # or a long form, retaining the original token if unsure.
+        for prefix in ("و", "ف", "ب", "ل", "ك"):
+            if normalized.startswith(prefix) and len(normalized) >= 6:
+                remainder = normalized[1:]
+                if remainder.startswith("ال") or (prefix == "ل" and remainder.startswith("ا")):
+                    normalized = remainder
+                    break
         if normalized.startswith("ال") and len(normalized) > 4:
             normalized = normalized[2:]
         return normalized
