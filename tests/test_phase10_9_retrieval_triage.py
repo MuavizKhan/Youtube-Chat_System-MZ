@@ -94,7 +94,7 @@ def test_default_targets_cover_only_the_three_known_failure_videos():
     assert triage.DEFAULT_DIAGNOSTIC_TARGETS["MdeQMVBuGgY"] == ("Q03",)
     assert triage.DEFAULT_DIAGNOSTIC_TARGETS["A-JBaNvv3Tk"] == ("AI01",)
     assert triage.DEFAULT_DIAGNOSTIC_TARGETS["fAd2nKfrDB8"] == (
-        "AR01", "AR02", "AR03", "AR04"
+        "AR01", "AR02", "AR03", "AR04", "AR08", "AR09"
     )
 
 
@@ -113,8 +113,8 @@ def test_run_triage_records_provenance_index_and_per_stage_group_summary():
         "completed_video_count": 3,
         "blocked_video_count": 0,
         "error_video_count": 0,
-        "diagnosed_question_count": 6,
-        "diagnosed_group_count": 8,
+        "diagnosed_question_count": 8,
+        "diagnosed_group_count": 10,
         "legacy_schema_trace_count": 0,
         "current_schema_trace_count": 3,
         "diagnostics_completed": True,
@@ -123,7 +123,7 @@ def test_run_triage_records_provenance_index_and_per_stage_group_summary():
     arabic = next(item for item in report["videos"] if item["video_id"] == "fAd2nKfrDB8")
     assert arabic["status"] == "completed"
     assert arabic["index_snapshot"]["metadata"]["transcript_language_code"] == "ar"
-    assert len(arabic["diagnostics"]) == 4
+    assert len(arabic["diagnostics"]) == 6
     group = arabic["group_summaries"][0]
     assert group["question_id"] == "AR01"
     assert group["existing_group_diagnosis"] == "evidence_in_top_k"
