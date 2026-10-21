@@ -98,6 +98,9 @@ def test_query_focus_terms_remove_hindi_question_boilerplate():
     )
 
     assert terms == ["ऑस्ट्रेलिया", "राजधानी"]
+    assert retrieval._split_unicode_words("ऑस्ट्रेलिया राजधानी") == [
+        "ऑस्ट्रेलिया", "राजधानी"
+    ]
 
 
 @pytest.mark.unit
