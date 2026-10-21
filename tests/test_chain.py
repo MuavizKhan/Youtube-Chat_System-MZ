@@ -1409,6 +1409,35 @@ def test_retrieval_trace_records_recovery_stage(monkeypatch):
 
 
 @pytest.mark.unit
+def test_query_recovery_stops_on_weak_native_semantic_rejection(monkeypatch):
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **_kwargs: (
+            [],
+            [],
+            {"weak_native_query_rejected": True},
+        ),
+    )
+
+    def unexpected_query_planning(**_kwargs):
+        raise AssertionError("Weak native-query rejection must bypass query planning.")
+
+    monkeypatch.setattr(chain, "understand_query", unexpected_query_planning)
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="ऑस्ट्रेलिया की राजधानी क्या है?",
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "no_evidence_weak_native_match_rejected"
+    assert trace["planner_used"] is False
+    assert trace["attempts"][-1]["weak_native_query_rejected"] is True
+
+
+@pytest.mark.unit
 def test_query_recovery_keeps_fast_path_when_initial_retrieval_succeeds(monkeypatch):
     expected = [(doc(1, 0, 10, "direct evidence"), 0.2)]
     calls = {"understand": 0}
