@@ -1011,7 +1011,7 @@ STOPWORDS = {
 ARABIC_QUERY_FOCUS_STOPWORDS = {
     "كم", "قد", "هل", "ما", "ماذا", "لماذا", "كيف", "أين", "اين", "متى",
     "من", "في", "على", "إلى", "الى", "عن", "مع", "داخل", "لمدة", "خلال",
-    "حول", "بين", "اللي", "ايه", "أيه",
+    "حول", "بين", "اللي", "ايه", "أيه", "يصف", "المقطع",
 }
 
 QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
@@ -1447,6 +1447,40 @@ def get_all_documents(
     return documents
 
 
+def _normalize_lexical_token(token: str) -> str:
+    """Normalize a small set of surface variants for lexical evidence matching.
+
+    This is deliberately conservative: it is not a full Arabic stemmer or an
+    English lemmatizer. It handles common Arabic alef/ya variants, the definite
+    article and possessive clitics, plus English comparative/superlative forms
+    such as easier/easiest matching easy.
+    """
+    if not isinstance(token, str) or not token:
+        return ""
+
+    normalized = token.casefold()
+    normalized = re.sub(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]", "", normalized)
+    normalized = normalized.translate(str.maketrans({
+        "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي",
+    }))
+
+    if re.search(r"[\u0600-\u06FF]", normalized):
+        # Strip one common attached possessive pronoun before the definite article.
+        for suffix in ("نا", "هم", "هن", "ها", "ه", "كم", "كن", "ك", "ي"):
+            if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
+                normalized = normalized[:-len(suffix)]
+                break
+        if normalized.startswith("ال") and len(normalized) > 4:
+            normalized = normalized[2:]
+        return normalized
+
+    if normalized.endswith("iest") and len(normalized) > 5:
+        return normalized[:-4] + "y"
+    if normalized.endswith("ier") and len(normalized) > 4:
+        return normalized[:-3] + "y"
+    return normalized
+
+
 def lexical_search(
     vector_store,
     query: str,
@@ -1472,11 +1506,18 @@ def lexical_search(
     if not documents:
         return []
 
-    unique_terms = list(dict.fromkeys(term.casefold() for term in focus_terms))
+    unique_terms = list(dict.fromkeys(
+        normalized for term in focus_terms
+        if (normalized := _normalize_lexical_token(term))
+    ))
     tokenized_documents = []
     for document in documents:
         text = document.page_content.casefold()
-        tokens = set(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
+        tokens = {
+            normalized
+            for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+            if (normalized := _normalize_lexical_token(token))
+        }
         tokenized_documents.append((document, text, tokens))
 
     document_frequency = {term: 0 for term in unique_terms}
@@ -1895,6 +1936,24 @@ def is_evidence_dense_question(query: str) -> bool:
 
     normalized = " ".join(query.casefold().split())
     focus_terms = extract_query_focus_terms(query)
+
+    # Predictions and future-facing claims can be answer-bearing even when the
+    # relevant passage is less lexically similar than surrounding discussion.
+    if re.search(r"\b(?:predict\w*|forecast\w*|projection\w*)\b", normalized):
+        return True
+
+    # Questions about plural bodily sounds can require evidence across several
+    # neighboring transcript segments; use the wider candidate shortlist.
+    if re.search(r"\b(?:bodily|body)\s+sounds?\b", normalized):
+        return True
+
+    # English-only intent rules miss common Arabic role/perception questions.
+    if (
+        re.search(r"(?:^|[^\w])(?:كيف|لماذا|ما|ماذا)(?:$|[^\w])", normalized)
+        and re.search(r"(?:^|[^\w])(?:دور|تأثير|اثر|أثر|أهمية|توجيه|الإدراك|الادراك)(?:$|[^\w])", normalized)
+    ):
+        return True
+
     quantitative_how = re.match(
         r"^how\s+(?:many|much|long|old|far|tall|wide|high|heavy|often|soon|fast|big|large|small)\b",
         normalized,
