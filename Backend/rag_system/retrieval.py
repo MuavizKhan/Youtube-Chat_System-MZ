@@ -1642,7 +1642,7 @@ def _normalize_lexical_token(token: str) -> str:
         # pronoun forms only when the token does not begin with the article.
         possessive_suffixes = ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها")
         if not normalized.startswith("ال"):
-            possessive_suffixes = (*possessive_suffixes, "ك", "ه", "ي")
+            possessive_suffixes = (*possessive_suffixes, "ك")
         for suffix in possessive_suffixes:
             if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
                 normalized = normalized[:-len(suffix)]
