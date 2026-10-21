@@ -22,6 +22,7 @@ This file does NOT:
 import logging
 import math
 import re
+import unicodedata
 from typing import Any
 from functools import lru_cache
 from pathlib import Path
@@ -1225,6 +1226,28 @@ SPEAKER_ATTRIBUTION_PATTERN = re.compile(
 )
 
 
+def _split_unicode_words(text: str) -> list[str]:
+    """Split on Unicode separators without breaking Indic combining sequences.
+
+    Python's standard \w token pattern excludes some combining marks used in
+    Devanagari, truncating Hindi words such as ऑस्ट्रेलिया. Combining marks stay
+    attached to the current token while punctuation/whitespace remain boundaries.
+    """
+    words: list[str] = []
+    current: list[str] = []
+    for character in text:
+        category = unicodedata.category(character)
+        if character.isalnum() or category.startswith("M"):
+            current.append(character)
+        else:
+            if current:
+                words.append("".join(current))
+                current = []
+    if current:
+        words.append("".join(current))
+    return words
+
+
 def extract_query_focus_terms(
     query: str,
 ) -> list[str]:
@@ -1243,7 +1266,7 @@ def extract_query_focus_terms(
         count=1,
     )
 
-    words = re.findall(r"[^\W_]+", normalized_query, flags=re.UNICODE)
+    words = _split_unicode_words(normalized_query)
     return [
         word
         for word in words
