@@ -3643,6 +3643,7 @@ def retrieve_question_context(
     expand_context: bool = True,
     allow_overview: bool = True,
     return_anchors: bool = False,
+    return_status: bool = False,
 ):
     """Retrieve transcript evidence, optionally retaining anchors before expansion.
 
@@ -3656,8 +3657,13 @@ def retrieve_question_context(
     )
     if allow_overview and is_overview_question(query):
         overview_results = retrieve_overview(vector_store)
+        status = {"weak_native_query_rejected": False}
         if return_anchors:
+            if return_status:
+                return overview_results, overview_results, status
             return overview_results, overview_results
+        if return_status:
+            return overview_results, status
         return overview_results
 
     dense_question = is_evidence_dense_question(query)
@@ -3723,6 +3729,11 @@ def retrieve_question_context(
         max_distance,
     )
     if weak_native_query_rejected:
+        status = {"weak_native_query_rejected": True}
+        if return_status and return_anchors:
+            return [], [], status
+        if return_status:
+            return [], status
         if return_anchors:
             return [], []
         return []
@@ -3754,8 +3765,13 @@ def retrieve_question_context(
     )
     raw_results = selection["anchors"]
     if not expand_context:
+        status = {"weak_native_query_rejected": False}
         if return_anchors:
+            if return_status:
+                return raw_results, raw_results, status
             return raw_results, raw_results
+        if return_status:
+            return raw_results, status
         return raw_results
 
     expanded_results = expand_retrieval_context(
@@ -3763,7 +3779,12 @@ def retrieve_question_context(
         raw_results,
         max_chunks=selection["context_max_chunks"],
     )
+    status = {"weak_native_query_rejected": False}
     if return_anchors:
+        if return_status:
+            return expanded_results, raw_results, status
         return expanded_results, raw_results
+    if return_status:
+        return expanded_results, status
     return expanded_results
 
