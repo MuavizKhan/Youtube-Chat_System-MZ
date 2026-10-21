@@ -1639,7 +1639,18 @@ def _normalize_lexical_token(token: str) -> str:
     }))
 
     if re.search(r"[\u0600-\u06FF]", normalized):
-        # Strip one common attached possessive pronoun before common clitics.
+        # Normalize common proclitics before possessive suffixes. This matters
+        # for forms such as "لإدراكنا": removing the prefix first preserves the
+        # root-final kaf when the possessive suffix is stripped afterward.
+        for prefix in ("و", "ف", "ب", "ل", "ك"):
+            if normalized.startswith(prefix) and len(normalized) >= 6:
+                remainder = normalized[1:]
+                if remainder.startswith("ال") or (prefix == "ل" and remainder.startswith("ا")):
+                    normalized = remainder
+                    break
+        if normalized.startswith("لل") and len(normalized) > 5:
+            normalized = normalized[2:]
+
         possessive_suffixes = ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها")
         if not normalized.startswith("ال"):
             possessive_suffixes = (*possessive_suffixes, "ك")
@@ -1647,14 +1658,6 @@ def _normalize_lexical_token(token: str) -> str:
             if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
                 normalized = normalized[:-len(suffix)]
                 break
-        # Normalize common proclitics only when followed by the definite article
-        # or a long form, retaining the original token if unsure.
-        for prefix in ("و", "ف", "ب", "ل", "ك"):
-            if normalized.startswith(prefix) and len(normalized) >= 6:
-                remainder = normalized[1:]
-                if remainder.startswith("ال") or (prefix == "ل" and remainder.startswith("ا")):
-                    normalized = remainder
-                    break
         if normalized.startswith("ال") and len(normalized) > 4:
             normalized = normalized[2:]
         return normalized
