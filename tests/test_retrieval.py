@@ -537,7 +537,6 @@ def test_weak_query_is_not_rejected_when_query_and_index_languages_differ():
 
 
 @pytest.mark.unit
-@pytest.mark.unit
 def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():
     documents = {
         "answer": doc(
