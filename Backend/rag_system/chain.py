@@ -3316,16 +3316,40 @@ def _build_financial_evidence_fallback(
             if topic == "certificate" and local_topic == "certificate"
             else ""
         )
-        claims_by_topic.setdefault(
-            topic,
-            {
-                **claim,
-                "topic": topic,
-                "text": claim_text,
-                "amount_caption": claim.get("amount_caption") or claim_text,
-                "amount_unit_context": unit_context,
-            },
-        )
+        selected_claim = {
+            **claim,
+            "topic": topic,
+            "text": claim_text,
+            "amount_caption": claim.get("amount_caption") or claim_text,
+            "amount_unit_context": unit_context,
+        }
+        existing_claim = claims_by_topic.get(topic)
+        if existing_claim is None:
+            claims_by_topic[topic] = selected_claim
+        elif (
+            topic == "certificate"
+            and math.isclose(
+                float(existing_claim.get("amount", -1)),
+                float(amount),
+                rel_tol=0.0,
+                abs_tol=0.1,
+            )
+            and not existing_claim.get("amount_unit_context")
+            and unit_context
+        ):
+            # Overlapping strict/bare amount parsers can recognize the same
+            # certificate figure. Preserve the first claim's attribution, but
+            # enrich only its unit metadata from a duplicate candidate for the
+            # same numeric amount and source block.
+            same_source = (
+                existing_claim.get("source_id") == source_id
+                and _financial_claim_topic(
+                    str(existing_claim.get("amount_caption") or "")
+                ) == "certificate"
+                and _financial_claim_topic(amount_caption) == "certificate"
+            )
+            if same_source:
+                existing_claim["amount_unit_context"] = unit_context
 
     missing_topics = [
         topic for topic in required_topics
