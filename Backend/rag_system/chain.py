@@ -3372,6 +3372,8 @@ def _build_financial_evidence_fallback(
                     "amount": claim.get("amount"),
                     "excerpt": str(claim.get("text", ""))[:240],
                     "source_id": claim.get("source_id"),
+                    "amount_caption": str(claim.get("amount_caption") or "")[:180],
+                    "amount_unit_context": str(claim.get("amount_unit_context") or "")[:240],
                 }
                 for topic, claim in claims_by_topic.items()
             },
