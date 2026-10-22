@@ -3595,8 +3595,9 @@ def test_financial_fallback_rejects_malformed_number_and_reads_adjacent_recovery
     assert diagnostics["missing_topics"] == []
     assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
     assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
-    assert "figure 6,203" in answer
+    assert "certificate amount of 6,203 crore" in answer
     assert "recovery figure of 14,100 crore" in answer
+    assert "14,000 crore recovered" not in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
 
 
