@@ -3551,6 +3551,56 @@ def test_financial_fallback_formats_claims_as_complete_labeled_statements():
 
 
 @pytest.mark.unit
+def test_financial_fallback_rejects_malformed_number_and_reads_adjacent_recovery_caption():
+    context = """[SOURCE 1]
+- [02:01:17–02:01:24] put in 3,000 crores of UB group's money
+[SOURCE 2]
+- [02:20:11–02:20:18] debt recovery tribunal's own admission
+- [02:20:15–02:20:21] 4,999 crores was a debt
+[SOURCE 3]
+- [03:31:36–03:31:40] says recovery
+- [03:31:40–03:31:50] 6,23 crores 35 lakhs 3,879 and Pisa 42 only.
+[SOURCE 4]
+- [04:09:55–04:10:01] right I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203
+- [04:10:01–04:10:08] crores I've shown you the ministry of
+- [04:10:04–04:10:11] finance report 14,000
+- [04:10:08–04:10:15] 100 recovered.
+[SOURCE 5]
+- [02:57:25–02:57:30] minister and printed report of the
+- [02:57:29–02:57:33] Ministry of Finance that they have shown 14,100
+- [02:57:33–02:57:38] crores recovered from me."""
+
+    claims = chain._money_amount_clauses(context)
+    assert not any(
+        item["amount"] == 623 and item.get("topic") == "certificate"
+        for item in claims
+    )
+
+    recovery_claims = [
+        item for item in claims
+        if item["amount"] == 14100 and item.get("topic") == "recovery_report"
+    ]
+    assert recovery_claims
+    assert recovery_claims[0]["source_id"] == 5
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert diagnostics["missing_topics"] == []
+    assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
+    assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
+    assert "figure 6,203" in answer
+    assert "recovery figure of 14,100 crore" in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
 def test_financial_fallback_does_not_borrow_recovery_report_attribution_from_other_source_blocks():
     context = """[SOURCE 1]
 Transcript caption segments in chronological order:
