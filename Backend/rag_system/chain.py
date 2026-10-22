@@ -3362,6 +3362,15 @@ def _build_financial_evidence_fallback(
             return f"{value} crore", True
         if rupee_unit:
             return f"{value} rupees", True
+        # A unitless certificate figure may be completed only from an adjacent
+        # caption within the same source group. The claim's amount_caption is
+        # bounded to the number's own caption and its immediate same-source
+        # neighbors; it cannot borrow a unit from another [SOURCE n] block.
+        local_captions = str(claim.get("amount_caption") or "")
+        if re.search(r"\bcrore\s+rupees?\b", local_captions, re.IGNORECASE):
+            return f"{value} crore rupees", True
+        if re.search(r"\bcrores?\b|\bcr\b", local_captions, re.IGNORECASE):
+            return f"{value} crore", True
         # A bare number is deliberately not given a currency or magnitude unit.
         return f"the figure {value}", False
 
