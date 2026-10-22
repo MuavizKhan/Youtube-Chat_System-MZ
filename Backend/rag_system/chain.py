@@ -2676,7 +2676,24 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         if not math.isfinite(amount):
             continue
 
-        own_caption, nearby_captions, source_id = caption_context(match.start())
+        # The amount regex scans the fully formatted context, while caption
+        # lookup is keyed to caption text offsets. Resolve the caption using
+        # the amount token's position in its matching caption line, not the
+        # global position in the decorated [SOURCE]/timestamp context.
+        caption_match = next(
+            (
+                row for row in caption_rows
+                if row["start"] <= match.start() <= row["end"]
+            ),
+            None,
+        )
+        caption_position = (
+            caption_match["text_start"]
+            + text[caption_match["text_start"]:caption_match["end"]].find(match.group(0))
+            if caption_match is not None
+            else match.start()
+        )
+        own_caption, nearby_captions, source_id = caption_context(caption_position)
         if source_id is None:
             source_id = source_id_at(match.start())
         topic = _financial_claim_topic(clause)
