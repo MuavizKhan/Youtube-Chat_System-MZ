@@ -416,8 +416,8 @@ _MODEL_TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
 
 _MONEY_AMOUNT_PATTERN = re.compile(
     r"(?:"
-    r"(?:₹|INR\b|Rs\.?)\s*(?P<currency_amount>\d[\d,]*(?:\.\d+)?)"
-    r"|(?<![\w:])(?P<amount>\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?:₹|INR\b|Rs\.?)\s*(?P<currency_amount>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    r"|(?<![\w:,])(?P<amount>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*"
     r"(?:crores?\b|cr\b|rupees?\b|INR\b|percent\b|%)"
     r")",
     re.IGNORECASE,
@@ -2761,7 +2761,10 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         )
         and re.search(
             r"\b(?:crores?|cr|rupees?)\b",
-            str(record.get("amount_caption") or record.get("text", "")),
+            " ".join((
+                str(record.get("amount_caption") or ""),
+                str(record.get("text") or ""),
+            )),
             re.IGNORECASE,
         )
     }
@@ -2831,11 +2834,14 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "asr_split_amount": True,
             })
 
-    # Caption speech recognition sometimes emits a financial figure as a bare
-    # number ("6203") while its currency/unit appears elsewhere or is omitted.
-    # Accept 4–6 digit values only inside timestamped caption rows that have a
-    # nearby financial claim label; source IDs/timestamps are never considered.
-    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
+    # Caption speech recognition may place a grouped number in one caption and
+    # its unit / claim wording in an adjacent caption from the same source.
+    # Keep ordinary bare numbers conservative, but also accept well-grouped
+    # thousands such as "14,100" without its unit on that same caption row.
+    # Never reinterpret split ASR text such as "14,000 100" as a valid 14,000.
+    bare_pattern = re.compile(
+        r"(?<![\w,:])(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?![\w,:]|\.\d)"
+    )
     for row in caption_rows:
         for match in bare_pattern.finditer(row["text"]):
             absolute_start = row["start"] + match.start()
@@ -2846,6 +2852,16 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
             if source_id is None:
                 source_id = source_id_at(absolute_start)
             local_text = nearby_captions or own_caption
+
+            # A pattern such as "14,000 100" is an ASR-split compound number,
+            # not a trustworthy 14,000 claim. Only the separate corroboration
+            # path above may normalize it to 14,100.
+            split_pair_pattern = re.compile(
+                rf"(?<![\w,:]){re.escape(match.group(0))}\s+\d{{1,3}}(?![\d,])"
+            )
+            if split_pair_pattern.search(local_text):
+                continue
+
             own_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(local_text)
             topic = own_topic or nearby_topic
