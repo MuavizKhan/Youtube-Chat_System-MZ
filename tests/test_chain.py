@@ -3577,6 +3577,18 @@ def test_financial_fallback_rejects_malformed_number_and_reads_adjacent_recovery
         for item in claims
     )
 
+    # The bare-number match is relative to each caption body, while caption
+    # lookup uses an absolute offset in the full formatted transcript. Verify
+    # that the parser resolves 6203 to SOURCE 4 and retains the adjacent "crores"
+    # caption needed for unit completion.
+    certificate_claims = [
+        item for item in claims
+        if item["amount"] == 6203 and item.get("topic") == "certificate"
+    ]
+    assert certificate_claims
+    assert certificate_claims[0]["source_id"] == 4
+    assert "crores" in certificate_claims[0]["amount_caption_context"].casefold()
+
     recovery_claims = [
         item for item in claims
         if item["amount"] == 14100 and item.get("topic") == "recovery_report"
