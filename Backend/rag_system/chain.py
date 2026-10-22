@@ -3386,9 +3386,9 @@ def _build_financial_evidence_fallback(
             else ""
         )
         unit_evidence = f"{evidence_text} {unit_context}"
-        crore_rupees = re.search(r"\\bcrore\\s+rupees?\\b", unit_evidence, re.IGNORECASE)
-        crore_unit = re.search(r"\\bcrores?\\b|\\bcr\\b", unit_evidence, re.IGNORECASE)
-        rupee_unit = re.search(r"\\brupees?\\b|\\bINR\\b|₹|\\bRs\\.?", unit_evidence, re.IGNORECASE)
+        crore_rupees = re.search(r"\bcrore\s+rupees?\b", unit_evidence, re.IGNORECASE)
+        crore_unit = re.search(r"\bcrores?\b|\bcr\b", unit_evidence, re.IGNORECASE)
+        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", unit_evidence, re.IGNORECASE)
         if crore_rupees:
             return f"{value} crore rupees", True
         if crore_unit:
