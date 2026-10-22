@@ -3312,11 +3312,13 @@ def _build_financial_evidence_fallback(
         # from the amount-bearing caption. Use that neighborhood only for a
         # unitless caption already classified as a certificate; never allow
         # a neighboring report/debt label to change the amount's topic.
+        # Keep caption neighborhoods as a dedicated formatting-only field.
+        # The claim topic remains anchored to the number-bearing caption, while
+        # the unit lookup may use that caption's immediate same-source neighbors.
         unit_context = (
-            claim.get("amount_caption_context")
-            if topic == "certificate"
-            and _financial_claim_topic(amount_caption) == "certificate"
-            else None
+            str(claim.get("amount_caption_context") or "")
+            if topic == "certificate" and local_topic == "certificate"
+            else ""
         )
         claims_by_topic.setdefault(
             topic,
@@ -3325,11 +3327,7 @@ def _build_financial_evidence_fallback(
                 "topic": topic,
                 "text": claim_text,
                 "amount_caption": claim.get("amount_caption") or claim_text,
-                "amount_unit_context": (
-                    str(claim.get("amount_caption_context") or "")
-                    if topic == "certificate" and local_topic == "certificate"
-                    else ""
-                ),
+                "amount_unit_context": unit_context,
             },
         )
 
