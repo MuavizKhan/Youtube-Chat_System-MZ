@@ -3308,13 +3308,9 @@ def _build_financial_evidence_fallback(
         # assembly. Keep the extractive fallback's claim wording, but leave
         # timestamp presentation to the trusted returned-source metadata.
         claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
-        # The parser exposes immediate same-source neighbor text separately
-        # from the amount-bearing caption. Use that neighborhood only for a
-        # unitless caption already classified as a certificate; never allow
-        # a neighboring report/debt label to change the amount's topic.
-        # Keep caption neighborhoods as a dedicated formatting-only field.
-        # The claim topic remains anchored to the number-bearing caption, while
-        # the unit lookup may use that caption's immediate same-source neighbors.
+        # Only a certificate amount can use immediate same-source neighbors
+        # to complete a missing unit. Investment, DRT and recovery figures
+        # retain their original unit evidence.
         unit_context = (
             str(claim.get("amount_caption_context") or "")
             if topic == "certificate" and local_topic == "certificate"
