@@ -3606,6 +3606,9 @@ def test_financial_fallback_rejects_malformed_number_and_reads_adjacent_recovery
     assert answer is not None
     assert diagnostics["missing_topics"] == []
     assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
+    assert "crores" in diagnostics["recognized_topics"]["certificate"]["amount_unit_context"].casefold(), (
+        diagnostics["recognized_topics"]["certificate"]
+    )
     assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
     assert "certificate amount of 6,203 crore" in answer
     assert "recovery figure of 14,100 crore" in answer
