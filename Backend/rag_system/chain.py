@@ -3308,18 +3308,24 @@ def _build_financial_evidence_fallback(
         # assembly. Keep the extractive fallback's claim wording, but leave
         # timestamp presentation to the trusted returned-source metadata.
         claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
+        # The parser exposes immediate same-source neighbor text separately
+        # from the amount-bearing caption. Use that neighborhood only for a
+        # unitless caption already classified as a certificate; never allow
+        # a neighboring report/debt label to change the amount's topic.
+        unit_context = (
+            claim.get("amount_caption_context")
+            if topic == "certificate"
+            and _financial_claim_topic(amount_caption) == "certificate"
+            else None
+        )
         claims_by_topic.setdefault(
             topic,
             {
                 **claim,
                 "topic": topic,
                 "text": claim_text,
-                "amount_caption": (
-                    claim.get("amount_caption_context")
-                    if topic == "certificate"
-                    and _financial_claim_topic(amount_caption) == "certificate"
-                    else claim.get("amount_caption")
-                ) or claim.get("amount_caption") or claim_text,
+                "amount_caption": claim.get("amount_caption") or claim_text,
+                "amount_unit_context": unit_context or "",
             },
         )
 
@@ -3371,6 +3377,7 @@ def _build_financial_evidence_fallback(
         evidence_text = " ".join((
             str(claim.get("text", "")),
             str(claim.get("amount_caption", "")),
+            str(claim.get("amount_unit_context", "")),
         ))
         crore_rupees = re.search(r"\bcrore\s+rupees?\b", evidence_text, re.IGNORECASE)
         crore_unit = re.search(r"\bcrores?\b|\bcr\b", evidence_text, re.IGNORECASE)
@@ -3385,7 +3392,7 @@ def _build_financial_evidence_fallback(
         # caption within the same source group. The claim's amount_caption is
         # bounded to the number's own caption and its immediate same-source
         # neighbors; it cannot borrow a unit from another [SOURCE n] block.
-        local_captions = str(claim.get("amount_caption") or "")
+        local_captions = str(claim.get("amount_unit_context") or "")
         if re.search(r"\bcrore\s+rupees?\b", local_captions, re.IGNORECASE):
             return f"{value} crore rupees", True
         if re.search(r"\bcrores?\b|\bcr\b", local_captions, re.IGNORECASE):
