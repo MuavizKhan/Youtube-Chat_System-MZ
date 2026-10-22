@@ -2630,6 +2630,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         )
         caption_rows.append({
             "start": match.start(),
+            "text_start": match.start(2),
             "end": match.end(),
             "text": match.group(2).strip(),
             "source_id": source_id,
@@ -2844,7 +2845,10 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     )
     for row in caption_rows:
         for match in bare_pattern.finditer(row["text"]):
-            absolute_start = row["start"] + match.start()
+            # bare_pattern runs against row["text"], not the full formatted
+            # transcript line. Use the body's absolute offset so caption_context
+            # resolves the amount to the correct timestamped row.
+            absolute_start = row["text_start"] + match.start()
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
             own_caption, nearby_captions, source_id = caption_context(absolute_start)
