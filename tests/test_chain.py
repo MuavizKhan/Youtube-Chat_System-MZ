@@ -3443,7 +3443,7 @@ Transcript caption segments in chronological order:
     assert fallback is not None
     assert "3,000 crore rupees" in fallback
     assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
-    assert "Debt certificate: the transcript identifies a certificate amount of 6,203 crore" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
     assert re.search(
         r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
         fallback,
@@ -3471,7 +3471,7 @@ The Ministry of Finance report said 14,100 crore rupees had been recovered."""
     assert fallback is not None
     assert "3,000 crore rupees" in fallback
     assert "DRT debt: the transcript describes 4,999 crore rupees as a debt" in fallback
-    assert "Debt certificate: the transcript identifies a certificate amount of 6,203 crore" in fallback
+    assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in fallback
     assert re.search(
         r"(?:Ministry of Finance report|Finance report|report).{0,80}14,100 crore(?: rupees)?",
         fallback,
