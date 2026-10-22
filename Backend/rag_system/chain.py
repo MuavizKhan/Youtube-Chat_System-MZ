@@ -2845,13 +2845,24 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
     for row in caption_rows:
         for match in bare_pattern.finditer(row["text"]):
             absolute_start = row["start"] + match.start()
-            absolute_end = row["start"] + match.end()
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
             own_caption, nearby_captions, source_id = caption_context(absolute_start)
             if source_id is None:
                 source_id = source_id_at(absolute_start)
             local_text = nearby_captions or own_caption
+
+            # Do not emit a bare-number candidate when it was already parsed
+            # with a unit, currency, or percentage by the strict amount parser.
+            # This prevents duplicate 14,100 candidates while still allowing
+            # truly unitless figures (for example, "certificate amount 6203").
+            if re.search(
+                rf"(?<![\w,:]){re.escape(match.group(0))}\s*"
+                r"(?:crores?\b|cr\b|rupees?\b|INR\b|percent\b|%)",
+                own_caption,
+                re.IGNORECASE,
+            ):
+                continue
 
             # A pattern such as "14,000 100" is an ASR-split compound number,
             # not a trustworthy 14,000 claim. Only the separate corroboration
