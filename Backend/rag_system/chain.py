@@ -3325,7 +3325,11 @@ def _build_financial_evidence_fallback(
                 "topic": topic,
                 "text": claim_text,
                 "amount_caption": claim.get("amount_caption") or claim_text,
-                "amount_unit_context": unit_context or "",
+                "amount_unit_context": (
+                    str(claim.get("amount_caption_context") or "")
+                    if topic == "certificate" and local_topic == "certificate"
+                    else ""
+                ),
             },
         )
 
