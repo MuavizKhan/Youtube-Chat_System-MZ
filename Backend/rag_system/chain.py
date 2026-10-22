@@ -3380,12 +3380,11 @@ def _build_financial_evidence_fallback(
             str(claim.get("text", "")),
             str(claim.get("amount_caption", "")),
         ))
-        # The amount's topic was already decided from its own caption above.
-        # Only a certificate amount may inherit a unit from the parser's bounded
-        # adjacent-caption neighborhood; this field cannot influence attribution.
-        unit_context = str(claim.get("amount_unit_context") or "")
-        if not unit_context and claim.get("topic") == "certificate":
-            unit_context = str(claim.get("amount_caption_context") or "")
+        unit_context = (
+            str(claim.get("amount_unit_context") or "")
+            if claim.get("topic") == "certificate"
+            else ""
+        )
         unit_evidence = f"{evidence_text} {unit_context}"
         crore_rupees = re.search(r"\\bcrore\\s+rupees?\\b", unit_evidence, re.IGNORECASE)
         crore_unit = re.search(r"\\bcrores?\\b|\\bcr\\b", unit_evidence, re.IGNORECASE)
