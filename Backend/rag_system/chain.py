@@ -3183,18 +3183,13 @@ def _build_financial_evidence_fallback(
         ):
             topic = local_topic
 
-        # A figure-only certificate caption can inherit the unit from its
-        # immediate same-source caption neighbors. Its claim_text remains
-        # anchored to the caption that contains the figure, so this is only
-        # unit completion, never cross-source claim attribution.
+        # A figure-only certificate caption can inherit a unit from a
+        # neighboring caption, but only if the number-bearing caption identifies
+        # a certificate and the neighboring text stays inside this same source.
+        # Keep the claim's source-boundary checks independent of unit completion.
         local_caption_evidence = str(
             claim.get("amount_caption_context") or amount_caption
         )
-        if topic == "certificate" and _financial_claim_topic(amount_caption) == "certificate":
-            claim = {
-                **claim,
-                "amount_caption": local_caption_evidence,
-            }
 
         # Attribution is source-local. In caption-aware contexts, a broad
         # clause may span adjacent SOURCE blocks even when its amount belongs
@@ -3321,9 +3316,10 @@ def _build_financial_evidence_fallback(
                 "text": claim_text,
                 "amount_caption": (
                     claim.get("amount_caption_context")
-                    or claim.get("amount_caption")
-                    or claim_text
-                ),
+                    if topic == "certificate"
+                    and _financial_claim_topic(amount_caption) == "certificate"
+                    else claim.get("amount_caption")
+                ) or claim.get("amount_caption") or claim_text,
             },
         )
 
