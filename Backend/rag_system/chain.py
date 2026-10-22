@@ -3379,27 +3379,23 @@ def _build_financial_evidence_fallback(
         evidence_text = " ".join((
             str(claim.get("text", "")),
             str(claim.get("amount_caption", "")),
-            str(claim.get("amount_unit_context", "")),
         ))
-        crore_rupees = re.search(r"\bcrore\s+rupees?\b", evidence_text, re.IGNORECASE)
-        crore_unit = re.search(r"\bcrores?\b|\bcr\b", evidence_text, re.IGNORECASE)
-        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", evidence_text, re.IGNORECASE)
+        # The amount's topic was already decided from its own caption above.
+        # Only a certificate amount may inherit a unit from the parser's bounded
+        # adjacent-caption neighborhood; this field cannot influence attribution.
+        unit_context = str(claim.get("amount_unit_context") or "")
+        if not unit_context and claim.get("topic") == "certificate":
+            unit_context = str(claim.get("amount_caption_context") or "")
+        unit_evidence = f"{evidence_text} {unit_context}"
+        crore_rupees = re.search(r"\\bcrore\\s+rupees?\\b", unit_evidence, re.IGNORECASE)
+        crore_unit = re.search(r"\\bcrores?\\b|\\bcr\\b", unit_evidence, re.IGNORECASE)
+        rupee_unit = re.search(r"\\brupees?\\b|\\bINR\\b|₹|\\bRs\\.?", unit_evidence, re.IGNORECASE)
         if crore_rupees:
             return f"{value} crore rupees", True
         if crore_unit:
             return f"{value} crore", True
         if rupee_unit:
             return f"{value} rupees", True
-        # A unitless certificate figure may be completed only from an adjacent
-        # caption within the same source group. The claim's amount_caption is
-        # bounded to the number's own caption and its immediate same-source
-        # neighbors; it cannot borrow a unit from another [SOURCE n] block.
-        local_captions = str(claim.get("amount_unit_context") or "")
-        if re.search(r"\bcrore\s+rupees?\b", local_captions, re.IGNORECASE):
-            return f"{value} crore rupees", True
-        if re.search(r"\bcrores?\b|\bcr\b", local_captions, re.IGNORECASE):
-            return f"{value} crore", True
-        # A bare number is deliberately not given a currency or magnitude unit.
         return f"the figure {value}", False
 
     investment_amount, investment_has_unit = formatted_amount(claims_by_topic["investment"])
