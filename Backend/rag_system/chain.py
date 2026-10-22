@@ -2890,6 +2890,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "topic": topic,
                 "source_id": source_id,
                 "amount_caption": own_caption,
+                "amount_caption_context": nearby_captions or own_caption,
             })
 
     # Validation also runs on plain generated prose, which has no timestamped
@@ -3182,6 +3183,19 @@ def _build_financial_evidence_fallback(
         ):
             topic = local_topic
 
+        # A figure-only certificate caption can inherit the unit from its
+        # immediate same-source caption neighbors. Its claim_text remains
+        # anchored to the caption that contains the figure, so this is only
+        # unit completion, never cross-source claim attribution.
+        local_caption_evidence = str(
+            claim.get("amount_caption_context") or amount_caption
+        )
+        if topic == "certificate" and _financial_claim_topic(amount_caption) == "certificate":
+            claim = {
+                **claim,
+                "amount_caption": local_caption_evidence,
+            }
+
         # Attribution is source-local. In caption-aware contexts, a broad
         # clause may span adjacent SOURCE blocks even when its amount belongs
         # to only one block; never let that wider clause borrow a report label.
@@ -3301,7 +3315,16 @@ def _build_financial_evidence_fallback(
         claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
         claims_by_topic.setdefault(
             topic,
-            {**claim, "topic": topic, "text": claim_text},
+            {
+                **claim,
+                "topic": topic,
+                "text": claim_text,
+                "amount_caption": (
+                    claim.get("amount_caption_context")
+                    or claim.get("amount_caption")
+                    or claim_text
+                ),
+            },
         )
 
     missing_topics = [
