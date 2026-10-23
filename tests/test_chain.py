@@ -2167,9 +2167,17 @@ def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch
 @pytest.mark.regression
 def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypatch):
     expanded_documents = [
-        doc(1, 10, 40, "selected answer anchor"),
-        doc(2, 20, 50, "context-only neighbor"),
-        doc(3, 60, 80, "second selected anchor"),
+        doc(1, 10, 40, "The room is silent."),
+        doc(
+            2,
+            20,
+            50,
+            (
+                "In a quiet room, you can hear your heartbeat, "
+                "blood moving, and even your eyelids blinking."
+            ),
+        ),
+        doc(3, 60, 80, "The presenter changes the audio level."),
     ]
     expanded_results = [
         (expanded_documents[0], 0.2),
@@ -2177,7 +2185,7 @@ def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypat
         (expanded_documents[2], 0.5),
     ]
     retrieval_result = {
-        "answer": "A grounded answer.",
+        "answer": "You may even hear the sound of your eyelids blinking.",
         "retrieved_results": expanded_results,
         "source_groups": chain.merge_overlapping_results(expanded_results),
         "retrieval_trace": {
@@ -2223,6 +2231,9 @@ def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypat
         (20.0, 50.0),
         (60.0, 80.0),
     ]
+    assert result["answer"].endswith(
+        "Relevant timestamps: 00:20–00:50"
+    )
 
 
 @pytest.mark.regression
