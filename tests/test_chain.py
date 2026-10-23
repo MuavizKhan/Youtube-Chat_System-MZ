@@ -1313,7 +1313,37 @@ def test_select_citation_results_excludes_context_expansion_neighbors():
 
 
 @pytest.mark.regression
-def test_select_citation_results_can_include_context_neighbors_in_experiment(monkeypatch):
+def test_select_citation_results_can_include_only_prompted_context_neighbors(monkeypatch):
+    expanded = [
+        (doc(1, 10, 20, "retrieved anchor omitted from prompt"), 0.2),
+        (doc(2, 20, 30, "context-only evidence included in prompt"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "selected anchor included in prompt"), 0.5),
+        (doc(4, 40, 50, "retrieved neighbor omitted from prompt"), 0.7),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS",
+        True,
+    )
+
+    selected = chain._select_citation_results(
+        expanded,
+        {
+            "final_chunk_ids": [1, 2, 3, 4],
+            "citation_chunk_ids": [1, 3],
+        },
+        {
+            "context_budget": {
+                "included_chunk_ids": ["2", "3"],
+            },
+        },
+    )
+
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [2, 3]
+
+
+@pytest.mark.unit
+def test_context_neighbor_citations_fall_back_to_anchor_ids_without_prompt_trace(monkeypatch):
     expanded = [
         (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
         (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
@@ -1333,7 +1363,7 @@ def test_select_citation_results_can_include_context_neighbors_in_experiment(mon
         },
     )
 
-    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 2, 3]
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 3]
 
 
 @pytest.mark.unit
