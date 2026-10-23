@@ -119,6 +119,41 @@ def test_lexical_search_ignores_common_hindi_function_words_for_unrelated_query(
 
 
 @pytest.mark.unit
+def test_lexical_search_matches_hindi_tokens_with_combining_marks():
+    documents = {
+        "gold": doc(
+            0, 0, 10,
+            "यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।",
+        ),
+        "unrelated": doc(
+            1, 10, 20,
+            "राजस्थान के इतिहास में किसान आंदोलन क्या था और क्यों हुआ।",
+        ),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया गया?",
+        limit=8,
+    )
+
+    assert results
+    assert results[0][0].metadata["chunk_id"] == 0
+    document_tokens = retrieval._split_unicode_words(
+        documents["gold"].page_content.casefold()
+    )
+    assert "टैक्स" in document_tokens
+    assert "टैक्स" not in {
+        token
+        for token in __import__("re").findall(
+            r"[^\\W_]+",
+            documents["gold"].page_content.casefold(),
+            flags=__import__("re").UNICODE,
+        )
+    }
+
+
+@pytest.mark.unit
 def test_query_variants_keep_original_and_add_content_focus():
     variants = retrieval.build_retrieval_query_variants(
         "What does Vijay Mallya say about building the Kingfisher brand?"
@@ -452,6 +487,44 @@ def test_lexical_search_requires_shared_evidence():
     }
     results=retrieval.lexical_search(FakeVectorStore(documents),"Who is Alice at Acme?")
     assert [d.metadata["chunk_id"] for d,_ in results]==[1]
+
+
+@pytest.mark.unit
+def test_contextual_query_plan_adds_bounded_hindi_terms_for_english_question_on_hindi_index():
+    candidate = doc(
+        0, 0, 75,
+        "यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।",
+    )
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "Which tax is identified as new, and what name does the speaker give for it?",
+    )
+
+    hindi_variants = [
+        query for label, query in plan if label == "cross_lingual_hindi"
+    ]
+    assert len(hindi_variants) == 1
+    assert "नया टैक्स" in hindi_variants[0]
+    assert "कर" in hindi_variants[0]
+    assert "नाम" in hindi_variants[0]
+    assert [label for label, _query in plan[:2]] == ["original", "focus"]
+
+
+@pytest.mark.unit
+def test_contextual_query_plan_does_not_add_hindi_variant_to_non_hindi_index():
+    candidate = doc(0, 0, 75, "A new tax was introduced.")
+    candidate.metadata["language_code"] = "en"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "Which tax is identified as new, and what name does the speaker give for it?",
+    )
+
+    assert not any(label == "cross_lingual_hindi" for label, _query in plan)
 
 
 @pytest.mark.unit
@@ -867,6 +940,43 @@ def test_dense_question_runs_facet_lexical_queries(monkeypatch):
         or "operational challenges payments fees fuel" in query
         for query in lexical_queries[1:]
     )
+
+
+@pytest.mark.unit
+def test_production_lexical_retrieval_uses_hindi_cross_lingual_variant(monkeypatch):
+    query = "Which tax is identified as new, and what name does the speaker give for it?"
+    candidate = doc(
+        0, 0, 75,
+        "यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।",
+    )
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"gold": candidate})
+    lexical_queries = []
+
+    monkeypatch.setattr(retrieval, "retrieve_mmr", lambda **_kwargs: [])
+
+    def fake_lexical_search(vector_store, query, limit):
+        lexical_queries.append(query)
+        if "नया टैक्स" in query and "नाम" in query:
+            return [(candidate, 0.5)]
+        return []
+
+    monkeypatch.setattr(retrieval, "lexical_search", fake_lexical_search)
+    monkeypatch.setattr(
+        retrieval,
+        "expand_retrieval_context",
+        lambda _store, results, **_kwargs: results,
+    )
+
+    results = retrieval.retrieve_question_context(
+        store,
+        query,
+        expand_context=False,
+        allow_overview=False,
+    )
+
+    assert any("नया टैक्स" in item and "नाम" in item for item in lexical_queries)
+    assert [document.metadata["chunk_id"] for document, _score in results] == [0]
 
 
 @pytest.mark.unit
