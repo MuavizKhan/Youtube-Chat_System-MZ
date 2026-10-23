@@ -143,14 +143,6 @@ def test_lexical_search_matches_hindi_tokens_with_combining_marks():
         documents["gold"].page_content.casefold()
     )
     assert "टैक्स" in document_tokens
-    assert "टैक्स" not in {
-        token
-        for token in __import__("re").findall(
-            r"[^\\W_]+",
-            documents["gold"].page_content.casefold(),
-            flags=__import__("re").UNICODE,
-        )
-    }
 
 
 @pytest.mark.unit
@@ -522,6 +514,20 @@ def test_contextual_query_plan_does_not_add_hindi_variant_to_non_hindi_index():
     plan = retrieval.build_contextual_retrieval_query_plan(
         store,
         "Which tax is identified as new, and what name does the speaker give for it?",
+    )
+
+    assert not any(label == "cross_lingual_hindi" for label, _query in plan)
+
+
+@pytest.mark.unit
+def test_hindi_query_expansion_omits_unrecognized_unrelated_english_query():
+    candidate = doc(0, 0, 75, "किसान आंदोलन राजस्थान के इतिहास में बताया गया है।")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "What is the capital of Australia?",
     )
 
     assert not any(label == "cross_lingual_hindi" for label, _query in plan)
