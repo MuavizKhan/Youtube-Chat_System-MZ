@@ -1194,23 +1194,37 @@ def append_verified_response_timestamps(
 def _select_citation_results(
     retrieved_results,
     retrieval_trace: dict[str, Any] | None,
+    generation_trace: dict[str, Any] | None = None,
 ) -> list:
-    """Select source chunks according to the configured citation experiment.
+    """Select source chunks without citing evidence omitted from the model prompt.
 
-    The default is anchor-only citations. The opt-in experiment includes
-    context-expanded neighbors so audits can compare citation coverage without
-    changing any retrieval ranking, context expansion, or distance thresholds.
+    The default remains anchor-only citations. The opt-in context-neighbor
+    experiment selects only chunks actually included in the generation context;
+    when that trace is unavailable, it safely falls back to anchor-only IDs.
+    This does not change retrieval ranking, context expansion, or thresholds.
     """
     if not isinstance(retrieval_trace, dict):
-        return list(retrieved_results)
+        if not RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
+            return list(retrieved_results)
+        retrieval_trace = {}
 
     if RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
-        raw_ids = retrieval_trace.get("final_chunk_ids")
-        if raw_ids is None:
+        context_budget = (
+            generation_trace.get("context_budget")
+            if isinstance(generation_trace, dict)
+            else None
+        )
+        raw_ids = (
+            context_budget.get("included_chunk_ids")
+            if isinstance(context_budget, dict)
+            else None
+        )
+        if not isinstance(raw_ids, list):
+            # Without prompt-inclusion metadata, never cite all retrieved
+            # candidates: fall back to the established answer-bearing anchors.
             raw_ids = retrieval_trace.get("citation_chunk_ids")
-        if raw_ids is None:
-            # Preserve behavior for legacy/test traces with no ID metadata.
-            return list(retrieved_results)
+            if not isinstance(raw_ids, list):
+                return []
     else:
         if "citation_chunk_ids" not in retrieval_trace:
             # Backward-compatible path for legacy/test traces.
@@ -5130,6 +5144,7 @@ def answer_question(
     citation_results = _select_citation_results(
         retrieved_results,
         retrieval_trace,
+        result.get("generation_trace", {}),
     )
     citation_source_groups = _build_citation_source_groups(
         citation_results,
