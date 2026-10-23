@@ -1313,7 +1313,37 @@ def test_select_citation_results_excludes_context_expansion_neighbors():
 
 
 @pytest.mark.regression
-def test_select_citation_results_can_include_context_neighbors_in_experiment(monkeypatch):
+def test_select_citation_results_can_include_only_prompted_context_neighbors(monkeypatch):
+    expanded = [
+        (doc(1, 10, 20, "retrieved anchor omitted from prompt"), 0.2),
+        (doc(2, 20, 30, "context-only evidence included in prompt"), chain.MAX_DISTANCE),
+        (doc(3, 30, 40, "selected anchor included in prompt"), 0.5),
+        (doc(4, 40, 50, "retrieved neighbor omitted from prompt"), 0.7),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS",
+        True,
+    )
+
+    selected = chain._select_citation_results(
+        expanded,
+        {
+            "final_chunk_ids": [1, 2, 3, 4],
+            "citation_chunk_ids": [1, 3],
+        },
+        {
+            "context_budget": {
+                "included_chunk_ids": ["2", "3"],
+            },
+        },
+    )
+
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [2, 3]
+
+
+@pytest.mark.unit
+def test_context_neighbor_citations_fall_back_to_anchor_ids_without_prompt_trace(monkeypatch):
     expanded = [
         (doc(1, 10, 20, "answer-bearing anchor"), 0.2),
         (doc(2, 20, 30, "context-only neighbor"), chain.MAX_DISTANCE),
@@ -1333,7 +1363,7 @@ def test_select_citation_results_can_include_context_neighbors_in_experiment(mon
         },
     )
 
-    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 2, 3]
+    assert [document.metadata["chunk_id"] for document, _ in selected] == [1, 3]
 
 
 @pytest.mark.unit
@@ -1406,6 +1436,35 @@ def test_retrieval_trace_records_recovery_stage(monkeypatch):
     ]
     assert trace["attempts"][0]["query"] == "Why did it happen?"
     assert trace["attempts"][1]["query"] == "reasons for the event"
+
+
+@pytest.mark.unit
+def test_query_recovery_stops_on_weak_native_semantic_rejection(monkeypatch):
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **_kwargs: (
+            [],
+            [],
+            {"weak_native_query_rejected": True},
+        ),
+    )
+
+    def unexpected_query_planning(**_kwargs):
+        raise AssertionError("Weak native-query rejection must bypass query planning.")
+
+    monkeypatch.setattr(chain, "understand_query", unexpected_query_planning)
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question="ऑस्ट्रेलिया की राजधानी क्या है?",
+    )
+
+    assert results == []
+    assert trace["final_stage"] == "no_evidence_weak_native_match_rejected"
+    assert trace["planner_used"] is False
+    assert trace["attempts"][-1]["weak_native_query_rejected"] is True
 
 
 @pytest.mark.unit
@@ -2126,7 +2185,11 @@ def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypat
             "final_chunk_ids": [1, 2, 3],
             "citation_chunk_ids": [1, 3],
         },
-        "generation_trace": {"generated": True, "fallback_used": False},
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+            "context_budget": {"included_chunk_ids": ["1", "2", "3"]},
+        },
     }
 
     monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
@@ -3518,6 +3581,72 @@ def test_financial_fallback_formats_claims_as_complete_labeled_statements():
     assert "- Ministry of Finance recovery report: the transcript associates a recovery figure of 14,100 crore with that report." in answer
     assert "right rest is all" not in answer
     assert "I've shown you the ministry of" not in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
+def test_financial_fallback_rejects_malformed_number_and_reads_adjacent_recovery_caption():
+    context = """[SOURCE 1]
+- [02:01:17–02:01:24] put in 3,000 crores of UB group's money
+[SOURCE 2]
+- [02:20:11–02:20:18] debt recovery tribunal's own admission
+- [02:20:15–02:20:21] 4,999 crores was a debt
+[SOURCE 3]
+- [03:31:36–03:31:40] says recovery
+- [03:31:40–03:31:50] 6,23 crores 35 lakhs 3,879 and Pisa 42 only.
+[SOURCE 4]
+- [04:09:55–04:10:01] right I showed you the debt recovery
+- [04:09:58–04:10:04] certificate amount 6203
+- [04:10:01–04:10:08] crores I've shown you the ministry of
+- [04:10:04–04:10:11] finance report 14,000
+- [04:10:08–04:10:15] 100 recovered.
+[SOURCE 5]
+- [02:57:25–02:57:30] minister and printed report of the
+- [02:57:29–02:57:33] Ministry of Finance that they have shown 14,100
+- [02:57:33–02:57:38] crores recovered from me."""
+
+    claims = chain._money_amount_clauses(context)
+    assert not any(
+        item["amount"] == 623 and item.get("topic") == "certificate"
+        for item in claims
+    )
+
+    # The bare-number match is relative to each caption body, while caption
+    # lookup uses an absolute offset in the full formatted transcript. Verify
+    # that the parser resolves 6203 to SOURCE 4 and retains the adjacent "crores"
+    # caption needed for unit completion.
+    certificate_claims = [
+        item for item in claims
+        if item["amount"] == 6203 and item.get("topic") == "certificate"
+    ]
+    assert certificate_claims
+    assert certificate_claims[0]["source_id"] == 4
+    assert "crores" in certificate_claims[0]["amount_caption_context"].casefold()
+
+    recovery_claims = [
+        item for item in claims
+        if item["amount"] == 14100 and item.get("topic") == "recovery_report"
+    ]
+    assert recovery_claims
+    assert recovery_claims[0]["source_id"] == 5
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts were mentioned?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert diagnostics["missing_topics"] == []
+    assert diagnostics["recognized_topics"]["certificate"]["amount"] == 6203
+    assert "crores" in diagnostics["recognized_topics"]["certificate"]["amount_unit_context"].casefold(), (
+        diagnostics["recognized_topics"]["certificate"]
+    )
+    assert diagnostics["recognized_topics"]["recovery_report"]["amount"] == 14100
+    assert "certificate amount of 6,203 crore" in answer
+    assert "recovery figure of 14,100 crore" in answer
+    assert "14,000 crore recovered" not in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
 
 

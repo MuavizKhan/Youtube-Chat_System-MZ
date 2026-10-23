@@ -416,8 +416,8 @@ _MODEL_TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
 
 _MONEY_AMOUNT_PATTERN = re.compile(
     r"(?:"
-    r"(?:₹|INR\b|Rs\.?)\s*(?P<currency_amount>\d[\d,]*(?:\.\d+)?)"
-    r"|(?<![\w:])(?P<amount>\d[\d,]*(?:\.\d+)?)\s*"
+    r"(?:₹|INR\b|Rs\.?)\s*(?P<currency_amount>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
+    r"|(?<![\w:,])(?P<amount>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*"
     r"(?:crores?\b|cr\b|rupees?\b|INR\b|percent\b|%)"
     r")",
     re.IGNORECASE,
@@ -1194,23 +1194,37 @@ def append_verified_response_timestamps(
 def _select_citation_results(
     retrieved_results,
     retrieval_trace: dict[str, Any] | None,
+    generation_trace: dict[str, Any] | None = None,
 ) -> list:
-    """Select source chunks according to the configured citation experiment.
+    """Select source chunks without citing evidence omitted from the model prompt.
 
-    The default is anchor-only citations. The opt-in experiment includes
-    context-expanded neighbors so audits can compare citation coverage without
-    changing any retrieval ranking, context expansion, or distance thresholds.
+    The default remains anchor-only citations. The opt-in context-neighbor
+    experiment selects only chunks actually included in the generation context;
+    when that trace is unavailable, it safely falls back to anchor-only IDs.
+    This does not change retrieval ranking, context expansion, or thresholds.
     """
     if not isinstance(retrieval_trace, dict):
-        return list(retrieved_results)
+        if not RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
+            return list(retrieved_results)
+        retrieval_trace = {}
 
     if RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
-        raw_ids = retrieval_trace.get("final_chunk_ids")
-        if raw_ids is None:
+        context_budget = (
+            generation_trace.get("context_budget")
+            if isinstance(generation_trace, dict)
+            else None
+        )
+        raw_ids = (
+            context_budget.get("included_chunk_ids")
+            if isinstance(context_budget, dict)
+            else None
+        )
+        if not isinstance(raw_ids, list):
+            # Without prompt-inclusion metadata, never cite all retrieved
+            # candidates: fall back to the established answer-bearing anchors.
             raw_ids = retrieval_trace.get("citation_chunk_ids")
-        if raw_ids is None:
-            # Preserve behavior for legacy/test traces with no ID metadata.
-            return list(retrieved_results)
+            if not isinstance(raw_ids, list):
+                return []
     else:
         if "citation_chunk_ids" not in retrieval_trace:
             # Backward-compatible path for legacy/test traces.
@@ -2630,6 +2644,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         )
         caption_rows.append({
             "start": match.start(),
+            "text_start": match.start(2),
             "end": match.end(),
             "text": match.group(2).strip(),
             "source_id": source_id,
@@ -2675,7 +2690,24 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         if not math.isfinite(amount):
             continue
 
-        own_caption, nearby_captions, source_id = caption_context(match.start())
+        # The amount regex scans the fully formatted context, while caption
+        # lookup is keyed to caption text offsets. Resolve the caption using
+        # the amount token's position in its matching caption line, not the
+        # global position in the decorated [SOURCE]/timestamp context.
+        caption_match = next(
+            (
+                row for row in caption_rows
+                if row["start"] <= match.start() <= row["end"]
+            ),
+            None,
+        )
+        caption_position = (
+            caption_match["text_start"]
+            + text[caption_match["text_start"]:caption_match["end"]].find(match.group(0))
+            if caption_match is not None
+            else match.start()
+        )
+        own_caption, nearby_captions, source_id = caption_context(caption_position)
         if source_id is None:
             source_id = source_id_at(match.start())
         topic = _financial_claim_topic(clause)
@@ -2761,7 +2793,10 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
         )
         and re.search(
             r"\b(?:crores?|cr|rupees?)\b",
-            str(record.get("amount_caption") or record.get("text", "")),
+            " ".join((
+                str(record.get("amount_caption") or ""),
+                str(record.get("text") or ""),
+            )),
             re.IGNORECASE,
         )
     }
@@ -2831,21 +2866,48 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "asr_split_amount": True,
             })
 
-    # Caption speech recognition sometimes emits a financial figure as a bare
-    # number ("6203") while its currency/unit appears elsewhere or is omitted.
-    # Accept 4–6 digit values only inside timestamped caption rows that have a
-    # nearby financial claim label; source IDs/timestamps are never considered.
-    bare_pattern = re.compile(r"(?<![\w,.:])\d{4,6}(?![\w,:]|\.\d)")
+    # Caption speech recognition may place a grouped number in one caption and
+    # its unit / claim wording in an adjacent caption from the same source.
+    # Keep ordinary bare numbers conservative, but also accept well-grouped
+    # thousands such as "14,100" without its unit on that same caption row.
+    # Never reinterpret split ASR text such as "14,000 100" as a valid 14,000.
+    bare_pattern = re.compile(
+        r"(?<![\w,:])(?:\d{1,3}(?:,\d{3})+|\d{4,6})(?![\w,:]|\.\d)"
+    )
     for row in caption_rows:
         for match in bare_pattern.finditer(row["text"]):
-            absolute_start = row["start"] + match.start()
-            absolute_end = row["start"] + match.end()
+            # bare_pattern runs against row["text"], not the full formatted
+            # transcript line. Use the body's absolute offset so caption_context
+            # resolves the amount to the correct timestamped row.
+            absolute_start = row["text_start"] + match.start()
             if any(start <= absolute_start < end for start, end in recognized_spans):
                 continue
             own_caption, nearby_captions, source_id = caption_context(absolute_start)
             if source_id is None:
                 source_id = source_id_at(absolute_start)
             local_text = nearby_captions or own_caption
+
+            # Do not emit a bare-number candidate when it was already parsed
+            # with a unit, currency, or percentage by the strict amount parser.
+            # This prevents duplicate 14,100 candidates while still allowing
+            # truly unitless figures (for example, "certificate amount 6203").
+            if re.search(
+                rf"(?<![\w,:]){re.escape(match.group(0))}\s*"
+                r"(?:crores?\b|cr\b|rupees?\b|INR\b|percent\b|%)",
+                own_caption,
+                re.IGNORECASE,
+            ):
+                continue
+
+            # A pattern such as "14,000 100" is an ASR-split compound number,
+            # not a trustworthy 14,000 claim. Only the separate corroboration
+            # path above may normalize it to 14,100.
+            split_pair_pattern = re.compile(
+                rf"(?<![\w,:]){re.escape(match.group(0))}\s+\d{{1,3}}(?![\d,])"
+            )
+            if split_pair_pattern.search(local_text):
+                continue
+
             own_topic = _financial_claim_topic(own_caption)
             nearby_topic = _financial_claim_topic(local_text)
             topic = own_topic or nearby_topic
@@ -2863,6 +2925,7 @@ def _money_amount_clauses(text: str) -> list[dict[str, Any]]:
                 "topic": topic,
                 "source_id": source_id,
                 "amount_caption": own_caption,
+                "amount_caption_context": nearby_captions or own_caption,
             })
 
     # Validation also runs on plain generated prose, which has no timestamped
@@ -3155,6 +3218,14 @@ def _build_financial_evidence_fallback(
         ):
             topic = local_topic
 
+        # A figure-only certificate caption can inherit a unit from a
+        # neighboring caption, but only if the number-bearing caption identifies
+        # a certificate and the neighboring text stays inside this same source.
+        # Keep the claim's source-boundary checks independent of unit completion.
+        local_caption_evidence = str(
+            claim.get("amount_caption_context") or amount_caption
+        )
+
         # Attribution is source-local. In caption-aware contexts, a broad
         # clause may span adjacent SOURCE blocks even when its amount belongs
         # to only one block; never let that wider clause borrow a report label.
@@ -3272,10 +3343,48 @@ def _build_financial_evidence_fallback(
         # assembly. Keep the extractive fallback's claim wording, but leave
         # timestamp presentation to the trusted returned-source metadata.
         claim_text = re.sub(r"^\s*-\s*\[[^\]]+\]\s*", "", claim_text)
-        claims_by_topic.setdefault(
-            topic,
-            {**claim, "topic": topic, "text": claim_text},
+        # Only a certificate amount can use immediate same-source neighbors
+        # to complete a missing unit. Investment, DRT and recovery figures
+        # retain their original unit evidence.
+        unit_context = (
+            str(claim.get("amount_caption_context") or "")
+            if topic == "certificate" and local_topic == "certificate"
+            else ""
         )
+        selected_claim = {
+            **claim,
+            "topic": topic,
+            "text": claim_text,
+            "amount_caption": claim.get("amount_caption") or claim_text,
+            "amount_unit_context": unit_context,
+        }
+        existing_claim = claims_by_topic.get(topic)
+        if existing_claim is None:
+            claims_by_topic[topic] = selected_claim
+        elif (
+            topic == "certificate"
+            and math.isclose(
+                float(existing_claim.get("amount", -1)),
+                float(amount),
+                rel_tol=0.0,
+                abs_tol=0.1,
+            )
+            and not existing_claim.get("amount_unit_context")
+            and unit_context
+        ):
+            # Overlapping strict/bare amount parsers can recognize the same
+            # certificate figure. Preserve the first claim's attribution, but
+            # enrich only its unit metadata from a duplicate candidate for the
+            # same numeric amount and source block.
+            same_source = (
+                existing_claim.get("source_id") == source_id
+                and _financial_claim_topic(
+                    str(existing_claim.get("amount_caption") or "")
+                ) == "certificate"
+                and _financial_claim_topic(amount_caption) == "certificate"
+            )
+            if same_source:
+                existing_claim["amount_unit_context"] = unit_context
 
     missing_topics = [
         topic for topic in required_topics
@@ -3294,6 +3403,8 @@ def _build_financial_evidence_fallback(
                     "amount": claim.get("amount"),
                     "excerpt": str(claim.get("text", ""))[:240],
                     "source_id": claim.get("source_id"),
+                    "amount_caption": str(claim.get("amount_caption") or "")[:180],
+                    "amount_unit_context": str(claim.get("amount_unit_context") or "")[:240],
                 }
                 for topic, claim in claims_by_topic.items()
             },
@@ -3326,16 +3437,21 @@ def _build_financial_evidence_fallback(
             str(claim.get("text", "")),
             str(claim.get("amount_caption", "")),
         ))
-        crore_rupees = re.search(r"\bcrore\s+rupees?\b", evidence_text, re.IGNORECASE)
-        crore_unit = re.search(r"\bcrores?\b|\bcr\b", evidence_text, re.IGNORECASE)
-        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", evidence_text, re.IGNORECASE)
+        unit_context = (
+            str(claim.get("amount_unit_context") or "")
+            if claim.get("topic") == "certificate"
+            else ""
+        )
+        unit_evidence = f"{evidence_text} {unit_context}"
+        crore_rupees = re.search(r"\bcrore\s+rupees?\b", unit_evidence, re.IGNORECASE)
+        crore_unit = re.search(r"\bcrores?\b|\bcr\b", unit_evidence, re.IGNORECASE)
+        rupee_unit = re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", unit_evidence, re.IGNORECASE)
         if crore_rupees:
             return f"{value} crore rupees", True
         if crore_unit:
             return f"{value} crore", True
         if rupee_unit:
             return f"{value} rupees", True
-        # A bare number is deliberately not given a currency or magnitude unit.
         return f"the figure {value}", False
 
     investment_amount, investment_has_unit = formatted_amount(claims_by_topic["investment"])
@@ -4175,10 +4291,15 @@ def _retrieve_with_query_recovery_trace(
         lambda_mult=MMR_LAMBDA,
         max_distance=MAX_DISTANCE,
         return_anchors=True,
+        return_status=True,
     )
-    initial_results, citation_results = _split_retrieval_result_bundle(
-        initial_bundle
-    )
+    if isinstance(initial_bundle, tuple) and len(initial_bundle) == 3:
+        initial_results, citation_results, initial_retrieval_status = initial_bundle
+    else:
+        initial_results, citation_results = _split_retrieval_result_bundle(
+            initial_bundle
+        )
+        initial_retrieval_status = {"weak_native_query_rejected": False}
     attempts.append(
         _build_retrieval_attempt_trace(
             "initial_strict",
@@ -4191,6 +4312,27 @@ def _retrieve_with_query_recovery_trace(
         final_results = initial_results
         final_stage = "initial_strict"
     else:
+        if initial_retrieval_status.get("weak_native_query_rejected"):
+            attempts[-1]["weak_native_query_rejected"] = True
+            attempts[-1]["rejection_reason"] = "weak_native_semantic_match"
+            logger.info(
+                "Abstaining before query-rewrite recovery: same-language retrieval "
+                "has no lexical support and lacks strong semantic confidence."
+            )
+            return [], {
+                "recovery_used": False,
+                "final_stage": "no_evidence_weak_native_match_rejected",
+                "planner_used": False,
+                "planner_intent": None,
+                "planner_latency_ms": 0.0,
+                "attempts": attempts,
+                "retrieval_latency_ms": round(
+                    (time.perf_counter() - started) * 1000,
+                    2,
+                ),
+                "final_chunk_ids": [],
+            }
+
         if llm_client is None:
             llm_client = create_llm_client()
 
@@ -5002,6 +5144,7 @@ def answer_question(
     citation_results = _select_citation_results(
         retrieved_results,
         retrieval_trace,
+        result.get("generation_trace", {}),
     )
     citation_source_groups = _build_citation_source_groups(
         citation_results,

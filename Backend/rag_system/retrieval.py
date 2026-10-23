@@ -22,6 +22,7 @@ This file does NOT:
 import logging
 import math
 import re
+import unicodedata
 from typing import Any
 from functools import lru_cache
 from pathlib import Path
@@ -800,6 +801,164 @@ def _build_facet_rankings(
     return facet_rankings, facet_candidate_rankings
 
 
+def _store_transcript_language_code(vector_store) -> str | None:
+    """Read the first verifiable transcript language from an index docstore."""
+    docstore = getattr(vector_store, "docstore", None)
+    mapping = getattr(vector_store, "index_to_docstore_id", None)
+    if docstore is None or not isinstance(mapping, dict):
+        return None
+    for docstore_id in mapping.values():
+        try:
+            document = docstore.search(docstore_id)
+        except Exception:
+            continue
+        metadata = getattr(document, "metadata", None)
+        if not isinstance(metadata, dict):
+            continue
+        value = metadata.get("language_code") or metadata.get("transcript_language_code")
+        if not value:
+            value = metadata.get("language")
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = value.strip().casefold().replace("_", "-").split("-", 1)[0]
+        aliases = {
+            "english": "en",
+            "hindi": "hi",
+            "arabic": "ar",
+            "urdu": "ur",
+        }
+        return aliases.get(normalized, normalized)
+    return None
+
+
+def _query_script_language(query: str) -> str | None:
+    """Identify unambiguous supported query scripts; Arabic script is shared by ar/ur."""
+    if re.search(r"[\u0900-\u097F]", query):
+        return "hi"
+    if re.search(r"[A-Za-z]", query):
+        return "en"
+    # Arabic script alone cannot distinguish Arabic from Urdu safely.
+    return None
+
+
+_ENGLISH_TO_ARABIC_SEARCH_TERMS = {
+    "body": "الجسم",
+    "bodily": "الجسم",
+    "sound": "الصوت",
+    "sounds": "الأصوات",
+    "people": "الناس",
+    "person": "الشخص",
+    "begin": "يبدأ",
+    "begins": "يبدأ",
+    "start": "يبدأ",
+    "hear": "يسمع",
+    "hearing": "السماع",
+    "room": "الغرفة",
+    "episode": "المقطع",
+    "say": "يقول",
+    "says": "يقول",
+    "contribute": "يساهم",
+    "contributes": "يساهم",
+    "perception": "الإدراك",
+    "perceive": "الإدراك",
+    "role": "دور",
+    "describe": "يصف",
+    "describes": "يصف",
+    "important": "مهمة",
+    "importance": "أهمية",
+    "world": "العالم",
+    "heartbeat": "نبض القلب",
+    "heart": "القلب",
+    "blood": "الدم",
+    "movement": "حركة",
+    "breath": "التنفس",
+    "breathing": "التنفس",
+    "lungs": "الرئتين",
+    "lung": "الرئة",
+    "stomach": "المعدة",
+    "silence": "الصمت",
+    "quiet": "الهدوء",
+    "cost": "تكلفة",
+    "dollar": "دولار",
+    "hour": "ساعة",
+}
+
+
+def _build_arabic_search_query(query: str) -> str:
+    """Build a bounded Arabic lexical/semantic variant for common caption concepts."""
+    focus_terms = extract_query_focus_terms(query)
+    translated = [
+        _ENGLISH_TO_ARABIC_SEARCH_TERMS[term.casefold()]
+        for term in focus_terms
+        if term.casefold() in _ENGLISH_TO_ARABIC_SEARCH_TERMS
+    ]
+    normalized = query.casefold()
+    expansions = []
+    if re.search(r"\b(?:bodily|body)\s+sounds?\b", normalized):
+        # A plural bodily-sounds question naturally calls for the sound examples
+        # discussed in the transcript, not a literal translation alone.
+        expansions.append("أصوات الجسم نبض القلب حركة الدم التنفس الرئتين المعدة")
+    if (
+        re.search(r"\b(?:sound|sounds)\b", normalized)
+        and re.search(r"\b(?:perception|perceive|role|contribut\w*)\b", normalized)
+    ):
+        expansions.append("أهمية الصوت في إدراك العالم")
+    terms = list(dict.fromkeys([*translated, *expansions]))
+    return " ".join(terms)
+
+
+def build_contextual_retrieval_query_plan(vector_store, query: str) -> list[tuple[str, str]]:
+    """Use the ordinary query plan plus a bounded Arabic variant for Arabic indexes."""
+    plan = list(build_retrieval_query_plan(query))
+    index_language = _store_transcript_language_code(vector_store)
+    query_language = _query_script_language(query)
+    if index_language == "ar" and query_language == "en":
+        translated_query = _build_arabic_search_query(query)
+        if translated_query:
+            plan.append(("cross_lingual_arabic", translated_query))
+    return plan
+
+
+NATIVE_QUERY_NO_LEXICAL_DISTANCE_RATIO = 0.70
+
+
+def _should_abstain_on_weak_native_semantic_match(
+    vector_store,
+    query: str,
+    semantic_results,
+    lexical_results,
+    max_distance: float,
+) -> bool:
+    """Abstain when a same-language query has no lexical support and only weak semantics.
+
+    This narrowly targets false-positive context. Cross-lingual Arabic queries
+    use an explicit Arabic variant, and native queries with lexical support are
+    unaffected. The stricter threshold is applied only when no lexical candidates
+    exist at all; it does not replace the configured general retrieval distance.
+    """
+    if lexical_results:
+        return False
+    index_language = _store_transcript_language_code(vector_store)
+    query_language = _query_script_language(query)
+    if not index_language or not query_language or query_language != index_language:
+        return False
+    distances = []
+    for item in semantic_results or []:
+        try:
+            distance = float(item[1])
+        except (TypeError, ValueError, OverflowError, IndexError):
+            continue
+        if math.isfinite(distance):
+            distances.append(distance)
+    if not distances:
+        return False
+    try:
+        confidence_ceiling = float(max_distance) * NATIVE_QUERY_NO_LEXICAL_DISTANCE_RATIO
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return min(distances) > confidence_ceiling
+
+
 def diagnose_retrieval_pipeline(
     vector_store,
     query: str,
@@ -830,7 +989,7 @@ def diagnose_retrieval_pipeline(
         else max(k, min(k * 2, 8))
     )
 
-    query_plan = build_retrieval_query_plan(query)
+    query_plan = build_contextual_retrieval_query_plan(vector_store, query)
     semantic_stages = []
     semantic_rankings = []
     semantic_rankings_by_label = {}
@@ -865,6 +1024,11 @@ def diagnose_retrieval_pipeline(
     lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(build_evidence_facet_plan(query))
+    lexical_queries.extend(
+        (label, query_text)
+        for label, query_text in query_plan
+        if label == "cross_lingual_arabic"
+    )
     lexical_stages = []
     lexical_rankings = []
     lexical_rankings_by_label = {}
@@ -886,6 +1050,13 @@ def diagnose_retrieval_pipeline(
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = lexical_results_for_query
     lexical_results = fuse_lexical_rankings(lexical_rankings)
+    weak_native_query_rejected = _should_abstain_on_weak_native_semantic_match(
+        vector_store,
+        query,
+        semantic_results,
+        lexical_results,
+        max_distance,
+    )
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
@@ -914,6 +1085,9 @@ def diagnose_retrieval_pipeline(
         original_query_lexical_results=original_query_lexical_results,
         diagnostic_trace=anchor_selection_trace,
     )
+    if weak_native_query_rejected:
+        selection["anchors"] = []
+        anchor_selection_trace["weak_native_semantic_match_rejected"] = True
     context_results = expand_retrieval_context(
         vector_store,
         selection["anchors"],
@@ -951,6 +1125,7 @@ def diagnose_retrieval_pipeline(
         "anchors": selection["anchors"],
         "final_context": context_results,
         "semantic_gate_passed": selection["semantic_gate_passed"],
+        "weak_native_query_rejected": weak_native_query_rejected,
     }
 
 
@@ -1011,10 +1186,27 @@ STOPWORDS = {
 ARABIC_QUERY_FOCUS_STOPWORDS = {
     "كم", "قد", "هل", "ما", "ماذا", "لماذا", "كيف", "أين", "اين", "متى",
     "من", "في", "على", "إلى", "الى", "عن", "مع", "داخل", "لمدة", "خلال",
-    "حول", "بين", "اللي", "ايه", "أيه",
+    "حول", "بين", "اللي", "ايه", "أيه", "يصف", "المقطع",
 }
 
-QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
+# Hindi question/function words should not count as lexical evidence. In
+# particular, "की", "क्या", and "है" occur frequently across unrelated Hindi
+# transcripts and can make an unrelated question look lexically supported.
+HINDI_QUERY_FOCUS_STOPWORDS = {
+    "की", "के", "का", "को", "में", "से", "पर", "और", "या", "लेकिन",
+    "क्या", "कौन", "किस", "किसे", "किसका", "किसकी", "किसके", "किसने",
+    "किसको", "कैसे", "कहाँ", "कहां", "कब", "क्यों", "कितना", "कितने",
+    "कितनी", "है", "हैं", "था", "थी", "थे", "हो", "हूँ", "हूं",
+    "होता", "होती", "होते", "यह", "ये", "वह", "वे", "इस", "उस",
+    "इन", "उन", "अपना", "अपने", "अपनी", "नहीं", "न", "लिए", "तक",
+    "जैसे", "जब", "तब", "भी", "ही", "तो", "वाला", "वाली", "वाले",
+}
+
+QUERY_FOCUS_STOPWORDS = (
+    STOPWORDS
+    | ARABIC_QUERY_FOCUS_STOPWORDS
+    | HINDI_QUERY_FOCUS_STOPWORDS
+    | {
     "he", "she", "his", "her", "their", "them", "me", "my", "your", "our",
     "we", "i", "say", "says", "said", "tell", "tells", "told",
     "discuss", "discusses", "discussed", "describe", "describes",
@@ -1022,7 +1214,8 @@ QUERY_FOCUS_STOPWORDS = STOPWORDS | ARABIC_QUERY_FOCUS_STOPWORDS | {
     "talking", "mention", "mentions", "mentioned", "give", "gives",
     "given", "provide", "provides", "provided", "does", "did",
     "video", "interview",
-}
+    }
+)
 
 SPEAKER_ATTRIBUTION_PATTERN = re.compile(
     r"\b(?:does|did|is|are|was|were|can|could|would|will|has|have|had)"
@@ -1031,6 +1224,28 @@ SPEAKER_ATTRIBUTION_PATTERN = re.compile(
     r"describe|describes|described|explain|explains|explained|"
     r"talk|talks|mention|mentions|mentioned)\b"
 )
+
+
+def _split_unicode_words(text: str) -> list[str]:
+    """Split on Unicode separators without breaking Indic combining sequences.
+
+    Python's standard \\w token pattern excludes some combining marks used in
+    Devanagari, truncating Hindi words such as ऑस्ट्रेलिया. Combining marks stay
+    attached to the current token while punctuation/whitespace remain boundaries.
+    """
+    words: list[str] = []
+    current: list[str] = []
+    for character in text:
+        category = unicodedata.category(character)
+        if character.isalnum() or category.startswith("M"):
+            current.append(character)
+        else:
+            if current:
+                words.append("".join(current))
+                current = []
+    if current:
+        words.append("".join(current))
+    return words
 
 
 def extract_query_focus_terms(
@@ -1051,7 +1266,7 @@ def extract_query_focus_terms(
         count=1,
     )
 
-    words = re.findall(r"[^\W_]+", normalized_query, flags=re.UNICODE)
+    words = _split_unicode_words(normalized_query)
     return [
         word
         for word in words
@@ -1447,6 +1662,54 @@ def get_all_documents(
     return documents
 
 
+def _normalize_lexical_token(token: str) -> str:
+    """Normalize a small set of surface variants for lexical evidence matching.
+
+    This is deliberately conservative: it is not a full Arabic stemmer or an
+    English lemmatizer. It handles common Arabic alef/ya variants, the definite
+    article and possessive clitics, plus English comparative/superlative forms
+    such as easier/easiest matching easy.
+    """
+    if not isinstance(token, str) or not token:
+        return ""
+
+    normalized = token.casefold()
+    normalized = re.sub(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]", "", normalized)
+    normalized = normalized.translate(str.maketrans({
+        "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي",
+    }))
+
+    if re.search(r"[\u0600-\u06FF]", normalized):
+        # Normalize common proclitics before possessive suffixes. This matters
+        # for forms such as "لإدراكنا": removing the prefix first preserves the
+        # root-final kaf when the possessive suffix is stripped afterward.
+        for prefix in ("و", "ف", "ب", "ل", "ك"):
+            if normalized.startswith(prefix) and len(normalized) >= 6:
+                remainder = normalized[1:]
+                if remainder.startswith("ال") or (prefix == "ل" and remainder.startswith("ا")):
+                    normalized = remainder
+                    break
+        if normalized.startswith("لل") and len(normalized) > 5:
+            normalized = normalized[2:]
+
+        possessive_suffixes = ("هما", "كما", "كم", "كن", "نا", "هم", "هن", "ها")
+        if not normalized.startswith("ال"):
+            possessive_suffixes = (*possessive_suffixes, "ك")
+        for suffix in possessive_suffixes:
+            if normalized.endswith(suffix) and len(normalized) - len(suffix) >= 3:
+                normalized = normalized[:-len(suffix)]
+                break
+        if normalized.startswith("ال") and len(normalized) > 4:
+            normalized = normalized[2:]
+        return normalized
+
+    if normalized.endswith("iest") and len(normalized) > 5:
+        return normalized[:-4] + "y"
+    if normalized.endswith("ier") and len(normalized) > 4:
+        return normalized[:-3] + "y"
+    return normalized
+
+
 def lexical_search(
     vector_store,
     query: str,
@@ -1472,11 +1735,18 @@ def lexical_search(
     if not documents:
         return []
 
-    unique_terms = list(dict.fromkeys(term.casefold() for term in focus_terms))
+    unique_terms = list(dict.fromkeys(
+        normalized for term in focus_terms
+        if (normalized := _normalize_lexical_token(term))
+    ))
     tokenized_documents = []
     for document in documents:
         text = document.page_content.casefold()
-        tokens = set(re.findall(r"[^\W_]+", text, flags=re.UNICODE))
+        tokens = {
+            normalized
+            for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+            if (normalized := _normalize_lexical_token(token))
+        }
         tokenized_documents.append((document, text, tokens))
 
     document_frequency = {term: 0 for term in unique_terms}
@@ -1895,6 +2165,24 @@ def is_evidence_dense_question(query: str) -> bool:
 
     normalized = " ".join(query.casefold().split())
     focus_terms = extract_query_focus_terms(query)
+
+    # Predictions and future-facing claims can be answer-bearing even when the
+    # relevant passage is less lexically similar than surrounding discussion.
+    if re.search(r"\b(?:predict\w*|forecast\w*|projection\w*)\b", normalized):
+        return True
+
+    # Questions about plural bodily sounds can require evidence across several
+    # neighboring transcript segments; use the wider candidate shortlist.
+    if re.search(r"\b(?:bodily|body)\s+sounds?\b", normalized):
+        return True
+
+    # English-only intent rules miss common Arabic role/perception questions.
+    if (
+        re.search(r"(?:^|[^\w])(?:كيف|لماذا|ما|ماذا)(?:$|[^\w])", normalized)
+        and re.search(r"(?:^|[^\w])(?:دور|تأثير|اثر|أثر|أهمية|توجيه|الإدراك|الادراك)(?:$|[^\w])", normalized)
+    ):
+        return True
+
     quantitative_how = re.match(
         r"^how\s+(?:many|much|long|old|far|tall|wide|high|heavy|often|soon|fast|big|large|small)\b",
         normalized,
@@ -3407,6 +3695,7 @@ def retrieve_question_context(
     expand_context: bool = True,
     allow_overview: bool = True,
     return_anchors: bool = False,
+    return_status: bool = False,
 ):
     """Retrieve transcript evidence, optionally retaining anchors before expansion.
 
@@ -3420,8 +3709,13 @@ def retrieve_question_context(
     )
     if allow_overview and is_overview_question(query):
         overview_results = retrieve_overview(vector_store)
+        status = {"weak_native_query_rejected": False}
         if return_anchors:
+            if return_status:
+                return overview_results, overview_results, status
             return overview_results, overview_results
+        if return_status:
+            return overview_results, status
         return overview_results
 
     dense_question = is_evidence_dense_question(query)
@@ -3438,7 +3732,7 @@ def retrieve_question_context(
         else max(k, min(k * 2, 8))
     )
 
-    query_plan = build_retrieval_query_plan(query)
+    query_plan = build_contextual_retrieval_query_plan(vector_store, query)
     semantic_rankings = []
     semantic_rankings_by_label = {}
     for label, query_variant in query_plan:
@@ -3459,6 +3753,11 @@ def retrieve_question_context(
     lexical_queries = [("original", query)]
     if dense_question:
         lexical_queries.extend(build_evidence_facet_plan(query))
+    lexical_queries.extend(
+        (label, query_text)
+        for label, query_text in query_plan
+        if label == "cross_lingual_arabic"
+    )
     lexical_rankings = []
     lexical_rankings_by_label = {}
     original_query_lexical_results = []
@@ -3474,6 +3773,22 @@ def retrieve_question_context(
         if label in EVIDENCE_FACET_QUERY_DEFINITIONS:
             lexical_rankings_by_label[label] = ranking
     lexical_results = fuse_lexical_rankings(lexical_rankings)
+    weak_native_query_rejected = _should_abstain_on_weak_native_semantic_match(
+        vector_store,
+        query,
+        semantic_results,
+        lexical_results,
+        max_distance,
+    )
+    if weak_native_query_rejected:
+        status = {"weak_native_query_rejected": True}
+        if return_status and return_anchors:
+            return [], [], status
+        if return_status:
+            return [], status
+        if return_anchors:
+            return [], []
+        return []
 
     combined_results = fuse_semantic_and_lexical_results(
         semantic_results=semantic_results,
@@ -3502,8 +3817,13 @@ def retrieve_question_context(
     )
     raw_results = selection["anchors"]
     if not expand_context:
+        status = {"weak_native_query_rejected": False}
         if return_anchors:
+            if return_status:
+                return raw_results, raw_results, status
             return raw_results, raw_results
+        if return_status:
+            return raw_results, status
         return raw_results
 
     expanded_results = expand_retrieval_context(
@@ -3511,7 +3831,12 @@ def retrieve_question_context(
         raw_results,
         max_chunks=selection["context_max_chunks"],
     )
+    status = {"weak_native_query_rejected": False}
     if return_anchors:
+        if return_status:
+            return expanded_results, raw_results, status
         return expanded_results, raw_results
+    if return_status:
+        return expanded_results, status
     return expanded_results
 

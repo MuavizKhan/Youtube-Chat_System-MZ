@@ -92,6 +92,33 @@ def test_query_focus_terms_remove_arabic_question_boilerplate():
 
 
 @pytest.mark.unit
+def test_query_focus_terms_remove_hindi_question_boilerplate():
+    terms = retrieval.extract_query_focus_terms(
+        "ऑस्ट्रेलिया की राजधानी क्या है?"
+    )
+
+    assert terms == ["ऑस्ट्रेलिया", "राजधानी"]
+    assert retrieval._split_unicode_words("ऑस्ट्रेलिया राजधानी") == [
+        "ऑस्ट्रेलिया", "राजधानी"
+    ]
+
+
+@pytest.mark.unit
+def test_lexical_search_ignores_common_hindi_function_words_for_unrelated_query():
+    documents = {
+        "a": doc(1, 0, 10, "राजस्थान के इतिहास में किसान आंदोलन क्या था और क्यों हुआ।"),
+        "b": doc(2, 10, 20, "वक्ता कहता है कि यह आंदोलन राजस्थान में शुरू हुआ था।"),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+    )
+
+    assert results == []
+
+
+@pytest.mark.unit
 def test_query_variants_keep_original_and_add_content_focus():
     variants = retrieval.build_retrieval_query_variants(
         "What does Vijay Mallya say about building the Kingfisher brand?"
@@ -372,6 +399,26 @@ def test_quantitative_how_questions_do_not_trigger_dense_retrieval(query):
 def test_explanatory_youtube_questions_trigger_dense_retrieval(query):
     assert retrieval.is_evidence_dense_question(query)
 
+@pytest.mark.unit
+def test_future_prediction_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "What does the guest predict will become easier for anyone?"
+    )
+
+
+@pytest.mark.unit
+def test_arabic_role_perception_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "كيف يصف المقطع دور الصوت في توجيه الإدراك؟"
+    )
+
+
+@pytest.mark.unit
+def test_bodily_sound_question_uses_larger_candidate_pool():
+    assert retrieval.is_evidence_dense_question(
+        "What bodily sounds might people begin to hear in the room?"
+    )
+
 
 @pytest.mark.unit
 def test_overview_can_select_one_representative_chunk():
@@ -408,6 +455,115 @@ def test_lexical_search_requires_shared_evidence():
 
 
 @pytest.mark.unit
+def test_contextual_query_plan_adds_arabic_terms_for_english_question_on_arabic_index():
+    candidate = doc(1, 190, 205, "الصوت هو بوصلة مهمة جداً لإدراكنا للعالم.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "What does the episode say sound contributes to perception, and how does it describe sound's role?",
+    )
+
+    translated = [
+        query for label, query in plan if label == "cross_lingual_arabic"
+    ]
+    assert len(translated) == 1
+    assert "الصوت" in translated[0]
+    assert "الإدراك" in translated[0]
+    assert "أهمية الصوت في إدراك العالم" in translated[0]
+
+
+@pytest.mark.unit
+def test_contextual_query_plan_expands_bodily_sounds_for_arabic_index():
+    candidate = doc(1, 190, 205, "نبض قلبك وحركة الدم والتنفس داخل الغرفة.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"gold": candidate})
+
+    plan = retrieval.build_contextual_retrieval_query_plan(
+        store,
+        "What bodily sounds might people begin to hear in the room?",
+    )
+
+    translated = [
+        query for label, query in plan if label == "cross_lingual_arabic"
+    ]
+    assert translated
+    assert "نبض القلب حركة الدم التنفس الرئتين المعدة" in translated[0]
+
+
+@pytest.mark.unit
+def test_retrieve_question_context_returns_weak_match_rejection_status(monkeypatch):
+    candidate = doc(16, 880, 890, "History lesson transcript passage.")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_mmr",
+        lambda **_kwargs: [(candidate, 1.14832)],
+    )
+    monkeypatch.setattr(retrieval, "lexical_search", lambda **_kwargs: [])
+
+    context, anchors, status = retrieval.retrieve_question_context(
+        store,
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+        max_distance=1.50,
+        return_anchors=True,
+        return_status=True,
+    )
+
+    assert context == []
+    assert anchors == []
+    assert status["weak_native_query_rejected"] is True
+
+
+@pytest.mark.unit
+def test_weak_same_language_semantic_only_match_is_rejected():
+    candidate = doc(16, 880, 890, "History lesson transcript passage.")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    assert retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "ऑस्ट्रेलिया की राजधानी क्या है?",
+        [(candidate, 1.14832)],
+        [],
+        1.50,
+    )
+
+
+@pytest.mark.unit
+def test_native_semantic_match_is_not_rejected_when_lexical_support_exists():
+    candidate = doc(3, 190, 205, "पहला बड़ा किसान आंदोलन")
+    candidate.metadata["language_code"] = "hi"
+    store = FakeVectorStore({"history": candidate})
+
+    assert not retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "किस किसान आंदोलन को पहला बड़ा आंदोलन बताया गया है?",
+        [(candidate, 0.9)],
+        [(candidate, 0.3)],
+        1.50,
+    )
+
+
+@pytest.mark.unit
+def test_weak_query_is_not_rejected_when_query_and_index_languages_differ():
+    candidate = doc(1, 0, 10, "Arabic transcript passage.")
+    candidate.metadata["language_code"] = "ar"
+    store = FakeVectorStore({"arabic": candidate})
+
+    assert not retrieval._should_abstain_on_weak_native_semantic_match(
+        store,
+        "What does sound contribute to perception?",
+        [(candidate, 1.4)],
+        [],
+        1.50,
+    )
+
+
+@pytest.mark.unit
 def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap():
     documents = {
         "answer": doc(
@@ -432,6 +588,46 @@ def test_arabic_lexical_search_prioritizes_specific_entity_over_common_overlap()
     )
 
     assert [document.metadata["chunk_id"] for document, _score in results] == [1]
+
+
+@pytest.mark.unit
+def test_lexical_search_normalizes_arabic_article_and_possessive_suffix():
+    documents = {
+        "gold": doc(
+            1, 190, 205,
+            "ولكن الحقيقة إن الصوت هو بوصلة مهمة جداً لإدراكنا للعالم."
+        ),
+        "neighbor": doc(
+            2, 205, 220,
+            "مبدأ البساطة والاهتمام بتجربة الصوت في الطبيعة."
+        ),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        limit=8,
+    )
+
+    assert results
+    assert results[0][0].metadata["chunk_id"] == 1
+
+
+@pytest.mark.unit
+def test_lexical_search_normalizes_english_comparatives_for_gold_evidence():
+    documents = {
+        "gold": doc(1, 0, 5, "It is about to get really easy to hack anyone."),
+        "other": doc(2, 10, 15, "The guest discusses AI workflows and shipping."),
+    }
+
+    results = retrieval.lexical_search(
+        FakeVectorStore(documents),
+        "What does the guest predict will become easier for anyone?",
+        limit=8,
+    )
+
+    assert results
+    assert results[0][0].metadata["chunk_id"] == 1
 
 
 @pytest.mark.unit
