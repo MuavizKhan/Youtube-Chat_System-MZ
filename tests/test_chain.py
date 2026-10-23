@@ -2185,7 +2185,11 @@ def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypat
             "final_chunk_ids": [1, 2, 3],
             "citation_chunk_ids": [1, 3],
         },
-        "generation_trace": {"generated": True, "fallback_used": False},
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+            "context_budget": {"included_chunk_ids": ["1", "2", "3"]},
+        },
     }
 
     monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
