@@ -662,3 +662,27 @@ Then start the backend against the already-indexed `experiment-caption-segments`
 ```
 
 **Phase 10.8 is not complete until the live report passes.** Require `cases_succeeded = 3`, `cases_failed = 0`, consistent effective server configuration, `quality_passed = true`, and an empty `quality_failures` array. In Q07, confirm the recovery amount remains explicitly attributed to the source report and malformed amounts are absent. In AR03 and AR08, confirm the plain-text timestamp summary uses the exact returned-source interval that contains chunk 2: this may be `00:13–03:37` when the returned source groups chunks 0–2, or `02:33–03:37` when chunk 2 is returned alone. The indexed caption places the eyelid phrase in chunk 2; chunk 11 (`09:49–10:58`) discusses sound-wave propagation and must not be used as the eyelid source. No reindexing is expected for these generation/attribution/timestamp changes. The five-video retrieval benchmark is a separate gate and must be reviewed from its own saved multi-video report; a passing answer/source audit does not imply that every pilot-video retrieval case passes.
+
+## Phase 10.9 — Targeted multilingual retrieval reliability
+
+Phase 10.9 adds narrowly scoped retrieval corrections for three observed failure patterns without a broad global-parameter sweep:
+
+- Reject weak same-language semantic-only matches when no lexical candidate supports the query, and preserve the rejection through query recovery so an unrelated question such as Hindi `HI10` does not regain irrelevant evidence through rewriting.
+- Improve evidence recall for English comparative phrasing and selected Arabic lexical variants; use a bounded Arabic query variant for English questions only when persisted index metadata identifies Arabic transcript text, while retaining the original query.
+- Keep citation selection bounded to chunks included in the generation prompt when that trace is available, with a safe anchor-only fallback when included-chunk IDs are missing.
+
+### Validation snapshot — 23 October 2026
+
+- Post-merge [Backend CI run #855](https://github.com/MuavizKhan/Youtube-Chat_System-MZ/actions/runs/39962020724) passed: dependency consistency, Python compilation, Chrome-extension JavaScript syntax checks, and **589 automated tests passed** (4 warnings).
+- The saved five-video comparison reports five videos evaluated, zero evaluation errors, and zero quality failures after the Phase 10.9 changes. Across 86 comparable question/stage outcomes, 10 changed from fail to pass and none changed from pass to fail. The newer registry contributes 26 outcomes without a matching prior outcome.
+- Target checks confirm `HI10` is rejected as unrelated, `AI01` evidence reaches production context, and Arabic `AR03`, `AR04`, and `AR09` meet the production-context evidence checks. **AR03 still has a raw-anchor gold-evidence miss**, retained as a non-gating diagnostic; production context contains the required evidence.
+- The live answer/source audit passed for Q07, AR03, and AR08, including AR08 source/timestamp alignment. That audit used an experimental namespace and different settings, so it is supplemental and not counted as the five-video retrieval comparison.
+
+### Remaining limitations
+
+- Urdu remains a source-verification blocker until a genuine Urdu-script caption track and its evidence phrases can be verified.
+- Legacy indexes missing `transcript_segment_schema_version` remain stale/not production-ready; read-only diagnostic compatibility is not permission to bypass index-readiness checks or rebuild indexes during a comparison.
+- The original 17 October baseline report lacks `experiment_metadata`. The 20 October metadata-bearing triage report was used to recover the recorded key configuration; the 22 October comparison report agrees on the recorded retrieval settings and default namespace. The original report does not prove a historical index fingerprint, so exact 17 October index identity cannot be claimed.
+
+This snapshot records the merged Phase 10.9 state; it does not mark the broader cross-phase audit or public-deployment requirements complete.
+
