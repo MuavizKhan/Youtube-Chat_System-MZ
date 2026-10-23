@@ -946,9 +946,9 @@ def _build_hindi_search_query(query: str) -> str:
     normalized = query.casefold()
     expansions = []
     if (
-        re.search(r"\\b(?:tax|taxes|taxation|levy|levies)\\b", normalized)
-        and re.search(r"\\b(?:new|introduced|imposed|levied)\\b", normalized)
-        and re.search(r"\\b(?:name|called|named|identified)\\b", normalized)
+        re.search(r"\b(?:tax|taxes|taxation|levy|levies)\\b", normalized)
+        and re.search(r"\b(?:new|introduced|imposed|levied)\\b", normalized)
+        and re.search(r"\b(?:name|called|named|identified)\\b", normalized)
     ):
         # Captions may phrase the answer as a named tax, rather than using the
         # exact English question wording. Keep this expansion limited to that
