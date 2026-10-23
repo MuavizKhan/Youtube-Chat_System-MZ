@@ -907,8 +907,60 @@ def _build_arabic_search_query(query: str) -> str:
     return " ".join(terms)
 
 
+# This is deliberately a small search vocabulary, not a general translation
+# system. It should add transcript-relevant Hindi terms without replacing the
+# user's original query or inventing unsupported details.
+_ENGLISH_TO_HINDI_SEARCH_TERMS = {
+    "tax": "कर टैक्स",
+    "taxes": "कर टैक्स",
+    "taxation": "कर",
+    "levy": "कर",
+    "levies": "कर",
+    "impose": "लगाना",
+    "imposed": "लगाया गया",
+    "imposing": "लगाना",
+    "introduce": "लागू करना",
+    "introduced": "लागू किया गया",
+    "new": "नया नई नए",
+    "name": "नाम",
+    "named": "नाम",
+    "call": "नाम",
+    "called": "नाम",
+    "give": "देना",
+    "given": "दिया गया",
+    "which": "कौन सा",
+    "identified": "कौन सा",
+    "speaker": "वक्ता",
+}
+
+
+def _build_hindi_search_query(query: str) -> str:
+    """Build a bounded Hindi search variant for English questions about Hindi captions."""
+    focus_terms = extract_query_focus_terms(query)
+    translated = [
+        _ENGLISH_TO_HINDI_SEARCH_TERMS[term.casefold()]
+        for term in focus_terms
+        if term.casefold() in _ENGLISH_TO_HINDI_SEARCH_TERMS
+    ]
+
+    normalized = query.casefold()
+    expansions = []
+    if (
+        re.search(r"\\b(?:tax|taxes|taxation|levy|levies)\\b", normalized)
+        and re.search(r"\\b(?:new|introduced|imposed|levied)\\b", normalized)
+        and re.search(r"\\b(?:name|called|named|identified)\\b", normalized)
+    ):
+        # Captions may phrase the answer as a named tax, rather than using the
+        # exact English question wording. Keep this expansion limited to that
+        # explicit tax + new/introduction + naming intent.
+        expansions.append("नया टैक्स नया कर लगाया गया नाम क्या था कौन सा")
+
+    terms = list(dict.fromkeys([*translated, *expansions]))
+    return " ".join(terms)
+
+
 def build_contextual_retrieval_query_plan(vector_store, query: str) -> list[tuple[str, str]]:
-    """Use the ordinary query plan plus a bounded Arabic variant for Arabic indexes."""
+    """Use bounded script-aware query variants for Arabic and Hindi transcript indexes."""
     plan = list(build_retrieval_query_plan(query))
     index_language = _store_transcript_language_code(vector_store)
     query_language = _query_script_language(query)
@@ -916,6 +968,10 @@ def build_contextual_retrieval_query_plan(vector_store, query: str) -> list[tupl
         translated_query = _build_arabic_search_query(query)
         if translated_query:
             plan.append(("cross_lingual_arabic", translated_query))
+    elif index_language == "hi" and query_language == "en":
+        translated_query = _build_hindi_search_query(query)
+        if translated_query:
+            plan.append(("cross_lingual_hindi", translated_query))
     return plan
 
 
@@ -1027,7 +1083,7 @@ def diagnose_retrieval_pipeline(
     lexical_queries.extend(
         (label, query_text)
         for label, query_text in query_plan
-        if label == "cross_lingual_arabic"
+        if label.startswith("cross_lingual_")
     )
     lexical_stages = []
     lexical_rankings = []
@@ -1742,9 +1798,13 @@ def lexical_search(
     tokenized_documents = []
     for document in documents:
         text = document.page_content.casefold()
+        # Use the same Unicode-aware token boundaries as query focus extraction.
+        # Python's [^\\W_] pattern does not keep Devanagari combining marks
+        # attached to their base letters, so Hindi document terms were split
+        # into fragments that could never match intact query terms.
         tokens = {
             normalized
-            for token in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+            for token in _split_unicode_words(text)
             if (normalized := _normalize_lexical_token(token))
         }
         tokenized_documents.append((document, text, tokens))
@@ -3756,7 +3816,7 @@ def retrieve_question_context(
     lexical_queries.extend(
         (label, query_text)
         for label, query_text in query_plan
-        if label == "cross_lingual_arabic"
+        if label.startswith("cross_lingual_")
     )
     lexical_rankings = []
     lexical_rankings_by_label = {}
