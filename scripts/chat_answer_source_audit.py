@@ -23,7 +23,8 @@ from urllib.request import Request, urlopen
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "phase10_8_8_answer_source_audit.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "chat_answer_source_audit.json"
+REPORT_ID = "chat_answer_source_audit_v1"
 
 # Evidence groups are pinned to chunk IDs observed in the current isolated
 # experiment-caption-segments namespace. Keep this registry aligned with
@@ -718,7 +719,7 @@ def run_audit(
 
     report = {
         "report_schema_version": "1.1.0",
-        "report_id": "phase10_8_8_answer_source_audit",
+        "report_id": REPORT_ID,
         "generated_at": datetime.now().astimezone().isoformat(),
         "backend_base_url": base_url.rstrip("/"),
         **_read_git_state(),
