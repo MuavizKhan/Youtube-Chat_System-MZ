@@ -701,7 +701,7 @@ Phase 10.10 uses the isolated `phase10-10-acceptance-minilm-20261023` index name
 
 The post-PR #120 five-video MiniLM acceptance report is `evaluation_reports/phase10_10_crossphase_acceptance_minilm_20261024_20261024-064619.json`. It records all five registered videos evaluated, zero evaluation errors, zero quality failures, and `overall_passed = true`. The 34 production-context evidence cases passed with 100% evidence presence and 100% mean group coverage. Raw-anchor diagnostics remain imperfect (88.2% aggregate hit rate and 81.4% group coverage); these are non-gating diagnostics and must not be improved by relaxing thresholds or weakening evidence requirements.
 
-The expanded-context live answer/source report is `evaluation_reports/phase10_10_answer_source_audit_context_citations_20261024-095758.json`. It records Q07, AR03, and AR08 as three successful requests, zero request failures, `quality_passed = true`, no quality failures, and a consistent effective server configuration using the same MiniLM acceptance namespace. The earlier anchor-only run failed AR08's evidence/source/timestamp alignment because required context evidence was not exposed as a source. The expanded policy passed that case without changing the retrieval configuration. The report was produced before the audit harness's metadata cleanup; new reports use the generic versioned report ID `chat_answer_source_audit_v1`.
+The expanded-context live answer/source report is `evaluation_reports/phase10_10_answer_source_audit_context_citations_20261024-095758.json`. It records Q07, AR03, and AR08 as three successful requests, zero request failures, `quality_passed = true`, no quality failures, and a consistent effective server configuration using the same MiniLM acceptance namespace. Its captured runtime label is `expanded_context_experiment`, the name used before this closure change. The earlier anchor-only run failed AR08's evidence/source/timestamp alignment because required context evidence was not exposed as a source. The expanded policy passed that case without changing retrieval configuration. This PR stabilizes the production metadata name as `prompt_included_chunks` and changes the audit harness's identity to `chat_answer_source_audit_v1`; therefore a fresh post-merge live audit is required to verify the final default and labels.
 
 ### Final closure gate
 
@@ -709,7 +709,7 @@ Do not rebuild or overwrite the acceptance index. Phase 10.10 is closed only aft
 
 1. GitHub CI passes for the citation-default and audit-report metadata changes.
 2. The full local test suite passes on the merged commit.
-3. A fresh live answer/source audit after the merge reports `cases_attempted = 3`, `cases_succeeded = 3`, `cases_failed = 0`, `quality_passed = true`, an empty `quality_failures` array, consistent effective server configuration, and `citation_policy = expanded_context_experiment` in all cases.
+3. A fresh live answer/source audit after the merge reports `cases_attempted = 3`, `cases_succeeded = 3`, `cases_failed = 0`, `quality_passed = true`, an empty `quality_failures` array, consistent effective server configuration, and `citation_policy = prompt_included_chunks` in all cases.
 4. The fresh report records the merged commit and clean tracked working tree; the namespace and model match the manifest.
 5. Hindi unrelated-query controls HI05/HI10 remain rejected, and all five videos remain green in the saved MiniLM acceptance report.
 
