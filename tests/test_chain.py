@@ -2716,6 +2716,71 @@ def test_generation_repair_instruction_detects_missing_and_unsupported_financial
 
 
 @pytest.mark.unit
+def test_hindi_named_tax_fallback_requires_native_tax_naming_question_and_explicit_evidence():
+    question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
+    context = (
+        "यहां पर एक नया टैक्स लगाया गया था चवरी कर कौन सा चरी कर "
+        "उस टैक्स का नाम क्या था।"
+    )
+    diagnostics = {}
+
+    answer = chain._build_hindi_named_tax_evidence_fallback(
+        question, context, diagnostics=diagnostics
+    )
+
+    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。"
+    assert diagnostics["used"] is True
+    assert diagnostics["extracted_tax_name"] == "चवरी कर"
+    assert diagnostics["matched_evidence_phrase"] == "नया टैक्स लगाया गया था चवरी कर"
+
+    # The same context must not turn an unrelated question into an answer.
+    assert chain._build_hindi_named_tax_evidence_fallback(
+        "ऑस्ट्रेलिया की राजधानी क्या है?", context
+    ) is None
+    # A cross-lingual English question must still receive an English answer.
+    assert chain._build_hindi_named_tax_evidence_fallback(
+        "Which new tax was imposed and what was it called?", context
+    ) is None
+    # General tax mentions are not enough without the explicit naming clause.
+    assert chain._build_hindi_named_tax_evidence_fallback(
+        question, "वक्ता 84 प्रकार के करों का उल्लेख करते हैं।"
+    ) is None
+
+
+@pytest.mark.unit
+def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(monkeypatch):
+    context = (
+        "यहां पर एक नया टैक्स लगाया गया था चवरी कर कौन सा चरी कर "
+        "उस टैक्स का नाम क्या था।"
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(0, 0, 78, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [0],
+                "citation_chunk_ids": [0],
+            },
+        ),
+    )
+    monkeypatch.setattr(chain, "generate_with_llm", lambda **kwargs: chain.FALLBACK_ANSWER)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?",
+        "video_id": "INpnuL7qnzY",
+    })
+
+    assert result["answer"] == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。"
+    assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
+    assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
+    assert result["generation_trace"]["fallback_used"] is False
+
+
+@pytest.mark.unit
 def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
     question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
     context = (
