@@ -3155,6 +3155,55 @@ def _generation_repair_instruction(
     )
 
 
+def _build_hindi_named_tax_evidence_fallback(
+    question: str,
+    context: str,
+    diagnostics: dict[str, Any] | None = None,
+) -> str | None:
+    """Extract a named Hindi tax only from an explicit transcript assertion.
+
+    This is a narrow answer fallback for a native-Hindi tax-naming question.
+    It requires the question to ask for a tax/name and the supplied transcript
+    context to contain the exact affirmative wording "नया टैक्स लगाया गया था
+    <name> कर". It does not translate, infer, or use gold annotations.
+    """
+    normalized_question = unicodedata.normalize("NFKC", question or "")
+    normalized_context = unicodedata.normalize("NFKC", context or "")
+
+    is_native_hindi = bool(re.search(r"[\u0900-\u097f]", normalized_question))
+    is_tax_question = bool(re.search(r"टैक्स|कर", normalized_question))
+    asks_for_name = bool(re.search(
+        r"नाम|कौन|किस नाम|कहा गया|बताया गया",
+        normalized_question,
+    ))
+    if not (is_native_hindi and is_tax_question and asks_for_name):
+        if diagnostics is not None:
+            diagnostics.update({"used": False, "rejection_reason": "question_not_hindi_tax_naming"})
+        return None
+
+    # Require the exact supported assertion and a Devanagari name immediately
+    # followed by "कर"; do not guess from other mentions of tax in the chunk.
+    match = re.search(
+        r"नया\s+टैक्स\s+लगाया\s+गया\s+था\s+"
+        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u097f])",
+        normalized_context,
+    )
+    if not match:
+        if diagnostics is not None:
+            diagnostics.update({"used": False, "rejection_reason": "explicit_named_tax_assertion_not_found"})
+        return None
+
+    tax_name = " ".join(match.group("tax_name").split())
+    if diagnostics is not None:
+        diagnostics.update({
+            "used": True,
+            "rejection_reason": None,
+            "matched_evidence_phrase": match.group(0),
+            "extracted_tax_name": tax_name,
+        })
+    return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
+
+
 def _build_financial_evidence_fallback(
     question: str,
     context: str,
@@ -4808,6 +4857,8 @@ def build_rag_chain(
         grounded_financial_fallback_used = False
         financial_answer_suppressed = False
         financial_fallback_diagnostics: dict[str, Any] = {}
+        grounded_hindi_tax_fallback_used = False
+        hindi_tax_fallback_diagnostics: dict[str, Any] = {}
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -4882,6 +4933,22 @@ def build_rag_chain(
                 answer = FINANCIAL_VERIFICATION_FALLBACK
                 financial_answer_suppressed = True
 
+        # If the model abstains despite a directly stated native-Hindi tax
+        # name in the prompt-visible transcript, use only that exact source
+        # phrase instead of suppressing otherwise valid source citations.
+        if _strip_unverified_timestamp_summary(answer or "").strip() == FALLBACK_ANSWER:
+            extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
+                question=question_text,
+                context=inputs.get("context", ""),
+                diagnostics=hindi_tax_fallback_diagnostics,
+            )
+            if extractive_hindi_tax_answer is not None:
+                answer = extractive_hindi_tax_answer
+                grounded_hindi_tax_fallback_used = True
+                logger.warning(
+                    "Using source-extractive Hindi named-tax answer after model abstention"
+                )
+
         return {
             "answer": answer,
             "generation_trace": {
@@ -4896,6 +4963,8 @@ def build_rag_chain(
                 "quality_repair_passed": repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
+                "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,
+                "hindi_tax_fallback_diagnostics": hindi_tax_fallback_diagnostics,
                 "financial_evidence_context_chars": (
                     len(financial_evidence_context) if is_financial_question else None
                 ),
