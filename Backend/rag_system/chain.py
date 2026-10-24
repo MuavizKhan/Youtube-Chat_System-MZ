@@ -139,9 +139,16 @@ RESPONSE LANGUAGE — HIGH PRIORITY
 ---------------------------------
 - Answer in the same language as the user's question, unless the user explicitly
   requests a different language.
+- The language of the user's question, not the transcript or caption language,
+  determines the answer language in BOTH directions.
 - Do not switch to English merely because the transcript, retrieved context, or
-  video captions are in English. For an Arabic question, answer in Arabic; for a
-  Hindi question, answer in Hindi; use the same principle for other languages.
+  video captions are in English. Likewise, do not switch to Hindi or Arabic merely
+  because the transcript or captions are in Hindi or Arabic.
+- For example, an English question about a Hindi or Arabic transcript must be
+  answered in English; a Hindi question must be answered in Hindi, and an Arabic
+  question must be answered in Arabic. Translate supported facts as needed while
+  preserving names and source-grounded spellings. Never answer in the transcript
+  language unless the user explicitly asks for that language.
 - Keep names, product names, numbers, currencies, and source-grounded facts
   accurate while expressing the answer naturally in the requested language.
 - When the transcript enumerates several distinct items that answer the question,
