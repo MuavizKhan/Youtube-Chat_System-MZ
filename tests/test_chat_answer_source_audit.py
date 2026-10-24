@@ -663,3 +663,152 @@ def test_q07_audit_rejects_unstructured_deterministic_financial_fallback():
     audit = analyze_response(_case("Q07"), response)
 
     assert "financial_fallback_statements_are_structured" in audit["quality"]["failed_checks"]
+
+
+def test_prompt_included_citations_reject_source_chunks_omitted_from_prompt():
+    response = {
+        "answer": (
+            "A heartbeat, blood rushing through veins, lung and stomach sounds, "
+            "and eyelids blinking can become noticeable."
+            "\n\nRelevant timestamps: 02:28–03:34"
+        ),
+        "retrieval_config": {
+            "citation_policy": "prompt_included_chunks",
+        },
+        "sources": [
+            {"source_id": 1, "chunk_ids": [2], "start": 148.233, "end": 214.294},
+            {"source_id": 2, "chunk_ids": [3], "start": 214.294, "end": 261.778},
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": [2, 3],
+                "citation_chunk_ids": [2, 3],
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": 1000,
+                    "final_chars": 900,
+                    "groups_available": 2,
+                    "groups_included": 1,
+                    "included_chunk_ids": ["2"],
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(_case("AR03"), response)
+
+    assert audit["citation_provenance"]["mode"] == "generation_context"
+    assert audit["citation_provenance"]["source_chunk_ids_outside_allowed_set"] == ["3"]
+    assert audit["citation_provenance"]["passed"] is False
+    assert "citation_prompt_provenance" in audit["quality"]["failed_checks"]
+
+
+def test_prompt_included_citation_policy_uses_anchor_fallback_without_prompt_trace():
+    anchor_only = audit_module._citation_provenance_diagnostics(
+        citation_policy="prompt_included_chunks",
+        retrieval={"citation_chunk_ids": [2]},
+        generation={"context_budget": {"budget_chars": 8000, "final_chars": 100}},
+        returned_source_ids=["2"],
+    )
+    neighbor_included = audit_module._citation_provenance_diagnostics(
+        citation_policy="prompt_included_chunks",
+        retrieval={"citation_chunk_ids": [2]},
+        generation={"context_budget": {"budget_chars": 8000, "final_chars": 100}},
+        returned_source_ids=["2", "3"],
+    )
+
+    assert anchor_only["mode"] == "selected_anchor_fallback"
+    assert anchor_only["used_selected_anchor_fallback"] is True
+    assert anchor_only["passed"] is True
+    assert neighbor_included["passed"] is False
+    assert neighbor_included["source_chunk_ids_outside_allowed_set"] == ["3"]
+
+
+def test_unanswerable_phase10_11_case_requires_abstention_and_no_sources():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI10")
+    response = {
+        "answer": (
+            "I couldn't find enough information about that in the video. "
+            "It may not be covered by this video."
+        ),
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [], "citation_chunk_ids": []},
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": 50,
+                    "final_chars": 50,
+                    "included_chunk_ids": [],
+                    "groups_available": 0,
+                    "groups_included": 0,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+
+    assert audit["quality"]["passed"] is True, audit["quality"]["failed_checks"]
+    assert audit["citation_provenance"]["passed"] is True
+
+
+def test_phase10_11_registered_answer_requirements_and_language_are_checked():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
+    checks = _answer_quality_checks(case, "नया टैक्स चवरी कर के नाम से था।")
+
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_phase10_11_coverage_manifest_accounts_for_pilot_and_blocked_urdu():
+    manifest = build_coverage_manifest(PHASE10_11_AUDIT_CASES)
+
+    assert manifest["registered_video_count"] == 5
+    assert manifest["live_audit_video_count"] == 5
+    assert manifest["live_audit_case_count"] == len(PHASE10_11_AUDIT_CASES)
+    assert manifest["all_registered_videos_have_answerable_and_unanswerable_live_cases"] is True
+    assert manifest["unregistered_live_cases"] == []
+    assert manifest["duplicate_live_cases"] == []
+    assert manifest["question_case_accounting"]["accounting_complete"] is True
+    assert manifest["question_case_accounting"]["not_live_audited_count"] > 0
+    assert manifest["blocked_languages"][0]["language"] == "ur"
+    assert all(row["representative_live_coverage_passed"] for row in manifest["videos"])
+
+
+def test_run_audit_fails_when_effective_configuration_does_not_match_expected(
+    tmp_path, monkeypatch
+):
+    shared_config = {
+        "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "index_namespace": "phase10-10-acceptance-minilm-20261023",
+        "citation_policy": "selected_anchors",
+    }
+
+    def fake_post_chat(_base_url, case, _timeout_seconds):
+        return {
+            "case_id": case["id"],
+            "status": "success",
+            "audit": {
+                "effective_retrieval_config": shared_config,
+                "quality": {"passed": True, "failed_checks": []},
+            },
+        }
+
+    monkeypatch.setattr(audit_module, "_post_chat", fake_post_chat)
+    report = audit_module.run_audit(
+        base_url="http://127.0.0.1:8000",
+        output_path=tmp_path / "config-mismatch.json",
+        timeout_seconds=5.0,
+        expected_configuration={"citation_policy": "prompt_included_chunks"},
+    )
+
+    assert report["effective_server_configuration_consistent_across_cases"] is True
+    assert report["effective_server_configuration_matches_expected"] is False
+    assert report["quality_passed"] is False
+    assert {
+        "case_id": "ALL",
+        "failed_checks": ["effective_server_configuration_matches_expected"],
+    } in report["quality_failures"]
