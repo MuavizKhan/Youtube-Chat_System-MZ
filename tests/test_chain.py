@@ -2559,6 +2559,56 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
 
 
 @pytest.mark.unit
+def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_caption_lines():
+    question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
+    filler = [
+        f"- [00:{index:02d}–00:{index + 1:02d}] "
+        "यह किसान आंदोलन के एक अन्य विषय का असंबंधित विवरण है।"
+        for index in range(20)
+    ]
+    assertion = "- [01:00–01:02] यहां पर एक नया टैक्स लगाया गया था"
+    tax_name = "- [01:02–01:04] चवरी कर कौन सा चरी कर"
+    source_text = "\n".join([
+        "[SOURCE 1]",
+        "Video ID: INpnuL7qnzY",
+        "Timestamp: 00:00 - 02:00",
+        "Transcript caption segments in chronological order:",
+        "Each line includes its caption snippet's start and end times:",
+        *filler,
+        assertion,
+        tax_name,
+        "- [01:04–01:06] उस टैक्स का नाम क्या था।",
+    ])
+
+    excerpt = chain._truncate_formatted_source(
+        source_text,
+        max_chars=900,
+        question=question,
+    )
+
+    assert len(excerpt) <= 900
+    assert assertion in excerpt
+    assert tax_name in excerpt
+
+    # The same evidence fallback used after generation abstention must now see
+    # the affirmative statement and named tax in the bounded prompt context.
+    answer = chain._build_hindi_named_tax_evidence_fallback(
+        question,
+        excerpt,
+    )
+    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。".replace("。", "।")
+
+
+@pytest.mark.unit
+def test_generation_context_query_terms_include_native_hindi_evidence_tokens():
+    terms = chain._generation_context_query_terms(
+        "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
+    )
+
+    assert {"नया", "टैक्स", "लगाया", "गया", "नाम"} <= terms
+
+
+@pytest.mark.unit
 def test_generation_context_query_terms_bridge_arabic_bodily_sound_question():
     terms = chain._generation_context_query_terms(
         "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
