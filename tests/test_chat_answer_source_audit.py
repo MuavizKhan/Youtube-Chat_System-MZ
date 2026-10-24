@@ -6,7 +6,9 @@ import scripts.chat_answer_source_audit as audit_module
 from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
+    PHASE10_11_AUDIT_CASES,
     analyze_response,
+    build_coverage_manifest,
     decode_json_response,
     _answer_quality_checks,
 )
@@ -83,7 +85,14 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
             "retrieval": {
                 "final_chunk_ids": [2, 3],
                 "citation_chunk_ids": [3],
-            }
+            },
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "final_chars": 200,
+                    "included_chunk_ids": ["2", "3"],
+                }
+            },
         },
     }
 
