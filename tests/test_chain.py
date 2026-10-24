@@ -2900,6 +2900,110 @@ def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_li
 
 
 @pytest.mark.unit
+def test_generation_repair_instruction_detects_question_answer_language_mismatch():
+    question = (
+        "What does the episode say sound contributes to perception, "
+        "and how does it describe sound's role?"
+    )
+    context = (
+        "الصوت ليس مجرد إشارة نسمعها، بل يتحول في الدماغ إلى تجربة حسية "
+        "تشكل إدراكنا، ويؤثر على المزاج والحالة النفسية."
+    )
+    arabic_answer = (
+        "الحلقة توضح أن الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question, arabic_answer, context
+    )
+
+    assert instruction is not None
+    assert "QUESTION-LANGUAGE REPAIR" in instruction
+    assert "rewrite the answer from scratch in english" in instruction.lower()
+    assert "SOUND/PERCEPTION ANSWER REPAIR" in instruction
+    assert "perception" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_question_answer_language_mismatch_only_flags_clear_script_mismatches():
+    assert chain._question_answer_language_mismatch(
+        "What does sound contribute to perception?",
+        "الصوت يؤثر في الإدراك ويغير المزاج."
+    ) == ("en", "ar")
+    assert chain._question_answer_language_mismatch(
+        "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        "The episode says sound shapes perception."
+    ) == ("ar", "en")
+    assert chain._question_answer_language_mismatch(
+        "What does sound contribute to perception?",
+        "The episode explains how sound shapes perception."
+    ) is None
+    assert chain._question_answer_language_mismatch(
+        "What is the Arabic term الصوت for sound?",
+        "The answer is sound, with the Arabic term الصوت."
+    ) is None
+
+
+@pytest.mark.unit
+def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch):
+    question = (
+        "What does the episode say sound contributes to perception, "
+        "and how does it describe sound's role?"
+    )
+    context = (
+        "- [02:28–03:34] الصوت ليس مجرد إشارة نسمعها، بل يتحول في الدماغ "
+        "إلى تجربة حسية تشكل إدراكنا.\n"
+        "- [21:28–22:25] تؤثر الموجات الصوتية على الدماغ والمزاج.\n"
+        "- [22:14–23:08] يساعد الصوت في تشكيل شعورنا وتجربتنا."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 148, 214, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    outputs = iter([
+        "الحلقة توضح أن الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا.",
+        (
+            "The episode explains that sound shapes perception by turning "
+            "physical sound waves into a sensory experience. It influences the "
+            "brain's response and mood, so sound helps shape how people perceive "
+            "their surroundings."
+        ),
+    ])
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "fAd2nKfrDB8",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is True
+    assert trace["question_language_repair_attempted"] is True
+    assert trace["question_language_repair_passed"] is True
+    assert "sound" in result["answer"].lower()
+    assert "perception" in result["answer"].lower()
+    assert "perceive" in result["answer"].lower()
+
+
+@pytest.mark.unit
 def test_rag_chain_retries_once_when_financial_draft_drops_source_amounts(monkeypatch):
     context = (
         "I invested 3,000 crore rupees in Kingfisher Airlines. "
