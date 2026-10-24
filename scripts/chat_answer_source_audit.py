@@ -1004,8 +1004,11 @@ def build_coverage_manifest(
             "video_id": video_id,
             "title": benchmark.title,
             "transcript_language": benchmark.transcript_language,
+            "video_url": benchmark.video_url,
+            "transcript_source_url": benchmark.transcript_source_url,
             "caption_track_kind": benchmark.caption_track_kind,
             "transcript_source_kind": benchmark.transcript_source_kind,
+            "annotation_source_urls": list(benchmark.annotation_source_urls),
             "caption_validation_note": benchmark.caption_validation_note,
             "registered_question_case_count": len(registered_ids),
             "live_audit_question_ids": [
@@ -1032,6 +1035,7 @@ def build_coverage_manifest(
         and all(row["representative_live_coverage_passed"] for row in video_rows)
     )
     return {
+        "supported_live_languages": list(SUPPORTED_LIVE_LANGUAGES),
         "registered_video_count": len(VIDEO_BENCHMARKS),
         "registered_question_case_count": sum(
             len(benchmark.question_cases)
