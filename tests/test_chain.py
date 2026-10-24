@@ -2222,7 +2222,7 @@ def test_answer_question_keeps_context_neighbors_as_individual_sources(monkeypat
         question="What does the passage say?",
     )
 
-    assert result["retrieval_config"]["citation_policy"] == "expanded_context_experiment"
+    assert result["retrieval_config"]["citation_policy"] == "prompt_included_chunks"
     assert result["source_segments"] == 3
     assert [source["chunk_ids"] for source in result["sources"]] == [[1], [2], [3]]
     # Chunk 2 overlaps anchor 1 in time, but the neighbor link stays precise.
