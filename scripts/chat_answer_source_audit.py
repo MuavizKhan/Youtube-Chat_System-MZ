@@ -128,8 +128,10 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
         expected_behavior="answerable",
         answer_language="en",
         answer_requirements=(
-            {"name": "three_ways", "pattern": r"\b(?:three|3)\b"},
-            {"name": "self_expression", "pattern": r"\bexpress\w*\b"},
+            # This direct-fact question asks for the count. Require the number
+            # and its unit; don't force the model to restate the question's
+            # "express yourself" wording when "Three ways." is a complete answer.
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+ways?\b"},
         ),
     ),
     _make_audit_case(

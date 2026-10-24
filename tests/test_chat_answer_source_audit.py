@@ -763,6 +763,22 @@ def test_phase10_11_registered_answer_requirements_and_language_are_checked():
     assert all(check["passed"] for check in checks), checks
 
 
+def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "EW01")
+
+    checks = _answer_quality_checks(case, "Three ways.")
+    assert all(check["passed"] for check in checks), checks
+    assert {
+        "substantive_answer",
+        "answer_requirement_three_ways",
+        "question_language",
+    } == {check["name"] for check in checks}
+
+    incomplete = _answer_quality_checks(case, "Three.")
+    by_name = {check["name"]: check["passed"] for check in incomplete}
+    assert by_name["answer_requirement_three_ways"] is False
+
+
 def test_phase10_11_coverage_manifest_accounts_for_pilot_and_blocked_urdu():
     manifest = build_coverage_manifest(PHASE10_11_AUDIT_CASES)
 
