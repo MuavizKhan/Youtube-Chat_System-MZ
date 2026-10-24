@@ -792,6 +792,12 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
         "question_language",
     } == {check["name"] for check in checks}
 
+    formatted_answer = _answer_quality_checks(
+        case,
+        "The speaker says he will give **three** ways to express yourself in meetings.",
+    )
+    assert all(check["passed"] for check in formatted_answer), formatted_answer
+
     incomplete = _answer_quality_checks(case, "Three.")
     by_name = {check["name"]: check["passed"] for check in incomplete}
     assert by_name["answer_requirement_three_ways"] is False

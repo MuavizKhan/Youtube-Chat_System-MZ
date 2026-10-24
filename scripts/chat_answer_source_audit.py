@@ -300,6 +300,17 @@ def _substantive_answer(answer: str) -> str:
     ).strip()
 
 
+def _normalize_answer_requirement_text(answer: str) -> str:
+    """Remove inline Markdown wrappers before matching answer requirements."""
+    text = _substantive_answer(answer)
+    # Do not let presentation markup split otherwise valid phrases such as
+    # "**three** ways" and cause a false negative in the acceptance gate.
+    text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text, flags=re.DOTALL)
+    text = re.sub(r"(?<!\w)([*_])([^*_]+?)\1(?!\w)", r"\2", text)
+    text = re.sub(r"`+([^`\n]+?)`+", r"\1", text)
+    return text
+
+
 def _quality_check(name: str, passed: bool, detail: str) -> dict[str, Any]:
     return {"name": name, "passed": bool(passed), "detail": detail}
 
@@ -548,13 +559,14 @@ def _answer_quality_checks(
     elif normalized_case_id in {"AR03", "AR08"}:
         checks.extend(_bodily_sound_checks(normalized_case_id, answer))
 
+    requirement_text = _normalize_answer_requirement_text(answer)
     for requirement in case.get("answer_requirements", []):
         if not isinstance(requirement, dict):
             continue
         name = str(requirement.get("name", "answer_requirement"))
         pattern = requirement.get("pattern")
         passed = isinstance(pattern, str) and bool(
-            re.search(pattern, substantive, flags=re.IGNORECASE)
+            re.search(pattern, requirement_text, flags=re.IGNORECASE)
         )
         checks.append(_quality_check(
             f"answer_requirement_{name}",
