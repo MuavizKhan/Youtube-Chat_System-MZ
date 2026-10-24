@@ -579,6 +579,75 @@ def _answer_quality_checks(
     return checks
 
 
+def _citation_provenance_diagnostics(
+    *,
+    citation_policy: Any,
+    retrieval: dict[str, Any],
+    generation: dict[str, Any],
+    returned_source_ids: list[str],
+) -> dict[str, Any]:
+    """Prove that each returned source was prompt-visible or an anchor fallback."""
+    policy = citation_policy if isinstance(citation_policy, str) else None
+    source_set = set(returned_source_ids)
+    raw_prompt_ids = None
+    context_budget = generation.get("context_budget")
+    if isinstance(context_budget, dict):
+        candidate_ids = context_budget.get("included_chunk_ids")
+        if isinstance(candidate_ids, list):
+            raw_prompt_ids = _chunk_ids(candidate_ids)
+
+    raw_anchor_ids = retrieval.get("citation_chunk_ids")
+    anchors_available = isinstance(raw_anchor_ids, list)
+    anchor_ids = _chunk_ids(raw_anchor_ids) if anchors_available else []
+
+    if policy == "prompt_included_chunks":
+        if raw_prompt_ids is not None:
+            allowed_ids = set(raw_prompt_ids)
+            mode = "generation_context"
+            fallback_used = False
+            trace_available = True
+        elif anchors_available:
+            allowed_ids = set(anchor_ids)
+            mode = "selected_anchor_fallback"
+            fallback_used = True
+            trace_available = True
+        else:
+            allowed_ids = set()
+            mode = "unverifiable_missing_prompt_and_anchor_trace"
+            fallback_used = False
+            trace_available = False
+    elif policy == "selected_anchors":
+        allowed_ids = set(anchor_ids)
+        mode = "selected_anchors"
+        fallback_used = False
+        trace_available = anchors_available
+    else:
+        # Unknown/absent policy appears in older synthetic fixtures; the live
+        # Phase 10.11 suite separately requires the exact expected policy.
+        allowed_ids = set()
+        mode = "not_applicable"
+        fallback_used = False
+        trace_available = False
+
+    outside_ids = sorted(source_set - allowed_ids)
+    if policy not in {"prompt_included_chunks", "selected_anchors"}:
+        passed = True
+    else:
+        passed = not outside_ids and (trace_available or not source_set)
+
+    return {
+        "citation_policy": policy,
+        "mode": mode,
+        "used_selected_anchor_fallback": fallback_used,
+        "prompt_inclusion_trace_available": raw_prompt_ids is not None,
+        "selected_anchor_trace_available": anchors_available,
+        "allowed_chunk_ids": sorted(allowed_ids),
+        "returned_source_chunk_ids": sorted(source_set),
+        "source_chunk_ids_outside_allowed_set": outside_ids,
+        "passed": passed,
+    }
+
+
 def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
     """Compare annotated candidate evidence with context, anchors, sources, and timestamp line."""
     observability = response.get("observability")
@@ -657,6 +726,15 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
     anchor_set = set(anchor_ids)
     source_set = set(returned_source_ids)
     summary_set = set(summary_source_ids)
+    retrieval_config = response.get("retrieval_config")
+    if not isinstance(retrieval_config, dict):
+        retrieval_config = {}
+    citation_provenance = _citation_provenance_diagnostics(
+        citation_policy=retrieval_config.get("citation_policy"),
+        retrieval=retrieval,
+        generation=generation,
+        returned_source_ids=returned_source_ids,
+    )
 
     evidence_group_results = []
     for group in case.get("evidence_groups", []):
@@ -688,7 +766,20 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         )
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
-    quality_checks = _answer_quality_checks(str(case.get("id", "")), answer)
+    quality_checks = _answer_quality_checks(case, answer)
+    if citation_provenance["citation_policy"] in {"prompt_included_chunks", "selected_anchors"}:
+        quality_checks.append(_quality_check(
+            "citation_prompt_provenance",
+            citation_provenance["passed"],
+            (
+                "Every returned source chunk is within the prompt-visible citation set."
+                if citation_provenance["passed"]
+                else (
+                    "Returned source chunks are not permitted by the active citation policy: "
+                    + ", ".join(citation_provenance["source_chunk_ids_outside_allowed_set"])
+                )
+            ),
+        ))
 
     generation_used_fallback = generation.get("grounded_financial_fallback_used") is True
     if str(case.get("id", "")) == "Q07" and generation_used_fallback:
@@ -781,6 +872,52 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         ),
     ))
 
+    expected_behavior = case.get("expected_behavior", "answerable")
+    if expected_behavior == "unanswerable":
+        no_sources = len(returned_source_ids) == 0
+        no_timestamps = len(timestamp_ranges) == 0
+        quality_checks.append(_quality_check(
+            "unanswerable_sources_suppressed",
+            no_sources and no_timestamps,
+            (
+                "The unrelated/unanswerable question has no clickable sources or source timestamp claims."
+                if no_sources and no_timestamps
+                else "The unrelated/unanswerable question returned sources or timestamp claims."
+            ),
+        ))
+    else:
+        sources_present = len(returned_source_ids) > 0
+        timestamp_alignment_ok = (
+            len(timestamp_ranges) > 0
+            and all(
+                (normalized := _normalize_range(item)) is not None
+                and normalized in {
+                    _normalize_range(source["display_range"])
+                    for source in source_ranges
+                    if isinstance(source.get("display_range"), str)
+                }
+                for item in timestamp_ranges
+            )
+        )
+        quality_checks.append(_quality_check(
+            "answerable_sources_present",
+            sources_present,
+            (
+                "The answerable question returns at least one clickable source."
+                if sources_present
+                else "The answerable question did not return a clickable source."
+            ),
+        ))
+        quality_checks.append(_quality_check(
+            "timestamp_summary_matches_returned_sources",
+            timestamp_alignment_ok,
+            (
+                "Every displayed timestamp range exactly matches a returned source interval."
+                if timestamp_alignment_ok
+                else "The timestamp summary is missing or contains an interval not present in returned source metadata."
+            ),
+        ))
+
     quality = {
         "passed": all(item["passed"] for item in quality_checks),
         "checks": quality_checks,
@@ -789,6 +926,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
     return {
         "effective_retrieval_config": response.get("retrieval_config"),
         "retrieval_method": response.get("retrieval_method"),
+        "citation_provenance": citation_provenance,
         "final_context_chunk_ids": final_context_ids,
         "selected_anchor_chunk_ids": anchor_ids,
         "context_only_chunk_ids": [
