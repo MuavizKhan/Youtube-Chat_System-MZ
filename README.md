@@ -567,7 +567,7 @@ Run the same three cases with a separate output path:
 
 Compare `effective_server_configuration.citation_policy`, each case's `annotated_evidence_groups`, `returned_source_chunk_ids`, `plain_text_timestamp_ranges`, source time ranges, and `answer_text_encoding_suspect`. The experimental mode changes source-link selection only; the generated answer and retrieved context may still vary slightly because each call invokes the model, so compare evidence and citation coverage rather than judging a single wording difference.
 
-The experiment has no default behavior change: `RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS=false` preserves anchor-only source links. In expanded mode, selected anchors remain merged, while context-only neighbors are returned as individual chunk-sized intervals so a link does not stretch across neighboring chunks. Neighbor intervals can overlap anchor links by design. The experimental mode does not change retrieval ranking or generation context, and should not become the default unless real-video audits show better direct evidence access without misleading or over-broad links. Q07's distinct numerical amounts still require real-model validation.
+Phase 10.10 validated expanded-context citation selection against real video answers, so `RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS=true` is now the default. The selector cites only chunk IDs that survived the generation-context budget; if prompt-inclusion trace metadata is unavailable, it safely falls back to selected anchors. In expanded mode, selected anchors remain merged, while context-only neighbors are returned as individual chunk-sized intervals so a source link does not stretch across neighboring chunks. Neighbor intervals can overlap anchor links by design. Set the flag to `false` only for controlled anchor-only comparisons or rollback. This policy changes source-link selection only; it does not change retrieval ranking, thresholds, or generation context.
 
 ## Phase 10.8.1 — Preserve transcript caption boundaries
 
@@ -685,4 +685,33 @@ Phase 10.9 adds narrowly scoped retrieval corrections for three observed failure
 - The original 17 October baseline report lacks `experiment_metadata`. The 20 October metadata-bearing triage report was used to recover the recorded key configuration; the 22 October comparison report agrees on the recorded retrieval settings and default namespace. The original report does not prove a historical index fingerprint, so exact 17 October index identity cannot be claimed.
 
 This snapshot records the merged Phase 10.9 state; it does not mark the broader cross-phase audit or public-deployment requirements complete.
+
+## Phase 10.10 — MiniLM multilingual retrieval and citation acceptance
+
+### Scope and implementation
+
+Phase 10.10 uses the isolated `phase10-10-acceptance-minilm-20261023` index namespace and the multilingual embedding model `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`. It does not overwrite the default index or change the acceptance index's chunking, distance threshold, or top-K settings.
+
+- PR [#120 — Fix Hindi lexical and cross-lingual retrieval](https://github.com/MuavizKhan/Youtube-Chat_System-MZ/pull/120) fixes Devanagari lexical tokenization by retaining combining marks with their words and adds bounded English-to-Hindi query expansion only when persisted index metadata identifies Hindi transcript text. Cross-lingual query variants use the lexical retrieval channel in both production retrieval and diagnostics.
+- The five-video acceptance remains separate from answer-generation/citation acceptance. Raw-anchor misses are retained as diagnostics; production-context gold evidence remains the retrieval release gate.
+- Live answer/source validation covers the financial-attribution case Q07 and English/Arabic bodily-sound cases AR03/AR08. It checks answer content, generation-context evidence, returned source chunks, timestamp summaries, encoding integrity, and effective configuration consistency.
+- Citation selection now defaults to the chunks actually included in the generation prompt. If prompt-inclusion trace metadata is absent, selection falls back to the explicit anchor set rather than broadening links without evidence.
+
+### Recorded acceptance evidence — 24 October 2026
+
+The post-PR #120 five-video MiniLM acceptance report is `evaluation_reports/phase10_10_crossphase_acceptance_minilm_20261024_20261024-064619.json`. It records all five registered videos evaluated, zero evaluation errors, zero quality failures, and `overall_passed = true`. The 34 production-context evidence cases passed with 100% evidence presence and 100% mean group coverage. Raw-anchor diagnostics remain imperfect (88.2% aggregate hit rate and 81.4% group coverage); these are non-gating diagnostics and must not be improved by relaxing thresholds or weakening evidence requirements.
+
+The expanded-context live answer/source report is `evaluation_reports/phase10_10_answer_source_audit_context_citations_20261024-095758.json`. It records Q07, AR03, and AR08 as three successful requests, zero request failures, `quality_passed = true`, no quality failures, and a consistent effective server configuration using the same MiniLM acceptance namespace. The earlier anchor-only run failed AR08's evidence/source/timestamp alignment because required context evidence was not exposed as a source. The expanded policy passed that case without changing the retrieval configuration. The report was produced before the audit harness's metadata cleanup; new reports use the generic versioned report ID `chat_answer_source_audit_v1`.
+
+### Final closure gate
+
+Do not rebuild or overwrite the acceptance index. Phase 10.10 is closed only after all of these are true:
+
+1. GitHub CI passes for the citation-default and audit-report metadata changes.
+2. The full local test suite passes on the merged commit.
+3. A fresh live answer/source audit after the merge reports `cases_attempted = 3`, `cases_succeeded = 3`, `cases_failed = 0`, `quality_passed = true`, an empty `quality_failures` array, consistent effective server configuration, and `citation_policy = expanded_context_experiment` in all cases.
+4. The fresh report records the merged commit and clean tracked working tree; the namespace and model match the manifest.
+5. Hindi unrelated-query controls HI05/HI10 remain rejected, and all five videos remain green in the saved MiniLM acceptance report.
+
+The real Urdu-caption evidence blocker remains open: no Urdu-script acceptance result is claimed until a genuine publisher-uploaded Urdu caption track and its evidence phrases are verified. Revisit broader live answer/source coverage in the next phase rather than silently treating this three-case audit as complete multilingual coverage.
 
