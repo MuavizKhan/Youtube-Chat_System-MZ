@@ -1198,10 +1198,10 @@ def _select_citation_results(
 ) -> list:
     """Select source chunks without citing evidence omitted from the model prompt.
 
-    The default remains anchor-only citations. The opt-in context-neighbor
-    experiment selects only chunks actually included in the generation context;
-    when that trace is unavailable, it safely falls back to anchor-only IDs.
-    This does not change retrieval ranking, context expansion, or thresholds.
+    The default policy cites only chunks that actually made it into the model's
+    prompt. When prompt-inclusion metadata is unavailable, it safely falls back to
+    the selected anchor IDs. This does not change retrieval ranking, context
+    expansion, or thresholds.
     """
     if not isinstance(retrieval_trace, dict):
         if not RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS:
@@ -1415,13 +1415,12 @@ def _build_citation_source_groups(
     citation_results,
     retrieval_trace: dict[str, Any] | None,
 ) -> list[dict]:
-    """Build source links without stretching opt-in neighbor citations.
+    """Build precise source links for selected anchors and prompt-included context.
 
-    The default path is behaviorally equivalent to the existing merged-anchor
-    policy. During the expanded-context experiment, selected anchors are merged
-    together as before, but context-only neighbors remain individual source
-    intervals even when they overlap an anchor. This makes each neighbor
-    directly seekable without changing retrieval or generation.
+    Selected anchors are merged together as before, but context-only neighbors
+    remain individual source intervals even when they overlap an anchor. This
+    makes each neighbor directly seekable without stretching timestamps or
+    changing retrieval ranking and generation context.
     """
     if not RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS or not isinstance(
         retrieval_trace, dict
@@ -5296,7 +5295,7 @@ def answer_question(
             "embedding_model": EMBEDDING_MODEL,
             "index_namespace": RAG_INDEX_NAMESPACE or "default",
             "citation_policy": (
-                "expanded_context_experiment"
+                "prompt_included_chunks"
                 if RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS
                 else "selected_anchors"
             ),
