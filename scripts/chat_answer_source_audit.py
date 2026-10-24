@@ -1267,7 +1267,13 @@ def run_audit(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Capture UTF-8 /chat answers and audit evidence-to-source coverage."
+        description="Run the live answer/source audit against a local FastAPI backend."
+    )
+    parser.add_argument(
+        "--suite",
+        choices=("phase10_10", "phase10_11"),
+        default="phase10_11",
+        help="Use the original three-case closure audit or the expanded five-video pilot suite.",
     )
     parser.add_argument(
         "--base-url",
@@ -1277,28 +1283,78 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_OUTPUT,
-        help=f"JSON report path (default: {DEFAULT_OUTPUT}).",
+        default=None,
+        help="JSON report path. A suite-specific safe default is used when omitted.",
     )
     parser.add_argument(
         "--timeout",
         type=float,
-        default=90.0,
+        default=120.0,
         help="Per-request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--expected-namespace",
+        default="phase10-10-acceptance-minilm-20261023",
+        help="Expected isolated index namespace for the Phase 10.11 live suite.",
+    )
+    parser.add_argument(
+        "--expected-embedding-model",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        help="Expected embedding model for the Phase 10.11 live suite.",
     )
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero.")
 
+    if args.suite == "phase10_10":
+        cases = AUDIT_CASES
+        report_id = REPORT_ID
+        output_path = args.output or DEFAULT_OUTPUT
+        expected_configuration = None
+        require_full_pilot_coverage = False
+    else:
+        cases = PHASE10_11_AUDIT_CASES
+        report_id = PHASE10_11_REPORT_ID
+        output_path = args.output or PHASE10_11_DEFAULT_OUTPUT
+        expected_configuration = {
+            "embedding_model": args.expected_embedding_model,
+            "index_namespace": args.expected_namespace,
+            "citation_policy": "prompt_included_chunks",
+            "top_k": 4,
+            "fetch_k": 10,
+            "lambda_mult": 0.7,
+            "max_distance": 1.3,
+            "context_expansion_chunks": 1,
+            "context_max_chunks": 12,
+            "dense_semantic_k": 24,
+            "dense_semantic_fetch_k": 32,
+            "dense_anchor_limit": 12,
+            "dense_anchor_min_chunk_gap": 2,
+            "dense_context_max_chunks": 16,
+            "dense_facet_rerank_weight": 0.5,
+            "rerank_enabled": False,
+            "rerank_model": "cross-encoder/ms-marco-MiniLM-L6-v2",
+            "rerank_candidate_k": 24,
+            "rerank_batch_size": 16,
+            "rerank_max_length": 512,
+        }
+        require_full_pilot_coverage = True
+
     report = run_audit(
         base_url=args.base_url,
-        output_path=args.output,
+        output_path=output_path,
         timeout_seconds=args.timeout,
+        cases=cases,
+        report_id=report_id,
+        expected_configuration=expected_configuration,
+        require_full_pilot_coverage=require_full_pilot_coverage,
     )
     print(
         json.dumps(
             {
-                "report_path": str(args.output),
+                "report_path": str(output_path),
+                "report_id": report["report_id"],
+                "report_schema_version": report["report_schema_version"],
                 "cases_attempted": report["cases_attempted"],
                 "cases_succeeded": report["cases_succeeded"],
                 "cases_failed": report["cases_failed"],
@@ -1308,13 +1364,16 @@ def main() -> int:
                 "effective_server_configuration_consistent_across_cases": (
                     report["effective_server_configuration_consistent_across_cases"]
                 ),
+                "effective_server_configuration_matches_expected": (
+                    report["effective_server_configuration_matches_expected"]
+                ),
+                "coverage_manifest": report["coverage_manifest"],
             },
             ensure_ascii=False,
             indent=2,
         )
     )
     return 0 if report["quality_passed"] else 1
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
