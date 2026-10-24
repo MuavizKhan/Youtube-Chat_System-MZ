@@ -2716,11 +2716,14 @@ def test_generation_repair_instruction_detects_missing_and_unsupported_financial
 
 
 @pytest.mark.unit
-def test_hindi_named_tax_fallback_requires_native_tax_naming_question_and_explicit_evidence():
+def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_question_language():
     question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
     context = (
-        "यहां पर एक नया टैक्स लगाया गया था चवरी कर कौन सा चरी कर "
-        "उस टैक्स का नाम क्या था।"
+        "[SOURCE 1]\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [02:49–02:51] यहां पर एक नया टैक्स लगाया गया था\n"
+        "- [02:51–02:53] चवरी कर कौन सा चरी कर\n"
+        "- [02:53–02:56] उस टैक्स का नाम क्या था।"
     )
     diagnostics = {}
 
@@ -2737,10 +2740,14 @@ def test_hindi_named_tax_fallback_requires_native_tax_naming_question_and_explic
     assert chain._build_hindi_named_tax_evidence_fallback(
         "ऑस्ट्रेलिया की राजधानी क्या है?", context
     ) is None
-    # A cross-lingual English question must still receive an English answer.
-    assert chain._build_hindi_named_tax_evidence_fallback(
+
+    # Cross-lingual questions keep the answer in English while preserving the
+    # named entity's exact Devanagari spelling from the caption evidence.
+    english_answer = chain._build_hindi_named_tax_evidence_fallback(
         "Which new tax was imposed and what was it called?", context
-    ) is None
+    )
+    assert english_answer == "The transcript identifies the new tax as “चवरी कर”."
+
     # General tax mentions are not enough without the explicit naming clause.
     assert chain._build_hindi_named_tax_evidence_fallback(
         question, "वक्ता 84 प्रकार के करों का उल्लेख करते हैं।"
@@ -2750,8 +2757,9 @@ def test_hindi_named_tax_fallback_requires_native_tax_naming_question_and_explic
 @pytest.mark.unit
 def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(monkeypatch):
     context = (
-        "यहां पर एक नया टैक्स लगाया गया था चवरी कर कौन सा चरी कर "
-        "उस टैक्स का नाम क्या था।"
+        "- [02:49–02:51] यहां पर एक नया टैक्स लगाया गया था\n"
+        "- [02:51–02:53] चवरी कर कौन सा चरी कर\n"
+        "- [02:53–02:56] उस टैक्स का नाम क्या था।"
     )
     monkeypatch.setattr(
         chain,
@@ -2778,6 +2786,43 @@ def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(m
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
     assert result["generation_trace"]["fallback_used"] is False
+
+
+@pytest.mark.unit
+def test_rag_chain_corrects_cross_lingual_tax_spelling_from_explicit_caption_evidence(monkeypatch):
+    context = (
+        "- [02:49–02:51] यहां पर एक नया टैक्स लगाया गया था\n"
+        "- [02:51–02:53] चवरी कर कौन सा चरी कर\n"
+        "- [02:53–02:56] उस टैक्स का नाम क्या था।"
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(0, 0, 78, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [0],
+                "citation_chunk_ids": [0],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **kwargs: "The new tax is called “चरी कर” (also “चारी कर”).",
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "Which tax is identified as new, and what name does the speaker give for it?",
+        "video_id": "INpnuL7qnzY",
+    })
+
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
+    assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
 
 
 @pytest.mark.unit
