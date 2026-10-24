@@ -156,9 +156,9 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
         answer_requirements=(
             {
                 "name": "named_chavri_tax",
-                "pattern": r"\bch(?:a|o|u)?v?ri\b|चवरी|चावरी|चवरी",
+                "pattern": r"\bch(?:avri|awri|owri|avari|awari)\b|चवरी|चावरी",
             },
-            {"name": "tax_concept", "pattern": r"\b(?:tax|taxes|levy)\b|कर|टैक्स"},
+            {"name": "tax_concept", "pattern": r"\b(?:tax|taxes|levy|kar)\b|कर|टैक्स"},
         ),
     ),
     _make_audit_case(
@@ -494,7 +494,7 @@ _ABSTENTION_PATTERN = re.compile(
     r"(?:नहीं|नही).{0,30}(?:बताया|उल्लेख|मिला|उपलब्ध|मौजूद)|"
     r"इस वीडियो में.{0,35}(?:नहीं|उल्लेख)|"
     r"(?:لا|لم).{0,40}(?:يذكر|تذكر|يتناول|تحتوي|توجد|يوجد|تتوفر|أستطيع|يمكن)|"
-    r"غير مذكور|غير موجود|لا توجد معلومات|لا تتوفر معلومات|",
+    r"غير مذكور|غير موجود|لا توجد معلومات|لا تتوفر معلومات",
     re.IGNORECASE,
 )
 
