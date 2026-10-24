@@ -3170,7 +3170,7 @@ def _build_hindi_named_tax_evidence_fallback(
     normalized_question = unicodedata.normalize("NFKC", question or "")
     normalized_context = unicodedata.normalize("NFKC", context or "")
 
-    is_native_hindi = bool(re.search(r"[\\u0900-\\u097f]", normalized_question))
+    is_native_hindi = bool(re.search(r"[\u0900-\u097f]", normalized_question))
     is_tax_question = bool(re.search(r"टैक्स|कर", normalized_question))
     asks_for_name = bool(re.search(
         r"नाम|कौन|किस नाम|कहा गया|बताया गया",
@@ -3184,8 +3184,8 @@ def _build_hindi_named_tax_evidence_fallback(
     # Require the exact supported assertion and a Devanagari name immediately
     # followed by "कर"; do not guess from other mentions of tax in the chunk.
     match = re.search(
-        r"नया\\s+टैक्स\\s+लगाया\\s+गया\\s+था\\s+"
-        r"(?P<tax_name>[\\u0900-\\u097f]+\\s+कर)(?![\\u0900-\\u097f])",
+        r"नया\s+टैक्स\s+लगाया\s+गया\s+था\s+"
+        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u097f])",
         normalized_context,
     )
     if not match:
@@ -3201,7 +3201,7 @@ def _build_hindi_named_tax_evidence_fallback(
             "matched_evidence_phrase": match.group(0),
             "extracted_tax_name": tax_name,
         })
-    return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है。"
+    return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
 
 
 def _build_financial_evidence_fallback(
