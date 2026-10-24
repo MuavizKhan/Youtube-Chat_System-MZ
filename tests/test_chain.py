@@ -2596,7 +2596,7 @@ def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_c
         question,
         excerpt,
     )
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。".replace("。", "।")
+    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
 
 
 @pytest.mark.unit
