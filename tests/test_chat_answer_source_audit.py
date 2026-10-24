@@ -812,3 +812,63 @@ def test_run_audit_fails_when_effective_configuration_does_not_match_expected(
         "case_id": "ALL",
         "failed_checks": ["effective_server_configuration_matches_expected"],
     } in report["quality_failures"]
+
+
+def test_unanswerable_control_rejects_a_guessed_answer_even_without_sources():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "Q13")
+    response = {
+        "answer": "Canberra is the capital of Australia.",
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [],
+        "observability": {
+            "retrieval": {"final_chunk_ids": [], "citation_chunk_ids": []},
+            "generation": {
+                "context_budget": {
+                    "budget_chars": 8000,
+                    "original_chars": 100,
+                    "final_chars": 50,
+                    "included_chunk_ids": [],
+                    "groups_available": 0,
+                    "groups_included": 0,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+
+    assert audit["quality"]["passed"] is False
+    assert "unanswerable_case_abstained" in audit["quality"]["failed_checks"]
+
+
+def test_full_pilot_coverage_gate_fails_for_three_case_legacy_suite(tmp_path, monkeypatch):
+    shared_config = {
+        "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "index_namespace": "phase10-10-acceptance-minilm-20261023",
+        "citation_policy": "prompt_included_chunks",
+    }
+
+    def fake_post_chat(_base_url, case, _timeout_seconds):
+        return {
+            "case_id": case["id"],
+            "status": "success",
+            "audit": {
+                "effective_retrieval_config": shared_config,
+                "quality": {"passed": True, "failed_checks": []},
+            },
+        }
+
+    monkeypatch.setattr(audit_module, "_post_chat", fake_post_chat)
+    report = audit_module.run_audit(
+        base_url="http://127.0.0.1:8000",
+        output_path=tmp_path / "incomplete-pilot-coverage.json",
+        timeout_seconds=5.0,
+        require_full_pilot_coverage=True,
+    )
+
+    assert report["coverage_manifest"]["all_registered_videos_have_answerable_and_unanswerable_live_cases"] is False
+    assert report["quality_passed"] is False
+    assert {
+        "case_id": "ALL",
+        "failed_checks": ["representative_five_video_live_coverage"],
+    } in report["quality_failures"]
