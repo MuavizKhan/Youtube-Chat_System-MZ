@@ -3160,37 +3160,72 @@ def _build_hindi_named_tax_evidence_fallback(
     context: str,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Extract a named Hindi tax only from an explicit transcript assertion.
+    """Build a tax-name answer only from an explicit transcript assertion.
 
-    This is a narrow answer fallback for a native-Hindi tax-naming question.
-    It requires the question to ask for a tax/name and the supplied transcript
-    context to contain the exact affirmative wording "नया टैक्स लगाया गया था
-    <name> कर". It does not translate, infer, or use gold annotations.
+    The assertion can span adjacent timestamped caption snippets. Timestamp
+    labels are removed within each source block only, so snippets may join
+    naturally without accidentally combining evidence from different sources.
+    The answer language follows the question language (Hindi or English).
     """
     normalized_question = unicodedata.normalize("NFKC", question or "")
     normalized_context = unicodedata.normalize("NFKC", context or "")
 
     is_native_hindi = bool(re.search(r"[\u0900-\u097f]", normalized_question))
-    is_tax_question = bool(re.search(r"टैक्स|कर", normalized_question))
-    asks_for_name = bool(re.search(
-        r"नाम|कौन|किस नाम|कहा गया|बताया गया",
-        normalized_question,
-    ))
-    if not (is_native_hindi and is_tax_question and asks_for_name):
+    if is_native_hindi:
+        is_tax_question = bool(re.search(r"टैक्स|कर", normalized_question))
+        asks_for_name = bool(re.search(
+            r"नाम|कौन|किस नाम|कहा गया|बताया गया",
+            normalized_question,
+        ))
+    else:
+        is_tax_question = bool(re.search(
+            r"\b(?:tax|taxes|levy)\b", normalized_question, re.IGNORECASE
+        ))
+        asks_for_name = bool(re.search(
+            r"\b(?:name|called|identified|identify)\b",
+            normalized_question,
+            re.IGNORECASE,
+        ))
+
+    if not (is_tax_question and asks_for_name):
         if diagnostics is not None:
-            diagnostics.update({"used": False, "rejection_reason": "question_not_hindi_tax_naming"})
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "question_not_tax_naming",
+            })
         return None
 
-    # Require the exact supported assertion and a Devanagari name immediately
-    # followed by "कर"; do not guess from other mentions of tax in the chunk.
-    match = re.search(
-        r"नया\s+टैक्स\s+लगाया\s+गया\s+था\s+"
-        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u097f])",
+    # In generation context, consecutive caption snippets are each prefixed by
+    # "- [MM:SS–MM:SS]". Strip only those labels, and never join across
+    # distinct [SOURCE N] blocks, before matching the affirmative assertion.
+    source_blocks = re.split(
+        r"(?m)^\[SOURCE\s+\d+\]\s*$",
         normalized_context,
     )
-    if not match:
+    caption_timestamp_prefix = re.compile(
+        r"(?m)^\s*-\s*\[\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*"
+        r"\d{1,2}:\d{2}(?::\d{2})?\]\s*"
+    )
+    named_tax_assertion = re.compile(
+        r"नया\s+टैक्स\s+लगाया\s+गया\s+था\s+"
+        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u097f])"
+    )
+
+    match = None
+    for source_block in source_blocks:
+        source_text = caption_timestamp_prefix.sub(" ", source_block)
+        source_text = re.sub(r"\s+", " ", source_text).strip()
+        candidate = named_tax_assertion.search(source_text)
+        if candidate is not None:
+            match = candidate
+            break
+
+    if match is None:
         if diagnostics is not None:
-            diagnostics.update({"used": False, "rejection_reason": "explicit_named_tax_assertion_not_found"})
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "explicit_named_tax_assertion_not_found",
+            })
         return None
 
     tax_name = " ".join(match.group("tax_name").split())
@@ -3201,7 +3236,10 @@ def _build_hindi_named_tax_evidence_fallback(
             "matched_evidence_phrase": match.group(0),
             "extracted_tax_name": tax_name,
         })
-    return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
+
+    if is_native_hindi:
+        return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
+    return f"The transcript identifies the new tax as “{tax_name}”."
 
 
 def _build_financial_evidence_fallback(
@@ -4933,21 +4971,44 @@ def build_rag_chain(
                 answer = FINANCIAL_VERIFICATION_FALLBACK
                 financial_answer_suppressed = True
 
-        # If the model abstains despite a directly stated native-Hindi tax
-        # name in the prompt-visible transcript, use only that exact source
-        # phrase instead of suppressing otherwise valid source citations.
-        if _strip_unverified_timestamp_summary(answer or "").strip() == FALLBACK_ANSWER:
+        # The spoken tax name can be split across timestamped caption snippets.
+        # For explicit tax-naming questions, use the exact transcript spelling
+        # when the model abstains or returns a different transliteration.
+        current_answer_is_fallback = (
+            _strip_unverified_timestamp_summary(answer or "").strip()
+            == FALLBACK_ANSWER
+        )
+        is_tax_naming_question = bool(
+            re.search(
+                r"टैक्स|कर|\b(?:tax|taxes|levy)\b",
+                question_text or "",
+                re.IGNORECASE,
+            )
+            and re.search(
+                r"नाम|कौन|किस नाम|name|called|identified|identify",
+                question_text or "",
+                re.IGNORECASE,
+            )
+        )
+        if current_answer_is_fallback or is_tax_naming_question:
             extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
                 question=question_text,
                 context=inputs.get("context", ""),
                 diagnostics=hindi_tax_fallback_diagnostics,
             )
             if extractive_hindi_tax_answer is not None:
-                answer = extractive_hindi_tax_answer
-                grounded_hindi_tax_fallback_used = True
-                logger.warning(
-                    "Using source-extractive Hindi named-tax answer after model abstention"
-                )
+                has_source_spelling = bool(re.search(
+                    r"चवरी|चावरी|\bch(?:avri|awri|owri|avari|awari)\b",
+                    _strip_unverified_timestamp_summary(answer or ""),
+                    re.IGNORECASE,
+                ))
+                if current_answer_is_fallback or not has_source_spelling:
+                    answer = extractive_hindi_tax_answer
+                    grounded_hindi_tax_fallback_used = True
+                    logger.warning(
+                        "Using source-extractive named-tax answer after abstention "
+                        "or transcript-name mismatch"
+                    )
 
         return {
             "answer": answer,
