@@ -2060,6 +2060,15 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
                         "distance": 0.25,
                     }
                 ],
+                "retrieval_trace": {
+                    "final_chunk_ids": [1],
+                    "citation_chunk_ids": [1],
+                },
+                "generation_trace": {
+                    "context_budget": {
+                        "included_chunk_ids": ["1"],
+                    },
+                },
             }
 
     def fake_build_rag_chain(
