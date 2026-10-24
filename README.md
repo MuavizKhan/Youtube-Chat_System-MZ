@@ -549,7 +549,7 @@ $env:RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = "false"
 In a second terminal, run the audit:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_answer_source_audit_anchor_only.json
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --suite phase10_10 --output evaluation_reports/phase10_8_answer_source_audit_anchor_only.json
 ```
 
 Then stop the server with Ctrl+C, change only the citation policy to opt in to context-neighbor sources, and restart the server:
@@ -562,7 +562,7 @@ $env:RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = "true"
 Run the same three cases with a separate output path:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_answer_source_audit_expanded_context.json
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --suite phase10_10 --output evaluation_reports/phase10_8_answer_source_audit_expanded_context.json
 ```
 
 Compare `effective_server_configuration.citation_policy`, each case's `annotated_evidence_groups`, `returned_source_chunk_ids`, `plain_text_timestamp_ranges`, source time ranges, and `answer_text_encoding_suspect`. The experimental mode changes source-link selection only; the generated answer and retrieved context may still vary slightly because each call invokes the model, so compare evidence and citation coverage rather than judging a single wording difference.
@@ -633,7 +633,7 @@ The script exits with code **1** if any HTTP request fails **or** any acceptance
 
 After CI passes, start the local backend with the unchanged experiment-caption-segments namespace and existing retrieval configuration. Run the audit from a second terminal with a fresh output path:
 
-    .\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_6_answer_source_audit_20261019.json
+    .\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --suite phase10_10 --output evaluation_reports/phase10_8_6_answer_source_audit_20261019.json
 
 **Final closure criteria:** all three requests return valid responses; quality_passed is true; retrieval configuration is consistent; all answer-content, evidence-source, timestamp-alignment, encoding, and context-budget checks pass; and the full CI suite is green. A report with cases_succeeded: 3 but quality_passed: false is a failed acceptance run and must not be treated as Phase 10.8 completion. This phase changes prompt guidance, generation-context prioritization and truncation diagnostics, a bounded corrective generation pass, response timestamp selection, audit annotations/checks, tests, and documentation. Embeddings, retrieval ranking, retrieval thresholds, source-link policy, and index format remain unchanged, so reindexing is not required. The corrective pass can incur one additional inference request for an answer that fails its completeness check; clean drafts use the existing single-generation path.
 
@@ -658,7 +658,7 @@ Run the full backend suite after CI dependency/compile checks:
 Then start the backend against the already-indexed `experiment-caption-segments` namespace with the existing retrieval configuration and run a fresh audit:
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --output evaluation_reports/phase10_8_8_answer_source_audit_20261019.json
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit --suite phase10_10 --output evaluation_reports/phase10_8_8_answer_source_audit_20261019.json
 ```
 
 **Phase 10.8 is not complete until the live report passes.** Require `cases_succeeded = 3`, `cases_failed = 0`, consistent effective server configuration, `quality_passed = true`, and an empty `quality_failures` array. In Q07, confirm the recovery amount remains explicitly attributed to the source report and malformed amounts are absent. In AR03 and AR08, confirm the plain-text timestamp summary uses the exact returned-source interval that contains chunk 2: this may be `00:13–03:37` when the returned source groups chunks 0–2, or `02:33–03:37` when chunk 2 is returned alone. The indexed caption places the eyelid phrase in chunk 2; chunk 11 (`09:49–10:58`) discusses sound-wave propagation and must not be used as the eyelid source. No reindexing is expected for these generation/attribution/timestamp changes. The five-video retrieval benchmark is a separate gate and must be reviewed from its own saved multi-video report; a passing answer/source audit does not imply that every pilot-video retrieval case passes.
@@ -701,7 +701,9 @@ Phase 10.10 uses the isolated `phase10-10-acceptance-minilm-20261023` index name
 
 The post-PR #120 five-video MiniLM acceptance report is `evaluation_reports/phase10_10_crossphase_acceptance_minilm_20261024_20261024-064619.json`. It records all five registered videos evaluated, zero evaluation errors, zero quality failures, and `overall_passed = true`. The 34 production-context evidence cases passed with 100% evidence presence and 100% mean group coverage. Raw-anchor diagnostics remain imperfect (88.2% aggregate hit rate and 81.4% group coverage); these are non-gating diagnostics and must not be improved by relaxing thresholds or weakening evidence requirements.
 
-The expanded-context live answer/source report is `evaluation_reports/phase10_10_answer_source_audit_context_citations_20261024-095758.json`. It records Q07, AR03, and AR08 as three successful requests, zero request failures, `quality_passed = true`, no quality failures, and a consistent effective server configuration using the same MiniLM acceptance namespace. Its captured runtime label is `expanded_context_experiment`, the name used before this closure change. The earlier anchor-only run failed AR08's evidence/source/timestamp alignment because required context evidence was not exposed as a source. The expanded policy passed that case without changing retrieval configuration. This PR stabilizes the production metadata name as `prompt_included_chunks` and changes the audit harness's identity to `chat_answer_source_audit_v1`; therefore a fresh post-merge live audit is required to verify the final default and labels.
+The expanded-context live answer/source report is `evaluation_reports/phase10_10_answer_source_audit_context_citations_20261024-095758.json`. It records Q07, AR03, and AR08 as three successful requests, zero request failures, `quality_passed = true`, no quality failures, and a consistent effective server configuration using the same MiniLM acceptance namespace. Its captured runtime label is `expanded_context_experiment`, the name used before this closure change. The earlier anchor-only run failed AR08's evidence/source/timestamp alignment because required context evidence was not exposed as a source. The expanded policy passed that case without changing retrieval configuration.
+
+The final post-merge report, `evaluation_reports/phase10_10_answer_source_audit_final_20261024-103321.json`, confirms the merged commit `7015da098733343948d8fea799fac14dbe4f2475`, a clean tracked working tree, all three requests successful, no quality failures, consistent configuration, and the final `prompt_included_chunks` policy label. The Phase 10.10 acceptance gate is therefore satisfied; subsequent wider coverage belongs to Phase 10.11.
 
 ### Final closure gate
 
@@ -715,3 +717,68 @@ Do not rebuild or overwrite the acceptance index. Phase 10.10 is closed only aft
 
 The real Urdu-caption evidence blocker remains open: no Urdu-script acceptance result is claimed until a genuine publisher-uploaded Urdu caption track and its evidence phrases are verified. Revisit broader live answer/source coverage in the next phase rather than silently treating this three-case audit as complete multilingual coverage.
 
+## Phase 10.11 — Multi-video answer/source citation acceptance
+
+### Objective and boundaries
+
+Phase 10.11 extends the live answer/source gate beyond the three Phase 10.10 closure cases. It remains separate from the deterministic five-video retrieval benchmark: the retrieval report proves transcript evidence reaches production context, while this live suite checks generated answers, abstention behavior, timestamps, and clickable-source provenance. It makes no ranking, threshold, MMR, chunking, embedding, index, or gold-annotation changes.
+
+The suite uses the five registered pilot videos and 16 representative live cases sourced from `Backend/rag_system/benchmark_registry.py`:
+
+| Pilot video | Transcript language | Live cases |
+|---|---|---|
+| Kingfisher interview (`MdeQMVBuGgY`) | English | Q07 financial claims; Q13 unrelated control |
+| English workshop (`pOnl-Zndcls`) | English | EW01 answerable; EW05 unrelated control |
+| Agentic engineering interview (`A-JBaNvv3Tk`) | English | AI01 answerable; AI05 unrelated control |
+| Rajasthan history (`INpnuL7qnzY`) | Hindi | HI04 English query; HI05 English unrelated control; HI09 Hindi query; HI10 Hindi unrelated control |
+| Quiet room episode (`fAd2nKfrDB8`) | Arabic | AR03, AR04 and native Arabic AR08/AR09 answerable cases; AR05/AR10 unrelated controls |
+
+The live report lists every question in the canonical registry as either live-audited or retrieval-benchmark-only, instead of implying the representative sample covers all 43 registry questions. The report also records the blocked Urdu-caption verification status. Urdu is not included as a successful live language until a genuine publisher-uploaded Urdu-script caption track and evidence have been verified.
+
+### Hard checks
+
+- **Answerability:** answerable questions require a substantive answer, registered concept checks where appropriate, and the expected answer script for English, Hindi, or Arabic.
+- **Abstention:** unrelated controls require an explicit abstention, no clickable sources, and no source timestamp claims. A guessed answer such as “Canberra” fails even if the source list is empty.
+- **Prompt-bound citation provenance:** under `prompt_included_chunks`, every returned source chunk ID must be in `observability.generation.context_budget.included_chunk_ids`. If prompt-inclusion IDs are missing on a legacy trace, the checker accepts only the selected-anchor fallback and rejects context-neighbor links that cannot be proved prompt-visible.
+- **Timestamp integrity:** answerable cases require at least one source and timestamp summary; every timestamp range in the summary must exactly match a returned source interval. The existing question-specific evidence checks for Q07 and AR03/AR08 remain in place.
+- **Configuration and provenance:** all cases must report the same effective configuration, matching the expected MiniLM namespace/model, `prompt_included_chunks` citation policy, and recorded retrieval parameters. Each report stores the report schema/ID, runner commit, tracked-tree cleanliness, expected and effective configuration, case outcomes, and registry coverage accounting.
+- **Coverage accounting:** a hard gate requires all five registered videos to have at least one answerable case and one unrelated control. Other registered questions are listed explicitly as not live answer/source audited in this slice; their separate retrieval results remain available in the five-video benchmark report.
+
+### Reproducible run
+
+Start the backend using the Phase 10.10 isolated MiniLM acceptance namespace and the settings recorded in its manifest. Do not call `POST /index` and do not rebuild or overwrite the acceptance index. Ensure `RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS=true` (the default) and restart the backend so the process loads it.
+
+From a second terminal, run the expanded suite with a fresh report path:
+
+```powershell
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$output = ".\evaluation_reports\phase10_11_multivideo_answer_source_audit_$stamp.json"
+if (Test-Path -LiteralPath $output) { throw "Refusing to overwrite $output" }
+
+.\.venv\Scripts\python.exe -m scripts.chat_answer_source_audit `
+    --suite phase10_11 `
+    --base-url "http://127.0.0.1:8000" `
+    --output $output
+
+if ($LASTEXITCODE -ne 0) { throw "Phase 10.11 answer/source acceptance failed." }
+
+$report = Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
+$report | Select-Object report_schema_version, report_id, runner_git_commit,
+    runner_working_tree_clean, cases_attempted, cases_succeeded, cases_failed,
+    quality_passed, effective_server_configuration_consistent_across_cases,
+    effective_server_configuration_matches_expected
+```
+
+For the Phase 10.10 three-case closure audit, select `--suite phase10_10` explicitly. The Phase 10.11 CLI defaults to the expanded suite and fails closed on configuration or representative-coverage mismatches.
+
+### Acceptance criteria
+
+1. GitHub CI and the complete offline test suite pass.
+2. The live report has 16 attempted cases, zero transport/parse failures, no quality failures, and `quality_passed = true`.
+3. Effective configuration is identical across all 16 responses and matches the acceptance manifest, including `citation_policy = prompt_included_chunks`.
+4. Each returned source chunk is prompt-visible; if prompt-inclusion trace is unavailable, the selected-anchor fallback is proven and no non-anchor neighbor is returned.
+5. Every answerable case passes its response-content/language and source/timestamp checks; every unrelated control abstains without clickable source links or timestamp claims.
+6. The coverage manifest accounts for all five videos, all registry questions and the Urdu blocker. Unselected question cases are labeled as not live-audited rather than silently passed.
+7. The saved five-video retrieval acceptance remains a separate gate. Raw-anchor misses remain diagnostic and must not be “fixed” by relaxing thresholds.
+
+The live 16-case run is intentionally an explicit acceptance step; no inference calls are made by CI. If a case fails, classify the failure as answer quality, abstention, prompt/source provenance, timestamp mismatch, configuration drift, or retrieval/context evidence, and fix only the demonstrated cause.
