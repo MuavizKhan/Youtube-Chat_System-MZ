@@ -68,7 +68,7 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     response = {
         "answer": "الإجابة صحيحة.\n\nRelevant timestamps: 02:28–04:21",
         "retrieval_config": {
-            "citation_policy": "expanded_context_experiment",
+            "citation_policy": "prompt_included_chunks",
         },
         "sources": [
             {
