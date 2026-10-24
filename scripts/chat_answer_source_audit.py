@@ -305,7 +305,7 @@ def _normalize_answer_requirement_text(answer: str) -> str:
     text = _substantive_answer(answer)
     # Do not let presentation markup split otherwise valid phrases such as
     # "**three** ways" and cause a false negative in the acceptance gate.
-    text = re.sub(r"(**|__)(.+?)\1", r"\2", text, flags=re.DOTALL)
+    text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text, flags=re.DOTALL)
     text = re.sub(r"(?<!\w)([*_])([^*_]+?)\1(?!\w)", r"\2", text)
     text = re.sub(r"`+([^`\n]+?)`+", r"\1", text)
     return text
