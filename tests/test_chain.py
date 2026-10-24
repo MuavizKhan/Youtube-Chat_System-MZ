@@ -748,6 +748,8 @@ def test_prompt_requires_answer_in_question_language_even_when_context_is_englis
     assert question in messages[1]["content"]
     assert "answer in the same language as the user's question" in normalized_system_prompt
     assert "do not switch to english merely because the transcript" in normalized_system_prompt
+    assert "do not switch to hindi or arabic merely because the transcript" in normalized_system_prompt
+    assert "an english question about a hindi or arabic transcript must be answered in english" in normalized_system_prompt
     assert "for an arabic question, answer in arabic" in normalized_system_prompt
 
 
