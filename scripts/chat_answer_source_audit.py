@@ -942,6 +942,124 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
     }
 
 
+def build_coverage_manifest(
+    cases: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Account for every registered video/question and disclose unevaluated cases."""
+    audited_by_video: dict[str, list[dict[str, Any]]] = {}
+    unregistered_cases: list[dict[str, str]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    duplicate_cases: list[dict[str, str]] = []
+
+    for case in cases:
+        video_id = str(case.get("video_id", ""))
+        question_id = str(case.get("id", ""))
+        benchmark = VIDEO_BENCHMARKS.get(video_id)
+        question_ids = (
+            {str(item.get("id")) for item in benchmark.question_cases}
+            if benchmark is not None
+            else set()
+        )
+        if benchmark is None or question_id not in question_ids:
+            unregistered_cases.append({
+                "video_id": video_id,
+                "question_id": question_id,
+            })
+            continue
+        key = (video_id, question_id)
+        if key in seen_keys:
+            duplicate_cases.append({
+                "video_id": video_id,
+                "question_id": question_id,
+            })
+        seen_keys.add(key)
+        audited_by_video.setdefault(video_id, []).append(case)
+
+    video_rows = []
+    unassessed_question_cases = []
+    for video_id, benchmark in VIDEO_BENCHMARKS.items():
+        audited_cases = audited_by_video.get(video_id, [])
+        audited_ids = {str(case.get("id")) for case in audited_cases}
+        registered_ids = [str(case.get("id")) for case in benchmark.question_cases]
+        not_audited = [
+            question_id for question_id in registered_ids
+            if question_id not in audited_ids
+        ]
+        for question_id in not_audited:
+            unassessed_question_cases.append({
+                "video_id": video_id,
+                "transcript_language": benchmark.transcript_language,
+                "question_id": question_id,
+                "status": "retrieval_benchmark_only_not_live_answer_source_audited",
+            })
+        positive_count = sum(
+            case.get("expected_behavior") == "answerable"
+            for case in audited_cases
+        )
+        negative_count = sum(
+            case.get("expected_behavior") == "unanswerable"
+            for case in audited_cases
+        )
+        video_rows.append({
+            "video_id": video_id,
+            "title": benchmark.title,
+            "transcript_language": benchmark.transcript_language,
+            "caption_track_kind": benchmark.caption_track_kind,
+            "transcript_source_kind": benchmark.transcript_source_kind,
+            "caption_validation_note": benchmark.caption_validation_note,
+            "registered_question_case_count": len(registered_ids),
+            "live_audit_question_ids": [
+                str(case.get("id")) for case in audited_cases
+            ],
+            "live_audit_case_count": len(audited_cases),
+            "live_answerable_case_count": positive_count,
+            "live_unanswerable_control_count": negative_count,
+            "unevaluated_question_ids": not_audited,
+            "representative_live_coverage_passed": (
+                positive_count >= 1 and negative_count >= 1
+            ),
+        })
+
+    blocker = BENCHMARK_CURATION_BLOCKERS
+    blocked_languages = []
+    if isinstance(blocker, dict) and blocker:
+        blocked_languages.append(dict(blocker))
+
+    expected_video_ids = set(VIDEO_BENCHMARKS)
+    covered_video_ids = set(audited_by_video)
+    all_videos_have_representative_coverage = (
+        covered_video_ids == expected_video_ids
+        and all(row["representative_live_coverage_passed"] for row in video_rows)
+    )
+    return {
+        "registered_video_count": len(VIDEO_BENCHMARKS),
+        "registered_question_case_count": sum(
+            len(benchmark.question_cases)
+            for benchmark in VIDEO_BENCHMARKS.values()
+        ),
+        "live_audit_case_count": len(cases),
+        "live_audit_video_count": len(covered_video_ids),
+        "all_registered_videos_have_answerable_and_unanswerable_live_cases": (
+            all_videos_have_representative_coverage
+        ),
+        "unregistered_live_cases": unregistered_cases,
+        "duplicate_live_cases": duplicate_cases,
+        "blocked_languages": blocked_languages,
+        "videos": video_rows,
+        "question_case_accounting": {
+            "live_audited_count": len(seen_keys),
+            "not_live_audited_count": len(unassessed_question_cases),
+            "not_live_audited_cases": unassessed_question_cases,
+            "accounting_complete": (
+                not unregistered_cases
+                and not duplicate_cases
+                and len(seen_keys) + len(unassessed_question_cases)
+                == sum(len(benchmark.question_cases) for benchmark in VIDEO_BENCHMARKS.values())
+            ),
+        },
+    }
+
+
 def _read_git_state() -> dict[str, Any]:
     def run_git(*args: str) -> str | None:
         try:
@@ -1037,10 +1155,14 @@ def run_audit(
     base_url: str,
     output_path: Path,
     timeout_seconds: float,
+    cases: tuple[dict[str, Any], ...] = AUDIT_CASES,
+    report_id: str = REPORT_ID,
+    expected_configuration: dict[str, Any] | None = None,
+    require_full_pilot_coverage: bool = False,
 ) -> dict[str, Any]:
     results = [
         _post_chat(base_url, case, timeout_seconds)
-        for case in AUDIT_CASES
+        for case in cases
     ]
 
     successful_audits = [
@@ -1057,9 +1179,20 @@ def run_audit(
     # Require one effective config for every attempted case. A subset of
     # matching configurations must not masquerade as cross-case consistency.
     configs_consistent = (
-        len(configs) == len(AUDIT_CASES)
+        len(configs) == len(cases)
+        and bool(configs)
         and all(config == configs[0] for config in configs)
     )
+
+    config_matches_expected: bool | None = None
+    if expected_configuration is not None:
+        config_matches_expected = (
+            isinstance(effective_config, dict)
+            and all(
+                effective_config.get(key) == value
+                for key, value in expected_configuration.items()
+            )
+        )
 
     cases_succeeded = sum(item.get("status") == "success" for item in results)
     cases_failed = sum(item.get("status") != "success" for item in results)
@@ -1077,22 +1210,47 @@ def run_audit(
             "case_id": "ALL",
             "failed_checks": ["effective_server_configuration_consistency"],
         })
+    if config_matches_expected is False:
+        quality_failures.append({
+            "case_id": "ALL",
+            "failed_checks": ["effective_server_configuration_matches_expected"],
+        })
+
+    coverage_manifest = build_coverage_manifest(cases)
+    coverage_passed = (
+        coverage_manifest["all_registered_videos_have_answerable_and_unanswerable_live_cases"]
+        and coverage_manifest["unregistered_live_cases"] == []
+        and coverage_manifest["duplicate_live_cases"] == []
+        and coverage_manifest["question_case_accounting"]["accounting_complete"]
+    )
+    if require_full_pilot_coverage and not coverage_passed:
+        quality_failures.append({
+            "case_id": "ALL",
+            "failed_checks": ["representative_five_video_live_coverage"],
+        })
+
     quality_passed = (
-        cases_succeeded == len(AUDIT_CASES)
+        cases_succeeded == len(cases)
         and cases_failed == 0
         and configs_consistent
+        and config_matches_expected is not False
+        and (coverage_passed or not require_full_pilot_coverage)
         and not quality_failures
     )
 
     report = {
-        "report_schema_version": "1.1.0",
-        "report_id": REPORT_ID,
+        "report_schema_version": "1.2.0",
+        "report_id": report_id,
         "generated_at": datetime.now().astimezone().isoformat(),
         "backend_base_url": base_url.rstrip("/"),
         **_read_git_state(),
+        "live_suite_case_ids": [str(case.get("id")) for case in cases],
+        "expected_server_configuration": expected_configuration,
         "effective_server_configuration": effective_config,
         "effective_server_configuration_consistent_across_cases": configs_consistent,
-        "cases_attempted": len(AUDIT_CASES),
+        "effective_server_configuration_matches_expected": config_matches_expected,
+        "coverage_manifest": coverage_manifest,
+        "cases_attempted": len(cases),
         "cases_succeeded": cases_succeeded,
         "cases_failed": cases_failed,
         "quality_passed": quality_passed,
@@ -1106,7 +1264,6 @@ def run_audit(
         encoding="utf-8",
     )
     return report
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(
