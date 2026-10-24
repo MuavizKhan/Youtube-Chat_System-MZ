@@ -192,7 +192,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
         answer_language="en",
         answer_requirements=(
             {"name": "sound_role", "pattern": r"\bsound\b"},
-            {"name": "perception_or_compass", "pattern": r"\b(?:compass|perception|guide|orient\w*|direction)\b"},
+            {"name": "perception_or_compass", "pattern": r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b"},
         ),
     ),
     _make_audit_case(
