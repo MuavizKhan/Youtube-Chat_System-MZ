@@ -3039,6 +3039,61 @@ def _financial_claim_topic(clause: str) -> str | None:
     return None
 
 
+_SUPPORTED_SCRIPT_NAMES = {
+    "en": "English",
+    "hi": "Hindi",
+    "ar": "Arabic",
+}
+
+
+def _supported_script_letter_counts(text: str) -> dict[str, int]:
+    """Count letters from the supported answer scripts, ignoring punctuation and timestamps."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    return {
+        "en": len(re.findall(r"[A-Za-z]", normalized)),
+        "hi": len(re.findall(r"[\u0904-\u0939\u0958-\u0961\u0972-\u097f]", normalized)),
+        "ar": len(re.findall(r"[\u0621-\u064a\u066e-\u06d3\u06fa-\u06fc\u0750-\u077f\u08a0-\u08ff]", normalized)),
+    }
+
+
+def _dominant_supported_script_language(text: str) -> str | None:
+    """Infer a supported language only when one script is clearly predominant."""
+    counts = _supported_script_letter_counts(text)
+    ranked = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    if not ranked or ranked[0][1] < 4:
+        return None
+    if ranked[1][1] and ranked[0][1] < ranked[1][1] * 1.15:
+        # A genuinely mixed-script question is ambiguous; avoid forcing a retry.
+        return None
+    return ranked[0][0]
+
+
+def _question_answer_language_mismatch(
+    question: str,
+    answer: str,
+) -> tuple[str, str] | None:
+    """Return (expected, actual) for a clear supported-script mismatch only."""
+    expected = _dominant_supported_script_language(question)
+    if expected is None:
+        return None
+
+    counts = _supported_script_letter_counts(_strip_unverified_timestamp_summary(answer or ""))
+    total = sum(counts.values())
+    if total < 8:
+        return None
+    actual, actual_count = max(counts.items(), key=lambda item: item[1])
+    if actual == expected:
+        return None
+
+    expected_share = counts[expected] / total
+    actual_share = actual_count / total
+    # Only repair strong mismatches. Small quoted names or source terms in another
+    # script should not cause a rewrite of an otherwise correctly-languaged answer.
+    if expected_share <= 0.35 and actual_share >= 0.55:
+        return expected, actual
+    return None
+
+
 def _generation_repair_instruction(
     question: str,
     answer: str,
@@ -3049,6 +3104,29 @@ def _generation_repair_instruction(
     question_text = unicodedata.normalize("NFKC", question or "").lower()
     answer_text = _strip_unverified_timestamp_summary(answer or "")
     context_text = context or ""
+
+    language_mismatch = _question_answer_language_mismatch(
+        question_text, answer_text
+    )
+    if language_mismatch is not None:
+        expected_language, previous_language = language_mismatch
+        expected_name = _SUPPORTED_SCRIPT_NAMES[expected_language]
+        previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
+        instructions.append(
+            "QUESTION-LANGUAGE REPAIR. The user's question is predominantly in "
+            + expected_name
+            + ", but the previous draft is predominantly in "
+            + previous_name
+            + ". Rewrite the answer from scratch in "
+            + expected_name
+            + ". Translate the source-supported meaning into "
+            + expected_name
+            + " instead of copying the transcript's language or script. "
+            "Use only facts supported by the supplied transcript context. "
+            "Keep any original-script proper name only when it is necessary, "
+            "and explain it in the requested language. Do not include a timestamp "
+            "line; the application adds verified timestamps separately."
+        )
 
     is_financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
@@ -3194,10 +3272,64 @@ def _generation_repair_instruction(
                     "the application adds verified timestamps separately."
                 )
 
+    question_language = _dominant_supported_script_language(question_text)
+    is_sound_perception_question = bool(
+        (
+            re.search(r"\bsound\b", question_text, re.IGNORECASE)
+            and re.search(r"\bpercept\w*\b", question_text, re.IGNORECASE)
+            and re.search(
+                r"\b(?:role|contribut\w*)\b",
+                question_text,
+                re.IGNORECASE,
+            )
+        )
+        or (
+            re.search(r"(?:الصوت|صوت)", question_text)
+            and re.search(r"(?:الإدراك|ادراك)", question_text)
+            and re.search(r"(?:دور|يساهم|يؤثر|توجيه|يوجه)", question_text)
+        )
+    )
+    if is_sound_perception_question and question_language in {"en", "ar"}:
+        if question_language == "ar":
+            missing_sound = not re.search(
+                r"(?:الصوت|صوت|أصوات|اصوات)", answer_text
+            )
+            missing_perception = not re.search(
+                r"(?:إدراك|ادراك|بوصلة|توجيه|يوجه|يوجّه)", answer_text
+            )
+        else:
+            missing_sound = not re.search(
+                r"\bsounds?\b", answer_text, re.IGNORECASE
+            )
+            missing_perception = not re.search(
+                r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b",
+                answer_text,
+                re.IGNORECASE,
+            )
+        if missing_sound or missing_perception:
+            language_name = _SUPPORTED_SCRIPT_NAMES[question_language]
+            missing_concepts = []
+            if missing_sound:
+                missing_concepts.append("sound")
+            if missing_perception:
+                missing_concepts.append("perception or its guiding/orienting role")
+            instructions.append(
+                "SOUND/PERCEPTION ANSWER REPAIR. Rewrite from scratch in "
+                + language_name
+                + " and directly answer both parts of the question: what sound "
+                "contributes to perception, and the role the episode assigns to "
+                "sound. The current draft is missing these concepts: "
+                + ", ".join(missing_concepts)
+                + ". Translate the transcript's meaning into the question's "
+                "language rather than copying sentences from the transcript. "
+                "Use only claims supported by the supplied context. Do not add "
+                "a timestamp line; the application appends verified timestamps."
+            )
+
     if not instructions:
         return None
     return (
-        "The previous draft failed an application source-completeness check. "
+        "The previous draft failed an application answer-quality check. "
         "The instructions below are revision requirements; the transcript context remains the only source of facts.\n\n"
         + "\n\n".join(instructions)
     )
@@ -4933,6 +5065,10 @@ def build_rag_chain(
         # Decide whether the model's bounded prompt needs a repair using the
         # same context it actually received. The extractive fallback below can
         # inspect all retrieved source groups independently of this prompt budget.
+        question_language_repair_attempted = (
+            _question_answer_language_mismatch(question_text, answer) is not None
+        )
+        question_language_repair_passed = None
         repair_instruction = _generation_repair_instruction(
             question=question_text,
             answer=answer,
@@ -4962,6 +5098,10 @@ def build_rag_chain(
                 answer=answer,
                 context=inputs.get("context", ""),
             ) is None
+            if question_language_repair_attempted:
+                question_language_repair_passed = (
+                    _question_answer_language_mismatch(question_text, answer) is None
+                )
             if not repair_passed:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
@@ -5070,6 +5210,8 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "question_language_repair_attempted": question_language_repair_attempted,
+                "question_language_repair_passed": question_language_repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
                 "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,
