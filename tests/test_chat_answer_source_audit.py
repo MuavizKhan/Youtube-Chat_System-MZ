@@ -763,6 +763,24 @@ def test_phase10_11_registered_answer_requirements_and_language_are_checked():
     assert all(check["passed"] for check in checks), checks
 
 
+def test_ar04_accepts_perceive_and_navigate_as_supported_perception_synonyms():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "AR04")
+    answer = (
+        "The episode explains that sound plays a key role in how we perceive "
+        "the world and helps us navigate our surroundings."
+    )
+    checks = _answer_quality_checks(case, answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["answer_requirement_sound_role"] is True
+    assert by_name["answer_requirement_perception_or_compass"] is True
+
+    unsupported = _answer_quality_checks(case, "Sound plays a key role in the episode.")
+    unsupported_by_name = {
+        check["name"]: check["passed"] for check in unsupported
+    }
+    assert unsupported_by_name["answer_requirement_perception_or_compass"] is False
+
+
 def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "EW01")
 
