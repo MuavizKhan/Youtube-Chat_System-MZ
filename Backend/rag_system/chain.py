@@ -1750,6 +1750,11 @@ def _generation_context_query_terms(question: str | None) -> set[str]:
     ))
     if is_arabic:
         terms.update(_answer_alignment_terms(normalized))
+    if re.search(r"[\u0900-\u097f]", normalized):
+        # _claim_terms is intentionally English-oriented. Include native Hindi
+        # tokens so caption selection can preserve evidence for Hindi questions
+        # instead of falling back to evenly spaced transcript sampling.
+        terms.update(re.findall(r"[\u0900-\u097f]{2,}", normalized))
     if is_bodily_sound_question:
         # Add both caption vocabularies regardless of question language. This
         # helps line selection when the answer language and transcript language
@@ -1778,6 +1783,11 @@ def _generation_line_relevance(
     line_terms = _claim_terms(transcript_text)
     if re.search(r"[\u0600-\u06ff]", transcript_text):
         line_terms.update(_answer_alignment_terms(transcript_text))
+    if re.search(r"[\u0900-\u097f]", transcript_text):
+        line_terms.update(re.findall(
+            r"[\u0900-\u097f]{2,}",
+            unicodedata.normalize("NFKC", transcript_text).lower(),
+        ))
     overlap = len(question_terms & line_terms)
     if financial_question and _extract_money_amounts(transcript_text):
         # For amount questions, retain lines containing actual monetary figures
@@ -1850,6 +1860,31 @@ def _truncate_formatted_source(
 
         captions = lines[caption_start:]
         split_evidence_caption_indices: set[int] = set()
+        is_hindi_tax_naming_question = bool(
+            re.search(r"[\u0900-\u097f]", question or "")
+            and re.search(r"टैक्स|कर", question or "")
+            and re.search(r"नाम|कौन|किस नाम", question or "")
+        )
+        if is_hindi_tax_naming_question:
+            # Hindi tax assertions are often split across consecutive YouTube
+            # captions. Reserve the affirmative assertion and its next two
+            # captions together, so the named tax cannot be cut away while the
+            # chunk ID still appears in the context-budget manifest.
+            for index in range(len(captions)):
+                window = captions[index:index + 3]
+                window_text = " ".join(
+                    line.split("] ", 1)[-1] if line.startswith("- [") else line
+                    for line in window
+                )
+                if re.search(
+                    r"नया\s+टैक्स\s+लगाया\s+गया\s+था",
+                    unicodedata.normalize("NFKC", window_text),
+                ):
+                    # The assertion and name may span up to three separate
+                    # caption snippets, so reserve the whole evidence window.
+                    split_evidence_caption_indices.update(
+                        range(index, min(len(captions), index + 3))
+                    )
         if (
             financial_question
             and re.search(r"\b(?:ministry|finance|report)\b", financial_group_context, re.IGNORECASE)
@@ -2270,7 +2305,13 @@ def build_generation_context(
             start = float(source_group.get("start", index))
         except (TypeError, ValueError):
             start = float(index)
-        overlap = len(question_terms & _claim_terms(rendered))
+        rendered_terms = _claim_terms(rendered)
+        if re.search(r"[\u0900-\u097f]", rendered):
+            rendered_terms.update(re.findall(
+                r"[\u0900-\u097f]{2,}",
+                unicodedata.normalize("NFKC", rendered).lower(),
+            ))
+        overlap = len(question_terms & rendered_terms)
         amount_count = (
             len(_extract_money_amounts(rendered))
             if financial_question
