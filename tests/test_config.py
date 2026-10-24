@@ -332,19 +332,25 @@ def _run_citation_policy_import(value: str | None):
     )
 
 
-def test_context_neighbor_citation_experiment_defaults_off():
+def test_context_neighbor_citation_policy_defaults_on():
     result = _run_citation_policy_import(None)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "True"
+
+
+def test_context_neighbor_citation_policy_can_be_disabled_for_comparison():
+    result = _run_citation_policy_import("false")
     assert result.returncode == 0
     assert result.stdout.strip() == "False"
 
 
-def test_context_neighbor_citation_experiment_can_be_enabled():
+def test_context_neighbor_citation_policy_can_be_explicitly_enabled():
     result = _run_citation_policy_import("true")
     assert result.returncode == 0
     assert result.stdout.strip() == "True"
 
 
-def test_context_neighbor_citation_experiment_rejects_invalid_boolean():
+def test_context_neighbor_citation_policy_rejects_invalid_boolean():
     result = _run_citation_policy_import("sometimes")
     assert result.returncode != 0
     assert "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS" in result.stderr
