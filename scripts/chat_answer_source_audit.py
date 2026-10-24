@@ -21,57 +21,209 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from Backend.rag_system.benchmark_registry import (
+    BENCHMARK_CURATION_BLOCKERS,
+    VIDEO_BENCHMARKS,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "chat_answer_source_audit.json"
 REPORT_ID = "chat_answer_source_audit_v1"
 
-# Evidence groups were initially curated against experiment-caption-segments and
-# revalidated against the Phase 10.10 MiniLM acceptance namespace on 2026-10-24.
-# Verify chunk IDs and caption evidence before reusing this registry on any other
-# namespace; never infer chunk IDs from timestamps alone.
+# Resolve live audit questions from the canonical video-scoped registry so
+# prompts cannot silently drift from retrieval acceptance annotations.
+def _registry_question(video_id: str, question_id: str) -> str:
+    benchmark = VIDEO_BENCHMARKS.get(video_id)
+    if benchmark is None:
+        raise ValueError(f"No registered benchmark for video {video_id!r}.")
+    for item in benchmark.question_cases:
+        if item.get("id") == question_id:
+            return str(item["question"])
+    raise ValueError(
+        f"No question {question_id!r} is registered for video {video_id!r}."
+    )
+
+
+def _make_audit_case(
+    question_id: str,
+    video_id: str,
+    *,
+    expected_behavior: str,
+    answer_language: str | None = None,
+    answer_requirements: tuple[dict[str, str], ...] = (),
+    evidence_groups: tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    if expected_behavior not in {"answerable", "unanswerable"}:
+        raise ValueError(f"Unsupported expected behavior: {expected_behavior!r}")
+    case: dict[str, Any] = {
+        "id": question_id,
+        "video_id": video_id,
+        "question": _registry_question(video_id, question_id),
+        "expected_behavior": expected_behavior,
+        "answer_requirements": list(answer_requirements),
+        "evidence_groups": list(evidence_groups),
+    }
+    if answer_language is not None:
+        case["answer_language"] = answer_language
+    return case
+
+
+# Phase 10.10 closure suite retained for reproducible regression comparisons.
+# The three chunk annotations were verified against the isolated MiniLM
+# acceptance namespace. Do not copy them to another namespace without checking
+# the actual indexed caption chunks.
 AUDIT_CASES: tuple[dict[str, Any], ...] = (
-    {
-        "id": "Q07",
-        "video_id": "MdeQMVBuGgY",
-        "question": (
-            "What does Vijay Mallya say about the amount of debt or money "
-            "involved in the Kingfisher situation?"
-        ),
-        "evidence_groups": [
+    _make_audit_case(
+        "Q07", "MdeQMVBuGgY",
+        expected_behavior="answerable",
+        answer_language="en",
+        evidence_groups=(
             {"label": "Kingfisher investment: 3,000 crore", "candidate_chunk_ids": [108]},
             {"label": "DRT judgment debt figure: 4,999 crore", "candidate_chunk_ids": [124]},
             {"label": "debt-certificate figure: 6,203 crore", "candidate_chunk_ids": [221]},
             {
                 "label": "Ministry of Finance recovery figure: 14,100 crore",
-                # Chunk 221 also mentions the Ministry report while discussing
-                # the DRT certificate figure, so its interval can support both
-                # adjacent transcript claims without inventing a source.
                 "candidate_chunk_ids": [153, 159, 221],
             },
-        ],
-    },
-    # Verified caption text for "and even your eyelids blinking" is in chunk 2
-    # (02:33–03:37). Chunk 11 (09:49–10:58) discusses sound-wave propagation.
-    {
-        "id": "AR03",
-        "video_id": "fAd2nKfrDB8",
-        "question": "What bodily sounds might people begin to hear in the room?",
-        "evidence_groups": [
+        ),
+    ),
+    _make_audit_case(
+        "AR03", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="en",
+        evidence_groups=(
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
             {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
-        ],
-    },
-    {
-        "id": "AR08",
-        "video_id": "fAd2nKfrDB8",
-        "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
-        "evidence_groups": [
+        ),
+    ),
+    _make_audit_case(
+        "AR08", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="ar",
+        evidence_groups=(
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
             {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
-        ],
-    },
+        ),
+    ),
 )
+
+
+# Phase 10.11 is a representative live answer/source suite across the five
+# registered pilot videos. All question text comes from benchmark_registry;
+# answer requirements use the already-curated gold phrases/concepts.
+PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
+    _make_audit_case(
+        "Q07", "MdeQMVBuGgY",
+        expected_behavior="answerable",
+        answer_language="en",
+        evidence_groups=AUDIT_CASES[0]["evidence_groups"],
+    ),
+    _make_audit_case(
+        "Q13", "MdeQMVBuGgY",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "EW01", "pOnl-Zndcls",
+        expected_behavior="answerable",
+        answer_language="en",
+        answer_requirements=(
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\b"},
+            {"name": "self_expression", "pattern": r"\bexpress\w*\b"},
+        ),
+    ),
+    _make_audit_case(
+        "EW05", "pOnl-Zndcls",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "AI01", "A-JBaNvv3Tk",
+        expected_behavior="answerable",
+        answer_language="en",
+        answer_requirements=(
+            {"name": "hackability", "pattern": r"\bhack\w*\b"},
+            {"name": "ease_prediction", "pattern": r"\beas(?:y|ier|ily)\b"},
+        ),
+    ),
+    _make_audit_case(
+        "AI05", "A-JBaNvv3Tk",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "HI04", "INpnuL7qnzY",
+        expected_behavior="answerable",
+        answer_language="en",
+        answer_requirements=(
+            {
+                "name": "named_chavri_tax",
+                "pattern": r"\bch(?:a|o|u)?v?ri\b|चवरी|चावरी|चवरी",
+            },
+            {"name": "tax_concept", "pattern": r"\b(?:tax|taxes|levy)\b|कर|टैक्स"},
+        ),
+    ),
+    _make_audit_case(
+        "HI05", "INpnuL7qnzY",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "HI09", "INpnuL7qnzY",
+        expected_behavior="answerable",
+        answer_language="hi",
+        answer_requirements=(
+            {"name": "named_chavri_tax", "pattern": r"चवरी|चावरी|चवरी|\bchavri\b|\bchawri\b"},
+            {"name": "tax_concept", "pattern": r"कर|टैक्स|\btax\b"},
+        ),
+    ),
+    _make_audit_case(
+        "HI10", "INpnuL7qnzY",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "AR03", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="en",
+        evidence_groups=AUDIT_CASES[1]["evidence_groups"],
+    ),
+    _make_audit_case(
+        "AR04", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="en",
+        answer_requirements=(
+            {"name": "sound_role", "pattern": r"\bsound\b"},
+            {"name": "perception_or_compass", "pattern": r"\b(?:compass|perception|guide|orient\w*|direction)\b"},
+        ),
+    ),
+    _make_audit_case(
+        "AR05", "fAd2nKfrDB8",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "AR08", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="ar",
+        evidence_groups=AUDIT_CASES[2]["evidence_groups"],
+    ),
+    _make_audit_case(
+        "AR09", "fAd2nKfrDB8",
+        expected_behavior="answerable",
+        answer_language="ar",
+        answer_requirements=(
+            {"name": "sound_subject", "pattern": r"الصوت|صوت"},
+            {"name": "perception_role", "pattern": r"بوصلة|إدراك|ادراك|توجيه"},
+        ),
+    ),
+    _make_audit_case(
+        "AR10", "fAd2nKfrDB8",
+        expected_behavior="unanswerable",
+    ),
+)
+
+PHASE10_11_REPORT_ID = "phase10_11_multivideo_answer_source_audit_v1"
+PHASE10_11_DEFAULT_OUTPUT = (
+    PROJECT_ROOT / "evaluation_reports" / "phase10_11_multivideo_answer_source_audit.json"
+)
+SUPPORTED_LIVE_LANGUAGES = ("en", "hi", "ar")
+
 
 # These marker sequences are strong indicators that non-ASCII answer text has
 # already been decoded with the wrong character encoding. They are warnings,
