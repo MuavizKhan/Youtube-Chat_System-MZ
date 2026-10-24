@@ -2728,7 +2728,7 @@ def test_hindi_named_tax_fallback_requires_native_tax_naming_question_and_explic
         question, context, diagnostics=diagnostics
     )
 
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。"
+    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
     assert diagnostics["used"] is True
     assert diagnostics["extracted_tax_name"] == "चवरी कर"
     assert diagnostics["matched_evidence_phrase"] == "नया टैक्स लगाया गया था चवरी कर"
@@ -2774,7 +2774,7 @@ def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(m
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है。"
+    assert result["answer"] == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
     assert result["generation_trace"]["fallback_used"] is False
