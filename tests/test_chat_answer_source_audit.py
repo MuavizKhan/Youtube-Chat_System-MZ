@@ -357,6 +357,7 @@ def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_pa
         timeout_seconds=5.0,
     )
 
+    assert report["report_id"] == "chat_answer_source_audit_v1"
     assert report["cases_attempted"] == 3
     assert report["cases_succeeded"] == 3
     assert report["cases_failed"] == 0
@@ -366,6 +367,7 @@ def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_pa
         {"case_id": "AR08", "failed_checks": ["sound_stomach"]}
     ]
     saved_report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert saved_report["report_id"] == "chat_answer_source_audit_v1"
     assert saved_report["quality_passed"] is False
 
 
