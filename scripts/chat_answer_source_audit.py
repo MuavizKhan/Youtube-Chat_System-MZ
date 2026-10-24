@@ -485,8 +485,53 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     return checks
 
 
-def _answer_quality_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
+_ABSTENTION_PATTERN = re.compile(
+    r"couldn['’]?t find enough information|may not be covered|"
+    r"not covered by (?:this|the) video|not mentioned in (?:this|the) video|"
+    r"not enough information|unable to answer|cannot answer|can['’]?t answer|"
+    r"no information (?:is )?(?:available|provided)|not specified|"
+    r"वीडियो में.{0,45}नहीं|जानकारी.{0,25}नहीं|"
+    r"(?:नहीं|नही).{0,30}(?:बताया|उल्लेख|मिला|उपलब्ध|मौजूद)|"
+    r"इस वीडियो में.{0,35}(?:नहीं|उल्लेख)|"
+    r"(?:لا|لم).{0,40}(?:يذكر|تذكر|يتناول|تحتوي|توجد|يوجد|تتوفر|أستطيع|يمكن)|"
+    r"غير مذكور|غير موجود|لا توجد معلومات|لا تتوفر معلومات|",
+    re.IGNORECASE,
+)
+
+
+def _answer_language_matches(answer: str, language: str) -> bool:
+    """Use script proportions as a conservative language guard for live answers."""
+    text = _substantive_answer(answer)
+    latin = len(re.findall(r"[A-Za-z]", text))
+    devanagari = len(re.findall(r"[\u0900-\u097f]", text))
+    arabic = len(re.findall(r"[\u0600-\u06ff]", text))
+    if language == "en":
+        return latin >= 8 and latin > devanagari and latin > arabic
+    if language == "hi":
+        return devanagari >= 6 and devanagari > latin and devanagari > arabic
+    if language == "ar":
+        return arabic >= 12 and arabic > latin and arabic > devanagari
+    return False
+
+
+def _answer_quality_checks(
+    case_id: str | dict[str, Any],
+    answer: str,
+) -> list[dict[str, Any]]:
+    case = case_id if isinstance(case_id, dict) else {"id": case_id}
+    normalized_case_id = str(case.get("id", ""))
+    expected_behavior = case.get("expected_behavior", "answerable")
     substantive = _substantive_answer(answer)
+
+    if expected_behavior == "unanswerable":
+        return [
+            _quality_check(
+                "unanswerable_case_abstained",
+                bool(_ABSTENTION_PATTERN.search(substantive)),
+                "The unrelated/unanswerable question must receive an explicit abstention, not a guessed factual answer.",
+            )
+        ]
+
     checks = [
         _quality_check(
             "substantive_answer",
@@ -496,10 +541,41 @@ def _answer_quality_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
             "The answer must contain a substantive response rather than the fallback.",
         )
     ]
-    if case_id == "Q07":
+    if normalized_case_id == "Q07":
         checks.extend(_q07_answer_checks(answer))
-    elif case_id in {"AR03", "AR08"}:
-        checks.extend(_bodily_sound_checks(case_id, answer))
+    elif normalized_case_id in {"AR03", "AR08"}:
+        checks.extend(_bodily_sound_checks(normalized_case_id, answer))
+
+    for requirement in case.get("answer_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        name = str(requirement.get("name", "answer_requirement"))
+        pattern = requirement.get("pattern")
+        passed = isinstance(pattern, str) and bool(
+            re.search(pattern, substantive, flags=re.IGNORECASE)
+        )
+        checks.append(_quality_check(
+            f"answer_requirement_{name}",
+            passed,
+            (
+                f"The answer must satisfy the registered {name.replace('_', ' ')} requirement."
+                if passed
+                else f"The answer did not satisfy the registered {name.replace('_', ' ')} requirement."
+            ),
+        ))
+
+    answer_language = case.get("answer_language")
+    if isinstance(answer_language, str):
+        passed = _answer_language_matches(answer, answer_language)
+        checks.append(_quality_check(
+            "question_language",
+            passed,
+            (
+                f"The answer uses the expected {answer_language} script."
+                if passed
+                else f"The answer does not use the expected {answer_language} script."
+            ),
+        ))
     return checks
 
 
