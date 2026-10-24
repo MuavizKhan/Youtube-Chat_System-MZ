@@ -462,12 +462,13 @@ RAG_RERANK_ENABLED = _get_bool(
     False,
 )
 
-# Diagnostic experiment: make context-expanded neighbors available as clickable
-# source segments. Keep disabled by default until answer/source audits show that
-# the wider citation policy improves grounding without adding misleading links.
+# Citation selection follows the chunks that actually survived generation-context
+# budgeting. Phase 10.10's live answer/source audit showed that anchor-only links
+# omit a required context-expanded evidence chunk; the expanded policy now defaults
+# on. Set the flag to false only for controlled comparisons or rollback.
 RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS = _get_bool(
     "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS",
-    False,
+    True,
 )
 
 RAG_RERANK_MODEL = os.getenv(
