@@ -1870,19 +1870,20 @@ def _truncate_formatted_source(
             # captions. Reserve the affirmative assertion and its next two
             # captions together, so the named tax cannot be cut away while the
             # chunk ID still appears in the context-budget manifest.
-            for index, line in enumerate(captions):
-                caption_text = (
-                    line.split("] ", 1)[-1]
-                    if line.startswith("- [")
-                    else line
+            for index in range(len(captions)):
+                window = captions[index:index + 3]
+                window_text = " ".join(
+                    line.split("] ", 1)[-1] if line.startswith("- [") else line
+                    for line in window
                 )
                 if re.search(
                     r"नया\s+टैक्स\s+लगाया\s+गया\s+था",
-                    unicodedata.normalize("NFKC", caption_text),
+                    unicodedata.normalize("NFKC", window_text),
                 ):
-                    split_evidence_caption_indices.add(index)
+                    # The assertion and name may span up to three separate
+                    # caption snippets, so reserve the whole evidence window.
                     split_evidence_caption_indices.update(
-                        range(index + 1, min(len(captions), index + 3))
+                        range(index, min(len(captions), index + 3))
                     )
         if (
             financial_question
