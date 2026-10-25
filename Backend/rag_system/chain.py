@@ -4773,9 +4773,13 @@ def _retrieve_with_query_recovery_trace(
             final_results = []
 
         if not final_results:
+            # Keep recovery bounded: the standalone rewrite is the highest-value
+            # candidate, followed by at most one alternative. Reusing all planner
+            # suggestions multiplies semantic retrieval work without another
+            # model call and can trigger the relaxed pass for every variant.
             queries = [
                 plan.standalone_question,
-                *plan.search_queries,
+                *plan.search_queries[:1],
             ]
 
             seen_queries = set()
