@@ -3097,6 +3097,15 @@ def test_question_answer_language_mismatch_only_flags_clear_script_mismatches():
         "What is the Arabic term الصوت for sound?",
         "The answer is sound, with the Arabic term الصوت."
     ) is None
+    # Latin script alone must not let a Turkish answer pass as English.
+    assert chain._question_answer_language_mismatch(
+        "How many ways does the speaker promise to express himself in meetings?",
+        "Üç yöntem."
+    ) == ("en", "tr")
+    assert chain._question_answer_language_mismatch(
+        "How many ways does the speaker promise to express himself in meetings?",
+        "The speaker offers three ways."
+    ) is None
 
 
 @pytest.mark.unit
@@ -3156,6 +3165,47 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
     assert "sound" in result["answer"].lower()
     assert "perception" in result["answer"].lower()
     assert "perceive" in result["answer"].lower()
+
+
+@pytest.mark.unit
+def test_quota_exhaustion_during_repair_returns_localized_safe_fallback(monkeypatch):
+    question = "What does the video explain about the topic?"
+    context = "- [00:10–00:24] The source discusses a topic in some detail."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 10, 24, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        if len(calls) == 1:
+            return "Üç yöntem."
+        raise RuntimeError("Groq daily token quota is exhausted for the configured model.")
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "pOnl-Zndcls",
+    })
+
+    assert len(calls) == 2
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is False
+    assert result["generation_trace"]["repair_aborted_due_quota"] is True
+    assert result["generation_trace"]["question_language_repair_attempted"] is True
+    assert result["generation_trace"]["question_language_repair_passed"] is False
 
 
 @pytest.mark.unit
