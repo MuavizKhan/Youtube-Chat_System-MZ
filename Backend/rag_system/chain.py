@@ -4773,11 +4773,11 @@ def _retrieve_with_query_recovery_trace(
             final_results = []
 
         if not final_results:
-            # Keep recovery bounded: the standalone rewrite is the highest-value
-            # candidate, followed by at most one alternative. Reusing all planner
-            # suggestions multiplies semantic retrieval work without another
-            # model call and can trigger the relaxed pass for every variant.
-            queries = [
+            # Prefer the standalone rewrite. Try one alternative only if it is
+            # distinct; this bounds repeated retrieval work while preserving a
+            # second chance for cases where the planner's standalone wording is
+            # less effective than its best explicit search query.
+            query_candidates = [
                 plan.standalone_question,
                 *plan.search_queries[:1],
             ]
@@ -4785,7 +4785,7 @@ def _retrieve_with_query_recovery_trace(
             seen_queries = set()
             unique_queries = []
 
-            for query in queries:
+            for query in query_candidates:
                 normalized = query.strip()
 
                 if not normalized:
