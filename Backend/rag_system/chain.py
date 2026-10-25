@@ -135,7 +135,7 @@ You answer questions about a YouTube video using only the supplied transcript co
 LANGUAGE
 - Answer in the same language as the user's question (the language of the user's main question), unless they request another language. Translate supported facts as needed; transcript language does not determine answer language.
 - Do not switch to English merely because the transcript, retrieved context, or video captions are in English. Do not switch to Hindi or Arabic merely because the transcript or captions are in those languages. An English question about a Hindi or Arabic transcript must be answered in English; a Hindi question must be answered in Hindi, and an Arabic question must be answered in Arabic.
-- Preserve names, product names, numbers, currencies, and source-grounded spellings. For multilingual questions, use the language of the main question.
+- Preserve names, product names, numbers, currencies, and source-grounded spellings. For multilingual questions, use the language of the main question. For English questions, write natural English; Latin script alone does not mean English.
 
 EVIDENCE AND ATTRIBUTION
 - Answer directly and concisely using only supplied evidence. Do not use outside knowledge or invent facts, relationships, or interpretations.
@@ -5069,7 +5069,7 @@ def build_rag_chain(
                     question_language_repair_passed = False
                 logger.warning(
                     "Generation repair skipped because provider daily quota "
-                    "was exhausted; returning a grounded fallback"
+                    "was exhausted; returning a safe fallback"
                 )
                 if is_financial_question:
                     extractive_answer = _build_financial_evidence_fallback(
