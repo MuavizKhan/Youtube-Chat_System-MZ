@@ -3168,6 +3168,69 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "question, expected_answer, expect_financial",
+    [
+        (
+            "What does the video explain about the topic?",
+            chain.FALLBACK_ANSWER,
+            False,
+        ),
+        (
+            "यह वीडियो विषय के बारे में क्या बताता है?",
+            "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+            False,
+        ),
+        (
+            "How much debt did the company have?",
+            chain.FINANCIAL_VERIFICATION_FALLBACK,
+            True,
+        ),
+    ],
+)
+def test_initial_quota_exhaustion_returns_safe_fallback(
+    monkeypatch, question, expected_answer, expect_financial
+):
+    context = "- [00:10–00:24] The source discusses a topic in some detail."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 10, 24, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fail_generation_with_quota(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        raise RuntimeError(
+            "Groq daily token quota is exhausted for the configured model."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fail_generation_with_quota)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "pOnl-Zndcls",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 1
+    assert result["answer"] == expected_answer
+    assert trace["generated"] is False
+    assert trace["fallback_used"] is True
+    assert trace["repair_aborted_due_quota"] is True
+    assert trace["quality_repair_attempted"] is False
+    assert trace["financial_answer_suppressed"] is expect_financial
+
+
+@pytest.mark.unit
 def test_quota_exhaustion_during_repair_returns_localized_safe_fallback(monkeypatch):
     question = "What does the video explain about the topic?"
     context = "- [00:10–00:24] The source discusses a topic in some detail."
