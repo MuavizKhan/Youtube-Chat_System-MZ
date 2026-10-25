@@ -4487,3 +4487,66 @@ def test_financial_context_packer_reserves_split_report_claim_using_global_corro
     assert "221" in result["diagnostics"]["included_chunk_ids"]
     assert "finance report" in result["context"].casefold()
     assert "100 recovered" in result["context"].casefold()
+
+
+
+@pytest.mark.unit
+def test_query_recovery_caps_model_rewrites_to_one_alternative(monkeypatch):
+    attempts = []
+    recovered = [(doc(7, 70, 80, "recovered evidence"), 0.4)]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            attempts.append(kwargs["query"])
+            or ([] if len(attempts) == 1 else recovered)
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="causal",
+            standalone_question="reasons people are protesting",
+            search_queries=[
+                "reasons for protest",
+                "protest demands",
+                "why people are protesting",
+            ],
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "Why are they protesting?",
+        object(),
+    )
+
+    assert results == recovered
+    assert attempts == [
+        "Why are they protesting?",
+        "reasons people are protesting",
+    ]
+    assert trace["planner_used"] is True
+
+
+@pytest.mark.unit
+def test_generation_context_is_bounded_by_configured_character_budget(monkeypatch):
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1800)
+    groups = [
+        {
+            "documents": [doc(i, i * 10, i * 10 + 8, "Evidence text " * 120)],
+            "start": i * 10,
+            "end": i * 10 + 8,
+            "distance": 0.1 + i * 0.01,
+        }
+        for i in range(1, 10)
+    ]
+
+    packed = chain.build_generation_context(groups, question="What evidence is stated?")
+
+    assert len(packed["context"]) <= 1800
+    assert packed["diagnostics"]["final_chars"] <= 1800
+    assert packed["diagnostics"]["reduced"] is True
