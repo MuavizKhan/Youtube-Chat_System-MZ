@@ -5006,7 +5006,6 @@ def build_rag_chain(
                 },
             }
 
-        answer = generation_chain.invoke(inputs)
         question_text = inputs.get("question", "")
         is_financial_question = bool(re.search(
             r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
@@ -5023,6 +5022,65 @@ def build_rag_chain(
             if is_financial_question and inputs.get("source_groups")
             else inputs.get("context", "")
         )
+
+        try:
+            answer = generation_chain.invoke(inputs)
+        except RuntimeError as error:
+            # Initial generation can hit the same hard quota wall as a repair.
+            # Do not propagate this known provider limit as an unhandled HTTP 502.
+            # Financial questions fail closed, while other questions return a
+            # localized abstention rather than an unchecked model draft.
+            if "daily token quota is exhausted" not in str(error).casefold():
+                raise
+            quota_diagnostics: dict[str, Any] = {}
+            answer = _fallback_for_question_language(question_text)
+            financial_answer_suppressed = False
+            grounded_financial_fallback_used = False
+            if is_financial_question:
+                extractive_answer = _build_financial_evidence_fallback(
+                    question=question_text,
+                    context=financial_evidence_context,
+                    diagnostics=quota_diagnostics,
+                )
+                if extractive_answer is not None:
+                    answer = extractive_answer
+                    grounded_financial_fallback_used = True
+                else:
+                    answer = FINANCIAL_VERIFICATION_FALLBACK
+                    financial_answer_suppressed = True
+            logger.warning(
+                "Initial generation skipped because provider daily quota was exhausted; "
+                "returning a grounded fallback"
+            )
+            return {
+                "answer": answer,
+                "generation_trace": {
+                    "generated": False,
+                    "fallback_used": True,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "context_budget": context_budget,
+                    "quality_repair_attempted": False,
+                    "quality_repair_passed": False,
+                    "repair_aborted_due_quota": True,
+                    "question_language_repair_attempted": False,
+                    "question_language_repair_passed": None,
+                    "grounded_financial_fallback_used": grounded_financial_fallback_used,
+                    "financial_answer_suppressed": financial_answer_suppressed,
+                    "grounded_hindi_tax_fallback_used": False,
+                    "hindi_tax_fallback_diagnostics": {},
+                    "financial_evidence_context_chars": (
+                        len(financial_evidence_context) if is_financial_question else None
+                    ),
+                    "financial_fallback_context_source": (
+                        "full_retrieved_source_groups"
+                        if grounded_financial_fallback_used
+                        else None
+                    ),
+                    "financial_fallback_diagnostics": (
+                        quota_diagnostics if is_financial_question else None
+                    ),
+                },
+            }
         # Decide whether the model's bounded prompt needs a repair using the
         # same context it actually received. The extractive fallback below can
         # inspect all retrieved source groups independently of this prompt budget.
