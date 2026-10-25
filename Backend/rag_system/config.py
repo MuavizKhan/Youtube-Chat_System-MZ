@@ -547,9 +547,11 @@ GROQ_MODEL_ID = os.getenv(
     "openai/gpt-oss-20b",
 )
 
+# Conservative default for free-tier token budgets; callers can raise this
+# explicitly in .env when their model and quota support larger outputs.
 GROQ_MAX_TOKENS = _get_int(
     "GROQ_MAX_TOKENS",
-    1200,
+    800,
 )
 
 GROQ_TEMPERATURE = _get_float(
@@ -638,7 +640,7 @@ HF_PROVIDER = os.getenv(
 
 HF_MAX_TOKENS = _get_int(
     "HF_MAX_TOKENS",
-    1200,
+    800,
 )
 
 HF_TEMPERATURE = _get_float(
