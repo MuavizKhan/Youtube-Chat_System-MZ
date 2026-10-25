@@ -867,6 +867,37 @@ def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
 
 
 @pytest.mark.unit
+def test_groq_daily_token_quota_is_detected_without_classifying_burst_limits():
+    daily_quota_error = RuntimeError(
+        "Error code: 429 - {'message': 'Rate limit reached on tokens per day (TPD)', "
+        "'code': 'rate_limit_exceeded'}"
+    )
+    burst_limit_error = RuntimeError("429 rate limit reached; try again shortly")
+
+    assert chain._is_daily_token_quota_exhausted(daily_quota_error) is True
+    assert chain._is_daily_token_quota_exhausted(burst_limit_error) is False
+
+
+@pytest.mark.unit
+def test_groq_generation_does_not_retry_daily_token_quota(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+    fake, completions = client(
+        error=RuntimeError(
+            "Error code: 429 - {'error': {'message': "
+            "'Rate limit reached on tokens per day (TPD): Limit 200000', "
+            "'code': 'rate_limit_exceeded'}}"
+        )
+    )
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    with pytest.raises(RuntimeError, match="daily token quota is exhausted"):
+        chain.generate_with_groq(fake, prompt)
+
+    assert completions.call_count == 1
+
+
+@pytest.mark.unit
 def test_generate_with_llm_dispatches_to_groq(monkeypatch):
     sentinel = "groq answer"
     monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")

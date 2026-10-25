@@ -4089,6 +4089,21 @@ def _provider_error_status(error: Exception) -> int | None:
     return None
 
 
+def _is_daily_token_quota_exhausted(error: Exception) -> bool:
+    """Return True only for explicit provider daily-token quota rejections."""
+    error_text = str(error).casefold()
+    quota_marker = (
+        "tokens per day" in error_text
+        or re.search(r"\btpd\b", error_text) is not None
+    )
+    rate_limit_marker = (
+        "429" in error_text
+        or "rate_limit_exceeded" in error_text
+        or "rate limit" in error_text
+    )
+    return quota_marker and rate_limit_marker
+
+
 def _is_retryable_provider_error(error: Exception) -> bool:
     """Recognize transient upstream failures without retrying bad requests/auth."""
     status = _provider_error_status(error)
@@ -4300,6 +4315,21 @@ def generate_with_groq(
         except Exception as error:
 
             error_text = str(error).lower()
+
+            # A daily token quota is a hard provider ceiling, not a transient
+            # burst limit. Retrying the same request cannot help and needlessly
+            # repeats calls during an exhausted quota window.
+            if _is_daily_token_quota_exhausted(error):
+                logger.warning(
+                    "Groq daily token quota exhausted; skipping retries "
+                    "status_code=%s error_type=%s",
+                    _provider_error_status(error),
+                    type(error).__name__,
+                )
+                raise RuntimeError(
+                    "Groq daily token quota is exhausted for the configured model. "
+                    "Wait until quota is available or use an available model/provider."
+                ) from error
 
             if "401" in error_text or "unauthorized" in error_text:
                 raise RuntimeError(
