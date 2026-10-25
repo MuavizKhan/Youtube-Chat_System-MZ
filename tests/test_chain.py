@@ -4562,6 +4562,6 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
-        "application appends verified timestamps",
+        "application appends a separate",
     ):
         assert required_rule in prompt
