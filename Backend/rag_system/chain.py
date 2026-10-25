@@ -2870,7 +2870,36 @@ _SUPPORTED_SCRIPT_NAMES = {
     "en": "English",
     "hi": "Hindi",
     "ar": "Arabic",
+    "tr": "Turkish",
 }
+
+# The model occasionally answers an English question in another Latin-script
+# language. Script counting alone calls that English, so recognize a small,
+# high-signal set of Turkish words seen in unsupported-language drafts.
+_TURKISH_LANGUAGE_MARKERS = {
+    "üç", "yöntem", "yöntemler", "değil", "çünkü", "nasıl",
+    "için", "şekilde", "olarak", "söylüyor", "yapılır", "sonra",
+    "daha", "olan", "böyle", "gibi", "vardır", "yoktur",
+}
+
+
+def _looks_like_turkish_answer(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text or "").casefold()
+    words = set(re.findall(r"[^\W\d_]+", normalized, flags=re.UNICODE))
+    # Two marker words are strong enough to avoid treating one foreign proper
+    # name or quoted term as evidence that the whole answer is Turkish.
+    return len(words & _TURKISH_LANGUAGE_MARKERS) >= 2
+
+
+def _fallback_for_question_language(question: str) -> str:
+    """Return a conservative abstention in the question's supported language."""
+    language = _dominant_supported_script_language(question)
+    if language == "hi":
+        return "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।"
+    if language == "ar":
+        return "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال."
+    return FALLBACK_ANSWER
+
 
 
 def _supported_script_letter_counts(text: str) -> dict[str, int]:
@@ -2903,6 +2932,11 @@ def _question_answer_language_mismatch(
     expected = _dominant_supported_script_language(question)
     if expected is None:
         return None
+
+    # Detect known non-English Latin-script drafts before script-only checks;
+    # otherwise a short answer such as "Üç yöntem" looks like English letters.
+    if _looks_like_turkish_answer(_strip_unverified_timestamp_summary(answer or "")):
+        return expected, "tr"
 
     counts = _supported_script_letter_counts(_strip_unverified_timestamp_summary(answer or ""))
     total = sum(counts.values())
@@ -5008,6 +5042,7 @@ def build_rag_chain(
         financial_fallback_diagnostics: dict[str, Any] = {}
         grounded_hindi_tax_fallback_used = False
         hindi_tax_fallback_diagnostics: dict[str, Any] = {}
+        repair_aborted_due_quota = False
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -5019,17 +5054,48 @@ def build_rag_chain(
                 + "\n\n"
                 + repair_instruction
             )
-            answer = generation_chain.invoke(repaired_inputs)
-            repair_passed = _generation_repair_instruction(
-                question=question_text,
-                answer=answer,
-                context=inputs.get("context", ""),
-            ) is None
-            if question_language_repair_attempted:
-                question_language_repair_passed = (
-                    _question_answer_language_mismatch(question_text, answer) is None
+            try:
+                answer = generation_chain.invoke(repaired_inputs)
+            except RuntimeError as error:
+                # If quota disappears between the first draft and its repair, do
+                # not turn a recoverable answer path into HTTP 502 or return a
+                # draft that the quality gate already rejected. Fail closed with
+                # a localized abstention, or a source-bound financial fallback.
+                if "daily token quota is exhausted" not in str(error).casefold():
+                    raise
+                repair_aborted_due_quota = True
+                repair_passed = False
+                if question_language_repair_attempted:
+                    question_language_repair_passed = False
+                logger.warning(
+                    "Generation repair skipped because provider daily quota "
+                    "was exhausted; returning a grounded fallback"
                 )
-            if not repair_passed:
+                if is_financial_question:
+                    extractive_answer = _build_financial_evidence_fallback(
+                        question=question_text,
+                        context=financial_evidence_context,
+                        diagnostics=financial_fallback_diagnostics,
+                    )
+                    if extractive_answer is not None:
+                        answer = extractive_answer
+                        grounded_financial_fallback_used = True
+                    else:
+                        answer = FINANCIAL_VERIFICATION_FALLBACK
+                        financial_answer_suppressed = True
+                else:
+                    answer = _fallback_for_question_language(question_text)
+            else:
+                repair_passed = _generation_repair_instruction(
+                    question=question_text,
+                    answer=answer,
+                    context=inputs.get("context", ""),
+                ) is None
+                if question_language_repair_attempted:
+                    question_language_repair_passed = (
+                        _question_answer_language_mismatch(question_text, answer) is None
+                    )
+            if not repair_passed and not repair_aborted_due_quota:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
@@ -5137,6 +5203,7 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "repair_aborted_due_quota": repair_aborted_due_quota,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
