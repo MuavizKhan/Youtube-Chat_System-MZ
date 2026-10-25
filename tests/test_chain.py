@@ -2327,6 +2327,130 @@ def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch
     )
 
 
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I could not find relevant information on this in the video. "
+        "The video does not cover that topic.",
+        "मैं इस वीडियो में ऑस्ट्रेलिया की राजधानी के बारे में कोई जानकारी नहीं पा सका। "
+        "यह वीडियो इस विषय को कवर नहीं करता है।",
+        "لا توجد معلومات في هذا الفيديو عن عاصمة أستراليا. "
+        "لا يتناول الفيديو هذا الموضوع.",
+    ],
+)
+def test_is_abstention_answer_recognizes_localized_no_answer_text(answer):
+    assert chain._is_abstention_answer(answer) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The video does not mention Australia's capital, but it explains "
+        "the causes and timeline of the farmer protests.",
+        "यह वीडियो ऑस्ट्रेलिया की राजधानी नहीं बताता, लेकिन किसान आंदोलन "
+        "के कारणों और घटनाक्रम पर चर्चा करता है।",
+        "لا يذكر الفيديو عاصمة أستراليا، لكنه يشرح أسباب الاحتجاجات "
+        "وتطوراتها الزمنية.",
+    ],
+)
+def test_is_abstention_answer_preserves_substantive_caveated_answers(answer):
+    assert chain._is_abstention_answer(answer) is False
+
+
+@pytest.mark.regression
+def test_answer_question_suppresses_sources_and_timestamps_for_localized_abstention(monkeypatch):
+    source_documents = [
+        doc(0, 2.919, 78.32, "राजस्थान के किसान आंदोलन का इतिहास"),
+        doc(8, 442.319, 513.08, "किसानों की मांग और आंदोलन"),
+        doc(16, 884.04, 966.8, "आंदोलन के कारण"),
+    ]
+    translated_abstention = (
+        "मैं इस वीडियो में ऑस्ट्रेलिया की राजधानी के बारे में कोई जानकारी नहीं पा सका। "
+        "यह वीडियो इस विषय को कवर नहीं करता है।"
+    )
+    retrieval_result = {
+        "answer": translated_abstention,
+        "retrieved_results": [
+            (source_document, 1.3)
+            for source_document in source_documents
+        ],
+        "source_groups": [
+            {
+                "documents": source_documents,
+                "start": 2.919,
+                "end": 966.8,
+                "distance": 1.3,
+            }
+        ],
+        "retrieval_trace": {
+            "recovery_used": True,
+            "final_stage": "best_effort_overview",
+            "final_chunk_ids": [0, 8, 16],
+            "citation_chunk_ids": [0, 8, 16],
+        },
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+            "quality_repair_attempted": True,
+            "quality_repair_passed": True,
+        },
+    }
+
+    monkeypatch.setattr(
+        chain,
+        "extract_video_id",
+        lambda _reference: "INpnuL7qnzY",
+    )
+    monkeypatch.setattr(
+        chain,
+        "load_ready_index",
+        lambda _video_id: object(),
+    )
+    monkeypatch.setattr(
+        chain,
+        "create_llm_client",
+        lambda: object(),
+    )
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            return retrieval_result
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+
+    result = chain.answer_question(
+        video_reference="INpnuL7qnzY",
+        question="ऑस्ट्रेलिया की राजधानी क्या है?",
+    )
+
+    assert result["answer"] == translated_abstention
+    assert result["sources"] == []
+    assert result["retrieved_chunks"] == 0
+    assert result["source_segments"] == 0
+
+    retrieval_trace = result["observability"]["retrieval"]
+    assert retrieval_trace["final_stage"] == "best_effort_overview"
+    assert retrieval_trace["candidate_retrieved_chunks"] == 3
+    assert retrieval_trace["candidate_source_segments"] == 1
+    assert retrieval_trace["final_chunk_ids"] == [0, 8, 16]
+    assert retrieval_trace["source_segments"] == 0
+    assert retrieval_trace["source_timestamps"] == []
+    assert retrieval_trace["response_evidence_suppressed"] is True
+    assert (
+        retrieval_trace["response_evidence_suppression_reason"]
+        == "localized_abstention"
+    )
+
+
+
 @pytest.mark.unit
 def test_answer_question_propagates_index_lifecycle_error(
     monkeypatch,
