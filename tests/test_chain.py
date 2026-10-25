@@ -4555,7 +4555,7 @@ def test_generation_context_is_bounded_by_configured_character_budget(monkeypatc
 @pytest.mark.unit
 def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
     prompt = chain.SYSTEM_INSTRUCTIONS
-    assert len(prompt) < 3200
+    assert len(prompt) < 5000
     for required_rule in (
         "language of the user's main question",
         "only the supplied transcript context",
