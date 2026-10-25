@@ -4550,3 +4550,18 @@ def test_generation_context_is_bounded_by_configured_character_budget(monkeypatc
     assert len(packed["context"]) <= 1800
     assert packed["diagnostics"]["final_chars"] <= 1800
     assert packed["diagnostics"]["reduced"] is True
+
+
+@pytest.mark.unit
+def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
+    prompt = chain.SYSTEM_INSTRUCTIONS
+    assert len(prompt) < 3200
+    for required_rule in (
+        "language of the user's main question",
+        "only the supplied transcript context",
+        "interviewer's question, allegation",
+        "Keep investment, debt, debt-certificate",
+        "I couldn't find enough information about that in the video.",
+        "application appends verified timestamps",
+    ):
+        assert required_rule in prompt
