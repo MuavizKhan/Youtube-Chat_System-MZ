@@ -4009,6 +4009,72 @@ def sanitize_generated_answer(answer: str) -> str:
     return cleaned or FALLBACK_ANSWER
 
 
+
+
+def _is_abstention_answer(answer: str | None) -> bool:
+    """Recognize canonical English and clear Hindi/Arabic abstentions.
+
+    Some models translate the fallback into the question's language. Those
+    answers are still abstentions: source links and timestamps should not be
+    attached merely because best-effort overview retrieval supplied context.
+    Require paired absence/non-coverage cues for localized text to avoid
+    suppressing a substantive answer that only contains a caveat.
+    """
+    text = _strip_unverified_timestamp_summary(answer or "").strip()
+    if not text:
+        return True
+    if text == FALLBACK_ANSWER:
+        return True
+
+    normalized = unicodedata.normalize("NFKC", text)
+
+    english_missing_information = bool(re.search(
+        r"\b(?:could(?:n't| not)|can't|cannot|unable to)\s+"
+        r"(?:find|locate|verify|answer)\b.{0,100}\b(?:information|answer|"
+        r"details?|evidence|figures?)\b|\bno relevant information\b",
+        normalized,
+        re.IGNORECASE,
+    ))
+    english_not_covered = bool(re.search(
+        r"\b(?:may not be covered|not covered|isn't covered|is not covered|"
+        r"doesn't cover|does not cover|not discussed|isn't discussed|"
+        r"is not discussed|not mentioned|isn't mentioned|is not mentioned)\b",
+        normalized,
+        re.IGNORECASE,
+    ))
+    if english_missing_information and english_not_covered:
+        return True
+
+    hindi_missing_information = bool(re.search(
+        r"(?:कोई|पर्याप्त)?\s*जानकारी.{0,40}(?:नहीं|नही)"
+        r".{0,25}(?:पा|मिल|प्राप्त|सक|है|हूँ|हूं)?|"
+        r"(?:मुझे|मैं).{0,35}(?:जानकारी|उत्तर).{0,30}(?:नहीं|नही)",
+        normalized,
+    ))
+    hindi_not_covered = bool(re.search(
+        r"(?:वीडियो|विषय|सवाल|प्रश्न).{0,60}"
+        r"(?:कवर|चर्चा|उल्लेख|बताया|शामिल|मौजूद|उपलब्ध).{0,25}(?:नहीं|नही)|"
+        r"(?:कवर|चर्चा|उल्लेख|बताया|शामिल).{0,25}(?:नहीं|नही)",
+        normalized,
+    ))
+    if hindi_missing_information and hindi_not_covered:
+        return True
+
+    arabic_missing_information = bool(re.search(
+        r"(?:لا توجد|لا تتوفر|ليس هناك|لا أجد|لم أجد|لا أستطيع العثور على)"
+        r".{0,40}(?:معلومات|بيانات|تفاصيل)|"
+        r"(?:معلومات|بيانات|تفاصيل).{0,30}(?:غير متوفرة|غير موجودة|لا توجد|لا تتوفر)",
+        normalized,
+    ))
+    arabic_not_covered = bool(re.search(
+        r"(?:الفيديو|المقطع|الموضوع|هذا السؤال|السؤال).{0,55}"
+        r"(?:لا|لم|غير مذكور|غير موجود|غير متناول)|"
+        r"(?:لا|لم).{0,35}(?:يتناول|يذكر|يناقش|يغطي|يتحدث عن)",
+        normalized,
+    ))
+    return arabic_missing_information and arabic_not_covered
+
+
 def _provider_error_status(error: Exception) -> int | None:
     """Return an upstream HTTP status code when the SDK exposes one."""
     candidates = [error, getattr(error, "response", None)]
@@ -5530,24 +5596,31 @@ def answer_question(
         has_evidence=has_evidence,
     )
 
-    # A fallback means the generated answer did not identify usable evidence.
-    # Do not expose nearby/recovery candidates as clickable supporting sources.
-    fallback_answer_returned = final_answer.strip() == FALLBACK_ANSWER
-    evidence_suppressed = fallback_answer_returned and bool(
+    # An abstention means the answer did not establish usable evidence. Some
+    # models localize the standard fallback rather than returning its exact
+    # English wording; do not attach best-effort overview sources or timestamps
+    # to those translated abstentions either.
+    fallback_answer_returned = (
+        _strip_unverified_timestamp_summary(final_answer).strip() == FALLBACK_ANSWER
+    )
+    abstention_answer_returned = _is_abstention_answer(final_answer)
+    evidence_suppressed = abstention_answer_returned and bool(
         candidate_retrieved_chunks or candidate_source_segments
     )
 
     response_sources = sources
     response_retrieved_chunks = candidate_retrieved_chunks
     response_source_segments = len(sources)
-    if fallback_answer_returned:
+    if abstention_answer_returned:
         response_sources = []
         response_retrieved_chunks = 0
         response_source_segments = 0
+        # Remove timestamps appended from candidates that are now suppressed.
+        final_answer = _strip_unverified_timestamp_summary(final_answer).strip() or FALLBACK_ANSWER
 
     if evidence_suppressed:
         logger.info(
-            "Suppressing retrieval sources for fallback answer "
+            "Suppressing retrieval sources for abstention answer "
             "candidate_chunks=%s candidate_source_segments=%s",
             candidate_retrieved_chunks,
             candidate_source_segments,
@@ -5571,7 +5644,13 @@ def answer_question(
             ],
             "response_evidence_suppressed": evidence_suppressed,
             "response_evidence_suppression_reason": (
-                "fallback_answer" if evidence_suppressed else None
+                (
+                    "fallback_answer"
+                    if fallback_answer_returned
+                    else "localized_abstention"
+                )
+                if evidence_suppressed
+                else None
             ),
         }
     )
