@@ -10,12 +10,37 @@ from scripts.chat_answer_source_audit import (
     analyze_response,
     build_coverage_manifest,
     decode_json_response,
+    select_audit_cases,
     _answer_quality_checks,
 )
 
 
 def _case(case_id):
     return next(case for case in AUDIT_CASES if case["id"] == case_id)
+
+
+def test_select_audit_cases_preserves_requested_order_and_returns_expected_subset():
+    cases = select_audit_cases(
+        PHASE10_11_AUDIT_CASES,
+        ["EW01", "HI09", "AR08", "Q07", "EW05"],
+    )
+
+    assert [case["id"] for case in cases] == [
+        "EW01", "HI09", "AR08", "Q07", "EW05"
+    ]
+
+
+@pytest.mark.parametrize(
+    "requested_ids, message",
+    [
+        (["EW01", "EW01"], "Duplicate case IDs"),
+        (["EW01", "NOT_A_CASE"], "Unknown case IDs"),
+        ([], "At least one case ID"),
+    ],
+)
+def test_select_audit_cases_rejects_invalid_selection(requested_ids, message):
+    with pytest.raises(ValueError, match=message):
+        select_audit_cases(PHASE10_11_AUDIT_CASES, requested_ids)
 
 
 def test_decode_json_response_preserves_arabic_and_unicode_punctuation():
