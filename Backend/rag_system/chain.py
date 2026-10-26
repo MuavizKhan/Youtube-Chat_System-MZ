@@ -5305,11 +5305,11 @@ def build_rag_chain(
                             raw_parts.append(raw_text.strip())
                     if raw_parts:
                         tax_evidence_blocks.append(
-                            f"[SOURCE {raw_source_number + group_index}]\\n"
-                            "Original retrieved document text:\\n"
-                            + "\\n".join(raw_parts)
+                            f"[SOURCE {raw_source_number + group_index}]\n"
+                            "Original retrieved document text:\n"
+                            + "\n".join(raw_parts)
                         )
-            tax_evidence_context = "\\n\\n".join(tax_evidence_blocks).strip()
+            tax_evidence_context = "\n\n".join(tax_evidence_blocks).strip()
             if not tax_evidence_context:
                 tax_evidence_context = inputs.get("context", "")
             extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
