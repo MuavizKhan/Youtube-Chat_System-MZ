@@ -3249,7 +3249,7 @@ def _build_hindi_named_tax_evidence_fallback(
     )
     named_tax_assertion = re.compile(
         r"नया\s+टैक्स\s+लगाया\s+गया\s+था\s+"
-        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u097f])"
+        r"(?P<tax_name>[\u0900-\u097f]+\s+कर)(?![\u0900-\u0963\u0972-\u097f])"
     )
 
     match = None
