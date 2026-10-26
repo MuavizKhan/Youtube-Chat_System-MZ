@@ -2462,6 +2462,7 @@ def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch
         "यह वीडियो इस विषय को कवर नहीं करता है।",
         "لا توجد معلومات في هذا الفيديو عن عاصمة أستراليا. "
         "لا يتناول الفيديو هذا الموضوع.",
+        "لا توجد في الفيديو أي معلومات حول عاصمة أستراليا.",
     ],
 )
 def test_is_abstention_answer_recognizes_localized_no_answer_text(answer):
@@ -2485,16 +2486,30 @@ def test_is_abstention_answer_preserves_substantive_caveated_answers(answer):
 
 
 @pytest.mark.regression
-def test_answer_question_suppresses_sources_and_timestamps_for_localized_abstention(monkeypatch):
+@pytest.mark.parametrize(
+    ("translated_abstention", "question", "video_id"),
+    [
+        (
+            "मैं इस वीडियो में ऑस्ट्रेलिया की राजधानी के बारे में कोई जानकारी नहीं पा सका। "
+            "यह वीडियो इस विषय को कवर नहीं करता है।",
+            "ऑस्ट्रेलिया की राजधानी क्या है?",
+            "INpnuL7qnzY",
+        ),
+        (
+            "لا توجد في الفيديو أي معلومات حول عاصمة أستراليا.",
+            "ما عاصمة أستراليا؟",
+            "fAd2nKfrDB8",
+        ),
+    ],
+)
+def test_answer_question_suppresses_sources_and_timestamps_for_localized_abstention(
+    monkeypatch, translated_abstention, question, video_id
+):
     source_documents = [
         doc(0, 2.919, 78.32, "राजस्थान के किसान आंदोलन का इतिहास"),
         doc(8, 442.319, 513.08, "किसानों की मांग और आंदोलन"),
         doc(16, 884.04, 966.8, "आंदोलन के कारण"),
     ]
-    translated_abstention = (
-        "मैं इस वीडियो में ऑस्ट्रेलिया की राजधानी के बारे में कोई जानकारी नहीं पा सका। "
-        "यह वीडियो इस विषय को कवर नहीं करता है।"
-    )
     retrieval_result = {
         "answer": translated_abstention,
         "retrieved_results": [
@@ -2526,7 +2541,7 @@ def test_answer_question_suppresses_sources_and_timestamps_for_localized_abstent
     monkeypatch.setattr(
         chain,
         "extract_video_id",
-        lambda _reference: "INpnuL7qnzY",
+        lambda _reference: video_id,
     )
     monkeypatch.setattr(
         chain,
@@ -2550,8 +2565,8 @@ def test_answer_question_suppresses_sources_and_timestamps_for_localized_abstent
     )
 
     result = chain.answer_question(
-        video_reference="INpnuL7qnzY",
-        question="ऑस्ट्रेलिया की राजधानी क्या है?",
+        video_reference=video_id,
+        question=question,
     )
 
     assert result["answer"] == translated_abstention
