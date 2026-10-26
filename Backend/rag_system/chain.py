@@ -5286,9 +5286,30 @@ def build_rag_chain(
         )
         if current_answer_is_fallback or is_tax_naming_question:
             # Use all retrieved source groups rather than only the context
-            # packed into the bounded LLM prompt. The exact tax-name assertion
-            # can fall outside that budget even when its source was retrieved.
-            tax_evidence_context = build_context(inputs.get("source_groups", []))
+            # packed into the bounded LLM prompt. Rendered contexts can still
+            # omit/rewrite an assertion during caption reconstruction, so also
+            # include each group's original document text as its own source block.
+            # Separate blocks deliberately prevent the extractor from stitching
+            # an assertion together across unrelated source groups.
+            tax_source_groups = inputs.get("source_groups", [])
+            tax_evidence_blocks = []
+            if tax_source_groups:
+                tax_evidence_blocks.append(build_context(tax_source_groups))
+                raw_source_number = len(tax_source_groups)
+                for group_index, source_group in enumerate(tax_source_groups, start=1):
+                    raw_documents = source_group.get("documents", [])
+                    raw_parts = []
+                    for document in raw_documents:
+                        raw_text = getattr(document, "page_content", "")
+                        if isinstance(raw_text, str) and raw_text.strip():
+                            raw_parts.append(raw_text.strip())
+                    if raw_parts:
+                        tax_evidence_blocks.append(
+                            f"[SOURCE {raw_source_number + group_index}]\\n"
+                            "Original retrieved document text:\\n"
+                            + "\\n".join(raw_parts)
+                        )
+            tax_evidence_context = "\\n\\n".join(tax_evidence_blocks).strip()
             if not tax_evidence_context:
                 tax_evidence_context = inputs.get("context", "")
             extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
