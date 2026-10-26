@@ -1283,6 +1283,32 @@ def run_audit(
     )
     return report
 
+def select_audit_cases(
+    cases: tuple[dict[str, Any], ...],
+    requested_ids: list[str],
+) -> tuple[dict[str, Any], ...]:
+    """Select an ordered, unique subset of suite cases by exact case ID."""
+    available = {str(case.get("id")): case for case in cases}
+    duplicates = sorted({
+        case_id for case_id in requested_ids
+        if requested_ids.count(case_id) > 1
+    })
+    if duplicates:
+        raise ValueError(
+            "Duplicate case IDs are not allowed: " + ", ".join(duplicates)
+        )
+
+    unknown = [case_id for case_id in requested_ids if case_id not in available]
+    if unknown:
+        raise ValueError(
+            "Unknown case IDs for the selected suite: " + ", ".join(unknown)
+        )
+    if not requested_ids:
+        raise ValueError("At least one case ID must be selected.")
+
+    return tuple(available[case_id] for case_id in requested_ids)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run the live answer/source audit against a local FastAPI backend."
@@ -1305,6 +1331,15 @@ def main() -> int:
         help="JSON report path. A suite-specific safe default is used when omitted.",
     )
     parser.add_argument(
+        "--case-ids",
+        default=None,
+        help=(
+            "Optional comma-separated subset of case IDs from the selected suite, "
+            "for a small controlled model-comparison pilot. When used, --output "
+            "is required and the full-suite coverage gate is disabled."
+        ),
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=120.0,
@@ -1323,6 +1358,18 @@ def main() -> int:
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be greater than zero.")
+    if args.case_ids is not None and args.output is None:
+        parser.error("--output is required when --case-ids is used.")
+
+    requested_case_ids = None
+    if args.case_ids is not None:
+        requested_case_ids = [
+            item.strip().upper()
+            for item in args.case_ids.split(",")
+            if item.strip()
+        ]
+        if not requested_case_ids:
+            parser.error("--case-ids must contain at least one case ID.")
 
     if args.suite == "phase10_10":
         cases = AUDIT_CASES
@@ -1357,6 +1404,14 @@ def main() -> int:
             "rerank_max_length": 512,
         }
         require_full_pilot_coverage = True
+
+    if requested_case_ids is not None:
+        try:
+            cases = select_audit_cases(cases, requested_case_ids)
+        except ValueError as error:
+            parser.error(str(error))
+        report_id = f"{report_id}_subset"
+        require_full_pilot_coverage = False
 
     report = run_audit(
         base_url=args.base_url,

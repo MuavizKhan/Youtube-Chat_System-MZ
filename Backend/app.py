@@ -49,8 +49,14 @@ from Backend.rag_system.index_service import (
 from Backend.rag_system.config import (
     CORS_ALLOW_ORIGINS,
     GROQ_API_KEY,
+    GROQ_MAX_RETRIES,
+    GROQ_MAX_TOKENS,
     GROQ_MODEL_ID,
+    GROQ_REASONING_EFFORT,
+    HF_MAX_RETRIES,
+    HF_MAX_TOKENS,
     HF_MODEL_ID,
+    HF_REASONING_EFFORT,
     HF_TOKEN,
     LLM_PROVIDER,
     RATE_LIMIT,
@@ -88,6 +94,29 @@ logger = logging.getLogger(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Report the effective, non-secret model configuration at each startup.
+    # This makes environment overrides visible without exposing credentials.
+    if LLM_PROVIDER == "groq":
+        logger.info(
+            "LLM runtime configuration provider=%s model=%s "
+            "max_completion_tokens=%s max_retries=%s reasoning_effort=%s",
+            LLM_PROVIDER,
+            GROQ_MODEL_ID,
+            GROQ_MAX_TOKENS,
+            GROQ_MAX_RETRIES,
+            GROQ_REASONING_EFFORT,
+        )
+    else:
+        logger.info(
+            "LLM runtime configuration provider=%s model=%s "
+            "max_tokens=%s max_retries=%s reasoning_effort=%s",
+            LLM_PROVIDER,
+            HF_MODEL_ID,
+            HF_MAX_TOKENS,
+            HF_MAX_RETRIES,
+            HF_REASONING_EFFORT,
+        )
+
     recover_index_jobs()
     try:
         yield

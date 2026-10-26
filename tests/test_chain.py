@@ -867,6 +867,71 @@ def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "header_value, expected",
+    [
+        ("30", 30.0),
+        ("0", 0.0),
+        ("invalid", None),
+        ("-1", None),
+        ("nan", None),
+    ],
+)
+def test_provider_retry_after_seconds_reads_valid_numeric_header(
+    header_value, expected
+):
+    error = RuntimeError("429 rate limit")
+    error.response = SimpleNamespace(
+        status_code=429,
+        headers={"retry-after": header_value},
+    )
+
+    assert chain._provider_retry_after_seconds(error) == expected
+
+
+@pytest.mark.unit
+def test_groq_generation_respects_provider_retry_after(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 1)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+    sleeps = []
+    monkeypatch.setattr(chain.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="grounded answer")
+            )
+        ]
+    )
+
+    class RetryAfterError(RuntimeError):
+        def __init__(self):
+            super().__init__("429 rate limit reached")
+            self.response = SimpleNamespace(
+                status_code=429,
+                headers={"retry-after": "30"},
+            )
+
+    class SequenceCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise RetryAfterError()
+            return response
+
+    completions = SequenceCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    assert chain.generate_with_groq(fake, prompt) == "grounded answer"
+    assert completions.call_count == 2
+    assert sleeps == [30.0]
+
+
+@pytest.mark.unit
 def test_groq_daily_token_quota_is_detected_without_classifying_burst_limits():
     daily_quota_error = RuntimeError(
         "Error code: 429 - {'message': 'Rate limit reached on tokens per day (TPD)', "
@@ -2027,6 +2092,23 @@ def test_create_groq_client_uses_configured_key(monkeypatch):
     assert isinstance(client, FakeGroq)
     assert captured == {"api_key": "gsk_test_key"}
 
+
+@pytest.mark.unit
+def test_create_groq_client_can_disable_sdk_retries(monkeypatch):
+    captured = {}
+
+    class FakeGroq:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(chain, "GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setattr(chain, "Groq", FakeGroq)
+
+    client = chain.create_groq_client(max_retries=0)
+
+    assert isinstance(client, FakeGroq)
+    assert captured == {"api_key": "gsk_test_key", "max_retries": 0}
+
 @pytest.mark.unit
 def test_answer_question_uses_index_lifecycle(monkeypatch):
     vector_store = object()
@@ -2067,13 +2149,22 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     )
 
     configured_client = object()
+    groq_generation_client = object()
     captured_clients = {}
+    groq_factory_kwargs = {}
 
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
     monkeypatch.setattr(
         chain,
         "create_llm_client",
         lambda: configured_client,
     )
+
+    def fake_create_groq_client(**kwargs):
+        groq_factory_kwargs.update(kwargs)
+        return groq_generation_client
+
+    monkeypatch.setattr(chain, "create_groq_client", fake_create_groq_client)
 
     source_doc = doc(1, 10, 20, "evidence")
 
@@ -2131,7 +2222,8 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert calls["load_ready_index"] == 1
     assert calls["load_vector_store"] == 0
     assert captured_clients["query"] is configured_client
-    assert captured_clients["generation"] is configured_client
+    assert captured_clients["generation"] is groq_generation_client
+    assert groq_factory_kwargs == {"max_retries": 0}
 
 @pytest.mark.regression
 def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch):
@@ -3097,6 +3189,15 @@ def test_question_answer_language_mismatch_only_flags_clear_script_mismatches():
         "What is the Arabic term الصوت for sound?",
         "The answer is sound, with the Arabic term الصوت."
     ) is None
+    # Latin script alone must not let a Turkish answer pass as English.
+    assert chain._question_answer_language_mismatch(
+        "How many ways does the speaker promise to express himself in meetings?",
+        "Üç yöntem."
+    ) == ("en", "tr")
+    assert chain._question_answer_language_mismatch(
+        "How many ways does the speaker promise to express himself in meetings?",
+        "The speaker offers three ways."
+    ) is None
 
 
 @pytest.mark.unit
@@ -3156,6 +3257,110 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
     assert "sound" in result["answer"].lower()
     assert "perception" in result["answer"].lower()
     assert "perceive" in result["answer"].lower()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question, expected_answer, expect_financial",
+    [
+        (
+            "What does the video explain about the topic?",
+            chain.FALLBACK_ANSWER,
+            False,
+        ),
+        (
+            "यह वीडियो विषय के बारे में क्या बताता है?",
+            "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+            False,
+        ),
+        (
+            "How much debt did the company have?",
+            chain.FINANCIAL_VERIFICATION_FALLBACK,
+            True,
+        ),
+    ],
+)
+def test_initial_quota_exhaustion_returns_safe_fallback(
+    monkeypatch, question, expected_answer, expect_financial
+):
+    context = "- [00:10–00:24] The source discusses a topic in some detail."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 10, 24, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fail_generation_with_quota(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        raise RuntimeError(
+            "Groq daily token quota is exhausted for the configured model."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fail_generation_with_quota)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "pOnl-Zndcls",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 1
+    assert result["answer"] == expected_answer
+    assert trace["generated"] is False
+    assert trace["fallback_used"] is True
+    assert trace["repair_aborted_due_quota"] is True
+    assert trace["quality_repair_attempted"] is False
+    assert trace["financial_answer_suppressed"] is expect_financial
+
+
+@pytest.mark.unit
+def test_quota_exhaustion_during_repair_returns_localized_safe_fallback(monkeypatch):
+    question = "What does the video explain about the topic?"
+    context = "- [00:10–00:24] The source discusses a topic in some detail."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 10, 24, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        if len(calls) == 1:
+            return "Üç yöntem."
+        raise RuntimeError("Groq daily token quota is exhausted for the configured model.")
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "pOnl-Zndcls",
+    })
+
+    assert len(calls) == 2
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["generation_trace"]["quality_repair_attempted"] is True
+    assert result["generation_trace"]["quality_repair_passed"] is False
+    assert result["generation_trace"]["repair_aborted_due_quota"] is True
+    assert result["generation_trace"]["question_language_repair_attempted"] is True
+    assert result["generation_trace"]["question_language_repair_passed"] is False
 
 
 @pytest.mark.unit
@@ -4487,3 +4692,81 @@ def test_financial_context_packer_reserves_split_report_claim_using_global_corro
     assert "221" in result["diagnostics"]["included_chunk_ids"]
     assert "finance report" in result["context"].casefold()
     assert "100 recovered" in result["context"].casefold()
+
+
+
+@pytest.mark.unit
+def test_query_recovery_caps_model_rewrites_to_one_alternative(monkeypatch):
+    attempts = []
+    recovered = [(doc(7, 70, 80, "recovered evidence"), 0.4)]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            attempts.append(kwargs["query"])
+            or ([] if len(attempts) == 1 else recovered)
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="causal",
+            standalone_question="reasons people are protesting",
+            search_queries=[
+                "reasons for protest",
+                "protest demands",
+                "why people are protesting",
+            ],
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "Why are they protesting?",
+        object(),
+    )
+
+    assert results == recovered
+    assert attempts == [
+        "Why are they protesting?",
+        "reasons people are protesting",
+    ]
+    assert trace["planner_used"] is True
+
+
+@pytest.mark.unit
+def test_generation_context_is_bounded_by_configured_character_budget(monkeypatch):
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1800)
+    groups = [
+        {
+            "documents": [doc(i, i * 10, i * 10 + 8, "Evidence text " * 120)],
+            "start": i * 10,
+            "end": i * 10 + 8,
+            "distance": 0.1 + i * 0.01,
+        }
+        for i in range(1, 10)
+    ]
+
+    packed = chain.build_generation_context(groups, question="What evidence is stated?")
+
+    assert len(packed["context"]) <= 1800
+    assert packed["diagnostics"]["final_chars"] <= 1800
+    assert packed["diagnostics"]["reduced"] is True
+
+
+@pytest.mark.unit
+def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
+    prompt = chain.SYSTEM_INSTRUCTIONS
+    assert len(prompt) < 5000
+    for required_rule in (
+        "language of the user's main question",
+        "only the supplied transcript context",
+        "interviewer's question, allegation",
+        "Keep investment, debt, debt-certificate",
+        "I couldn't find enough information about that in the video.",
+        "application appends a separate",
+    ):
+        assert required_rule in prompt

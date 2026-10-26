@@ -130,196 +130,36 @@ FINANCIAL_VERIFICATION_FALLBACK = (
 # ============================================================
 
 SYSTEM_INSTRUCTIONS = """
-You are a YouTube video question-answering assistant.
+You answer questions about a YouTube video using only the supplied transcript context.
 
-Your task is to answer the user's question using ONLY the
-transcript evidence provided in the context.
+LANGUAGE
+- Answer in the same language as the user's question (the language of the user's main question), unless they request another language. Translate supported facts as needed; transcript language does not determine answer language.
+- Do not switch to English merely because the transcript, retrieved context, or video captions are in English. Do not switch to Hindi or Arabic merely because the transcript or captions are in those languages. An English question about a Hindi or Arabic transcript must be answered in English; a Hindi question must be answered in Hindi, and an Arabic question must be answered in Arabic.
+- Preserve names, product names, numbers, currencies, and source-grounded spellings. For multilingual questions, use the language of the main question. For English questions, write natural English; Latin script alone does not mean English.
 
-RESPONSE LANGUAGE — HIGH PRIORITY
----------------------------------
-- Answer in the same language as the user's question, unless the user explicitly
-  requests a different language.
-- The language of the user's question, not the transcript or caption language,
-  determines the answer language in BOTH directions.
-- Do not switch to English merely because the transcript, retrieved context, or
-  video captions are in English. Likewise, do not switch to Hindi or Arabic merely
-  because the transcript or captions are in Hindi or Arabic.
-- For example, an English question about a Hindi or Arabic transcript must be
-  answered in English; a Hindi question must be answered in Hindi, and an Arabic
-  question must be answered in Arabic. Translate supported facts as needed while
-  preserving names and source-grounded spellings. Never answer in the transcript
-  language unless the user explicitly asks for that language.
-- Keep names, product names, numbers, currencies, and source-grounded facts
-  accurate while expressing the answer naturally in the requested language.
-- When the transcript enumerates several distinct items that answer the question,
-  include each supported item in the answer in the question's language. Do not
-  reduce a supported list to only its first item. Omit an item only when the
-  supplied transcript does not support it or the available context is insufficient.
-- If the question deliberately uses multiple languages and no output language is
-  requested, answer in the language used for the main question.
-
-SPEAKER AND CLAIM ATTRIBUTION — HIGH PRIORITY
----------------------------------------------
-The supplied transcript context may contain multiple speakers. Source blocks are
-timestamped evidence segments, not speaker labels and not guaranteed single-speaker
-turns. Some blocks preserve the original caption snippets as separate lines.
-
-- A caption line preserves one caption snippet, not a verified speaker turn. Each
-  reconstructed caption line includes that snippet's original start and end times
-  in brackets. Use those times to follow chronology and nearby conversational
-  sequence, but the timestamps do not establish who spoke.
-- A single caption can contain words from more than one speaker, and a speaker may
-  continue across multiple captions. Caption boundaries and timestamps do not prove
-  that the speaker changed.
-- Use caption order and the exact wording to understand the conversation, but never
-  infer a speaker's identity from segmentation alone.
-
-For each material claim, determine from the actual transcript wording who is
-speaking and what level of certainty is supported:
-- When the user asks what a named person says, attribute a claim to that person
-  only when the context clearly shows that person stated or endorsed it. The name
-  in the question does not make that person the source of every nearby claim.
-- Keep another speaker's question, premise, allegation, or summary separate from
-  the guest's response. Do not turn an interviewer's paraphrase of an allegation
-  about an authority, investigation, legal matter, or financial issue into the
-  guest's statement or an established finding.
-- Attribute a named report or authority's claim only as strongly as the transcript
-  supports. A speaker saying an authority "found", "concluded", or "said" something
-  establishes that the speaker made that account; it does not by itself verify the
-  underlying finding.
-- Do not carry attribution from one sentence into a different claim with phrases
-  like "he also says" or "she mentions" unless the source for that claim is clear.
-- If speaker identity or claim status cannot be reliably resolved from the context,
-  describe it neutrally as something discussed, qualify it as an allegation or
-  account when supported, or omit it if it is not needed to answer the question.
-  Do not guess.
-
-Apply this claim-by-claim check before composing the answer, not as a caveat added
-afterward.
-
-GROUNDING RULES
----------------
-
-1. Use only information supported by the provided transcript.
-
-2. Do not use outside knowledge.
-
-3. Do not invent facts, names, events, explanations,
-   conclusions, or relationships.
-
-4. If the transcript context is empty, unrelated, or genuinely insufficient
-   to answer what was said, respond exactly with:
-
-   "I couldn't find enough information about that in the video. It may not be covered by this video."
-
-   Do not use this fallback solely because a named event, result, score,
-   winner, or announcement is absent from an otherwise relevant transcript
-   passage. For an absence question scoped to a supplied time range, say that
-   the event is not stated in that passage when no such statement appears.
-
-5. The transcript may contain speech-recognition errors,
-   incomplete sentences, repetitions, or informal wording.
-   Do not silently repair missing facts using outside knowledge.
-
-6. If a statement cannot be supported by the provided context,
-   leave it out.
-
-7. Distinguish between what the speaker said and your own
-   interpretation. Do not add interpretation unless the
-   transcript clearly supports it.
-
-8. Do not make claims about a person's importance, reputation,
-   intelligence, brilliance, influence, or impact unless the
-   transcript explicitly supports that claim.
+EVIDENCE AND ATTRIBUTION
+- Answer directly and concisely using only supplied evidence. Do not use outside knowledge or invent facts, relationships, or interpretations.
+- Source blocks are timestamped evidence segments containing caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove the speaker changed; the timestamps do not establish who spoke.
+- When asked what a named person says, attribute a claim only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into a statement made by the guest or an established finding. Distinguish the guest's statements from an interviewer's questions. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. A speaker's account of what an authority found is an account; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify it when supported, or omit it. Do not guess.
+- Caption errors, fragments, and repetitions may occur. Do not silently repair facts using outside knowledge.
 
 TEMPORAL AND MULTI-PART QUESTIONS
----------------------------------
+- Answer time-scoped questions only from the relevant supplied passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say that it is not stated in that passage.
+- For multi-part questions, include every supported part and every distinct supported item; omit unsupported parts. Prefer a concise paragraph; use bullets only for genuinely multi-part answers. Do not repeat information.
 
-For questions scoped to a time range:
-- Answer only about the supplied passage, not the whole video unless the
-  supplied context supports a whole-video conclusion.
-- For multi-part questions, answer each part that the passage supports.
-- If the user asks whether a winner was declared, a score announced, or a
-  decision stated, and none appears in the relevant supplied passage, explicitly
-  say it is not stated in that passage. Absence of a statement is answerable
-  when the relevant passage is present; it is not by itself a reason to abstain.
-- Describe what the speakers actually discuss before addressing what is absent.
+NUMBERS AND FINANCIAL CLAIMS
+- Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker. Retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
+- Keep investment, debt, debt-certificate, alleged transaction, and recovery figures separate. For broad money/debt questions, include each materially relevant monetary claim. If the transcript does not explain how figures relate, report both separately and state that the relationship is unclear.
+- Do not silently repair a number or call one a "misreading" unless the transcript explicitly supports that relationship. Never describe a recovery figure as a company debt total merely because both figures occur in the same interview. If captions garble a number or speakers disagree, do not silently correct it or reconcile the figures.
 
-ANSWER STYLE
-------------
+ABSTENTION
+- If context is empty, unrelated, or genuinely insufficient, answer exactly: "I couldn't find enough information about that in the video. It may not be covered by this video."
+- Do not use this fallback solely because a named event is absent from an otherwise relevant passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage.
 
-9. Answer the user's actual question directly.
-
-10. Prefer a concise paragraph for a simple factual question.
-
-11. Use bullet points only when the question naturally contains
-    multiple distinct points.
-
-12. Do not create empty bullet points.
-
-13. Do not repeat the same information.
-
-14. Use clear, natural language.
-
-15. Use Markdown only when it improves readability.
-
-SOURCE / TIMESTAMP RULES
-------------------------
-
-16. Do NOT output source labels such as:
-    [SOURCE 1]
-    [Source 1]
-    Source 1
-    [1]
-
-17. Do not invent timestamps or citations. The application appends a separate
-    "Relevant timestamps" line to every substantive answer from returned source
-    metadata. For answers containing several distinct monetary claims, the
-    application may select up to five source intervals that best match those
-    claims; ordinary answers retain a concise timestamp summary. Do not calculate
-    or invent timestamp values yourself.
-
-18. Do NOT mention the retrieval system, vector database,
-    embeddings, prompts, or internal implementation.
-
-19. The application also displays clickable video sources separately. Plain-text
-    timestamp ranges remain part of the answer and are generated from source
-    metadata, not from guesses.
-
-20. Never fabricate a source, timestamp, citation, or reference.
-
-21. For questions involving numbers, amounts, percentages, dates, or counts, preserve
-    distinct figures as stated in the transcript. Before answering, silently map
-    every figure to its nearby claim, subject, qualifier, and source/speaker. Explain
-    what each figure refers to and retain its attribution. Do not round, merge, or
-    treat different figures as interchangeable unless the transcript explicitly says
-    they describe the same measure. In financial passages, keep investment, debt,
-    debt-certificate, alleged transaction, and recovery figures separate. In
-    particular, never describe a recovery figure as a company debt total merely
-    because both figures occur in the same interview. For a broad question about
-    debt or money, include each materially relevant monetary claim present in the
-    supplied context, with a short attribution, instead of choosing one figure as
-    a single total. If a DRT debt figure and a debt-certificate figure are both
-    discussed but their relationship is not explicit, report both separately and
-    say the transcript does not clearly explain how they relate. If automatic
-    captions garble a number or speakers appear to disagree, do not silently repair
-    a number, reconcile the figures, or call one a "misreading" unless the transcript
-    explicitly supports that relationship.
-
-22. In multi-speaker passages, retain claim-by-claim attribution. Distinguish the
-    guest's statements from an interviewer's questions, premises, allegations, or
-    paraphrases. Never turn an allegation described by the interviewer into a
-    statement made by the guest or an established finding. A timestamp/source
-    identifies where a passage occurs, not who said it. When speaker identity or
-    claim status is unclear, use neutral wording or omit the claim rather than
-    guessing.
-
-FINAL RULE
-----------
-
-23. Return only the answer to the user's question.
+SOURCES AND OUTPUT
+- Return only the substantive answer. Do not output source labels, citations, references, or metadata, and do not invent timestamps. The application appends a separate "Relevant timestamps" line to substantive answers using verified source metadata; timestamp ranges remain part of the answer. Clickable video sources are displayed separately.
+- Do not mention retrieval, embeddings, prompts, vector databases, or internal implementation.
 """
-
 
 # ============================================================
 # 2. PROMPT
@@ -335,25 +175,12 @@ RAG_PROMPT = ChatPromptTemplate.from_messages(
         (
             "human",
             """
-VIDEO CONTEXT
-=============
-
+Transcript context:
 {context}
 
+Question: {question}
 
-USER QUESTION
-=============
-
-{question}
-
-
-Answer the user's question using only the transcript evidence
-provided above.
-
-Return only the substantive answer text.
-Do not include source labels, citations, references, timestamps, or metadata
-yourself; the application appends verified source timestamp ranges after
-generation.
+Answer only from the context, in the question's language. Be concise but include all supported parts and preserve claim attribution and distinct figures. If the context is genuinely insufficient, use the specified fallback. Return answer text only; the application adds verified sources and timestamps.
 """,
         ),
     ]
@@ -3043,7 +2870,36 @@ _SUPPORTED_SCRIPT_NAMES = {
     "en": "English",
     "hi": "Hindi",
     "ar": "Arabic",
+    "tr": "Turkish",
 }
+
+# The model occasionally answers an English question in another Latin-script
+# language. Script counting alone calls that English, so recognize a small,
+# high-signal set of Turkish words seen in unsupported-language drafts.
+_TURKISH_LANGUAGE_MARKERS = {
+    "üç", "yöntem", "yöntemler", "değil", "çünkü", "nasıl",
+    "için", "şekilde", "olarak", "söylüyor", "yapılır", "sonra",
+    "daha", "olan", "böyle", "gibi", "vardır", "yoktur",
+}
+
+
+def _looks_like_turkish_answer(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text or "").casefold()
+    words = set(re.findall(r"[^\W\d_]+", normalized, flags=re.UNICODE))
+    # Two marker words are strong enough to avoid treating one foreign proper
+    # name or quoted term as evidence that the whole answer is Turkish.
+    return len(words & _TURKISH_LANGUAGE_MARKERS) >= 2
+
+
+def _fallback_for_question_language(question: str) -> str:
+    """Return a conservative abstention in the question's supported language."""
+    language = _dominant_supported_script_language(question)
+    if language == "hi":
+        return "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।"
+    if language == "ar":
+        return "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال."
+    return FALLBACK_ANSWER
+
 
 
 def _supported_script_letter_counts(text: str) -> dict[str, int]:
@@ -3076,6 +2932,11 @@ def _question_answer_language_mismatch(
     expected = _dominant_supported_script_language(question)
     if expected is None:
         return None
+
+    # Detect known non-English Latin-script drafts before script-only checks;
+    # otherwise a short answer such as "Üç yöntem" looks like English letters.
+    if _looks_like_turkish_answer(_strip_unverified_timestamp_summary(answer or "")):
+        return expected, "tr"
 
     counts = _supported_script_letter_counts(_strip_unverified_timestamp_summary(answer or ""))
     total = sum(counts.values())
@@ -3798,8 +3659,14 @@ def create_huggingface_client() -> InferenceClient:
     )
 
 
-def create_groq_client() -> Groq:
-    """Create the direct Groq generation client."""
+def create_groq_client(*, max_retries: int | None = None) -> Groq:
+    """Create a Groq client, optionally overriding SDK-level retries.
+
+    Generation supplies max_retries=0 because generate_with_groq owns its
+    bounded retry policy. Keeping SDK retries disabled on that client avoids
+    multiplying SDK retries by the application's retry loop. Other callers
+    retain the SDK default unless they explicitly override it.
+    """
 
     if not GROQ_API_KEY:
 
@@ -3808,10 +3675,11 @@ def create_groq_client() -> Groq:
             "Set GROQ_API_KEY in the project root .env file."
         )
 
+    client_options: dict[str, Any] = {"api_key": GROQ_API_KEY}
+    if max_retries is not None:
+        client_options["max_retries"] = max_retries
 
-    return Groq(
-        api_key=GROQ_API_KEY,
-    )
+    return Groq(**client_options)
 
 
 def create_llm_client() -> InferenceClient | Groq:
@@ -4089,6 +3957,31 @@ def _provider_error_status(error: Exception) -> int | None:
     return None
 
 
+def _provider_retry_after_seconds(error: Exception) -> float | None:
+    """Read a numeric Retry-After header when the provider exposes one."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        headers = getattr(error, "headers", None)
+    if headers is None:
+        return None
+
+    try:
+        raw_value = headers.get("retry-after")
+    except (AttributeError, TypeError):
+        return None
+    if raw_value is None:
+        return None
+
+    try:
+        seconds = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
 def _is_daily_token_quota_exhausted(error: Exception) -> bool:
     """Return True only for explicit provider daily-token quota rejections."""
     error_text = str(error).casefold()
@@ -4345,15 +4238,24 @@ def generate_with_groq(
 
             if _is_retryable_provider_error(error):
                 if attempt < GROQ_MAX_RETRIES:
+                    configured_delay = GROQ_RETRY_DELAY_SECONDS * (attempt + 1)
+                    retry_after = _provider_retry_after_seconds(error)
+                    retry_delay = max(
+                        configured_delay,
+                        retry_after if retry_after is not None else 0.0,
+                    )
                     logger.warning(
                         "Transient Groq generation failure; retrying "
-                        "attempt=%s max_attempts=%s status_code=%s error_type=%s",
+                        "attempt=%s max_attempts=%s status_code=%s error_type=%s "
+                        "retry_after_seconds=%s retry_delay_seconds=%.2f",
                         attempt + 1,
                         GROQ_MAX_RETRIES + 1,
                         _provider_error_status(error),
                         type(error).__name__,
+                        retry_after,
+                        retry_delay,
                     )
-                    time.sleep(GROQ_RETRY_DELAY_SECONDS * (attempt + 1))
+                    time.sleep(retry_delay)
                     continue
 
                 if "429" in error_text or "rate limit" in error_text or "too many requests" in error_text:
@@ -4773,15 +4675,19 @@ def _retrieve_with_query_recovery_trace(
             final_results = []
 
         if not final_results:
-            queries = [
+            # Prefer the standalone rewrite. Try one alternative only if it is
+            # distinct; this bounds repeated retrieval work while preserving a
+            # second chance for cases where the planner's standalone wording is
+            # less effective than its best explicit search query.
+            query_candidates = [
                 plan.standalone_question,
-                *plan.search_queries,
+                *plan.search_queries[:1],
             ]
 
             seen_queries = set()
             unique_queries = []
 
-            for query in queries:
+            for query in query_candidates:
                 normalized = query.strip()
 
                 if not normalized:
@@ -5141,7 +5047,6 @@ def build_rag_chain(
                 },
             }
 
-        answer = generation_chain.invoke(inputs)
         question_text = inputs.get("question", "")
         is_financial_question = bool(re.search(
             r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
@@ -5158,6 +5063,65 @@ def build_rag_chain(
             if is_financial_question and inputs.get("source_groups")
             else inputs.get("context", "")
         )
+
+        try:
+            answer = generation_chain.invoke(inputs)
+        except RuntimeError as error:
+            # Initial generation can hit the same hard quota wall as a repair.
+            # Do not propagate this known provider limit as an unhandled HTTP 502.
+            # Financial questions fail closed, while other questions return a
+            # localized abstention rather than an unchecked model draft.
+            if "daily token quota is exhausted" not in str(error).casefold():
+                raise
+            quota_diagnostics: dict[str, Any] = {}
+            answer = _fallback_for_question_language(question_text)
+            financial_answer_suppressed = False
+            grounded_financial_fallback_used = False
+            if is_financial_question:
+                extractive_answer = _build_financial_evidence_fallback(
+                    question=question_text,
+                    context=financial_evidence_context,
+                    diagnostics=quota_diagnostics,
+                )
+                if extractive_answer is not None:
+                    answer = extractive_answer
+                    grounded_financial_fallback_used = True
+                else:
+                    answer = FINANCIAL_VERIFICATION_FALLBACK
+                    financial_answer_suppressed = True
+            logger.warning(
+                "Initial generation skipped because provider daily quota was exhausted; "
+                "returning a grounded fallback"
+            )
+            return {
+                "answer": answer,
+                "generation_trace": {
+                    "generated": False,
+                    "fallback_used": True,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "context_budget": context_budget,
+                    "quality_repair_attempted": False,
+                    "quality_repair_passed": False,
+                    "repair_aborted_due_quota": True,
+                    "question_language_repair_attempted": False,
+                    "question_language_repair_passed": None,
+                    "grounded_financial_fallback_used": grounded_financial_fallback_used,
+                    "financial_answer_suppressed": financial_answer_suppressed,
+                    "grounded_hindi_tax_fallback_used": False,
+                    "hindi_tax_fallback_diagnostics": {},
+                    "financial_evidence_context_chars": (
+                        len(financial_evidence_context) if is_financial_question else None
+                    ),
+                    "financial_fallback_context_source": (
+                        "full_retrieved_source_groups"
+                        if grounded_financial_fallback_used
+                        else None
+                    ),
+                    "financial_fallback_diagnostics": (
+                        quota_diagnostics if is_financial_question else None
+                    ),
+                },
+            }
         # Decide whether the model's bounded prompt needs a repair using the
         # same context it actually received. The extractive fallback below can
         # inspect all retrieved source groups independently of this prompt budget.
@@ -5177,6 +5141,7 @@ def build_rag_chain(
         financial_fallback_diagnostics: dict[str, Any] = {}
         grounded_hindi_tax_fallback_used = False
         hindi_tax_fallback_diagnostics: dict[str, Any] = {}
+        repair_aborted_due_quota = False
         if repair_instruction:
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
@@ -5188,17 +5153,48 @@ def build_rag_chain(
                 + "\n\n"
                 + repair_instruction
             )
-            answer = generation_chain.invoke(repaired_inputs)
-            repair_passed = _generation_repair_instruction(
-                question=question_text,
-                answer=answer,
-                context=inputs.get("context", ""),
-            ) is None
-            if question_language_repair_attempted:
-                question_language_repair_passed = (
-                    _question_answer_language_mismatch(question_text, answer) is None
+            try:
+                answer = generation_chain.invoke(repaired_inputs)
+            except RuntimeError as error:
+                # If quota disappears between the first draft and its repair, do
+                # not turn a recoverable answer path into HTTP 502 or return a
+                # draft that the quality gate already rejected. Fail closed with
+                # a localized abstention, or a source-bound financial fallback.
+                if "daily token quota is exhausted" not in str(error).casefold():
+                    raise
+                repair_aborted_due_quota = True
+                repair_passed = False
+                if question_language_repair_attempted:
+                    question_language_repair_passed = False
+                logger.warning(
+                    "Generation repair skipped because provider daily quota "
+                    "was exhausted; returning a safe fallback"
                 )
-            if not repair_passed:
+                if is_financial_question:
+                    extractive_answer = _build_financial_evidence_fallback(
+                        question=question_text,
+                        context=financial_evidence_context,
+                        diagnostics=financial_fallback_diagnostics,
+                    )
+                    if extractive_answer is not None:
+                        answer = extractive_answer
+                        grounded_financial_fallback_used = True
+                    else:
+                        answer = FINANCIAL_VERIFICATION_FALLBACK
+                        financial_answer_suppressed = True
+                else:
+                    answer = _fallback_for_question_language(question_text)
+            else:
+                repair_passed = _generation_repair_instruction(
+                    question=question_text,
+                    answer=answer,
+                    context=inputs.get("context", ""),
+                ) is None
+                if question_language_repair_attempted:
+                    question_language_repair_passed = (
+                        _question_answer_language_mismatch(question_text, answer) is None
+                    )
+            if not repair_passed and not repair_aborted_due_quota:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
@@ -5306,6 +5302,7 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "repair_aborted_due_quota": repair_aborted_due_quota,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
@@ -5494,12 +5491,20 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Create one configured LLM client for both query understanding
-    # and final generation. The provider is selected by LLM_PROVIDER.
+    # Keep the query-understanding client separate from generation:
+    # query planning retains SDK retry defaults, while generation disables
+    # SDK retries and uses the bounded, Retry-After-aware app retry policy.
     # --------------------------------------------------------
 
     llm_client = create_llm_client()
-    generation_client = llm_client
+    # Query planning retains the SDK's default retry behavior. The generation
+    # client disables SDK retries because generate_with_groq implements the
+    # bounded retry policy and must fail immediately on daily TPD exhaustion.
+    generation_client = (
+        create_groq_client(max_retries=0)
+        if LLM_PROVIDER == "groq"
+        else llm_client
+    )
 
 
     # --------------------------------------------------------
