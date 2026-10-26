@@ -867,6 +867,71 @@ def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "header_value, expected",
+    [
+        ("30", 30.0),
+        ("0", 0.0),
+        ("invalid", None),
+        ("-1", None),
+        ("nan", None),
+    ],
+)
+def test_provider_retry_after_seconds_reads_valid_numeric_header(
+    header_value, expected
+):
+    error = RuntimeError("429 rate limit")
+    error.response = SimpleNamespace(
+        status_code=429,
+        headers={"retry-after": header_value},
+    )
+
+    assert chain._provider_retry_after_seconds(error) == expected
+
+
+@pytest.mark.unit
+def test_groq_generation_respects_provider_retry_after(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 1)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+    sleeps = []
+    monkeypatch.setattr(chain.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="grounded answer")
+            )
+        ]
+    )
+
+    class RetryAfterError(RuntimeError):
+        def __init__(self):
+            super().__init__("429 rate limit reached")
+            self.response = SimpleNamespace(
+                status_code=429,
+                headers={"retry-after": "30"},
+            )
+
+    class SequenceCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            if self.call_count == 1:
+                raise RetryAfterError()
+            return response
+
+    completions = SequenceCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    assert chain.generate_with_groq(fake, prompt) == "grounded answer"
+    assert completions.call_count == 2
+    assert sleeps == [30.0]
+
+
+@pytest.mark.unit
 def test_groq_daily_token_quota_is_detected_without_classifying_burst_limits():
     daily_quota_error = RuntimeError(
         "Error code: 429 - {'message': 'Rate limit reached on tokens per day (TPD)', "
@@ -2027,6 +2092,23 @@ def test_create_groq_client_uses_configured_key(monkeypatch):
     assert isinstance(client, FakeGroq)
     assert captured == {"api_key": "gsk_test_key"}
 
+
+@pytest.mark.unit
+def test_create_groq_client_can_disable_sdk_retries(monkeypatch):
+    captured = {}
+
+    class FakeGroq:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(chain, "GROQ_API_KEY", "gsk_test_key")
+    monkeypatch.setattr(chain, "Groq", FakeGroq)
+
+    client = chain.create_groq_client(max_retries=0)
+
+    assert isinstance(client, FakeGroq)
+    assert captured == {"api_key": "gsk_test_key", "max_retries": 0}
+
 @pytest.mark.unit
 def test_answer_question_uses_index_lifecycle(monkeypatch):
     vector_store = object()
@@ -2067,13 +2149,22 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     )
 
     configured_client = object()
+    groq_generation_client = object()
     captured_clients = {}
+    groq_factory_kwargs = {}
 
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
     monkeypatch.setattr(
         chain,
         "create_llm_client",
         lambda: configured_client,
     )
+
+    def fake_create_groq_client(**kwargs):
+        groq_factory_kwargs.update(kwargs)
+        return groq_generation_client
+
+    monkeypatch.setattr(chain, "create_groq_client", fake_create_groq_client)
 
     source_doc = doc(1, 10, 20, "evidence")
 
@@ -2131,7 +2222,8 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert calls["load_ready_index"] == 1
     assert calls["load_vector_store"] == 0
     assert captured_clients["query"] is configured_client
-    assert captured_clients["generation"] is configured_client
+    assert captured_clients["generation"] is groq_generation_client
+    assert groq_factory_kwargs == {"max_retries": 0}
 
 @pytest.mark.regression
 def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch):
