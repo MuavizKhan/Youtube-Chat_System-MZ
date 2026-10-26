@@ -5491,8 +5491,9 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Create one configured LLM client for both query understanding
-    # and final generation. The provider is selected by LLM_PROVIDER.
+    # Keep the query-understanding client separate from generation:
+    # query planning retains SDK retry defaults, while generation disables
+    # SDK retries and uses the bounded, Retry-After-aware app retry policy.
     # --------------------------------------------------------
 
     llm_client = create_llm_client()
