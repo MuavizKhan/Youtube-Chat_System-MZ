@@ -5073,11 +5073,14 @@ def build_rag_chain(
         try:
             answer = generation_chain.invoke(inputs)
         except RuntimeError as error:
-            # Initial generation can hit the same hard quota wall as a repair.
-            # Do not propagate this known provider limit as an unhandled HTTP 502.
-            # Financial questions fail closed, while other questions return a
-            # localized abstention rather than an unchecked model draft.
-            if "daily token quota is exhausted" not in str(error).casefold():
+            # Provider failures can exhaust the daily quota or produce no visible
+            # answer after retries. For those known failure modes, fail closed:
+            # use source-extractive financial evidence when available, otherwise
+            # return a localized abstention instead of an unchecked HTTP 502.
+            error_text = str(error).casefold()
+            daily_quota_exhausted = "daily token quota is exhausted" in error_text
+            empty_provider_answer = "returned an empty answer after" in error_text
+            if not (daily_quota_exhausted or empty_provider_answer):
                 raise
             quota_diagnostics: dict[str, Any] = {}
             answer = _fallback_for_question_language(question_text)
@@ -5095,9 +5098,14 @@ def build_rag_chain(
                 else:
                     answer = FINANCIAL_VERIFICATION_FALLBACK
                     financial_answer_suppressed = True
+            failure_reason = (
+                "provider daily token quota exhaustion"
+                if daily_quota_exhausted
+                else "empty provider answer after retries"
+            )
             logger.warning(
-                "Initial generation skipped because provider daily quota was exhausted; "
-                "returning a grounded fallback"
+                "Initial generation unavailable due to %s; returning a grounded fallback",
+                failure_reason,
             )
             return {
                 "answer": answer,
@@ -5108,7 +5116,7 @@ def build_rag_chain(
                     "context_budget": context_budget,
                     "quality_repair_attempted": False,
                     "quality_repair_passed": False,
-                    "repair_aborted_due_quota": True,
+                    "repair_aborted_due_quota": daily_quota_exhausted,
                     "question_language_repair_attempted": False,
                     "question_language_repair_passed": None,
                     "grounded_financial_fallback_used": grounded_financial_fallback_used,
@@ -5277,9 +5285,15 @@ def build_rag_chain(
             )
         )
         if current_answer_is_fallback or is_tax_naming_question:
+            # Use all retrieved source groups rather than only the context
+            # packed into the bounded LLM prompt. The exact tax-name assertion
+            # can fall outside that budget even when its source was retrieved.
+            tax_evidence_context = build_context(inputs.get("source_groups", []))
+            if not tax_evidence_context:
+                tax_evidence_context = inputs.get("context", "")
             extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
                 question=question_text,
-                context=inputs.get("context", ""),
+                context=tax_evidence_context,
                 diagnostics=hindi_tax_fallback_diagnostics,
             )
             if extractive_hindi_tax_answer is not None:
