@@ -781,6 +781,37 @@ def test_unanswerable_phase10_11_case_requires_abstention_and_no_sources():
     assert audit["citation_provenance"]["passed"] is True
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        (
+            "لا أجد معلومات كافية حول ذلك في الفيديو. "
+            "قد لا يكون موضوع العاصمة أستراليا مغطى في هذا الفيديو."
+        ),
+        "لا أجد معلومات كافية حول ذلك في الفيديو.",
+        "قد لا يكون موضوع العاصمة أستراليا مغطى في هذا الفيديو.",
+    ],
+)
+def test_ar10_recognizes_arabic_abstention_variants(answer):
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "AR10")
+
+    checks = _answer_quality_checks(case, answer)
+
+    assert len(checks) == 1
+    assert checks[0]["name"] == "unanswerable_case_abstained"
+    assert checks[0]["passed"] is True, checks
+
+
+def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "AR10")
+
+    checks = _answer_quality_checks(case, "عاصمة أستراليا هي كانبيرا.")
+
+    assert len(checks) == 1
+    assert checks[0]["name"] == "unanswerable_case_abstained"
+    assert checks[0]["passed"] is False
+
+
 def test_phase10_11_registered_answer_requirements_and_language_are_checked():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
     checks = _answer_quality_checks(case, "नया टैक्स चवरी कर के नाम से था।")
