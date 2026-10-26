@@ -2870,6 +2870,59 @@ def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_c
 
 
 @pytest.mark.unit
+def test_named_tax_fallback_uses_full_source_groups_when_prompt_context_omits_assertion(monkeypatch):
+    source_text = "यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।"
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(51, 0, 30, source_text), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [51],
+                "citation_chunk_ids": [51],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "build_generation_context",
+        lambda groups, question=None: {
+            "context": "The bounded prompt does not retain the exact tax-name assertion.",
+            "diagnostics": {
+                "budget_chars": 8000,
+                "final_chars": 62,
+                "included_chunk_ids": ["51"],
+                "original_chars": 100,
+                "groups_available": 1,
+                "groups_included": 1,
+                "reduced": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **kwargs: (
+            "The speaker says a new tax was imposed called the “चारी” "
+            "(or “चरी कर”)."
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "Which tax is identified as new, and what name does the speaker give for it?",
+        "video_id": "INpnuL7qnzY",
+    })
+
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
+    assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["extracted_tax_name"] == "चवरी कर"
+
+
+@pytest.mark.unit
 def test_generation_context_query_terms_include_native_hindi_evidence_tokens():
     terms = chain._generation_context_query_terms(
         "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
@@ -4006,6 +4059,56 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     assert "4,999 crore rupees" in answer
     assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
     assert "recovery figure of 14,100 crore rupees" in answer
+    assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
+def test_rag_chain_uses_grounded_financial_fallback_when_initial_provider_answer_is_empty(monkeypatch):
+    context = (
+        "I invested 3,000 crore rupees into Kingfisher Airlines. "
+        "The DRT judgment debt was 4,999 crore rupees plus interest. "
+        "The debt certificate gives a figure of 6203. "
+        "The Ministry of Finance report said 14,100 crore rupees had been recovered."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(101, 0, 90, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [101],
+                "citation_chunk_ids": [101],
+            },
+        ),
+    )
+
+    def fail_with_empty_provider_answer(**kwargs):
+        raise RuntimeError(
+            "The Groq model returned an empty answer after 3 attempts. "
+            "Diagnostics: {'finish_reason': 'length', 'content_length': 0, "
+            "'reasoning_length': 0}"
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fail_with_empty_provider_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What amounts were mentioned about Kingfisher debt and money involved?",
+        "video_id": "Gfr50f6ZBvo",
+    })
+
+    answer = result["answer"]
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["fallback_used"] is True
+    assert trace["grounded_financial_fallback_used"] is True
+    assert trace["repair_aborted_due_quota"] is False
+    assert "3,000 crore" in answer
+    assert "4,999 crore" in answer
+    assert "6,203" in answer
+    assert "14,100 crore" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
 
 
