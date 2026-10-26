@@ -3659,8 +3659,14 @@ def create_huggingface_client() -> InferenceClient:
     )
 
 
-def create_groq_client() -> Groq:
-    """Create the direct Groq generation client."""
+def create_groq_client(*, max_retries: int | None = None) -> Groq:
+    """Create a Groq client, optionally overriding SDK-level retries.
+
+    Generation supplies max_retries=0 because generate_with_groq owns its
+    bounded retry policy. Keeping SDK retries disabled on that client avoids
+    multiplying SDK retries by the application's retry loop. Other callers
+    retain the SDK default unless they explicitly override it.
+    """
 
     if not GROQ_API_KEY:
 
@@ -3669,10 +3675,11 @@ def create_groq_client() -> Groq:
             "Set GROQ_API_KEY in the project root .env file."
         )
 
+    client_options: dict[str, Any] = {"api_key": GROQ_API_KEY}
+    if max_retries is not None:
+        client_options["max_retries"] = max_retries
 
-    return Groq(
-        api_key=GROQ_API_KEY,
-    )
+    return Groq(**client_options)
 
 
 def create_llm_client() -> InferenceClient | Groq:
@@ -3950,6 +3957,31 @@ def _provider_error_status(error: Exception) -> int | None:
     return None
 
 
+def _provider_retry_after_seconds(error: Exception) -> float | None:
+    """Read a numeric Retry-After header when the provider exposes one."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        headers = getattr(error, "headers", None)
+    if headers is None:
+        return None
+
+    try:
+        raw_value = headers.get("retry-after")
+    except (AttributeError, TypeError):
+        return None
+    if raw_value is None:
+        return None
+
+    try:
+        seconds = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
 def _is_daily_token_quota_exhausted(error: Exception) -> bool:
     """Return True only for explicit provider daily-token quota rejections."""
     error_text = str(error).casefold()
@@ -4206,15 +4238,24 @@ def generate_with_groq(
 
             if _is_retryable_provider_error(error):
                 if attempt < GROQ_MAX_RETRIES:
+                    configured_delay = GROQ_RETRY_DELAY_SECONDS * (attempt + 1)
+                    retry_after = _provider_retry_after_seconds(error)
+                    retry_delay = max(
+                        configured_delay,
+                        retry_after if retry_after is not None else 0.0,
+                    )
                     logger.warning(
                         "Transient Groq generation failure; retrying "
-                        "attempt=%s max_attempts=%s status_code=%s error_type=%s",
+                        "attempt=%s max_attempts=%s status_code=%s error_type=%s "
+                        "retry_after_seconds=%s retry_delay_seconds=%.2f",
                         attempt + 1,
                         GROQ_MAX_RETRIES + 1,
                         _provider_error_status(error),
                         type(error).__name__,
+                        retry_after,
+                        retry_delay,
                     )
-                    time.sleep(GROQ_RETRY_DELAY_SECONDS * (attempt + 1))
+                    time.sleep(retry_delay)
                     continue
 
                 if "429" in error_text or "rate limit" in error_text or "too many requests" in error_text:
@@ -5455,7 +5496,14 @@ def answer_question(
     # --------------------------------------------------------
 
     llm_client = create_llm_client()
-    generation_client = llm_client
+    # Query planning retains the SDK's default retry behavior. The generation
+    # client disables SDK retries because generate_with_groq implements the
+    # bounded retry policy and must fail immediately on daily TPD exhaustion.
+    generation_client = (
+        create_groq_client(max_retries=0)
+        if LLM_PROVIDER == "groq"
+        else llm_client
+    )
 
 
     # --------------------------------------------------------
