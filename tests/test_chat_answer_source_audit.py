@@ -860,6 +860,37 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
     assert by_name["answer_requirement_three_ways"] is False
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "I couldn't find enough information about that in the video. "
+        "It may not be covered by this video.",
+        "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+        "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
+    ],
+)
+def test_answerable_case_does_not_count_canonical_localized_abstention_as_substantive(answer):
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "EW01")
+
+    checks = _answer_quality_checks(case, answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+
+    assert by_name["substantive_answer"] is False
+
+
+def test_answerable_case_keeps_substantive_caveat_as_an_answer():
+    case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "EW01")
+    answer = (
+        "The video does not specify every detail, but the speaker says there "
+        "are three ways to express yourself in meetings."
+    )
+
+    checks = _answer_quality_checks(case, answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+
+    assert by_name["substantive_answer"] is True
+
+
 def test_phase10_11_coverage_manifest_accounts_for_pilot_and_blocked_urdu():
     manifest = build_coverage_manifest(PHASE10_11_AUDIT_CASES)
 
