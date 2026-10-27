@@ -520,7 +520,7 @@ _ABSTENTION_PATTERN = re.compile(
 _ABSTENTION_ONLY_PATTERNS = (
     re.compile(
         r"I couldn't find enough information about that in the video"
-        r"(?:\\.\\s*It may not be covered by this video)?[.!]?",
+        r"(?:\.\s*It may not be covered by this video)?[.!]?",
         re.IGNORECASE,
     ),
     re.compile(
