@@ -3896,6 +3896,15 @@ def _is_abstention_answer(answer: str | None) -> bool:
 
     normalized = unicodedata.normalize("NFKC", text)
 
+    # The backend emits this exact one-sentence Hindi fallback. It has no
+    # second explicit "not covered" clause, so the paired-cue detector below
+    # otherwise leaves best-effort sources and timestamps attached to it.
+    if re.fullmatch(
+        r"वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली[।.!]?",
+        normalized,
+    ):
+        return True
+
     english_missing_information = bool(re.search(
         r"\b(?:could(?:n't| not)|can't|cannot|unable to)\s+"
         r"(?:find|locate|verify|answer)\b.{0,100}\b(?:information|answer|"
