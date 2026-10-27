@@ -514,6 +514,30 @@ _ABSTENTION_PATTERN = re.compile(
 )
 
 
+# Exact fallback forms emitted by the backend. Keep this deliberately narrower
+# than _ABSTENTION_PATTERN: a substantive answer can contain a caveat such as
+# "the video does not specify the date" and still answer the question.
+_ABSTENTION_ONLY_PATTERNS = (
+    re.compile(
+        r"I couldn't find enough information about that in the video"
+        r"(?:\\.\\s*It may not be covered by this video)?[.!]?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली[।.!]?"
+    ),
+    re.compile(
+        r"لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال[.!؟]?"
+    ),
+)
+
+
+def _is_abstention_only_answer(answer: str) -> bool:
+    """Return true for canonical fallback-only answers, not caveated answers."""
+    text = _substantive_answer(answer).strip()
+    return any(pattern.fullmatch(text) for pattern in _ABSTENTION_ONLY_PATTERNS)
+
+
 def _answer_language_matches(answer: str, language: str) -> bool:
     """Use script proportions as a conservative language guard for live answers."""
     text = _substantive_answer(answer)
@@ -550,9 +574,7 @@ def _answer_quality_checks(
     checks = [
         _quality_check(
             "substantive_answer",
-            bool(substantive) and substantive != (
-                "I couldn't find enough information about that in the video. It may not be covered by this video."
-            ),
+            bool(substantive) and not _is_abstention_only_answer(substantive),
             "The answer must contain a substantive response rather than the fallback.",
         )
     ]
