@@ -869,7 +869,7 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
         "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
     ],
 )
-def test_answerable_case_does_not_count_canonical_localized_abstention_as_substantive(answer):
+def test_answerable_case_rejects_localized_abstention(answer):
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "EW01")
 
     checks = _answer_quality_checks(case, answer)
