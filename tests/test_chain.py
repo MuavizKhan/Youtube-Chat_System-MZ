@@ -2464,6 +2464,7 @@ def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch
         "لا يتناول الفيديو هذا الموضوع.",
         "لا توجد في الفيديو أي معلومات حول عاصمة أستراليا.",
         "لا توجد معلومات كافية في الفيديو حول عاصمة أستراليا.",
+        "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
     ],
 )
 def test_is_abstention_answer_recognizes_localized_no_answer_text(answer):
@@ -2503,6 +2504,11 @@ def test_is_abstention_answer_preserves_substantive_caveated_answers(answer):
         ),
         (
             "لا توجد معلومات كافية في الفيديو حول عاصمة أستراليا.",
+            "ما عاصمة أستراليا؟",
+            "fAd2nKfrDB8",
+        ),
+        (
+            "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
             "ما عاصمة أستراليا؟",
             "fAd2nKfrDB8",
         ),
