@@ -2465,6 +2465,7 @@ def test_answer_question_suppresses_sources_when_generation_abstains(monkeypatch
         "لا توجد في الفيديو أي معلومات حول عاصمة أستراليا.",
         "لا توجد معلومات كافية في الفيديو حول عاصمة أستراليا.",
         "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
+        "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
     ],
 )
 def test_is_abstention_answer_recognizes_localized_no_answer_text(answer):
@@ -2511,6 +2512,11 @@ def test_is_abstention_answer_preserves_substantive_caveated_answers(answer):
             "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال.",
             "ما عاصمة أستراليا؟",
             "fAd2nKfrDB8",
+        ),
+        (
+            "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+            "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया गया?",
+            "INpnuL7qnzY",
         ),
     ],
 )
