@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube AI Chat",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Chat with YouTube videos using a local RAG-powered AI backend.",
   "action": {
     "default_title": "Toggle YouTube AI Chat"
