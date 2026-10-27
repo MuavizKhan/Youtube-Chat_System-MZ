@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube AI Chat",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Chat with YouTube videos using a local RAG-powered AI backend.",
   "action": {
     "default_title": "Toggle YouTube AI Chat"
@@ -22,6 +22,16 @@
       ],
       "css": [
         "style.css"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/chatbot-avatar.jpg"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
       ]
     }
   ]

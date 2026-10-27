@@ -59,6 +59,20 @@ const INDEX_POLL_INTERVAL_MS = 2000;
 
 const INDEX_POLL_MAX_ATTEMPTS = 90;
 
+// Floating launcher and panel geometry. The launcher remains visible while
+// the chat is open so it can always be repositioned.
+const LAUNCHER_SIZE = 60;
+const VIEWPORT_MARGIN = 12;
+const CHAT_PANEL_GAP = 12;
+const MIN_USABLE_PANEL_WIDTH = 280;
+const MIN_USABLE_PANEL_HEIGHT = 260;
+const MAX_CHAT_PANEL_WIDTH = 380;
+const MAX_CHAT_PANEL_HEIGHT = 560;
+const LAUNCHER_POSITION_KEY = "youtube-ai-chat-position-v1";
+
+let launcherDragState = null;
+let suppressLauncherClick = false;
+
 // ============================================================
 // 1. YOUTUBE VIDEO ID
 // ============================================================
@@ -175,51 +189,312 @@ function formatTimestamp(
 
 
 // ============================================================
-// 4. CREATE LAUNCHER
+// 4. FLOATING LAUNCHER: POSITION, DRAG, AND VIEWPORT SAFETY
 // ============================================================
 
-function createLauncher() {
+function clampNumber(value, minimum, maximum) {
+    return Math.min(Math.max(value, minimum), Math.max(minimum, maximum));
+}
 
+
+function readSavedLauncherPosition() {
+    try {
+        const raw = window.localStorage.getItem(LAUNCHER_POSITION_KEY);
+        if (!raw) {
+            return null;
+        }
+
+        const saved = JSON.parse(raw);
+        if (
+            saved &&
+            Number.isFinite(saved.left) &&
+            Number.isFinite(saved.top)
+        ) {
+            return saved;
+        }
+    } catch (error) {
+        // Storage can be unavailable in private/restricted browsing contexts.
+    }
+
+    return null;
+}
+
+
+function setLauncherPosition(left, top, persist = false) {
+    if (!launcher) {
+        return;
+    }
+
+    const maxLeft = Math.max(
+        VIEWPORT_MARGIN,
+        window.innerWidth - LAUNCHER_SIZE - VIEWPORT_MARGIN
+    );
+    const maxTop = Math.max(
+        VIEWPORT_MARGIN,
+        window.innerHeight - LAUNCHER_SIZE - VIEWPORT_MARGIN
+    );
+
+    const position = {
+        left: Math.round(clampNumber(left, VIEWPORT_MARGIN, maxLeft)),
+        top: Math.round(clampNumber(top, VIEWPORT_MARGIN, maxTop))
+    };
+
+    launcher.style.left = position.left + "px";
+    launcher.style.top = position.top + "px";
+    launcher.style.right = "auto";
+    launcher.style.bottom = "auto";
+
+    if (persist) {
+        try {
+            window.localStorage.setItem(
+                LAUNCHER_POSITION_KEY,
+                JSON.stringify(position)
+            );
+        } catch (error) {
+            // Position still works for this page even if persistence is blocked.
+        }
+    }
+
+    if (sidebar && !sidebar.hidden) {
+        positionChatPanel();
+    }
+}
+
+
+function positionChatPanel() {
+    if (!sidebar || sidebar.hidden || !launcher) {
+        return;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Do not leave a tiny, unusable panel open on genuinely small viewports.
+    // Normal edge positions are handled by clamping the panel back on-screen.
+    if (
+        viewportWidth < MIN_USABLE_PANEL_WIDTH ||
+        viewportHeight < MIN_USABLE_PANEL_HEIGHT + 2 * VIEWPORT_MARGIN
+    ) {
+        closeChat();
+        return;
+    }
+
+    const panelWidth = Math.min(
+        MAX_CHAT_PANEL_WIDTH,
+        viewportWidth - 2 * VIEWPORT_MARGIN
+    );
+
+    const launcherRect = launcher.getBoundingClientRect();
+
+    // The panel opens above the floating launcher. As the launcher is dragged
+    // toward the top edge, the panel progressively shrinks; when it cannot
+    // retain a readable minimum height, the panel closes automatically.
+    const availableHeight = (
+        launcherRect.top - CHAT_PANEL_GAP - VIEWPORT_MARGIN
+    );
+    const panelHeight = Math.min(
+        MAX_CHAT_PANEL_HEIGHT,
+        viewportHeight - 2 * VIEWPORT_MARGIN,
+        availableHeight
+    );
+
+    if (
+        panelWidth < MIN_USABLE_PANEL_WIDTH ||
+        panelHeight < MIN_USABLE_PANEL_HEIGHT
+    ) {
+        closeChat();
+        return;
+    }
+
+    sidebar.style.width = Math.floor(panelWidth) + "px";
+    sidebar.style.height = Math.floor(panelHeight) + "px";
+    sidebar.style.maxWidth = Math.floor(viewportWidth - 2 * VIEWPORT_MARGIN) + "px";
+    sidebar.style.maxHeight = Math.floor(viewportHeight - 2 * VIEWPORT_MARGIN) + "px";
+    sidebar.style.minWidth = "0";
+    sidebar.style.minHeight = "0";
+    sidebar.style.resize = "none";
+
+    const launcherIsOnRight = (
+        launcherRect.left + launcherRect.width / 2 >= viewportWidth / 2
+    );
+
+    const preferredLeft = launcherIsOnRight
+        ? launcherRect.left - CHAT_PANEL_GAP - panelWidth
+        : launcherRect.right + CHAT_PANEL_GAP;
+
+    const left = clampNumber(
+        preferredLeft,
+        VIEWPORT_MARGIN,
+        viewportWidth - panelWidth - VIEWPORT_MARGIN
+    );
+
+    // The panel's bottom stays above the launcher, while its height is based
+    // on the available viewport space. The chat body scrolls independently.
+    const top = launcherRect.top - CHAT_PANEL_GAP - panelHeight;
+
+    sidebar.style.left = Math.round(left) + "px";
+    sidebar.style.top = Math.round(top) + "px";
+    sidebar.style.right = "auto";
+    sidebar.style.bottom = "auto";
+}
+
+
+function updateLauncherAccessibility() {
+    if (!launcher) {
+        return;
+    }
+
+    const chatIsOpen = Boolean(sidebar && !sidebar.hidden);
+    const label = chatIsOpen
+        ? "Close YouTube AI Chat"
+        : "Open YouTube AI Chat";
+
+    launcher.title = label;
+    launcher.setAttribute("aria-label", label);
+    launcher.setAttribute("aria-expanded", String(chatIsOpen));
+}
+
+
+function installLauncherDragging() {
+    if (!launcher) {
+        return;
+    }
+
+    launcher.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) {
+            return;
+        }
+
+        const rect = launcher.getBoundingClientRect();
+        launcherDragState = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            originLeft: rect.left,
+            originTop: rect.top,
+            moved: false
+        };
+
+        try {
+            launcher.setPointerCapture(event.pointerId);
+        } catch (error) {
+            // Pointer capture may be unavailable in a restricted WebView.
+        }
+    });
+
+    launcher.addEventListener("pointermove", (event) => {
+        if (
+            !launcherDragState ||
+            event.pointerId !== launcherDragState.pointerId
+        ) {
+            return;
+        }
+
+        const deltaX = event.clientX - launcherDragState.startX;
+        const deltaY = event.clientY - launcherDragState.startY;
+
+        if (!launcherDragState.moved && Math.hypot(deltaX, deltaY) < 5) {
+            return;
+        }
+
+        launcherDragState.moved = true;
+        launcher.classList.add("is-dragging");
+        event.preventDefault();
+
+        setLauncherPosition(
+            launcherDragState.originLeft + deltaX,
+            launcherDragState.originTop + deltaY
+        );
+    });
+
+    const finishDrag = (event) => {
+        if (
+            !launcherDragState ||
+            event.pointerId !== launcherDragState.pointerId
+        ) {
+            return;
+        }
+
+        const wasDragged = launcherDragState.moved;
+        launcherDragState = null;
+        launcher.classList.remove("is-dragging");
+
+        if (wasDragged) {
+            const rect = launcher.getBoundingClientRect();
+            setLauncherPosition(rect.left, rect.top, true);
+
+            // A drag can generate a synthetic click. Suppress it so moving the
+            // icon never accidentally opens or closes the chat.
+            suppressLauncherClick = true;
+            window.setTimeout(() => {
+                suppressLauncherClick = false;
+            }, 0);
+        }
+
+        try {
+            if (launcher.hasPointerCapture(event.pointerId)) {
+                launcher.releasePointerCapture(event.pointerId);
+            }
+        } catch (error) {
+            // Pointer capture may already have been released by the browser.
+        }
+    };
+
+    launcher.addEventListener("pointerup", finishDrag);
+    launcher.addEventListener("pointercancel", finishDrag);
+}
+
+
+function createLauncher() {
     if (launcher) {
         return;
     }
 
+    launcher = document.createElement("button");
+    launcher.id = "youtube-ai-chat-launcher";
+    launcher.type = "button";
+    launcher.setAttribute("aria-controls", "youtube-ai-chat");
+    launcher.setAttribute("aria-expanded", "false");
+    launcher.draggable = false;
 
-    launcher =
-        document.createElement("button");
+    const avatar = document.createElement("img");
+    avatar.className = "chatbot-avatar";
+    avatar.src = chrome.runtime.getURL("assets/chatbot-avatar.jpg");
+    avatar.alt = "";
+    avatar.draggable = false;
+    avatar.setAttribute("aria-hidden", "true");
+    launcher.appendChild(avatar);
 
+    launcher.addEventListener("click", (event) => {
+        if (suppressLauncherClick) {
+            event.preventDefault();
+            event.stopPropagation();
+            suppressLauncherClick = false;
+            return;
+        }
 
-    launcher.id =
-        "youtube-ai-chat-launcher";
+        toggleChat();
+    });
 
+    document.body.appendChild(launcher);
+    installLauncherDragging();
+    updateLauncherAccessibility();
 
-    launcher.type =
-        "button";
-
-
-    launcher.textContent =
-        "🤖";
-
-
-    launcher.title =
-        "Open YouTube AI Chat";
-
-
-    launcher.setAttribute(
-        "aria-label",
-        "Open YouTube AI Chat"
+    const savedPosition = readSavedLauncherPosition();
+    setLauncherPosition(
+        savedPosition ? savedPosition.left : window.innerWidth - LAUNCHER_SIZE - 20,
+        savedPosition ? savedPosition.top : window.innerHeight - LAUNCHER_SIZE - 20
     );
 
+    window.addEventListener("resize", () => {
+        if (!launcher) {
+            return;
+        }
 
-    launcher.addEventListener(
-        "click",
-        openChat
-    );
-
-
-    document.body.appendChild(
-        launcher
-    );
+        const rect = launcher.getBoundingClientRect();
+        setLauncherPosition(rect.left, rect.top);
+        positionChatPanel();
+    });
 }
 
 
@@ -256,7 +531,14 @@ function createSidebar() {
         <div class="chat-header">
 
             <div class="chat-title">
-                <span>🤖</span>
+                <span class="chat-title-avatar">
+                    <img
+                        src="${chrome.runtime.getURL("assets/chatbot-avatar.jpg")}"
+                        alt=""
+                        draggable="false"
+                        aria-hidden="true"
+                    />
+                </span>
                 <span>YouTube AI</span>
             </div>
 
@@ -622,8 +904,8 @@ function openChat() {
 
 
     sidebar.hidden = false;
-
-    launcher.hidden = true;
+    updateLauncherAccessibility();
+    positionChatPanel();
 
 
     // Capture the current video ID and retry preparation if needed.
@@ -662,10 +944,9 @@ function closeChat() {
 
     sidebar.hidden = true;
 
-
     if (launcher) {
-
-        launcher.hidden = false;
+        launcher.hidden = !isVideoPage();
+        updateLauncherAccessibility();
     }
 }
 
@@ -699,42 +980,21 @@ function toggleChat() {
 // 9. TEMPORARY LAUNCHER MESSAGE
 // ============================================================
 
-function showTemporaryLauncherMessage(
-    message
-) {
-
+function showTemporaryLauncherMessage(message) {
     if (!launcher) {
         return;
     }
 
+    launcher.title = message;
+    launcher.setAttribute("aria-label", message);
+    launcher.classList.add("launcher-warning");
 
-    const originalText =
-        launcher.textContent;
-
-
-    launcher.textContent =
-        "⚠";
-
-
-    launcher.title =
-        message;
-
-
-    setTimeout(
-        () => {
-
-            if (launcher) {
-
-                launcher.textContent =
-                    originalText;
-
-                launcher.title =
-                    "Open YouTube AI Chat";
-            }
-
-        },
-        1800
-    );
+    setTimeout(() => {
+        if (launcher) {
+            launcher.classList.remove("launcher-warning");
+            updateLauncherAccessibility();
+        }
+    }, 1800);
 }
 
 
@@ -1318,10 +1578,14 @@ function handleVideoNavigation() {
     }
 
     if (launcher) {
-        launcher.hidden =
-            sidebar
-                ? !sidebar.hidden
-                : false;
+        // Keep the launcher visible even while the chat is open so it remains
+        // draggable and can always be used to close the panel.
+        launcher.hidden = false;
+        updateLauncherAccessibility();
+
+        if (sidebar && !sidebar.hidden) {
+            positionChatPanel();
+        }
     }
 }
 
