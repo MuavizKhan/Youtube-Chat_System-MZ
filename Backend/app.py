@@ -867,6 +867,35 @@ def chat(
         )
 
         observability = result.get("observability", {})
+        generation_trace = observability.get("generation", {})
+        # Do not present provider-quota fallback text as if retrieval proved
+        # the topic was absent from the transcript. Keep deterministic,
+        # source-grounded fallbacks available when they were actually built.
+        has_grounded_non_llm_fallback = bool(
+            generation_trace.get("grounded_financial_fallback_used")
+            or generation_trace.get("grounded_hindi_tax_fallback_used")
+        )
+        if (
+            generation_trace.get("repair_aborted_due_quota")
+            and not has_grounded_non_llm_fallback
+        ):
+            logger.warning(
+                "Chat answer withheld because provider daily quota is exhausted "
+                "request_id=%s video_id=%s",
+                request.state.request_id,
+                canonical_video_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "ai_provider_daily_quota_exhausted",
+                    "message": (
+                        "The AI provider's daily token quota is exhausted. "
+                        "This question was not answered; try again after quota "
+                        "resets or configure an available provider/model."
+                    ),
+                },
+            )
         logger.info(
             "Chat RAG trace request_id=%s video_id=%s "
             "retrieval_stage=%s retrieved_chunks=%s source_segments=%s "

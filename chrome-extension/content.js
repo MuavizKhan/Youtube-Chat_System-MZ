@@ -94,13 +94,25 @@ function isExtensionRuntimeAvailable() {
 }
 
 function sendExtensionMessage(message, callback, onUnavailable) {
-    const handleUnavailable = () => {
-        clearIndexPolling();
+    const handleUnavailable = (
+        notice = EXTENSION_REFRESH_MESSAGE
+    ) => {
+        // Best-effort cleanup: after Chrome invalidates an extension context,
+        // even UI or timer access can fail in some lifecycle races.
+        try {
+            clearIndexPolling();
+        } catch (_error) {
+            // The stale context may no longer own its timers.
+        }
 
-        if (typeof onUnavailable === "function") {
-            onUnavailable(EXTENSION_REFRESH_MESSAGE);
-        } else {
-            updateHeaderStatus("failed", EXTENSION_REFRESH_MESSAGE);
+        try {
+            if (typeof onUnavailable === "function") {
+                onUnavailable(notice);
+            } else {
+                updateHeaderStatus("failed", notice);
+            }
+        } catch (_error) {
+            // Do not let stale-context cleanup throw a second exception.
         }
     };
 
@@ -131,11 +143,20 @@ function sendExtensionMessage(message, callback, onUnavailable) {
         return true;
     } catch (error) {
         const messageText = String(error && error.message || error);
-        if (/extension context invalidated|context invalidated/i.test(messageText)) {
-            handleUnavailable();
-            return false;
+        const contextInvalidated =
+            /extension context invalidated|context invalidated/i.test(messageText);
+        const notice = contextInvalidated
+            ? EXTENSION_REFRESH_MESSAGE
+            : "The extension could not send a message. Reload the extension and refresh this page.";
+
+        handleUnavailable(notice);
+
+        // Never rethrow a synchronous messaging failure into sendMessage(),
+        // which otherwise logs a second, misleading uncaught lifecycle error.
+        if (!contextInvalidated) {
+            console.warn("YouTube AI extension message failed:", messageText);
         }
-        throw error;
+        return false;
     }
 }
 

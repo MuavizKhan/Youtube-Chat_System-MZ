@@ -113,6 +113,40 @@ def test_chat_returns_retryable_429_for_provider_rate_limit(client, monkeypatch)
     assert "ProviderRateLimitError" not in response.text
 
 
+@pytest.mark.api
+def test_chat_does_not_present_provider_quota_fallback_as_missing_transcript_evidence(
+    client, monkeypatch
+):
+    def quota_fallback(**kwargs):
+        return {
+            "answer": "I couldn't find enough information about that in the video.",
+            "sources": [],
+            "observability": {
+                "generation": {
+                    "generated": False,
+                    "fallback_used": True,
+                    "repair_aborted_due_quota": True,
+                    "grounded_financial_fallback_used": False,
+                    "grounded_hindi_tax_fallback_used": False,
+                }
+            },
+        }
+
+    monkeypatch.setattr(app_module, "answer_question", quota_fallback)
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What reasons do the protesters give?",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "ai_provider_daily_quota_exhausted"
+    assert "daily token quota is exhausted" in response.json()["message"]
+    assert "not answered" in response.json()["message"]
+
+
 @pytest.fixture
 def client():
     with TestClient(app_module.app,raise_server_exceptions=False) as c:
