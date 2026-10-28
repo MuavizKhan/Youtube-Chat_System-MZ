@@ -498,6 +498,8 @@ class IndexStatusResponse(BaseModel):
     action: str
     ready: bool
     job_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 class ConversationTurn(BaseModel):
@@ -674,6 +676,7 @@ def readiness():
 @app.post(
     "/index",
     response_model=IndexStatusResponse,
+    response_model_exclude_unset=True,
 )
 @limiter.limit(RATE_LIMIT)
 def index_prepare(
@@ -718,13 +721,19 @@ def index_prepare(
         elif not result.ready:
             response.status_code = 202
 
-        return {
+        payload = {
             "video_id": result.video_id,
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
             "job_id": result.job_id,
         }
+        error_code = getattr(result, "error_code", None)
+        error_message = getattr(result, "error_message", None)
+        if error_code and error_message:
+            payload["error_code"] = error_code
+            payload["error_message"] = error_message
+        return payload
 
     except IndexLanguageConflictError as error:
         raise HTTPException(
@@ -753,6 +762,7 @@ def index_prepare(
 @app.get(
     "/index/{video_id}",
     response_model=IndexStatusResponse,
+    response_model_exclude_unset=True,
 )
 @limiter.limit(RATE_LIMIT)
 def index_status(
@@ -764,13 +774,19 @@ def index_status(
 
     try:
         result = get_index_status(video_id)
-        return {
+        payload = {
             "video_id": result.video_id,
             "state": result.state,
             "action": result.action,
             "ready": result.ready,
             "job_id": result.job_id,
         }
+        error_code = getattr(result, "error_code", None)
+        error_message = getattr(result, "error_message", None)
+        if error_code and error_message:
+            payload["error_code"] = error_code
+            payload["error_message"] = error_message
+        return payload
 
     except ValueError as error:
         raise HTTPException(

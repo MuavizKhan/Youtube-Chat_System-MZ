@@ -57,6 +57,15 @@ from .retrieval import (
 )
 
 
+class TranscriptAcquisitionError(RuntimeError):
+    """A known transcript-access failure with a safe public explanation."""
+
+    def __init__(self, code: str, public_message: str) -> None:
+        self.code = code
+        self.public_message = public_message
+        super().__init__(public_message)
+
+
 # ============================================================
 # 1. GET YOUTUBE TRANSCRIPT
 # ============================================================
@@ -144,31 +153,29 @@ def get_transcript(
 
 
     except TranscriptsDisabled as error:
-
-        raise RuntimeError(
-            f"Transcripts are disabled for video: {video_id}"
+        raise TranscriptAcquisitionError(
+            "TRANSCRIPTS_DISABLED",
+            "Captions are disabled for this video. Try a video with captions enabled.",
         ) from error
-
 
     except NoTranscriptFound as error:
-
-        raise RuntimeError(
-            f"No transcript found for video '{video_id}' "
-            f"for languages: {languages}"
+        requested_languages = ", ".join(languages)
+        raise TranscriptAcquisitionError(
+            "NO_SUPPORTED_TRANSCRIPT",
+            "No captions were found in the requested language(s): "
+            f"{requested_languages}. Choose a video with captions in one of those languages.",
         ) from error
-
 
     except VideoUnavailable as error:
-
-        raise RuntimeError(
-            f"Video '{video_id}' is unavailable."
+        raise TranscriptAcquisitionError(
+            "VIDEO_UNAVAILABLE",
+            "YouTube reports that this video is unavailable or inaccessible to the transcript service.",
         ) from error
 
-
     except InvalidVideoId as error:
-
-        raise RuntimeError(
-            f"Invalid YouTube video ID: {video_id}"
+        raise TranscriptAcquisitionError(
+            "INVALID_VIDEO_ID",
+            "The transcript service rejected this video reference. Check that it is a valid YouTube video.",
         ) from error
 
 

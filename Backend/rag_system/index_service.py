@@ -38,6 +38,7 @@ from .index_jobs import (
 from .indexing import (
     IndexAction,
     IndexState,
+    TranscriptAcquisitionError,
     ensure_index_with_action,
     get_index_action,
     get_index_state,
@@ -66,6 +67,45 @@ class IndexStatus:
     action: str
     ready: bool
     job_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+_GENERIC_INDEX_FAILURE_MESSAGE = (
+    "Video preparation failed unexpectedly. Retry once; if it persists, "
+    "try another accessible YouTube video with captions in English, Hindi, Urdu, or Arabic."
+)
+_INDEX_FAILURE_CODES = {
+    "TRANSCRIPTS_DISABLED",
+    "NO_SUPPORTED_TRANSCRIPT",
+    "VIDEO_UNAVAILABLE",
+    "INVALID_VIDEO_ID",
+    "INDEX_PREPARATION_FAILED",
+}
+
+
+def _parse_index_failure(error: str | None) -> tuple[str | None, str | None]:
+    """Decode a safe failure record stored in the existing jobs.error column."""
+    if not error:
+        return None, None
+
+    code, separator, message = error.partition("|")
+    if separator and code in _INDEX_FAILURE_CODES and message.strip():
+        return code, message.strip()
+
+    # Older jobs stored a generic message; never expose legacy/internal details.
+    return "INDEX_PREPARATION_FAILED", _GENERIC_INDEX_FAILURE_MESSAGE
+
+
+def _serialize_index_failure(error: Exception) -> str:
+    """Return a persistent, user-safe failure record without raw exception text."""
+    if isinstance(error, TranscriptAcquisitionError):
+        code = error.code
+        message = error.public_message
+        if code in _INDEX_FAILURE_CODES and message.strip():
+            return f"{code}|{message.strip()}"
+
+    return f"INDEX_PREPARATION_FAILED|{_GENERIC_INDEX_FAILURE_MESSAGE}"
 
 
 class IndexLanguageConflictError(RuntimeError):
@@ -260,7 +300,7 @@ def _run_index_job(video_id: str) -> None:
             job.attempt,
         )
 
-    except Exception:
+    except Exception as error:
         logger.exception(
             "Index job failed video_id=%s job_id=%s attempt=%s",
             job.video_id,
@@ -271,7 +311,7 @@ def _run_index_job(video_id: str) -> None:
         marked_failed = _JOB_STORE.mark_failed(
             job.job_id,
             worker_id=_WORKER_ID,
-            error="Index preparation failed.",
+            error=_serialize_index_failure(error),
         )
 
         if not marked_failed:
@@ -376,12 +416,15 @@ def get_index_status(
                     job_id=job.job_id,
                 )
 
+            error_code, error_message = _parse_index_failure(job.error)
             return IndexStatus(
                 video_id=canonical_video_id,
                 state="failed",
                 action="retry",
                 ready=False,
                 job_id=job.job_id,
+                error_code=error_code,
+                error_message=error_message,
             )
 
         if job.status == JOB_READY:

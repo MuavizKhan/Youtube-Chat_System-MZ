@@ -459,6 +459,36 @@ def test_index_status_endpoint_returns_state(client, monkeypatch):
 
 
 @pytest.mark.api
+def test_index_status_endpoint_returns_actionable_failure_details(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "get_index_status",
+        lambda video_id: SimpleNamespace(
+            video_id=video_id,
+            state="failed",
+            action="retry",
+            ready=False,
+            job_id="job-failed-1",
+            error_code="TRANSCRIPTS_DISABLED",
+            error_message="Captions are disabled for this video. Try a video with captions enabled.",
+        ),
+    )
+
+    response = client.get(f"/index/{VALID_VIDEO_ID}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "video_id": VALID_VIDEO_ID,
+        "state": "failed",
+        "action": "retry",
+        "ready": False,
+        "job_id": "job-failed-1",
+        "error_code": "TRANSCRIPTS_DISABLED",
+        "error_message": "Captions are disabled for this video. Try a video with captions enabled.",
+    }
+
+
+@pytest.mark.api
 def test_index_status_endpoint_rejects_invalid_video_id(client):
     response = client.get("/index/not-valid")
 
