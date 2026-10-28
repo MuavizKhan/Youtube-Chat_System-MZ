@@ -76,6 +76,69 @@ let indexStatusMessage = "";
 let sourceNavigationIndex = 0;
 let trackedSourceVideo = null;
 
+const EXTENSION_REFRESH_MESSAGE =
+    "The extension context is no longer active. Refresh this YouTube page to reconnect.";
+
+// Extension reloads invalidate content scripts already running in YouTube tabs.
+// Check the runtime before messaging and handle a synchronous invalidation
+// without repeatedly logging an exception or leaving index polling running.
+function isExtensionRuntimeAvailable() {
+    try {
+        return (
+            typeof chrome !== "undefined" &&
+            Boolean(chrome.runtime && chrome.runtime.id)
+        );
+    } catch (_error) {
+        return false;
+    }
+}
+
+function sendExtensionMessage(message, callback, onUnavailable) {
+    const handleUnavailable = () => {
+        clearIndexPolling();
+
+        if (typeof onUnavailable === "function") {
+            onUnavailable(EXTENSION_REFRESH_MESSAGE);
+        } else {
+            updateHeaderStatus("failed", EXTENSION_REFRESH_MESSAGE);
+        }
+    };
+
+    if (!isExtensionRuntimeAvailable()) {
+        handleUnavailable();
+        return false;
+    }
+
+    try {
+        chrome.runtime.sendMessage(message, (response) => {
+            if (!isExtensionRuntimeAvailable()) {
+                handleUnavailable();
+                return;
+            }
+
+            let runtimeError = null;
+            try {
+                runtimeError = chrome.runtime.lastError || null;
+            } catch (_error) {
+                handleUnavailable();
+                return;
+            }
+
+            if (typeof callback === "function") {
+                callback(response, runtimeError);
+            }
+        });
+        return true;
+    } catch (error) {
+        const messageText = String(error && error.message || error);
+        if (/extension context invalidated|context invalidated/i.test(messageText)) {
+            handleUnavailable();
+            return false;
+        }
+        throw error;
+    }
+}
+
 // ============================================================
 // 1. YOUTUBE VIDEO ID
 // ============================================================
@@ -894,13 +957,12 @@ function pollIndexStatus(videoId) {
     indexPollVideoId = videoId;
     indexPollAttempts += 1;
 
-    chrome.runtime.sendMessage(
+    sendExtensionMessage(
         {
             type: "index_status",
             video_id: videoId
         },
-        (response) => {
-            const runtimeError = chrome.runtime.lastError;
+        (response, runtimeError) => {
 
             if (videoId !== getVideoId()) {
                 clearIndexPolling();
@@ -942,6 +1004,14 @@ function pollIndexStatus(videoId) {
                 () => pollIndexStatus(videoId),
                 INDEX_POLL_INTERVAL_MS
             );
+        },
+        () => {
+            clearIndexPolling();
+            updateIndexStatus(
+                videoId,
+                "failed",
+                EXTENSION_REFRESH_MESSAGE
+            );
         }
     );
 }
@@ -964,13 +1034,12 @@ function requestIndexPreparation(videoId) {
     indexPreparationInProgressFor = videoId;
     updateIndexStatus(videoId, "preparing");
 
-    chrome.runtime.sendMessage(
+    sendExtensionMessage(
         {
             type: "prepare_index",
             video_id: videoId
         },
-        (response) => {
-            const runtimeError = chrome.runtime.lastError;
+        (response, runtimeError) => {
 
             if (indexPreparationInProgressFor === videoId) {
                 indexPreparationInProgressFor = null;
@@ -1011,6 +1080,16 @@ function requestIndexPreparation(videoId) {
             }
 
             pollIndexStatus(videoId);
+        },
+        () => {
+            if (indexPreparationInProgressFor === videoId) {
+                indexPreparationInProgressFor = null;
+            }
+            updateIndexStatus(
+                videoId,
+                "failed",
+                EXTENSION_REFRESH_MESSAGE
+            );
         }
     );
 }
@@ -1617,7 +1696,7 @@ function sendMessage() {
     const requestId = ++activeRequestId;
 
     try {
-        chrome.runtime.sendMessage(
+        sendExtensionMessage(
             {
                 type: "chat",
                 video_id: requestedVideoId,
@@ -1626,8 +1705,7 @@ function sendMessage() {
                     -MAX_CONVERSATION_HISTORY
                 )
             },
-            (response) => {
-                const runtimeError = chrome.runtime.lastError;
+            (response, runtimeError) => {
 
                 if (runtimeError) {
                     if (requestId === activeRequestId) {
@@ -1711,6 +1789,24 @@ function sendMessage() {
                 if (chatBody) {
                     chatBody.scrollTop =
                         chatBody.scrollHeight;
+                }
+            },
+            (notice) => {
+                if (requestId !== activeRequestId) {
+                    return;
+                }
+
+                resetRequestState();
+                aiMessage.textContent = notice;
+                updateHeaderStatus("failed", notice);
+
+                // A stale content script cannot reattach itself to the new
+                // extension runtime. Require a full YouTube page refresh.
+                if (chatInput) {
+                    chatInput.disabled = true;
+                }
+                if (sendButton) {
+                    sendButton.disabled = true;
                 }
             }
         );
