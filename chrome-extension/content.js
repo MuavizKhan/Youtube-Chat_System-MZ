@@ -63,7 +63,7 @@ const INDEX_POLL_MAX_ATTEMPTS = 90;
 // the chat is open so it can always be repositioned.
 const LAUNCHER_SIZE = 60;
 const VIEWPORT_MARGIN = 12;
-const CHAT_PANEL_GAP = 12;
+const CHAT_PANEL_GAP = 4;
 const MIN_USABLE_PANEL_WIDTH = 280;
 const MIN_USABLE_PANEL_HEIGHT = 260;
 const MAX_CHAT_PANEL_WIDTH = 380;
@@ -72,6 +72,9 @@ const LAUNCHER_POSITION_KEY = "youtube-ai-chat-position-v1";
 
 let launcherDragState = null;
 let suppressLauncherClick = false;
+let indexStatusMessage = "";
+let sourceNavigationIndex = 0;
+let trackedSourceVideo = null;
 
 // ============================================================
 // 1. YOUTUBE VIDEO ID
@@ -421,7 +424,22 @@ function installLauncherDragging() {
 
         if (wasDragged) {
             const rect = launcher.getBoundingClientRect();
-            setLauncherPosition(rect.left, rect.top, true);
+            const maxLeft = window.innerWidth - LAUNCHER_SIZE - VIEWPORT_MARGIN;
+            const snappedLeft = rect.left + LAUNCHER_SIZE / 2 < window.innerWidth / 2
+                ? VIEWPORT_MARGIN
+                : maxLeft;
+
+            // Snap horizontally after dragging while preserving the chosen top.
+            launcher.classList.add("is-snapping");
+            setLauncherPosition(snappedLeft, rect.top, true);
+            window.setTimeout(() => {
+                if (launcher) {
+                    launcher.classList.remove("is-snapping");
+                    // Recalculate after the transition so the panel aligns to
+                    // the launcher's final position, not an intermediate frame.
+                    positionChatPanel();
+                }
+            }, 220);
 
             // A drag can generate a synthetic click. Suppress it so moving the
             // icon never accidentally opens or closes the chat.
@@ -530,27 +548,51 @@ function createSidebar() {
 
         <div class="chat-header">
 
-            <div class="chat-title">
-                <span class="chat-title-avatar">
-                    <img
-                        src="${chrome.runtime.getURL("assets/chatbot-avatar.jpg")}"
-                        alt=""
-                        draggable="false"
-                        aria-hidden="true"
-                    />
-                </span>
-                <span>YouTube AI</span>
+            <div class="chat-brand">
+                <div class="chat-title">
+                    <span class="chat-title-avatar">
+                        <img
+                            src="${chrome.runtime.getURL("assets/chatbot-avatar.jpg")}"
+                            alt=""
+                            draggable="false"
+                            aria-hidden="true"
+                        />
+                    </span>
+                    <span>YouTube AI</span>
+                </div>
+                <div
+                    id="chat-status"
+                    class="chat-status"
+                    data-state="unknown"
+                    role="status"
+                    aria-live="polite"
+                    title="Checking video readiness"
+                >
+                    <span class="chat-status-dot" aria-hidden="true"></span>
+                    <span id="chat-status-label">Checking</span>
+                </div>
             </div>
 
-            <button
-                type="button"
-                id="chat-close"
-                class="chat-close"
-                aria-label="Close chat"
-                title="Close"
-            >
-                ×
-            </button>
+            <div class="chat-header-actions">
+                <button
+                    type="button"
+                    id="chat-new"
+                    class="chat-new"
+                    aria-label="Start a new conversation"
+                    title="New conversation"
+                >
+                    +
+                </button>
+                <button
+                    type="button"
+                    id="chat-close"
+                    class="chat-close"
+                    aria-label="Close chat"
+                    title="Close"
+                >
+                    ×
+                </button>
+            </div>
 
         </div>
 
@@ -646,6 +688,14 @@ function createSidebar() {
             "#chat-close"
         );
 
+    const newConversationButton =
+        sidebar.querySelector("#chat-new");
+
+    newConversationButton.addEventListener(
+        "click",
+        startNewConversation
+    );
+
 
     // --------------------------------------------------------
     // Close button
@@ -708,9 +758,74 @@ function createSidebar() {
 }
 
 
+function startNewConversation() {
+    if (!sidebar || !chatBody) {
+        return;
+    }
+
+    // Ignore in-flight responses from the conversation being cleared.
+    activeRequestId += 1;
+    resetRequestState();
+
+    conversationHistory = [];
+    resetSourceHistory();
+
+    if (chatInput) {
+        chatInput.value = "";
+    }
+
+    chatBody.innerHTML = `
+        <div class="welcome-message">
+            <strong>Ask anything about this video.</strong>
+            <span>Answers are generated from the video's transcript.</span>
+        </div>
+        <div
+            id="index-status"
+            class="index-status"
+            role="status"
+            aria-live="polite"
+        ></div>
+    `;
+
+    if (lastVideoId && lastVideoId === getVideoId()) {
+        updateIndexStatus(lastVideoId, indexStatus, indexStatusMessage);
+    }
+
+    if (chatInput) {
+        chatInput.focus();
+    }
+}
+
+
 // ============================================================
 // 6. OPEN CHAT
 // ============================================================
+
+function updateHeaderStatus(status, message = "") {
+    const statusElement = sidebar?.querySelector("#chat-status");
+    const labelElement = sidebar?.querySelector("#chat-status-label");
+    if (!statusElement || !labelElement) {
+        return;
+    }
+
+    const normalizedMessage = String(message || "");
+    const hasConnectionFailure = /failed to fetch|network|connect|unreachable|offline/i.test(
+        normalizedMessage
+    );
+
+    const labels = {
+        unknown: "Checking",
+        queued: "Queued",
+        preparing: "Preparing",
+        ready: "Ready",
+        failed: hasConnectionFailure ? "Offline" : "Attention"
+    };
+
+    labelElement.textContent = labels[status] || labels.unknown;
+    statusElement.dataset.state = status || "unknown";
+    statusElement.title = normalizedMessage || labels[status] || labels.unknown;
+}
+
 
 function updateIndexStatus(videoId, status, message = "") {
     if (videoId !== getVideoId()) {
@@ -719,6 +834,9 @@ function updateIndexStatus(videoId, status, message = "") {
 
     indexStatusVideoId = videoId;
     indexStatus = status;
+    indexStatusMessage = message;
+
+    updateHeaderStatus(status, message);
 
     const statusElement = sidebar?.querySelector("#index-status");
     if (!statusElement) {
@@ -733,7 +851,15 @@ function updateIndexStatus(videoId, status, message = "") {
         failed: message || "Could not prepare this video. Reopen the chat to retry."
     };
 
-    statusElement.textContent = messages[status] || messages.unknown;
+    const rawMessage = messages[status] || messages.unknown;
+    const connectionUnavailable = status === "failed" &&
+        /failed to fetch|networkerror|network request failed|could not contact the backend|could not reach the backend/i.test(
+            String(rawMessage)
+        );
+
+    statusElement.textContent = connectionUnavailable
+        ? "Can't reach the local backend. Start FastAPI at 127.0.0.1:8000, then reopen the chat."
+        : rawMessage;
     statusElement.dataset.state = status;
 }
 
@@ -1033,165 +1159,242 @@ function appendMessage(text, type) {
 // ============================================================
 
 function clearSources() {
-
     if (!sourcesContainer) {
         return;
     }
 
-
-    sourcesContainer.innerHTML =
-        "";
-
-
-    sourcesContainer.hidden =
-        true;
+    sourcesContainer.innerHTML = "";
+    sourcesContainer.hidden = true;
 }
 
 
 function resetSourceHistory() {
-
     sourceHistory = [];
-
+    sourceNavigationIndex = 0;
     clearSources();
 }
 
 
-function mergeSources(
-    sources
-) {
-
+function mergeSources(sources) {
     if (!Array.isArray(sources)) {
         return;
     }
 
-    sources.forEach(
-        (source) => {
+    sources.forEach((source) => {
+        const start = Number(source?.start);
+        const endValue = Number(source?.end);
+        const end = Number.isFinite(endValue) ? endValue : start;
 
-            const start = Number(source?.start);
-            const endValue = Number(source?.end);
-            const end = Number.isFinite(endValue)
-                ? endValue
-                : start;
-
-            if (
-                !Number.isFinite(start) ||
-                start < 0 ||
-                !Number.isFinite(end) ||
-                end < start
-            ) {
-                return;
-            }
-
-            const alreadyExists =
-                sourceHistory.some(
-                    (existing) =>
-                        existing.start === start &&
-                        existing.end === end
-                );
-
-            if (!alreadyExists) {
-                sourceHistory.push({
-                    start,
-                    end
-                });
-            }
+        if (
+            !Number.isFinite(start) ||
+            start < 0 ||
+            !Number.isFinite(end) ||
+            end < start
+        ) {
+            return;
         }
+
+        const alreadyExists = sourceHistory.some(
+            (existing) => existing.start === start && existing.end === end
+        );
+
+        if (!alreadyExists) {
+            sourceHistory.push({ start, end });
+        }
+    });
+
+    // Navigate chronologically instead of using retrieval ranking order.
+    sourceHistory.sort((first, second) =>
+        first.start - second.start || first.end - second.end
+    );
+    sourceNavigationIndex = Math.min(
+        sourceNavigationIndex,
+        Math.max(0, sourceHistory.length - 1)
     );
 }
 
 
-// ============================================================
-// 12. RENDER SOURCES
-// ============================================================
+function updateSourceNavigationControls() {
+    if (!sourcesContainer || sourceHistory.length === 0) {
+        return;
+    }
+
+    const previousButton = sourcesContainer.querySelector("#source-prev");
+    const nextButton = sourcesContainer.querySelector("#source-next");
+    const counter = sourcesContainer.querySelector("#source-counter");
+
+    if (previousButton) {
+        previousButton.disabled = sourceNavigationIndex <= 0;
+    }
+    if (nextButton) {
+        nextButton.disabled = sourceNavigationIndex >= sourceHistory.length - 1;
+    }
+    if (counter) {
+        counter.textContent = "Source " + (sourceNavigationIndex + 1) +
+            " of " + sourceHistory.length;
+    }
+
+    sourcesContainer.querySelectorAll(".source-button").forEach((button) => {
+        const active = Number(button.dataset.sourceIndex) === sourceNavigationIndex;
+        button.dataset.active = String(active);
+        button.setAttribute("aria-pressed", String(active));
+    });
+}
+
+
+function navigateSource(offset) {
+    if (sourceHistory.length === 0) {
+        return;
+    }
+
+    sourceNavigationIndex = Math.max(
+        0,
+        Math.min(sourceHistory.length - 1, sourceNavigationIndex + offset)
+    );
+
+    const source = sourceHistory[sourceNavigationIndex];
+    seekToTimestamp(source.start);
+    updateSourceNavigationControls();
+
+    const activeButton = sourcesContainer?.querySelector(
+        '.source-button[data-source-index="' + sourceNavigationIndex + '"]'
+    );
+    activeButton?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+
+function updateActiveSourceFromPlayback() {
+    const video = trackedSourceVideo;
+    if (!video || sourceHistory.length === 0) {
+        return;
+    }
+
+    const currentTime = Number(video.currentTime) || 0;
+    const activeIndex = sourceHistory.findIndex(
+        (source) => currentTime >= source.start && currentTime <= source.end
+    );
+
+    if (activeIndex >= 0 && activeIndex !== sourceNavigationIndex) {
+        sourceNavigationIndex = activeIndex;
+        updateSourceNavigationControls();
+    }
+}
+
+
+function trackSourcePlayback() {
+    const video = document.querySelector("video");
+    if (!video || video === trackedSourceVideo) {
+        return;
+    }
+
+    if (trackedSourceVideo) {
+        trackedSourceVideo.removeEventListener(
+            "timeupdate",
+            updateActiveSourceFromPlayback
+        );
+    }
+
+    trackedSourceVideo = video;
+    trackedSourceVideo.addEventListener(
+        "timeupdate",
+        updateActiveSourceFromPlayback
+    );
+}
+
 
 function renderSources() {
-
     clearSources();
 
     if (sourceHistory.length === 0) {
         return;
     }
 
-    const sourcesToggle =
-        document.createElement("button");
-
+    const sourcesToggle = document.createElement("button");
     sourcesToggle.type = "button";
     sourcesToggle.className = "sources-toggle";
-    sourcesToggle.textContent =
-        "Video sources · " + sourceHistory.length;
+    sourcesToggle.textContent = "Video sources · " + sourceHistory.length;
     sourcesToggle.setAttribute("aria-expanded", "false");
     sourcesToggle.setAttribute("aria-controls", "chat-sources-list");
 
-    const list =
-        document.createElement("div");
+    const navigation = document.createElement("div");
+    navigation.className = "sources-navigation";
+    navigation.hidden = true;
 
+    const previousButton = document.createElement("button");
+    previousButton.type = "button";
+    previousButton.id = "source-prev";
+    previousButton.className = "source-nav-button";
+    previousButton.textContent = "Previous";
+    previousButton.addEventListener("click", () => navigateSource(-1));
+
+    const counter = document.createElement("span");
+    counter.id = "source-counter";
+    counter.className = "source-counter";
+    counter.setAttribute("aria-live", "polite");
+
+    const nextButton = document.createElement("button");
+    nextButton.type = "button";
+    nextButton.id = "source-next";
+    nextButton.className = "source-nav-button";
+    nextButton.textContent = "Next";
+    nextButton.addEventListener("click", () => navigateSource(1));
+
+    navigation.append(previousButton, counter, nextButton);
+
+    const list = document.createElement("div");
     list.id = "chat-sources-list";
     list.className = "sources-list";
     list.hidden = true;
 
-    sourceHistory.forEach(
-        (source, index) => {
+    sourceHistory.forEach((source, index) => {
+        const sourceButton = document.createElement("button");
+        sourceButton.type = "button";
+        sourceButton.className = "source-button";
+        sourceButton.dataset.sourceIndex = String(index);
 
-            const sourceButton =
-                document.createElement("button");
+        const sourceId = index + 1;
+        const start = Number(source.start) || 0;
+        const endValue = Number(source.end);
+        const end = Number.isFinite(endValue) ? endValue : start;
 
-            sourceButton.type = "button";
-            sourceButton.className = "source-button";
+        sourceButton.textContent =
+            "▶  Source " + sourceId + " · " +
+            formatTimestamp(start) + " → " + formatTimestamp(end);
+        sourceButton.title = "Jump to this transcript segment";
+        sourceButton.setAttribute(
+            "aria-label",
+            "Jump to source " + sourceId + ", " +
+            formatTimestamp(start) + " to " + formatTimestamp(end)
+        );
+        sourceButton.setAttribute("aria-pressed", "false");
 
-            const start =
-                Number(source.start) || 0;
+        sourceButton.addEventListener("click", () => {
+            sourceNavigationIndex = index;
+            seekToTimestamp(start);
+            updateSourceNavigationControls();
+        });
 
-            const endValue = Number(source.end);
-            const end = Number.isFinite(endValue)
-                ? endValue
-                : start;
+        list.appendChild(sourceButton);
+    });
 
-            const sourceId = index + 1;
-
-            sourceButton.textContent =
-                "Source " + sourceId + " · " +
-                formatTimestamp(start) + " → " +
-                formatTimestamp(end);
-
-            sourceButton.title =
-                "Jump to this evidence segment";
-
-            sourceButton.setAttribute(
-                "aria-label",
-                "Source " + sourceId + ", " +
-                formatTimestamp(start) + " to " +
-                formatTimestamp(end) + ". Jump to this part of the video."
-            );
-
-            sourceButton.addEventListener(
-                "click",
-                () => {
-                    seekToTimestamp(start);
-                }
-            );
-
-            list.appendChild(sourceButton);
-        }
-    );
-
-    sourcesToggle.addEventListener(
-        "click",
-        () => {
-            const expanded =
-                sourcesToggle.getAttribute("aria-expanded") !== "true";
-
-            sourcesToggle.setAttribute(
+    sourcesToggle.addEventListener("click", () => {
+        const expanded = sourcesToggle.getAttribute("aria-expanded") !== "true";
+        sourcesToggle.setAttribute(
                 "aria-expanded",
                 String(expanded)
             );
+        navigation.hidden = !expanded;
+        list.hidden = !expanded;
 
-            list.hidden = !expanded;
+        if (expanded) {
+            trackSourcePlayback();
+            updateSourceNavigationControls();
         }
-    );
+    });
 
-    sourcesContainer.appendChild(sourcesToggle);
-    sourcesContainer.appendChild(list);
+    sourcesContainer.append(sourcesToggle, navigation, list);
     sourcesContainer.hidden = false;
+    updateSourceNavigationControls();
 }
 
 
@@ -1431,6 +1634,10 @@ function sendMessage() {
 
                         aiMessage.textContent =
                             "The extension could not contact its background service.";
+                        updateHeaderStatus(
+                            "failed",
+                            "The extension could not contact its background service."
+                        );
                     }
 
                     console.error(
@@ -1453,13 +1660,20 @@ function sendMessage() {
                 resetRequestState();
 
                 if (!response || !response.success) {
-                    aiMessage.textContent =
-                        response?.error ||
+                    const errorMessage = response?.error ||
                         "The backend could not process the request.";
+                    aiMessage.textContent = errorMessage;
+
+                    if (/failed to fetch|network|connect|unreachable/i.test(errorMessage)) {
+                        updateHeaderStatus("failed", errorMessage);
+                    } else {
+                        updateHeaderStatus("failed", "The last question could not be completed.");
+                    }
 
                     return;
                 }
 
+                updateHeaderStatus("ready", "Connected and ready to answer.");
                 const answer =
                     typeof response.answer === "string"
                         ? response.answer.trim()
@@ -1505,6 +1719,7 @@ function sendMessage() {
 
             aiMessage.textContent =
                 "The extension could not send the request.";
+            updateHeaderStatus("failed", "The extension could not send the request.");
         }
 
         console.error(
