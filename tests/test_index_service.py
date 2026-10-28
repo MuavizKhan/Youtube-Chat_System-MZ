@@ -7,7 +7,11 @@ from Backend.rag_system.index_jobs import (
     JOB_QUEUED,
     IndexJob,
 )
-from Backend.rag_system.indexing import IndexAction, IndexState
+from Backend.rag_system.indexing import (
+    IndexAction,
+    IndexState,
+    TranscriptAcquisitionError,
+)
 
 
 VIDEO_ID = "Gfr50f6ZBvo"
@@ -310,6 +314,110 @@ def test_status_reports_building_from_durable_job(monkeypatch):
     assert status.state == "building"
     assert status.action == IndexAction.REBUILD.value
     assert status.ready is False
+
+
+@pytest.mark.unit
+def test_failed_transcript_job_exposes_safe_reason(monkeypatch):
+    message = "Captions are disabled for this video. Try a video with captions enabled."
+    job = IndexJob(
+        job_id="job-transcripts-disabled",
+        video_id=VIDEO_ID,
+        status=JOB_FAILED,
+        action=IndexAction.CREATE.value,
+        languages=["en"],
+        attempt=1,
+        error=f"TRANSCRIPTS_DISABLED|{message}",
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.MISSING)
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.state == "failed"
+    assert status.error_code == "TRANSCRIPTS_DISABLED"
+    assert status.error_message == message
+
+
+@pytest.mark.unit
+def test_legacy_failure_record_is_sanitized(monkeypatch):
+    job = IndexJob(
+        job_id="job-legacy-error",
+        video_id=VIDEO_ID,
+        status=JOB_FAILED,
+        action=IndexAction.CREATE.value,
+        languages=["en"],
+        attempt=1,
+        error="private filesystem path and traceback",
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.MISSING)
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.error_code == "INDEX_PREPARATION_FAILED"
+    assert "private filesystem path" not in status.error_message
+    assert status.error_message
+
+
+@pytest.mark.unit
+def test_worker_persists_known_transcript_failure_as_safe_record(monkeypatch):
+    job = IndexJob(
+        job_id="job-worker-failure",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=["en"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+
+    class FailedWorkerStore:
+        def __init__(self):
+            self.failed_error = None
+
+        def claim(self, video_id, worker_id):
+            return job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_failed(self, job_id, worker_id, error):
+            self.failed_error = error
+            return True
+
+    store = FailedWorkerStore()
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "ensure_index_with_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TranscriptAcquisitionError(
+                "NO_SUPPORTED_TRANSCRIPT",
+                "No captions were found in the requested language(s): en, hi, ur, ar.",
+            )
+        ),
+    )
+
+    index_service._run_index_job(VIDEO_ID)
+
+    assert store.failed_error == (
+        "NO_SUPPORTED_TRANSCRIPT|No captions were found in the requested "
+        "language(s): en, hi, ur, ar."
+    )
 
 
 @pytest.mark.unit

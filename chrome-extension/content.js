@@ -926,7 +926,8 @@ function pollIndexStatus(videoId) {
                 updateIndexStatus(
                     videoId,
                     "failed",
-                    "Could not prepare this video. Reopen the chat to retry."
+                    response.error_message ||
+                        "Could not prepare this video. Check that captions are available in a supported language, then retry."
                 );
                 return;
             }

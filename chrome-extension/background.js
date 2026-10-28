@@ -265,10 +265,12 @@ async function handleIndexPreparation(videoId, sendResponse) {
         const data = await parseResponse(response);
 
         if (!response.ok) {
-            throw new Error(
+            const backendMessage = data?.error_message ||
                 extractBackendError(data) ||
-                `Index request failed (HTTP ${response.status}).`
-            );
+                `Index request failed (HTTP ${response.status}).`;
+            const error = new Error(backendMessage);
+            error.errorCode = data?.error_code || null;
+            throw error;
         }
 
         if (!data || typeof data !== "object") {
@@ -280,11 +282,14 @@ async function handleIndexPreparation(videoId, sendResponse) {
             video_id: data.video_id,
             state: data.state,
             action: data.action,
-            ready: data.ready === true
+            ready: data.ready === true,
+            error_code: data.error_code || null,
+            error_message: data.error_message || null
         });
     } catch (error) {
         sendResponse({
             success: false,
+            error_code: error?.errorCode || null,
             error: error?.name === "AbortError"
                 ? "The index service did not respond. Reopen the chat to retry."
                 : (error instanceof Error && error.message
@@ -330,7 +335,9 @@ async function handleIndexStatus(videoId, sendResponse) {
             video_id: data?.video_id || videoId,
             state: data?.state || "unknown",
             action: data?.action || "unknown",
-            ready: data?.ready === true
+            ready: data?.ready === true,
+            error_code: data?.error_code || null,
+            error_message: data?.error_message || null
         });
     } catch (error) {
         sendResponse({

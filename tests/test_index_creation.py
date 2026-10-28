@@ -85,6 +85,34 @@ def test_timestamped_chunks_preserve_caption_segments_across_chunk_boundaries(
     )
     assert segments_by_id[2]["text"] == "Interviewer follows up."
 
+@pytest.mark.parametrize(
+    ("exception_name", "expected_code"),
+    [
+        ("TranscriptsDisabled", "TRANSCRIPTS_DISABLED"),
+        ("NoTranscriptFound", "NO_SUPPORTED_TRANSCRIPT"),
+        ("VideoUnavailable", "VIDEO_UNAVAILABLE"),
+        ("InvalidVideoId", "INVALID_VIDEO_ID"),
+    ],
+)
+def test_get_transcript_maps_known_provider_errors_to_safe_messages(
+    monkeypatch, exception_name, expected_code
+):
+    class FakeProviderError(Exception):
+        pass
+
+    api = MagicMock()
+    api.fetch.side_effect = FakeProviderError("private provider diagnostic")
+    monkeypatch.setattr(indexing, exception_name, FakeProviderError)
+    monkeypatch.setattr(indexing, "YouTubeTranscriptApi", lambda: api)
+
+    with pytest.raises(indexing.TranscriptAcquisitionError) as caught:
+        indexing.get_transcript(VIDEO_ID)
+
+    assert caught.value.code == expected_code
+    assert caught.value.public_message
+    assert "private provider diagnostic" not in str(caught.value)
+
+
 def test_get_transcript_uses_supported_language_priority(monkeypatch):
     api = MagicMock()
     fetched_transcript = MagicMock()
