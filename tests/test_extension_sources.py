@@ -78,6 +78,18 @@ def test_runtime_messages_guard_against_invalidated_extension_context():
     assert content.count("sendExtensionMessage(") >= 4
 
 
+def test_launcher_avatar_does_not_load_cross_origin_extension_asset():
+    content = CONTENT_JS.read_text(encoding="utf-8")
+    start = content.index("function createLauncher()")
+    end = content.index("function handleVideoNavigation()", start)
+    launcher = content[start:end]
+
+    assert "const CHATBOT_AVATAR_DATA_URI =" in content
+    assert 'avatar.src = CHATBOT_AVATAR_DATA_URI;' in launcher
+    assert "chrome.runtime.getURL(\"assets/chatbot-avatar.jpg\")" not in launcher
+    assert "data:image/jpeg;base64," in content
+
+
 def test_chat_timeout_allows_slow_generation_without_changing_index_timeout():
     background = (
         ROOT / "chrome-extension" / "background.js"
