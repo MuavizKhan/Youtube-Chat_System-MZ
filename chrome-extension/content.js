@@ -1352,16 +1352,18 @@ function renderSources() {
         sourceButton.className = "source-button";
         sourceButton.dataset.sourceIndex = String(index);
 
+        const sourceId = index + 1;
         const start = Number(source.start) || 0;
         const endValue = Number(source.end);
         const end = Number.isFinite(endValue) ? endValue : start;
 
         sourceButton.textContent =
-            "▶  " + formatTimestamp(start) + " → " + formatTimestamp(end);
+            "▶  Source " + sourceId + " · " +
+            formatTimestamp(start) + " → " + formatTimestamp(end);
         sourceButton.title = "Jump to this transcript segment";
         sourceButton.setAttribute(
             "aria-label",
-            "Jump to source " + (index + 1) + ", " +
+            "Jump to source " + sourceId + ", " +
             formatTimestamp(start) + " to " + formatTimestamp(end)
         );
         sourceButton.setAttribute("aria-pressed", "false");
@@ -1377,7 +1379,10 @@ function renderSources() {
 
     sourcesToggle.addEventListener("click", () => {
         const expanded = sourcesToggle.getAttribute("aria-expanded") !== "true";
-        sourcesToggle.setAttribute("aria-expanded", String(expanded));
+        sourcesToggle.setAttribute(
+                "aria-expanded",
+                String(expanded)
+            );
         navigation.hidden = !expanded;
         list.hidden = !expanded;
 
