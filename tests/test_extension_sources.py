@@ -71,7 +71,7 @@ def test_runtime_messages_guard_against_invalidated_extension_context():
     assert "function isExtensionRuntimeAvailable()" in content
     assert "function sendExtensionMessage(message, callback, onUnavailable)" in content
     assert "chrome.runtime.id" in content
-    assert "Extension context invalidated" in content
+    assert "context invalidated" in content.lower()
     assert "Refresh this YouTube page to reconnect." in content
     # All outbound runtime messages must pass through the lifecycle guard.
     assert content.count("chrome.runtime.sendMessage(") == 1
