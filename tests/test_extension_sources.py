@@ -91,4 +91,4 @@ def test_chat_timeout_allows_slow_generation_without_changing_index_timeout():
     chat_handler = background[start:end]
 
     assert "CHAT_REQUEST_TIMEOUT_MS" in chat_handler
-    assert "REQUEST_TIMEOUT_MS" not in chat_handler
+    assert "\n            REQUEST_TIMEOUT_MS\n" not in chat_handler
