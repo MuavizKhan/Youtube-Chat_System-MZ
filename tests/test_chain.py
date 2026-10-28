@@ -931,6 +931,48 @@ def test_groq_generation_respects_provider_retry_after(monkeypatch):
     assert sleeps == [30.0]
 
 
+
+@pytest.mark.unit
+def test_groq_generation_bounds_cumulative_retry_after_wait(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+    sleeps = []
+
+    monkeypatch.setattr(
+        chain.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    class RetryAfterError(RuntimeError):
+        def __init__(self):
+            super().__init__("429 rate limit reached")
+            self.response = SimpleNamespace(
+                status_code=429,
+                headers={"retry-after": "30"},
+            )
+
+    class AlwaysLimitedCompletions:
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            self.call_count += 1
+            raise RetryAfterError()
+
+    completions = AlwaysLimitedCompletions()
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    with pytest.raises(chain.ProviderRateLimitError, match="rate limit was reached"):
+        chain.generate_with_groq(fake, prompt)
+
+    # The first 30-second Retry-After is honored; a repeated 30-second wait is
+    # rejected instead of making the request wait for another full window.
+    assert completions.call_count == 2
+    assert sleeps == [30.0]
+
+
 @pytest.mark.unit
 def test_groq_daily_token_quota_is_detected_without_classifying_burst_limits():
     daily_quota_error = RuntimeError(
@@ -2060,13 +2102,20 @@ def test_create_llm_client_requires_huggingface_token(monkeypatch):
 def test_create_llm_client_selects_groq(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    captured = {}
+
+    def fake_create_groq_client(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
     monkeypatch.setattr(
         chain,
         "create_groq_client",
-        lambda: sentinel,
+        fake_create_groq_client,
     )
 
     assert chain.create_llm_client() is sentinel
+    assert captured == {"max_retries": 0}
 
 
 @pytest.mark.unit
