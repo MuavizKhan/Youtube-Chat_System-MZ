@@ -79,6 +79,34 @@ let trackedSourceVideo = null;
 const EXTENSION_REFRESH_MESSAGE =
     "The extension context is no longer active. Refresh this YouTube page to reconnect.";
 
+const CHATBOT_AVATAR_DATA_URI =
+    "data:image/jpeg;base64," +
+    [
+        "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"
+    ].join("");
+
 // Extension reloads invalidate content scripts already running in YouTube tabs.
 // Check the runtime before messaging and handle a synchronous invalidation
 // without repeatedly logging an exception or leaving index polling running.
@@ -561,7 +589,10 @@ function createLauncher() {
 
     const avatar = document.createElement("img");
     avatar.className = "chatbot-avatar";
-    avatar.src = chrome.runtime.getURL("assets/chatbot-avatar.jpg");
+    // Keep the launcher icon self-contained. Loading a chrome-extension://
+    // image from a YouTube document can be rejected by the page's frame/origin
+    // policy even when the asset is declared web-accessible.
+    avatar.src = CHATBOT_AVATAR_DATA_URI;
     avatar.alt = "";
     avatar.draggable = false;
     avatar.setAttribute("aria-hidden", "true");
