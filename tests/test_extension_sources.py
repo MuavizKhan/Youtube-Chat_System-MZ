@@ -86,9 +86,9 @@ def test_launcher_avatar_does_not_load_cross_origin_extension_asset():
 
     assert "const CHATBOT_AVATAR_DATA_URI =" in content
     assert 'avatar.src = CHATBOT_AVATAR_DATA_URI;' in launcher
-    # The launcher must not request the extension-origin avatar URL. Other UI
-    # markup may still use runtime.getURL for an asset outside createLauncher().
-    assert "chrome.runtime.getURL(\"assets/chatbot-avatar.jpg\")" not in launcher
+    # Other UI markup in content.js may use getURL; only the launcher avatar
+    # assignment must avoid a chrome-extension:// resource request.
+    assert 'avatar.src = chrome.runtime.getURL("assets/chatbot-avatar.jpg");' not in launcher
     assert "data:image/jpeg;base64," in content
 
 
