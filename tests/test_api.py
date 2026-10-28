@@ -90,6 +90,29 @@ def test_chat_returns_502_when_index_lifecycle_fails(
     assert "index creation failed" not in response.text
 
 
+
+@pytest.mark.api
+def test_chat_returns_retryable_429_for_provider_rate_limit(client, monkeypatch):
+    def rate_limited(**kwargs):
+        raise app_module.ProviderRateLimitError(30.0)
+
+    monkeypatch.setattr(app_module, "answer_question", rate_limited)
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "What happened?",
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "30"
+    assert response.json()["error"] == "ai_provider_rate_limited"
+    assert "30 seconds" in response.json()["message"]
+    assert "ProviderRateLimitError" not in response.text
+
+
 @pytest.fixture
 def client():
     with TestClient(app_module.app,raise_server_exceptions=False) as c:

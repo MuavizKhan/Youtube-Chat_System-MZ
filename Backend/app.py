@@ -35,7 +35,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Literal
 
-from Backend.rag_system.chain import answer_question
+from Backend.rag_system.chain import ProviderRateLimitError, answer_question
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.index_service import (
     IndexLanguageConflictError,
@@ -952,6 +952,30 @@ def chat(
                     "The request contains an invalid value."
                 ),
             },
+        ) from error
+
+    except ProviderRateLimitError as error:
+        retry_after_seconds = error.retry_after_seconds
+        if retry_after_seconds is None:
+            retry_after_seconds = 5.0
+        retry_after = max(1, int(retry_after_seconds + 0.999))
+
+        logger.warning(
+            "AI provider rate limited request_id=%s video_id=%s retry_after_seconds=%s",
+            request.state.request_id,
+            canonical_video_id,
+            retry_after,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "ai_provider_rate_limited",
+                "message": (
+                    "The AI provider is temporarily rate-limited. "
+                    f"Please wait about {retry_after} seconds, then retry."
+                ),
+            },
+            headers={"Retry-After": str(retry_after)},
         ) from error
 
     except RuntimeError as error:

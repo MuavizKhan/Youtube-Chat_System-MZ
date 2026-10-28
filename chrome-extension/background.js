@@ -31,6 +31,11 @@ const INDEX_STATUS_URL =
 const REQUEST_TIMEOUT_MS =
     15000;
 
+// Chat may include retrieval plus several model calls. Keep index requests
+// on the shorter timeout, but allow a normal slow generation to finish.
+const CHAT_REQUEST_TIMEOUT_MS =
+    90000;
+
 
 // ============================================================
 // 1. EXTENSION ACTION → TOGGLE CHAT
@@ -374,7 +379,7 @@ async function handleChatRequest(
             () => {
                 controller.abort();
             },
-            REQUEST_TIMEOUT_MS
+            CHAT_REQUEST_TIMEOUT_MS
         );
 
     try {

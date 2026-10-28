@@ -62,3 +62,33 @@ def test_assistant_lists_use_compact_vertical_spacing():
     assert "margin: 0.35em 0 0.4em;" in css
     assert ".chat-message.assistant li {" in css
     assert "margin: 0 0 0.2em;" in css
+
+
+
+def test_runtime_messages_guard_against_invalidated_extension_context():
+    content = CONTENT_JS.read_text(encoding="utf-8")
+
+    assert "function isExtensionRuntimeAvailable()" in content
+    assert "function sendExtensionMessage(message, callback, onUnavailable)" in content
+    assert "chrome.runtime.id" in content
+    assert "context invalidated" in content.lower()
+    assert "Refresh this YouTube page to reconnect." in content
+    # All outbound runtime messages must pass through the lifecycle guard.
+    assert content.count("chrome.runtime.sendMessage(") == 1
+    assert content.count("sendExtensionMessage(") >= 4
+
+
+def test_chat_timeout_allows_slow_generation_without_changing_index_timeout():
+    background = (
+        ROOT / "chrome-extension" / "background.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const REQUEST_TIMEOUT_MS =\n    15000;" in background
+    assert "const CHAT_REQUEST_TIMEOUT_MS =\n    90000;" in background
+
+    start = background.index("async function handleChatRequest(")
+    end = background.index("// 4.", start)
+    chat_handler = background[start:end]
+
+    assert "CHAT_REQUEST_TIMEOUT_MS" in chat_handler
+    assert "\n            REQUEST_TIMEOUT_MS\n" not in chat_handler
