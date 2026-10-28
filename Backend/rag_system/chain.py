@@ -5607,7 +5607,6 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # --------------------------------------------------------
     # Disable hidden SDK retries for query planning as well as generation.
     # This keeps provider waits within the application retry budget.
     # --------------------------------------------------------
