@@ -106,6 +106,40 @@ from .index_service import load_ready_index
 logger = logging.getLogger(__name__)
 
 
+class ProviderRateLimitError(RuntimeError):
+    """Raised when retrying a provider throttle would exceed the inline wait budget."""
+
+    def __init__(self, retry_after_seconds: float | None = None):
+        if (
+            isinstance(retry_after_seconds, (int, float))
+            and not isinstance(retry_after_seconds, bool)
+            and math.isfinite(float(retry_after_seconds))
+            and retry_after_seconds >= 0
+        ):
+            self.retry_after_seconds = float(retry_after_seconds)
+        else:
+            self.retry_after_seconds = None
+
+        if self.retry_after_seconds is None:
+            message = (
+                "Groq rate limit was reached after the bounded retry budget. "
+                "Retry after the current rate-limit window."
+            )
+        else:
+            wait_seconds = max(1, math.ceil(self.retry_after_seconds))
+            message = (
+                "Groq rate limit was reached after the bounded retry budget. "
+                f"Retry after about {wait_seconds} seconds."
+            )
+        super().__init__(message)
+
+
+# Bound total sleeping on repeated Groq 429 responses for each model call. A
+# single Retry-After interval (including 30 seconds) is honored, but a second
+# long wait is returned to the caller instead of stranding chat for another minute.
+MAX_GROQ_RETRY_WAIT_SECONDS = 30.0
+
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -3686,7 +3720,7 @@ def create_llm_client() -> InferenceClient | Groq:
     """Create the configured LLM client used by planning and generation."""
 
     if LLM_PROVIDER == "groq":
-        return create_groq_client()
+        return create_groq_client(max_retries=0)
 
     return create_huggingface_client()
 
@@ -4202,11 +4236,10 @@ def generate_with_groq(
     """Send the LangChain prompt to Groq and return the visible answer."""
 
     messages = prompt_to_messages(prompt_value)
+    total_retry_wait_seconds = 0.0
 
     for attempt in range(GROQ_MAX_RETRIES + 1):
-
         try:
-
             response = (
                 client
                 .chat
@@ -4222,12 +4255,10 @@ def generate_with_groq(
             )
 
         except Exception as error:
-
             error_text = str(error).lower()
 
             # A daily token quota is a hard provider ceiling, not a transient
-            # burst limit. Retrying the same request cannot help and needlessly
-            # repeats calls during an exhausted quota window.
+            # burst limit. Retrying the same request cannot help.
             if _is_daily_token_quota_exhausted(error):
                 logger.warning(
                     "Groq daily token quota exhausted; skipping retries "
@@ -4252,33 +4283,67 @@ def generate_with_groq(
                     "Check API key permissions and the selected model."
                 ) from error
 
+            retry_after = _provider_retry_after_seconds(error)
+            is_rate_limit = (
+                _provider_error_status(error) == 429
+                or "429" in error_text
+                or "rate limit" in error_text
+                or "too many requests" in error_text
+            )
+
             if _is_retryable_provider_error(error):
                 if attempt < GROQ_MAX_RETRIES:
                     configured_delay = GROQ_RETRY_DELAY_SECONDS * (attempt + 1)
-                    retry_after = _provider_retry_after_seconds(error)
                     retry_delay = max(
                         configured_delay,
                         retry_after if retry_after is not None else 0.0,
                     )
+
+                    if (
+                        is_rate_limit
+                        and total_retry_wait_seconds + retry_delay
+                        > MAX_GROQ_RETRY_WAIT_SECONDS
+                    ):
+                        logger.warning(
+                            "Groq retry wait budget exhausted; returning a rate-limit response "
+                            "attempt=%s max_attempts=%s status_code=%s "
+                            "retry_after_seconds=%s waited_seconds=%.2f",
+                            attempt + 1,
+                            GROQ_MAX_RETRIES + 1,
+                            _provider_error_status(error),
+                            retry_after,
+                            total_retry_wait_seconds,
+                        )
+                        raise ProviderRateLimitError(
+                            retry_after_seconds=retry_after or retry_delay
+                        ) from error
+
+                    if is_rate_limit:
+                        total_retry_wait_seconds += retry_delay
+
                     logger.warning(
                         "Transient Groq generation failure; retrying "
                         "attempt=%s max_attempts=%s status_code=%s error_type=%s "
-                        "retry_after_seconds=%s retry_delay_seconds=%.2f",
+                        "retry_after_seconds=%s retry_delay_seconds=%.2f "
+                        "cumulative_retry_wait_seconds=%.2f",
                         attempt + 1,
                         GROQ_MAX_RETRIES + 1,
                         _provider_error_status(error),
                         type(error).__name__,
                         retry_after,
                         retry_delay,
+                        total_retry_wait_seconds,
                     )
                     time.sleep(retry_delay)
                     continue
 
-                if "429" in error_text or "rate limit" in error_text or "too many requests" in error_text:
-                    raise RuntimeError(
-                        "Groq rate limit was reached after "
-                        f"{GROQ_MAX_RETRIES + 1} attempts. Retry after the "
-                        "current rate-limit window."
+                if is_rate_limit:
+                    raise ProviderRateLimitError(
+                        retry_after_seconds=(
+                            retry_after
+                            if retry_after is not None
+                            else max(1.0, GROQ_RETRY_DELAY_SECONDS)
+                        )
                     ) from error
 
             raise RuntimeError(
@@ -5542,15 +5607,12 @@ def answer_question(
 
 
     # --------------------------------------------------------
-    # Keep the query-understanding client separate from generation:
-    # query planning retains SDK retry defaults, while generation disables
-    # SDK retries and uses the bounded, Retry-After-aware app retry policy.
+    # --------------------------------------------------------
+    # Disable hidden SDK retries for query planning as well as generation.
+    # This keeps provider waits within the application retry budget.
     # --------------------------------------------------------
 
     llm_client = create_llm_client()
-    # Query planning retains the SDK's default retry behavior. The generation
-    # client disables SDK retries because generate_with_groq implements the
-    # bounded retry policy and must fail immediately on daily TPD exhaustion.
     generation_client = (
         create_groq_client(max_retries=0)
         if LLM_PROVIDER == "groq"
