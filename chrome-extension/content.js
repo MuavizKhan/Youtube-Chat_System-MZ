@@ -667,7 +667,7 @@ function createSidebar() {
                 <div class="chat-title">
                     <span class="chat-title-avatar">
                         <img
-                            src="${chrome.runtime.getURL("assets/chatbot-avatar.jpg")}"
+                            src="${CHATBOT_AVATAR_DATA_URI}"
                             alt=""
                             draggable="false"
                             aria-hidden="true"
