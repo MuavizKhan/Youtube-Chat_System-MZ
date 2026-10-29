@@ -78,17 +78,21 @@ def test_runtime_messages_guard_against_invalidated_extension_context():
     assert content.count("sendExtensionMessage(") >= 4
 
 
-def test_launcher_avatar_does_not_load_cross_origin_extension_asset():
+def test_launcher_and_sidebar_avatars_do_not_load_cross_origin_extension_asset():
     content = CONTENT_JS.read_text(encoding="utf-8")
-    start = content.index("function createLauncher()")
-    end = content.index("function handleVideoNavigation()", start)
-    launcher = content[start:end]
+    launcher_start = content.index("function createLauncher()")
+    launcher_end = content.index("// 5. CREATE SIDEBAR", launcher_start)
+    launcher = content[launcher_start:launcher_end]
+
+    sidebar_start = content.index("function createSidebar()")
+    sidebar_end = content.index("// 6.", sidebar_start)
+    sidebar = content[sidebar_start:sidebar_end]
 
     assert "const CHATBOT_AVATAR_DATA_URI =" in content
     assert 'avatar.src = CHATBOT_AVATAR_DATA_URI;' in launcher
-    # Other UI markup in content.js may use getURL; only the launcher avatar
-    # assignment must avoid a chrome-extension:// resource request.
-    assert 'avatar.src = chrome.runtime.getURL("assets/chatbot-avatar.jpg");' not in launcher
+    assert 'src="${CHATBOT_AVATAR_DATA_URI}"' in sidebar
+    # Neither UI surface should request the image from the extension origin.
+    assert 'chrome.runtime.getURL("assets/chatbot-avatar.jpg")' not in content
     assert "data:image/jpeg;base64," in content
 
 
