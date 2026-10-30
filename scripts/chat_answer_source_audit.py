@@ -227,7 +227,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "Q01", "MdeQMVBuGgY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "airline_identity", "pattern": r"\bkingfisher\b|\bairline\b"},),
+        answer_requirements=({"name": "airline_differentiator", "pattern": r"\bsingle.class\b|\blow.cost\b|\bpremium\b|\binflight entertainment\b|\bmeals\b|\bgood food\b"},),
     ),
     _make_audit_case(
         "Q02", "MdeQMVBuGgY",
@@ -294,7 +294,10 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "EW04", "pOnl-Zndcls",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "email_structure", "pattern": r"\bemail\b"},),
+        answer_requirements=(
+            {"name": "email_structure", "pattern": r"\bemail\b"},
+            {"name": "email_outcome", "pattern": r"\brepl(?:y|ies)\b|\bresponse\b"},
+        ),
     ),
     _make_audit_case(
         "AI02", "A-JBaNvv3Tk",
@@ -329,7 +332,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI06", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "named_movement", "pattern": r"बिजोलिया|बिजोलिया"},),
+        answer_requirements=({"name": "named_movement", "pattern": r"बिजोलिया|पहला बड़ा किसान आंदोलन"},),
     ),
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
