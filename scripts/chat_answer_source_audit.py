@@ -14,8 +14,10 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import math
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -30,6 +32,10 @@ from Backend.rag_system.benchmark_registry import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = PROJECT_ROOT / "evaluation_reports" / "chat_answer_source_audit.json"
 REPORT_ID = "chat_answer_source_audit_v1"
+
+AUDIT_RATE_LIMIT_RETRIES = 2
+AUDIT_RATE_LIMIT_BUFFER_SECONDS = 1.0
+AUDIT_RATE_LIMIT_FALLBACK_WAIT_SECONDS = 30.0
 
 # Resolve live audit questions from the canonical video-scoped registry so
 # prompts cannot silently drift from retrieval acceptance annotations.
@@ -1290,28 +1296,63 @@ def _post_chat(
         {"video_id": case["video_id"], "question": case["question"]},
         ensure_ascii=False,
     ).encode("utf-8")
-    request = Request(
-        f"{base_url.rstrip('/')}/chat",
-        data=request_body,
-        headers={"Content-Type": "application/json; charset=utf-8", "Accept": "application/json"},
-        method="POST",
-    )
 
     status_code: int | None = None
     content_type: str | None = None
     raw_body = b""
     transport_error = None
-    try:
-        with urlopen(request, timeout=timeout_seconds) as result:
-            status_code = result.status
-            content_type = result.headers.get("Content-Type")
-            raw_body = result.read()
-    except HTTPError as error:
-        status_code = error.code
-        content_type = error.headers.get("Content-Type") if error.headers else None
-        raw_body = error.read()
-    except (URLError, TimeoutError, OSError) as error:
-        transport_error = str(error)
+    request_attempts = 0
+    rate_limit_retry_wait_seconds = 0.0
+
+    for attempt in range(AUDIT_RATE_LIMIT_RETRIES + 1):
+        request_attempts += 1
+        request = Request(
+            f"{base_url.rstrip('/')}/chat",
+            data=request_body,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        response_headers = None
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                status_code = response.status
+                content_type = response.headers.get("Content-Type")
+                response_headers = response.headers
+                raw_body = response.read()
+        except HTTPError as error:
+            status_code = error.code
+            response_headers = error.headers
+            content_type = (
+                error.headers.get("Content-Type") if error.headers else None
+            )
+            raw_body = error.read()
+        except (URLError, TimeoutError, OSError) as error:
+            transport_error = str(error)
+            break
+
+        if status_code != 429 or attempt >= AUDIT_RATE_LIMIT_RETRIES:
+            break
+
+        retry_after: float | None = None
+        if response_headers is not None:
+            try:
+                raw_retry_after = response_headers.get("Retry-After")
+                if raw_retry_after is not None:
+                    candidate = float(raw_retry_after)
+                    if math.isfinite(candidate) and candidate >= 0:
+                        retry_after = candidate
+            except (AttributeError, TypeError, ValueError):
+                retry_after = None
+
+        if retry_after is None:
+            retry_after = AUDIT_RATE_LIMIT_FALLBACK_WAIT_SECONDS
+
+        wait_seconds = retry_after + AUDIT_RATE_LIMIT_BUFFER_SECONDS
+        rate_limit_retry_wait_seconds += wait_seconds
+        time.sleep(wait_seconds)
 
     payload: dict[str, Any] | None = None
     parse_error = None
@@ -1338,6 +1379,9 @@ def _post_chat(
         "response_body_sha256": hashlib.sha256(raw_body).hexdigest() if raw_body else None,
         "transport_error": transport_error,
         "response_parse_error": parse_error,
+        "request_attempts": request_attempts,
+        "rate_limit_retry_count": max(0, request_attempts - 1),
+        "rate_limit_retry_wait_seconds": round(rate_limit_retry_wait_seconds, 3),
         "response": payload,
     }
     if isinstance(payload, dict) and isinstance(payload.get("answer"), str):
