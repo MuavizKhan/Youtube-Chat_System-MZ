@@ -877,6 +877,32 @@ def build_index_metadata(
                     "and non-empty text."
                 )
 
+    # Overlapping text chunks intentionally repeat caption segments. Count and
+    # summarize unique caption records so diagnostics describe the source
+    # transcript rather than the number of chunk appearances.
+    unique_segments: dict[int, dict] = {}
+    for chunk in chunks:
+        for segment in chunk.metadata["transcript_segments"]:
+            segment_id = segment["segment_id"]
+            existing = unique_segments.get(segment_id)
+            if existing is not None and existing != segment:
+                raise ValueError(
+                    "Cannot build index metadata because duplicate transcript "
+                    "segment IDs contain conflicting records."
+                )
+            unique_segments[segment_id] = segment
+
+    ordered_segments = [
+        unique_segments[key]
+        for key in sorted(unique_segments)
+    ]
+    timeline_start = min(float(segment["start"]) for segment in ordered_segments)
+    timeline_end = max(float(segment["end"]) for segment in ordered_segments)
+    transcript_character_count = sum(
+        len(segment["text"])
+        for segment in ordered_segments
+    )
+
     return {
         "metadata_version": INDEX_METADATA_VERSION,
         "transcript_segment_schema_version": TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
@@ -890,6 +916,11 @@ def build_index_metadata(
         "transcript_generated": bool(
             metadata["is_generated"]
         ),
+        "transcript_segment_count": len(ordered_segments),
+        "transcript_character_count": transcript_character_count,
+        "transcript_timeline_start_seconds": timeline_start,
+        "transcript_timeline_end_seconds": timeline_end,
+        "transcript_timeline_span_seconds": max(0.0, timeline_end - timeline_start),
         "requested_languages": normalize_transcript_languages(
             requested_languages
         ),
@@ -977,6 +1008,52 @@ def _validate_vector_store_contents(
 
     if metadata["metadata_version"] != INDEX_METADATA_VERSION:
         return False, False
+
+    # Transcript statistics are additive. Legacy indexes without these fields
+    # remain valid; a partially written or malformed statistics block is not.
+    transcript_stat_fields = {
+        "transcript_segment_count",
+        "transcript_character_count",
+        "transcript_timeline_start_seconds",
+        "transcript_timeline_end_seconds",
+        "transcript_timeline_span_seconds",
+    }
+    present_transcript_stat_fields = transcript_stat_fields & metadata.keys()
+    if present_transcript_stat_fields:
+        if present_transcript_stat_fields != transcript_stat_fields:
+            return False, False
+        if (
+            type(metadata["transcript_segment_count"]) is not int
+            or metadata["transcript_segment_count"] <= 0
+            or type(metadata["transcript_character_count"]) is not int
+            or metadata["transcript_character_count"] <= 0
+        ):
+            return False, False
+        timeline_values = (
+            metadata["transcript_timeline_start_seconds"],
+            metadata["transcript_timeline_end_seconds"],
+            metadata["transcript_timeline_span_seconds"],
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0
+            for value in timeline_values
+        ):
+            return False, False
+        if (
+            metadata["transcript_timeline_end_seconds"]
+            < metadata["transcript_timeline_start_seconds"]
+            or not math.isclose(
+                float(metadata["transcript_timeline_span_seconds"]),
+                float(metadata["transcript_timeline_end_seconds"])
+                - float(metadata["transcript_timeline_start_seconds"]),
+                rel_tol=1e-9,
+                abs_tol=1e-6,
+            )
+        ):
+            return False, False
 
     # Additive field: legacy indexes without this key remain loadable, but
     # explicit language-selection requests will rebuild them because their
