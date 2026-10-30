@@ -1,3 +1,7 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from scripts.phase11_0_unseen_video_smoke import (
@@ -76,3 +80,22 @@ def test_validate_case_accepts_unseen_video_with_explicit_language_and_variant()
 def test_validate_case_rejects_malformed_smoke_manifest_entries(case):
     with pytest.raises(ValueError):
         _validate_case(case)
+
+
+
+def test_smoke_runner_supports_documented_direct_script_invocation():
+    project_root = Path(__file__).resolve().parents[1]
+    runner = project_root / "scripts" / "phase11_0_unseen_video_smoke.py"
+
+    completed = subprocess.run(
+        [sys.executable, str(runner), "--help"],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--manifest" in completed.stdout
+    assert "--max-wait-seconds" in completed.stdout
