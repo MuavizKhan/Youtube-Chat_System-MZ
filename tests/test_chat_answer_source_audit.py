@@ -13,6 +13,8 @@ from scripts.chat_answer_source_audit import (
     PHASE11_0_AUDIT_CASES,
     analyze_response,
     build_coverage_manifest,
+    _answer_timestamp_ranges,
+    _timestamp_range_covered_by_sources,
     decode_json_response,
     select_audit_cases,
     _answer_quality_checks,
@@ -439,6 +441,53 @@ def test_post_chat_retries_rate_limit_after_retry_after_and_records_wait(monkeyp
     assert result["rate_limit_retry_wait_seconds"] == 3.0
     assert sleeps == [3.0]
     assert len(calls) == 2
+
+
+def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
+    )
+    answer = (
+        "Vijay Mallya discusses United\u202fBreweries and "
+        "United\u202fSpirits, alongside Kingfisher Airlines."
+    )
+
+    checks = _answer_quality_checks(case, answer)
+    failed = [check["name"] for check in checks if not check["passed"]]
+
+    assert failed == []
+
+
+def test_answer_timestamp_parser_finds_inline_hindi_ranges_without_footer():
+    answer = (
+        "पहला उल्लेख 00:02–00:06 के आसपास है और दूसरा "
+        "16:30–16:37 के आसपास है।"
+    )
+
+    assert _answer_timestamp_ranges(answer) == [
+        "00:02–00:06",
+        "16:30–16:37",
+    ]
+
+
+def test_timestamp_range_must_be_fully_covered_by_returned_source_intervals():
+    hi_sources = [
+        {"display_range": "00:02–01:18"},
+        {"display_range": "15:49–17:08"},
+    ]
+    kingfisher_sources = [
+        {"display_range": "01:10:38–01:12:04"},
+        {"display_range": "01:11:54–01:13:23"},
+    ]
+
+    assert _timestamp_range_covered_by_sources("00:02–00:06", hi_sources)
+    assert _timestamp_range_covered_by_sources("16:30–16:37", hi_sources)
+    assert _timestamp_range_covered_by_sources(
+        "01:10:38–01:13:23", kingfisher_sources
+    )
+    assert not _timestamp_range_covered_by_sources(
+        "01:10:38–01:14:34", kingfisher_sources
+    )
 
 
 def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_path, monkeypatch):
