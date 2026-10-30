@@ -70,6 +70,62 @@ def test_missing_index_returns_missing(
     )
 
 
+def test_valid_legacy_index_without_transcript_statistics_remains_valid(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "Backend.rag_system.indexing.VECTOR_STORE_ROOT",
+        tmp_path,
+    )
+
+    create_index("legacyvideo1", tmp_path)
+
+    assert get_index_state("legacyvideo1") is IndexState.VALID
+
+
+def test_partial_transcript_statistics_make_index_invalid(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "Backend.rag_system.indexing.VECTOR_STORE_ROOT",
+        tmp_path,
+    )
+
+    path = create_index("statsvideo01", tmp_path)
+    metadata_path = path / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["transcript_segment_count"] = 10
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    assert get_index_state("statsvideo01") is IndexState.INVALID
+
+
+def test_inconsistent_transcript_timeline_statistics_make_index_invalid(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "Backend.rag_system.indexing.VECTOR_STORE_ROOT",
+        tmp_path,
+    )
+
+    path = create_index("statsvideo02", tmp_path)
+    metadata_path = path / "metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update({
+        "transcript_segment_count": 2,
+        "transcript_character_count": 20,
+        "transcript_timeline_start_seconds": 0.0,
+        "transcript_timeline_end_seconds": 20.0,
+        "transcript_timeline_span_seconds": 10.0,
+    })
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    assert get_index_state("statsvideo02") is IndexState.INVALID
+
+
 def test_valid_index_returns_valid(
     tmp_path,
     monkeypatch,
