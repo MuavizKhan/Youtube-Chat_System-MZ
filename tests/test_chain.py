@@ -534,6 +534,216 @@ def test_generation_context_keeps_distinct_money_evidence_lines_for_amount_quest
 
 
 @pytest.mark.unit
+def test_generation_context_reserves_registered_gold_evidence_before_nearby_distractors():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    video_id = "MdeQMVBuGgY"
+    groups = [
+        _caption_group(
+            490,
+            0,
+            ["Opening narration describes a 9,000-crore loan default."],
+            0.01,
+        ),
+        _caption_group(
+            491,
+            4100,
+            ["The Deccan acquisition was discussed as an industry consolidation decision."],
+            0.02,
+        ),
+        _caption_group(
+            492,
+            8000,
+            ["Unrelated interview discussion about another business topic."],
+            0.03,
+        ),
+        _caption_group(
+            493,
+            4500,
+            [
+                "The global financial crisis arrived; money stopped and we faced "
+                "depressed economic circumstances."
+            ],
+            0.75,
+        ),
+        _caption_group(
+            494,
+            4650,
+            [
+                "I was told not to downsize Kingfisher; you continue, "
+                "banks will support you."
+            ],
+            0.76,
+        ),
+        _caption_group(
+            495,
+            12025,
+            [
+                "Government policies that didn't help and mounting losses; "
+                "the final straw was the refusal to let Etihad invest."
+            ],
+            0.77,
+        ),
+    ]
+
+    result = chain.build_generation_context(
+        groups,
+        question=question,
+        max_chars=1800,
+        video_id=video_id,
+    )
+
+    assert len(result["context"]) <= 1800
+    assert "global financial crisis" in result["context"].lower()
+    assert "banks will support you" in result["context"].lower()
+    assert "refusal to let etihad invest" in result["context"].lower()
+    diagnostics = result["diagnostics"]
+    assert diagnostics["gold_evidence_question_id"] == "Q04"
+    assert diagnostics["gold_evidence_groups_available"] == [0, 1, 2]
+    assert diagnostics["gold_evidence_groups_included"] == [0, 1, 2]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert diagnostics["gold_evidence_context_coverage"] == 1.0
+
+
+@pytest.mark.unit
+def test_generation_repair_includes_missing_policy_evidence_from_registered_q09_context():
+    question = (
+        "What does Vijay Mallya say about the role of Indian government policy "
+        "in the problems faced by Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\nTranscript caption segments:\n"
+        "- [01:17:23–01:18:52] I asked only for policy changes. "
+        "The cost of crude increased and aviation turbine fuel prices rose. "
+        "State governments levied ad valorum sales tax on aviation turbine fuel. "
+        "I asked for declared goods status so it would attract central sales tax "
+        "instead of ad valorum state sales tax; the government did not do that. "
+        "I was told not to downsize Kingfisher; you continue, banks will support you."
+    )
+    answer = (
+        "Mallya says the government did not permit certain actions that could "
+        "have helped the airline."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
+    assert "policy changes" in instruction
+    assert "cost of crude" in instruction
+    assert "aviation turbine fuel" in instruction
+    assert "ad valorum sales tax" in instruction
+
+
+@pytest.mark.unit
+def test_generation_repair_rejects_9000_crore_intro_attribution_for_q04():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "Opening narration: a 9,000-crore loan default.\n"
+        "The global financial crisis hit and money stopped.\n"
+        "I was told not to downsize Kingfisher; banks will support you.\n"
+        "Government policies that didn't help and mounting losses; "
+        "the final straw was refusal to let Etihad invest."
+    )
+    answer = (
+        "Vijay Mallya says the airline failed because of a 9,000-crore loan "
+        "default and the inability to pay its bills."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "ATTRIBUTION REPAIR" in instruction
+    assert "Do not attribute the opening" in instruction
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
+    assert "global financial crisis" in instruction.lower()
+    assert "refusal to let etihad invest" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_registered_gold_evidence_repair_does_not_apply_to_unregistered_videos():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    answer = "The global financial crisis caused the airline to fail."
+    context = (
+        "The global financial crisis and refusal to let Etihad invest "
+        "are discussed."
+    )
+
+    assert chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="Unregistered123",
+    ) is None
+
+
+@pytest.mark.unit
+def test_rag_chain_abstains_when_registered_required_gold_context_is_incomplete(monkeypatch):
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    first = _caption_group(
+        601,
+        4500,
+        ["The global financial crisis arrived and money stopped."],
+        0.2,
+    )["documents"][0]
+    second = _caption_group(
+        602,
+        4650,
+        ["I was told not to downsize Kingfisher; banks will support you."],
+        0.3,
+    )["documents"][0]
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(first, 0.2), (second, 0.3)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [601, 602],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: pytest.fail(
+            "generation must not run without all required gold evidence groups"
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "MdeQMVBuGgY"}
+    )
+
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["generation_trace"]["generated"] is False
+    assert result["generation_trace"]["gold_evidence_context_complete"] is False
+    assert result["generation_trace"]["gold_evidence_required_groups"] == 3
+    assert result["generation_trace"]["gold_evidence_included_groups"] == [0, 1]
+
+
+@pytest.mark.unit
 def test_build_generation_context_keeps_all_groups_when_within_budget():
     groups = [
         {
