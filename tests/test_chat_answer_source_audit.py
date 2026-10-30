@@ -1064,3 +1064,55 @@ def test_phase11_0_native_language_cases_require_the_question_language():
     assert cases["AR06"]["answer_language"] == "ar"
     assert cases["AR07"]["answer_language"] == "ar"
 
+def test_phase11_0_full_registry_gate_requires_all_43_cases(monkeypatch, tmp_path):
+    def successful_fake_chat(_base_url, case, _timeout_seconds):
+        return {
+            "case_id": case["id"],
+            "status": "success",
+            "audit": {
+                "effective_retrieval_config": {"top_k": 4},
+                "quality": {"passed": True, "failed_checks": []},
+            },
+        }
+
+    monkeypatch.setattr(audit_module, "_post_chat", successful_fake_chat)
+
+    full_report = audit_module.run_audit(
+        base_url="http://unused.invalid",
+        output_path=tmp_path / "phase11_0_full.json",
+        timeout_seconds=1.0,
+        cases=PHASE11_0_AUDIT_CASES,
+        report_id="phase11_0_test_full",
+        expected_configuration={"top_k": 4},
+        require_full_pilot_coverage=True,
+        require_full_registry_coverage=True,
+    )
+
+    assert full_report["cases_attempted"] == 43
+    assert full_report["cases_succeeded"] == 43
+    assert full_report["full_registry_coverage_passed"] is True
+    assert full_report["quality_passed"] is True
+
+    subset_report = audit_module.run_audit(
+        base_url="http://unused.invalid",
+        output_path=tmp_path / "phase11_0_subset.json",
+        timeout_seconds=1.0,
+        cases=PHASE11_0_ADDITIONAL_CASES,
+        report_id="phase11_0_test_incomplete",
+        expected_configuration={"top_k": 4},
+        require_full_pilot_coverage=True,
+        require_full_registry_coverage=True,
+    )
+
+    assert subset_report["cases_succeeded"] == 27
+    assert subset_report["full_registry_coverage_passed"] is False
+    assert subset_report["quality_passed"] is False
+    assert {
+        check
+        for failure in subset_report["quality_failures"]
+        for check in failure["failed_checks"]
+    } >= {
+        "representative_five_video_live_coverage",
+        "all_registered_question_cases_live_audited",
+    }
+
