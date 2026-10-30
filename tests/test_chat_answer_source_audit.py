@@ -485,6 +485,13 @@ def test_timestamp_range_must_be_fully_covered_by_returned_source_intervals():
     assert _timestamp_range_covered_by_sources(
         "01:10:38–01:13:23", kingfisher_sources
     )
+    adjacent_sources = [
+        {"display_range": "00:00–00:10"},
+        {"display_range": "00:11–00:20"},
+    ]
+    assert _timestamp_range_covered_by_sources(
+        "00:00–00:20", adjacent_sources
+    )
     assert not _timestamp_range_covered_by_sources(
         "01:10:38–01:14:34", kingfisher_sources
     )
