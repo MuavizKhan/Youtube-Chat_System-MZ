@@ -534,7 +534,7 @@ def _normalize_answer_requirement_text(answer: str) -> str:
     text = re.sub(r"`+([^`\n]+?)`+", r"\1", text)
     # Unicode no-break spaces (including U+202F) are valid word separators.
     # Normalize whitespace so content checks are formatting-agnostic.
-    return re.sub(r"\\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _quality_check(name: str, passed: bool, detail: str) -> dict[str, Any]:
