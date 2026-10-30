@@ -218,7 +218,11 @@ def test_build_index_metadata_counts_unique_caption_segments_across_overlapping_
 
 def test_build_index_metadata_rejects_conflicting_duplicate_segment_ids():
     chunks = make_chunks()
-    chunks[1].metadata["transcript_segments"][0]["text"] = "Conflicting text."
+    conflicting_duplicate = dict(
+        chunks[0].metadata["transcript_segments"][0]
+    )
+    conflicting_duplicate["text"] = "Conflicting text."
+    chunks[1].metadata["transcript_segments"].append(conflicting_duplicate)
 
     with pytest.raises(ValueError, match="conflicting records"):
         build_index_metadata(chunks)
