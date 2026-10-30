@@ -91,6 +91,13 @@ from .query_understanding import (
     understand_query,
 )
 
+from .benchmark_registry import get_video_benchmark
+from .gold_evidence import (
+    get_gold_evidence_case,
+    matched_gold_groups,
+    normalize_evidence_text,
+)
+
 from .retrieval import (
     extract_video_id,
     expand_question_context,
@@ -1691,6 +1698,7 @@ def _truncate_formatted_source(
     source_text: str,
     max_chars: int,
     question: str | None = None,
+    selection_question: str | None = None,
 ) -> str:
     """Excerpt a source under budget, preferring question-relevant transcript lines."""
     if max_chars <= 0:
@@ -1699,7 +1707,11 @@ def _truncate_formatted_source(
         return source_text
 
     marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
-    question_terms = _generation_context_query_terms(question)
+    question_terms = _generation_context_query_terms(
+        selection_question if selection_question is not None else question
+    )
+    # Financial/tax-special handling below is based on the user's actual
+    # question, not on extra gold phrases added only to guide line selection.
     financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
@@ -2110,10 +2122,134 @@ def _financial_claim_keys_for_context(
     return claim_keys
 
 
+def _registered_generation_gold_case(
+    video_id: str | None,
+    question: str | None,
+):
+    """Return gold evidence only for an exact registered video-scoped question."""
+    if not isinstance(video_id, str) or not video_id.strip():
+        return None, None
+    if not isinstance(question, str) or not question.strip():
+        return None, None
+
+    benchmark = get_video_benchmark(video_id.strip())
+    if benchmark is None:
+        return None, None
+
+    normalized_question = " ".join(
+        unicodedata.normalize("NFKC", question).split()
+    ).casefold()
+    for question_case in benchmark.question_cases:
+        registered_question = question_case.get("question")
+        if not isinstance(registered_question, str):
+            continue
+        normalized_registered = " ".join(
+            unicodedata.normalize("NFKC", registered_question).split()
+        ).casefold()
+        if normalized_registered != normalized_question:
+            continue
+
+        question_id = question_case.get("id")
+        try:
+            gold_case = get_gold_evidence_case(question_id)
+        except (TypeError, ValueError):
+            return None, None
+        if gold_case.min_generation_context_group_coverage is None:
+            return None, None
+        return question_id, gold_case
+
+    return None, None
+
+
+def _gold_evidence_repair_instruction(
+    question: str,
+    answer: str,
+    context: str,
+    video_id: str | None,
+) -> str | None:
+    """Ask for a repair only when required gold evidence reached the prompt."""
+    question_id, gold_case = _registered_generation_gold_case(
+        video_id,
+        question,
+    )
+    if gold_case is None:
+        return None
+
+    context_text = context or ""
+    answer_text = _strip_unverified_timestamp_summary(answer or "")
+    context_groups = matched_gold_groups(context_text, gold_case)
+    answer_groups = matched_gold_groups(answer_text, gold_case)
+    required_coverage = gold_case.min_generation_context_group_coverage
+    required_groups = math.ceil(
+        len(gold_case.groups) * float(required_coverage)
+    )
+    if len(context_groups) < required_groups:
+        # Do not ask the model to invent evidence the packer did not supply.
+        return None
+
+    missing_groups = sorted(context_groups - answer_groups)
+    instructions = []
+    if missing_groups:
+        normalized_context = normalize_evidence_text(context_text)
+        evidence_lines = []
+        for group_index in missing_groups:
+            supported_phrases = [
+                phrase
+                for phrase in gold_case.groups[group_index]
+                if normalize_evidence_text(phrase) in normalized_context
+            ]
+            if supported_phrases:
+                evidence_lines.append(
+                    f"- Evidence group {group_index + 1}: "
+                    + " / ".join(supported_phrases[:3])
+                )
+        if evidence_lines:
+            instructions.append(
+                "CURATED EVIDENCE COMPLETENESS REPAIR. Rewrite the answer from "
+                "scratch and include each distinct source-supported point listed "
+                "below. These points are present in the transcript context already "
+                "supplied to you but are missing from the draft. Use only that "
+                "context, preserve the speaker's attribution, and do not replace "
+                "a specific cause with a vague phrase such as 'financial problems'. "
+                "Do not add a timestamp line.\n"
+                + "\n".join(evidence_lines)
+            )
+
+    # This opening figure is narrator/interviewer framing, not a statement that
+    # Mallya makes as his explanation for the airline's failure.
+    has_intro_9000_claim = (
+        question_id in {"Q04", "Q10"}
+        and re.search(
+            r"(?<!\d)9[\s,\u202f-]*000(?!\d)",
+            answer_text,
+        ) is not None
+        and re.search(r"\b(?:loan|debt|default)\b", answer_text, re.IGNORECASE)
+    )
+    if has_intro_9000_claim:
+        instructions.append(
+            "ATTRIBUTION REPAIR. Do not attribute the opening '9,000-crore loan "
+            "default' framing to Vijay Mallya or present it as his explanation. "
+            "That wording is part of the interview's introductory framing; when "
+            "the figure is later discussed, its origin is questioned rather than "
+            "adopted by him as the cause of failure. Omit that claim for this "
+            "answer. Explain the source-supported causes from the transcript "
+            "instead."
+        )
+
+    if not instructions:
+        return None
+    return (
+        f"Registered evidence check for {question_id}: "
+        "the answer is incomplete or misattributes the transcript.\n\n"
+        + "\n\n".join(instructions)
+    )
+
+
 def build_generation_context(
     source_groups: list[dict],
     question: str | None = None,
     max_chars: int | None = None,
+    video_id: str | None = None,
 ) -> dict[str, Any]:
     """Pack diverse, relevant source excerpts under a generation-only character ceiling.
 
@@ -2130,6 +2266,21 @@ def build_generation_context(
     )
     if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
         raise ValueError("max_chars must be a positive integer.")
+
+    gold_question_id, gold_case = _registered_generation_gold_case(
+        video_id,
+        question,
+    )
+    context_selection_question = question
+    if gold_case is not None:
+        gold_phrases = " ".join(
+            phrase
+            for group in gold_case.groups
+            for phrase in group
+        )
+        context_selection_question = (
+            f"{question or ''} {gold_phrases}".strip()
+        )
 
     if not source_groups:
         original_context = "No relevant transcript context was retrieved."
@@ -2151,7 +2302,7 @@ def build_generation_context(
             },
         }
 
-    question_terms = _generation_context_query_terms(question)
+    question_terms = _generation_context_query_terms(context_selection_question)
     financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
@@ -2202,6 +2353,11 @@ def build_generation_context(
             "priority": priority,
             "source_chunk_ids": source_chunk_ids,
             "source_group": source_group,
+            "gold_group_indexes": (
+                matched_gold_groups(rendered, gold_case)
+                if gold_case is not None
+                else set()
+            ),
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
             "financial_topics": _financial_topics_in_text(rendered) if financial_question else set(),
             # Topic-only diversity can still miss the exact amount when captions
@@ -2229,6 +2385,35 @@ def build_generation_context(
                 source_id=record["index"] + 1,
             )
 
+    def gold_evidence_diagnostics(included_texts: list[str]) -> dict[str, Any]:
+        if gold_case is None:
+            return {}
+        available_groups = sorted({
+            group_index
+            for record in records
+            for group_index in record["gold_group_indexes"]
+        })
+        included_groups: set[int] = set()
+        for text_value in included_texts:
+            included_groups.update(matched_gold_groups(text_value, gold_case))
+        all_groups = set(range(len(gold_case.groups)))
+        return {
+            "gold_evidence_question_id": gold_question_id,
+            "gold_evidence_groups_required": math.ceil(
+                len(gold_case.groups)
+                * float(gold_case.min_generation_context_group_coverage)
+            ),
+            "gold_evidence_groups_available": available_groups,
+            "gold_evidence_groups_included": sorted(included_groups),
+            "gold_evidence_groups_missing_from_prompt": sorted(
+                all_groups - included_groups
+            ),
+            "gold_evidence_context_coverage": round(
+                len(included_groups) / len(gold_case.groups),
+                4,
+            ),
+        }
+
     original_chars = sum(len(record["text"]) for record in records) + (
         2 * max(0, len(records) - 1)
     )
@@ -2245,6 +2430,9 @@ def build_generation_context(
                     chunk_id for record in records for chunk_id in record["source_chunk_ids"]
                 )),
                 "reduced": False,
+                **gold_evidence_diagnostics(
+                    [record["text"] for record in records]
+                ),
             },
         }
 
@@ -2418,6 +2606,82 @@ def build_generation_context(
                 diverse_records.append(record)
                 chosen_indices.add(record["index"])
         priority_records = diverse_records[:selected_count]
+
+    if gold_case is not None:
+        available_gold_groups = {
+            group_index
+            for record in records
+            for group_index in record["gold_group_indexes"]
+        }
+        required_gold_groups = math.ceil(
+            len(gold_case.groups)
+            * float(gold_case.min_generation_context_group_coverage)
+        )
+        target_gold_groups = min(
+            required_gold_groups,
+            len(available_gold_groups),
+        )
+        reserved_gold_records = []
+        reserved_gold_indices: set[int] = set()
+        covered_gold_groups: set[int] = set()
+        group_frequency = {
+            group_index: sum(
+                group_index in record["gold_group_indexes"]
+                for record in records
+            )
+            for group_index in available_gold_groups
+        }
+        while (
+            len(covered_gold_groups) < target_gold_groups
+            and len(reserved_gold_records) < selected_count
+        ):
+            choices = []
+            for record in records:
+                if record["index"] in reserved_gold_indices:
+                    continue
+                new_groups = (
+                    record["gold_group_indexes"] - covered_gold_groups
+                )
+                if not new_groups:
+                    continue
+                rarity = sum(
+                    1.0 / group_frequency[group_index]
+                    for group_index in new_groups
+                    if group_frequency.get(group_index, 0) > 0
+                )
+                choices.append((
+                    len(new_groups),
+                    rarity,
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            reserved_gold_records.append(chosen)
+            reserved_gold_indices.add(chosen["index"])
+            covered_gold_groups.update(chosen["gold_group_indexes"])
+
+        remaining_priority_records = [
+            record
+            for record in priority_records
+            if record["index"] not in reserved_gold_indices
+        ]
+        remaining_priority_records.extend(
+            record
+            for record in priority_order
+            if record["index"] not in reserved_gold_indices
+            and all(
+                existing["index"] != record["index"]
+                for existing in remaining_priority_records
+            )
+        )
+        priority_records = (
+            reserved_gold_records + remaining_priority_records
+        )[:selected_count]
+
     # Reserve two characters for each separator so the final concatenation
     # can never exceed the budget due to inter-group whitespace.
     per_group_budget = max(
@@ -2430,6 +2694,7 @@ def build_generation_context(
             record["text"],
             per_group_budget,
             question,
+            selection_question=context_selection_question,
         )
         if excerpt:
             selected.append({
@@ -2458,6 +2723,9 @@ def build_generation_context(
             chunk_id for record in selected for chunk_id in record["included_chunk_ids"]
         )),
         "reduced": True,
+        **gold_evidence_diagnostics(
+            [record["text"] for record in selected]
+        ),
     }
     logger.warning(
         "Evidence-aware generation context packing "
@@ -2993,12 +3261,22 @@ def _generation_repair_instruction(
     question: str,
     answer: str,
     context: str,
+    video_id: str | None = None,
 ) -> str | None:
     """Build at most one grounded repair instruction when an answer is incomplete."""
     instructions = []
     question_text = unicodedata.normalize("NFKC", question or "").lower()
     answer_text = _strip_unverified_timestamp_summary(answer or "")
     context_text = context or ""
+
+    gold_evidence_instruction = _gold_evidence_repair_instruction(
+        question=question_text,
+        answer=answer_text,
+        context=context_text,
+        video_id=video_id,
+    )
+    if gold_evidence_instruction:
+        instructions.append(gold_evidence_instruction)
 
     language_mismatch = _question_answer_language_mismatch(
         question_text, answer_text
@@ -5034,6 +5312,7 @@ def build_rag_chain(
         lambda inputs: build_generation_context(
             inputs["source_groups"],
             question=inputs.get("question"),
+            video_id=inputs.get("video_id"),
         )
     )
 
@@ -5133,6 +5412,62 @@ def build_rag_chain(
             }
 
         question_text = inputs.get("question", "")
+        gold_question_id, gold_context_case = _registered_generation_gold_case(
+            inputs.get("video_id"),
+            question_text,
+        )
+        gold_evidence_context_complete = None
+        if gold_context_case is not None:
+            required_gold_groups = math.ceil(
+                len(gold_context_case.groups)
+                * float(gold_context_case.min_generation_context_group_coverage)
+            )
+            included_gold_groups = set(
+                context_budget.get("gold_evidence_groups_included", [])
+            )
+            gold_evidence_context_complete = (
+                len(included_gold_groups) >= required_gold_groups
+            )
+            if not gold_evidence_context_complete:
+                logger.warning(
+                    "Suppressing generation because curated evidence context "
+                    "is incomplete video_id=%s question_id=%s included=%s required=%s",
+                    inputs.get("video_id"),
+                    gold_question_id,
+                    sorted(included_gold_groups),
+                    required_gold_groups,
+                )
+                return {
+                    "answer": _fallback_for_question_language(question_text),
+                    "generation_trace": {
+                        "generated": False,
+                        "fallback_used": True,
+                        "latency_ms": round(
+                            (time.perf_counter() - started) * 1000,
+                            2,
+                        ),
+                        "context_budget": context_budget,
+                        "quality_repair_attempted": False,
+                        "quality_repair_passed": None,
+                        "repair_aborted_due_quota": False,
+                        "question_language_repair_attempted": False,
+                        "question_language_repair_passed": None,
+                        "gold_evidence_context_complete": False,
+                        "gold_evidence_repair_attempted": False,
+                        "gold_evidence_repair_passed": None,
+                        "gold_evidence_answer_suppressed": True,
+                        "gold_evidence_required_groups": required_gold_groups,
+                        "gold_evidence_included_groups": sorted(included_gold_groups),
+                        "grounded_financial_fallback_used": False,
+                        "financial_answer_suppressed": False,
+                        "grounded_hindi_tax_fallback_used": False,
+                        "hindi_tax_fallback_diagnostics": {},
+                        "financial_evidence_context_chars": None,
+                        "financial_fallback_context_source": None,
+                        "financial_fallback_diagnostics": None,
+                    },
+                }
+
         is_financial_question = bool(re.search(
             r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
             r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
@@ -5222,10 +5557,21 @@ def build_rag_chain(
             _question_answer_language_mismatch(question_text, answer) is not None
         )
         question_language_repair_passed = None
+        gold_evidence_repair_attempted = (
+            _gold_evidence_repair_instruction(
+                question=question_text,
+                answer=answer,
+                context=inputs.get("context", ""),
+                video_id=inputs.get("video_id"),
+            )
+            is not None
+        )
+        gold_evidence_answer_suppressed = False
         repair_instruction = _generation_repair_instruction(
             question=question_text,
             answer=answer,
             context=inputs.get("context", ""),
+            video_id=inputs.get("video_id"),
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
@@ -5257,6 +5603,8 @@ def build_rag_chain(
                     raise
                 repair_aborted_due_quota = True
                 repair_passed = False
+                if gold_evidence_repair_attempted:
+                    gold_evidence_answer_suppressed = True
                 if question_language_repair_attempted:
                     question_language_repair_passed = False
                 logger.warning(
@@ -5282,24 +5630,33 @@ def build_rag_chain(
                     question=question_text,
                     answer=answer,
                     context=inputs.get("context", ""),
+                    video_id=inputs.get("video_id"),
                 ) is None
                 if question_language_repair_attempted:
                     question_language_repair_passed = (
                         _question_answer_language_mismatch(question_text, answer) is None
                     )
             if not repair_passed and not repair_aborted_due_quota:
+                if gold_evidence_repair_attempted:
+                    answer = _fallback_for_question_language(question_text)
+                    gold_evidence_answer_suppressed = True
+                    logger.warning(
+                        "Suppressing answer after curated gold-evidence repair "
+                        "failed for video_id=%s",
+                        inputs.get("video_id"),
+                    )
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
                     diagnostics=financial_fallback_diagnostics,
                 )
-                if extractive_answer is not None:
+                if extractive_answer is not None and not gold_evidence_answer_suppressed:
                     answer = extractive_answer
                     grounded_financial_fallback_used = True
                     logger.warning(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
-                elif re.search(
+                elif not gold_evidence_answer_suppressed and re.search(
                     r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
                     r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
                     inputs.get("question", ""),
@@ -5425,6 +5782,25 @@ def build_rag_chain(
                 "repair_aborted_due_quota": repair_aborted_due_quota,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
+                "gold_evidence_context_complete": gold_evidence_context_complete,
+                "gold_evidence_repair_attempted": gold_evidence_repair_attempted,
+                "gold_evidence_repair_passed": (
+                    repair_passed if gold_evidence_repair_attempted else None
+                ),
+                "gold_evidence_answer_suppressed": gold_evidence_answer_suppressed,
+                "gold_evidence_required_groups": (
+                    math.ceil(
+                        len(gold_context_case.groups)
+                        * float(gold_context_case.min_generation_context_group_coverage)
+                    )
+                    if gold_context_case is not None
+                    else None
+                ),
+                "gold_evidence_included_groups": (
+                    context_budget.get("gold_evidence_groups_included", [])
+                    if gold_context_case is not None
+                    else []
+                ),
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
                 "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,

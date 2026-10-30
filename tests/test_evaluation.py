@@ -226,10 +226,20 @@ def test_gold_evidence_annotations_cover_content_cases():
         or 0.0 < case.min_context_group_coverage <= 1.0
         for case in GOLD_EVIDENCE_CASES
     )
+    assert all(
+        case.min_generation_context_group_coverage is None
+        or 0.0 < case.min_generation_context_group_coverage <= 1.0
+        for case in GOLD_EVIDENCE_CASES
+    )
     assert get_gold_evidence_case("Q03").min_group_coverage == pytest.approx(2 / 3)
     assert get_gold_evidence_case("Q03").min_context_group_coverage == 1.0
     assert get_gold_evidence_case("Q09").min_group_coverage == pytest.approx(2 / 3)
     assert get_gold_evidence_case("Q09").min_context_group_coverage == 1.0
+    for question_id in ("Q04", "Q09", "Q10"):
+        assert (
+            get_gold_evidence_case(question_id).min_generation_context_group_coverage
+            == 1.0
+        )
 
 
 @pytest.mark.regression
