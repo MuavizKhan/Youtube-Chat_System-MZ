@@ -220,6 +220,158 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
     ),
 )
 
+# Phase 11.0 broadens the accepted live audit from the representative 16-case
+# pilot to every question in the five-video registry. The Phase 10.11 tuple
+# above remains unchanged as a frozen regression suite.
+PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
+    _make_audit_case(
+        "Q01", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "airline_identity", "pattern": r"\bkingfisher\b|\bairline\b"},),
+    ),
+    _make_audit_case(
+        "Q02", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "formula_one_connection", "pattern": r"\bformula\s*(?:one|1)\b|\bf1\b|\bmotorsport\b"},),
+    ),
+    _make_audit_case(
+        "Q03", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "business_or_team", "pattern": r"\b(?:royal challengers|united breweries|united spirits|kingfisher red)\b"},),
+    ),
+    _make_audit_case(
+        "Q04", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "failure_reason", "pattern": r"\b(?:financial crisis|government polic|etihad|mounting losses|money stopped)\b"},),
+    ),
+    _make_audit_case(
+        "Q05", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "operating_challenge", "pattern": r"\b(?:working capital|cash flow|oil bills|airport fees|landing charges)\b"},),
+    ),
+    _make_audit_case(
+        "Q06", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "brand_strategy", "pattern": r"\b(?:brand|surrogate advertising|personality)\b"},),
+    ),
+    _make_audit_case(
+        "Q08", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "bank_recovery", "pattern": r"\b14[, ]?100\b|\bfully paid\b|\bstatement of account\b|\bstatement in parliament\b"},),
+    ),
+    _make_audit_case(
+        "Q09", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "policy_detail", "pattern": r"\b(?:policy changes|aviation turbine fuel|crude|sales tax)\b"},),
+    ),
+    _make_audit_case(
+        "Q10", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "failure_explanation", "pattern": r"\b(?:financial crisis|government polic|etihad|mounting losses|run out of options)\b"},),
+    ),
+    _make_audit_case(
+        "Q11", "MdeQMVBuGgY",
+        expected_behavior="answerable", answer_language="en",
+    ),
+    # Q12 is marked unanswerable in the canonical registry. Its retrieval
+    # expectation is may_retrieve, so this live case tests answer abstention
+    # and source suppression rather than requiring retrieval to return zero
+    # candidates before generation.
+    _make_audit_case(
+        "Q12", "MdeQMVBuGgY",
+        expected_behavior="unanswerable",
+    ),
+    _make_audit_case(
+        "EW02", "pOnl-Zndcls",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "work_explanation_structure", "pattern": r"\b30[- ]second\b|\bthirty[- ]second\b"},),
+    ),
+    _make_audit_case(
+        "EW03", "pOnl-Zndcls",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "small_talk_difficulty", "pattern": r"\b(?:small talk|strangers|conversation)\b"},),
+    ),
+    _make_audit_case(
+        "EW04", "pOnl-Zndcls",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "email_structure", "pattern": r"\bemail\b"},),
+    ),
+    _make_audit_case(
+        "AI02", "A-JBaNvv3Tk",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "open_source_alignment_concern", "pattern": r"\bopen.source\b|\balignment\b"},),
+    ),
+    _make_audit_case(
+        "AI03", "A-JBaNvv3Tk",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "unified_system", "pattern": r"\b(?:central system|one system|unified system)\b"},),
+    ),
+    _make_audit_case(
+        "AI04", "A-JBaNvv3Tk",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "shipping_pace", "pattern": r"\bship(?:ping|ped)?\b"},),
+    ),
+    _make_audit_case(
+        "HI01", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "named_movement", "pattern": r"\bbijoli?ya\b|\bbijolia\b|बिजोलिया"},),
+    ),
+    _make_audit_case(
+        "HI02", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "movement_location", "pattern": r"\bbijoli?ya\b|\bbijolia\b|बिजोलिया"},),
+    ),
+    _make_audit_case(
+        "HI03", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "tax_count", "pattern": r"\b84\b|\beighty.four\b|८४"},),
+    ),
+    _make_audit_case(
+        "HI06", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="hi",
+        answer_requirements=({"name": "named_movement", "pattern": r"बिजोलिया|बिजोलिया"},),
+    ),
+    _make_audit_case(
+        "HI07", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="hi",
+        answer_requirements=({"name": "movement_location", "pattern": r"बिजोलिया"},),
+    ),
+    _make_audit_case(
+        "HI08", "INpnuL7qnzY",
+        expected_behavior="answerable", answer_language="hi",
+        answer_requirements=({"name": "tax_count", "pattern": r"84|८४"},),
+    ),
+    _make_audit_case(
+        "AR01", "fAd2nKfrDB8",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "silence_and_rest", "pattern": r"\b(?:quiet|silence|rest)\b"},),
+    ),
+    _make_audit_case(
+        "AR02", "fAd2nKfrDB8",
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "room_cost", "pattern": r"\b600\b|\bsix hundred\b"},),
+    ),
+    _make_audit_case(
+        "AR06", "fAd2nKfrDB8",
+        expected_behavior="answerable", answer_language="ar",
+        answer_requirements=({"name": "silence_and_rest", "pattern": r"الهدوء|الصمت|راحة"},),
+    ),
+    _make_audit_case(
+        "AR07", "fAd2nKfrDB8",
+        expected_behavior="answerable", answer_language="ar",
+        answer_requirements=({"name": "room_cost", "pattern": r"600|٦٠٠|دولار"},),
+    ),
+)
+
+PHASE11_0_AUDIT_CASES: tuple[dict[str, Any], ...] = (
+    *PHASE10_11_AUDIT_CASES,
+    *PHASE11_0_ADDITIONAL_CASES,
+)
+PHASE11_0_REPORT_ID = "phase11_0_full_registry_answer_source_audit_v1"
+PHASE11_0_DEFAULT_OUTPUT = (
+    PROJECT_ROOT / "evaluation_reports" / "phase11_0_full_registry_answer_source_audit.json"
+)
+
 PHASE10_11_REPORT_ID = "phase10_11_multivideo_answer_source_audit_v1"
 PHASE10_11_DEFAULT_OUTPUT = (
     PROJECT_ROOT / "evaluation_reports" / "phase10_11_multivideo_answer_source_audit.json"
@@ -1201,6 +1353,7 @@ def run_audit(
     report_id: str = REPORT_ID,
     expected_configuration: dict[str, Any] | None = None,
     require_full_pilot_coverage: bool = False,
+    require_full_registry_coverage: bool = False,
 ) -> dict[str, Any]:
     results = [
         _post_chat(base_url, case, timeout_seconds)
@@ -1265,10 +1418,24 @@ def run_audit(
         and coverage_manifest["duplicate_live_cases"] == []
         and coverage_manifest["question_case_accounting"]["accounting_complete"]
     )
+    registry_accounting = coverage_manifest["question_case_accounting"]
+    full_registry_coverage_passed = (
+        coverage_manifest["unregistered_live_cases"] == []
+        and coverage_manifest["duplicate_live_cases"] == []
+        and registry_accounting["accounting_complete"]
+        and registry_accounting["live_audited_count"]
+        == coverage_manifest["registered_question_case_count"]
+        and registry_accounting["not_live_audited_count"] == 0
+    )
     if require_full_pilot_coverage and not coverage_passed:
         quality_failures.append({
             "case_id": "ALL",
             "failed_checks": ["representative_five_video_live_coverage"],
+        })
+    if require_full_registry_coverage and not full_registry_coverage_passed:
+        quality_failures.append({
+            "case_id": "ALL",
+            "failed_checks": ["all_registered_question_cases_live_audited"],
         })
 
     quality_passed = (
@@ -1277,6 +1444,7 @@ def run_audit(
         and configs_consistent
         and config_matches_expected is not False
         and (coverage_passed or not require_full_pilot_coverage)
+        and (full_registry_coverage_passed or not require_full_registry_coverage)
         and not quality_failures
     )
 
@@ -1292,6 +1460,7 @@ def run_audit(
         "effective_server_configuration_consistent_across_cases": configs_consistent,
         "effective_server_configuration_matches_expected": config_matches_expected,
         "coverage_manifest": coverage_manifest,
+        "full_registry_coverage_passed": full_registry_coverage_passed,
         "cases_attempted": len(cases),
         "cases_succeeded": cases_succeeded,
         "cases_failed": cases_failed,
@@ -1339,9 +1508,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--suite",
-        choices=("phase10_10", "phase10_11"),
+        choices=("phase10_10", "phase10_11", "phase11_0"),
         default="phase10_11",
-        help="Use the original three-case closure audit or the expanded five-video pilot suite.",
+        help=(
+            "Use the three-case closure audit, frozen 16-case pilot suite, "
+            "or Phase 11.0 full 43-question registry suite."
+        ),
     )
     parser.add_argument(
         "--base-url",
@@ -1395,16 +1567,27 @@ def main() -> int:
         if not requested_case_ids:
             parser.error("--case-ids must contain at least one case ID.")
 
+    expected_configuration = None
+    require_full_pilot_coverage = False
+    require_full_registry_coverage = False
+
     if args.suite == "phase10_10":
         cases = AUDIT_CASES
         report_id = REPORT_ID
         output_path = args.output or DEFAULT_OUTPUT
-        expected_configuration = None
-        require_full_pilot_coverage = False
-    else:
+    elif args.suite == "phase10_11":
         cases = PHASE10_11_AUDIT_CASES
         report_id = PHASE10_11_REPORT_ID
         output_path = args.output or PHASE10_11_DEFAULT_OUTPUT
+        require_full_pilot_coverage = True
+    else:
+        cases = PHASE11_0_AUDIT_CASES
+        report_id = PHASE11_0_REPORT_ID
+        output_path = args.output or PHASE11_0_DEFAULT_OUTPUT
+        require_full_pilot_coverage = True
+        require_full_registry_coverage = True
+
+    if args.suite in {"phase10_11", "phase11_0"}:
         expected_configuration = {
             "embedding_model": args.expected_embedding_model,
             "index_namespace": args.expected_namespace,
@@ -1427,7 +1610,6 @@ def main() -> int:
             "rerank_batch_size": 16,
             "rerank_max_length": 512,
         }
-        require_full_pilot_coverage = True
 
     if requested_case_ids is not None:
         try:
@@ -1436,6 +1618,7 @@ def main() -> int:
             parser.error(str(error))
         report_id = f"{report_id}_subset"
         require_full_pilot_coverage = False
+        require_full_registry_coverage = False
 
     report = run_audit(
         base_url=args.base_url,
@@ -1445,6 +1628,7 @@ def main() -> int:
         report_id=report_id,
         expected_configuration=expected_configuration,
         require_full_pilot_coverage=require_full_pilot_coverage,
+        require_full_registry_coverage=require_full_registry_coverage,
     )
     print(
         json.dumps(
@@ -1456,6 +1640,7 @@ def main() -> int:
                 "cases_succeeded": report["cases_succeeded"],
                 "cases_failed": report["cases_failed"],
                 "quality_passed": report["quality_passed"],
+                "full_registry_coverage_passed": report["full_registry_coverage_passed"],
                 "quality_failures": report["quality_failures"],
                 "effective_server_configuration": report["effective_server_configuration"],
                 "effective_server_configuration_consistent_across_cases": (
