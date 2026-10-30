@@ -7,6 +7,8 @@ from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
     PHASE10_11_AUDIT_CASES,
+    PHASE11_0_ADDITIONAL_CASES,
+    PHASE11_0_AUDIT_CASES,
     analyze_response,
     build_coverage_manifest,
     decode_json_response,
@@ -1000,3 +1002,65 @@ def test_full_pilot_coverage_gate_fails_for_three_case_legacy_suite(tmp_path, mo
         "case_id": "ALL",
         "failed_checks": ["representative_five_video_live_coverage"],
     } in report["quality_failures"]
+
+
+def test_phase11_0_adds_exactly_the_27_uncovered_registered_questions():
+    expected_additional_ids = {
+        "Q01", "Q02", "Q03", "Q04", "Q05", "Q06",
+        "Q08", "Q09", "Q10", "Q11", "Q12",
+        "EW02", "EW03", "EW04",
+        "AI02", "AI03", "AI04",
+        "HI01", "HI02", "HI03", "HI06", "HI07", "HI08",
+        "AR01", "AR02", "AR06", "AR07",
+    }
+
+    assert len(PHASE10_11_AUDIT_CASES) == 16
+    assert len(PHASE11_0_ADDITIONAL_CASES) == 27
+    assert len(PHASE11_0_AUDIT_CASES) == 43
+    assert PHASE11_0_AUDIT_CASES[:16] == PHASE10_11_AUDIT_CASES
+    assert {
+        case["id"] for case in PHASE11_0_ADDITIONAL_CASES
+    } == expected_additional_ids
+    assert len({
+        (case["video_id"], case["id"])
+        for case in PHASE11_0_AUDIT_CASES
+    }) == 43
+
+
+def test_phase11_0_full_registry_manifest_has_no_unevaluated_questions():
+    manifest = build_coverage_manifest(PHASE11_0_AUDIT_CASES)
+
+    assert manifest["registered_video_count"] == 5
+    assert manifest["registered_question_case_count"] == 43
+    assert manifest["live_audit_case_count"] == 43
+    assert manifest["live_audit_video_count"] == 5
+    assert manifest["unregistered_live_cases"] == []
+    assert manifest["duplicate_live_cases"] == []
+    assert manifest["question_case_accounting"]["live_audited_count"] == 43
+    assert manifest["question_case_accounting"]["not_live_audited_count"] == 0
+    assert manifest["question_case_accounting"]["not_live_audited_cases"] == []
+    assert manifest["question_case_accounting"]["accounting_complete"] is True
+    assert manifest[
+        "all_registered_videos_have_answerable_and_unanswerable_live_cases"
+    ] is True
+
+
+def test_phase11_0_keeps_registry_unanswerable_q12_as_abstention_case():
+    case = next(item for item in PHASE11_0_AUDIT_CASES if item["id"] == "Q12")
+
+    assert case["expected_behavior"] == "unanswerable"
+    assert case.get("answer_language") is None
+
+
+def test_phase11_0_native_language_cases_require_the_question_language():
+    cases = {
+        item["id"]: item
+        for item in PHASE11_0_AUDIT_CASES
+    }
+
+    assert cases["HI06"]["answer_language"] == "hi"
+    assert cases["HI07"]["answer_language"] == "hi"
+    assert cases["HI08"]["answer_language"] == "hi"
+    assert cases["AR06"]["answer_language"] == "ar"
+    assert cases["AR07"]["answer_language"] == "ar"
+
