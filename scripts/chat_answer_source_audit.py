@@ -499,7 +499,7 @@ def _timestamp_range_covered_by_sources(
     for source_start, source_end in intervals:
         if source_end < covered_until:
             continue
-        if source_start > covered_until:
+        if source_start > covered_until + 1:
             return False
         covered_until = max(covered_until, source_end)
         if covered_until >= target_end:
