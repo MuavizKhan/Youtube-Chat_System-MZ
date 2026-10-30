@@ -52,10 +52,21 @@ $env:RAG_INDEX_NAMESPACE = "phase11-0-unseen-video-smoke"
 .\.venv\Scripts\python.exe scripts/phase11_0_unseen_video_smoke.py
 ~~~
 
-The default manifest includes two videos outside the five-video benchmark
-registry (XGLx-Anjxvg and jzjHxh9nPkA) and one known publisher-uploaded
-Arabic-caption control (fAd2nKfrDB8). The caption control is not counted as an
-unseen video.
+The manifest includes four videos outside the five-video benchmark registry:
+XGLx-Anjxvg (English), jzjHxh9nPkA (Hindi), k1vQz0Pedfs (English short-timeline
+candidate), and yr4z6x5zG2M (English long-timeline candidate). It also includes
+one known publisher-uploaded Arabic-caption control (fAd2nKfrDB8), which is
+not counted as an unseen video.
+
+The short candidate is SciShow Space's *15 Futuristic Space Mission Concepts
+in 5 Minutes* (5:32), whose transcript is indexed in Nerdfighteria Wiki:
+https://nerdfighteria.info/v/k1vQz0Pedfs/ . The long candidate is CS50 Fall
+2023 Lecture 0 - Scratch on the official CS50 YouTube channel:
+https://www.youtube.com/watch?v=yr4z6x5zG2M . The manifest assigns explicit
+expected timeline classes but deliberately does not assume either video's
+caption-track variant. The live smoke runner must confirm that YouTube returns
+an English caption track and that its timestamp span falls in the requested
+class.
 
 The runner checks:
 - index readiness and persisted FAISS/metadata files;

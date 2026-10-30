@@ -188,6 +188,14 @@ def _validate_case(case: dict[str, Any]) -> None:
     if case.get("expected_outcome", "ready") == "ready":
         if not isinstance(case.get("expected_language_code"), str):
             raise ValueError(f"{case_id}: ready cases require expected_language_code.")
+    expected_timeline_class = case.get("expected_timeline_class")
+    if expected_timeline_class is not None and (
+        not isinstance(expected_timeline_class, str)
+        or expected_timeline_class not in {"short", "medium", "long"}
+    ):
+        raise ValueError(
+            f"{case_id}: expected_timeline_class must be 'short', 'medium', or 'long'."
+        )
 
 
 def _case_result(

@@ -45,6 +45,17 @@ def test_validate_case_accepts_unseen_video_with_explicit_language_and_variant()
     })
 
 
+def test_validate_case_accepts_explicit_timeline_class():
+    _validate_case({
+        "case_id": "UVE03",
+        "video_id": "k1vQz0Pedfs",
+        "languages": ["en"],
+        "expected_outcome": "ready",
+        "expected_language_code": "en",
+        "expected_timeline_class": "short",
+    })
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -74,6 +85,14 @@ def test_validate_case_accepts_unseen_video_with_explicit_language_and_variant()
             "video_id": "XGLx-Anjxvg",
             "languages": ["en"],
             "expected_outcome": "failed",
+        },
+        {
+            "case_id": "BAD05",
+            "video_id": "XGLx-Anjxvg",
+            "languages": ["en"],
+            "expected_outcome": "ready",
+            "expected_language_code": "en",
+            "expected_timeline_class": "ultra_long",
         },
     ],
 )
