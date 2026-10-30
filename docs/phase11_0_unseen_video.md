@@ -31,6 +31,22 @@ suite at the Phase 11.0 smoke namespace.
 A selected --case-ids run is diagnostic only: it writes a subset report and
 disables the complete-registry gate. It cannot close the phase.
 
+For the registered Kingfisher explanation cases Q04, Q09, and Q10, the
+generation context packer now reserves the curated transcript evidence groups
+before filling remaining prompt space by ordinary relevance. The prompt still
+uses the same 8,000-character ceiling and the accepted retrieval configuration
+is unchanged. The generation trace reports which gold evidence groups were
+available and which survived context packing.
+
+When a registered case has insufficient required evidence in the packed
+context, the answer path abstains rather than asking the model to infer missing
+causes. When required evidence is present but omitted or misattributed in the
+draft, one grounded repair is attempted. If that repair remains incomplete,
+the draft is suppressed rather than returned as a passing answer. These
+benchmark-specific requirements apply only to the exact registered
+video/question pairs; unregistered videos and questions continue through the
+general RAG path.
+
 The live audit runner automatically retries HTTP 429 responses up to two
 additional times, honoring the backend's `Retry-After` header plus a one-second
 safety buffer. Per-case request attempts and cumulative retry wait are included
