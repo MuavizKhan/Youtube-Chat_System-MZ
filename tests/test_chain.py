@@ -692,6 +692,16 @@ def test_registered_gold_evidence_repair_does_not_apply_to_unregistered_videos()
         video_id="Unregistered123",
     ) is None
 
+    # Q11 is registered for this video but has a temporal annotation rather
+    # than a GoldEvidenceCase. It must also stay on the general temporal path.
+    assert chain._registered_generation_gold_case(
+        "MdeQMVBuGgY",
+        (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    ) == (None, None)
+
 
 @pytest.mark.unit
 def test_rag_chain_abstains_when_registered_required_gold_context_is_incomplete(monkeypatch):
