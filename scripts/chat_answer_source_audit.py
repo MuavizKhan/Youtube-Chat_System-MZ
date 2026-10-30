@@ -441,15 +441,78 @@ def _normalize_range(value: str) -> tuple[str, str] | None:
     return parts[0].strip(), parts[1].strip()
 
 
+def _timestamp_to_seconds(value: str) -> int | None:
+    """Convert a displayed MM:SS or HH:MM:SS value into whole seconds."""
+    try:
+        parts = [int(part) for part in value.strip().split(":")]
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds >= 60:
+            return None
+        return minutes * 60 + seconds
+
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+        if minutes >= 60 or seconds >= 60:
+            return None
+        return hours * 3600 + minutes * 60 + seconds
+
+    return None
+
+
+def _timestamp_range_bounds(value: str) -> tuple[int, int] | None:
+    """Return inclusive whole-second bounds for a displayed timestamp range."""
+    normalized = _normalize_range(value)
+    if normalized is None:
+        return None
+    start = _timestamp_to_seconds(normalized[0])
+    end = _timestamp_to_seconds(normalized[1])
+    if start is None or end is None or end < start:
+        return None
+    return start, end
+
+
+def _timestamp_range_covered_by_sources(
+    timestamp_range: str,
+    source_ranges: list[dict[str, Any]],
+) -> bool:
+    """Require every second in an answer range to be covered by returned sources."""
+    target = _timestamp_range_bounds(timestamp_range)
+    if target is None:
+        return False
+    target_start, target_end = target
+
+    intervals = []
+    for source in source_ranges:
+        display_range = source.get("display_range")
+        if not isinstance(display_range, str):
+            continue
+        bounds = _timestamp_range_bounds(display_range)
+        if bounds is not None:
+            intervals.append(bounds)
+
+    intervals.sort()
+    covered_until = target_start
+    for source_start, source_end in intervals:
+        if source_end < covered_until:
+            continue
+        if source_start > covered_until + 1:
+            return False
+        covered_until = max(covered_until, source_end)
+        if covered_until >= target_end:
+            return True
+    return False
+
+
 def _answer_timestamp_ranges(answer: str) -> list[str]:
-    match = re.search(
-        r"Relevant timestamps?:\s*([^\r\n]+)",
-        answer,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return []
-    return [item.group(0).strip() for item in _TIMESTAMP_RANGE_PATTERN.finditer(match.group(1))]
+    """Extract displayed timestamp ranges whether inline or in the footer."""
+    return [
+        item.group(0).strip()
+        for item in _TIMESTAMP_RANGE_PATTERN.finditer(answer)
+    ]
 
 
 def _substantive_answer(answer: str) -> str:
@@ -469,7 +532,9 @@ def _normalize_answer_requirement_text(answer: str) -> str:
     text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text, flags=re.DOTALL)
     text = re.sub(r"(?<!\w)([*_])([^*_]+?)\1(?!\w)", r"\2", text)
     text = re.sub(r"`+([^`\n]+?)`+", r"\1", text)
-    return text
+    # Unicode no-break spaces (including U+202F) are valid word separators.
+    # Normalize whitespace so content checks are formatting-agnostic.
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _quality_check(name: str, passed: bool, detail: str) -> dict[str, Any]:
@@ -905,19 +970,25 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         answer = ""
 
     timestamp_ranges = _answer_timestamp_ranges(answer)
-    normalized_summary_ranges = {
-        normalized
+    normalized_summary_ranges = [
+        bounds
         for item in timestamp_ranges
-        if (normalized := _normalize_range(item)) is not None
-    }
+        if (bounds := _timestamp_range_bounds(item)) is not None
+    ]
     summary_source_ids: list[str] = []
     for source in source_ranges:
-        normalized = (
-            _normalize_range(source["display_range"])
+        source_bounds = (
+            _timestamp_range_bounds(source["display_range"])
             if isinstance(source.get("display_range"), str)
             else None
         )
-        if normalized in normalized_summary_ranges:
+        if source_bounds is None:
+            continue
+        source_start, source_end = source_bounds
+        if any(
+            source_start <= summary_end and source_end >= summary_start
+            for summary_start, summary_end in normalized_summary_ranges
+        ):
             summary_source_ids.extend(source["chunk_ids"])
     summary_source_ids = list(dict.fromkeys(summary_source_ids))
 
@@ -1089,12 +1160,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         timestamp_alignment_ok = (
             len(timestamp_ranges) > 0
             and all(
-                (normalized := _normalize_range(item)) is not None
-                and normalized in {
-                    _normalize_range(source["display_range"])
-                    for source in source_ranges
-                    if isinstance(source.get("display_range"), str)
-                }
+                _timestamp_range_covered_by_sources(item, source_ranges)
                 for item in timestamp_ranges
             )
         )
@@ -1111,9 +1177,9 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
             "timestamp_summary_matches_returned_sources",
             timestamp_alignment_ok,
             (
-                "Every displayed timestamp range exactly matches a returned source interval."
+                "Every displayed timestamp range is fully covered by returned source intervals."
                 if timestamp_alignment_ok
-                else "The timestamp summary is missing or contains an interval not present in returned source metadata."
+                else "The timestamp summary is missing or at least one displayed interval extends beyond the returned source intervals."
             ),
         ))
 
