@@ -556,3 +556,73 @@ def test_not_ready_error_carries_durable_job_id():
     assert error.state == "building"
     assert error.job_id == "job-123"
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error_code", "message"),
+    [
+        ("TRANSCRIPTS_DISABLED", "Captions are disabled for this video."),
+        ("NO_SUPPORTED_TRANSCRIPT", "No transcript was found in the requested languages."),
+        ("VIDEO_UNAVAILABLE", "This YouTube video is unavailable."),
+        ("INVALID_VIDEO_ID", "The supplied YouTube video reference is invalid."),
+    ],
+)
+def test_worker_persists_and_status_exposes_every_known_transcript_failure(
+    monkeypatch,
+    error_code,
+    message,
+):
+    job = IndexJob(
+        job_id=f"job-{error_code.lower()}",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=["en", "hi", "ur", "ar"],
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-phase11-0",
+    )
+
+    class TranscriptFailureStore:
+        def get(self, video_id):
+            return job
+
+        def claim(self, video_id, worker_id):
+            return job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_failed(self, job_id, worker_id, error):
+            job.status = JOB_FAILED
+            job.error = error
+            job.lease_until = 0.0
+            job.worker_id = None
+            return True
+
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", TranscriptFailureStore())
+    monkeypatch.setattr(
+        index_service,
+        "ensure_index_with_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TranscriptAcquisitionError(error_code, message)
+        ),
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_state",
+        lambda video_id: IndexState.MISSING,
+    )
+
+    index_service._run_index_job(VIDEO_ID)
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert job.status == JOB_FAILED
+    assert job.error == f"{error_code}|{message}"
+    assert status.state == "failed"
+    assert status.error_code == error_code
+    assert status.error_message == message
+
