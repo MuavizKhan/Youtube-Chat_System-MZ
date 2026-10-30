@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import time
 from datetime import datetime
@@ -39,8 +40,8 @@ def classify_transcript_timeline(
     long_min_seconds: float = 1800.0,
 ) -> str:
     """Classify caption timeline span, not claimed full media duration."""
-    if span_seconds < 0:
-        raise ValueError("Transcript timeline span cannot be negative.")
+    if not math.isfinite(float(span_seconds)) or span_seconds < 0:
+        raise ValueError("Transcript timeline span must be finite and non-negative.")
     if short_max_seconds <= 0 or long_min_seconds <= short_max_seconds:
         raise ValueError("Timeline class thresholds are invalid.")
     if span_seconds <= short_max_seconds:
