@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Phase 11.0 smoke corpus. The first two entries are outside the five-video benchmark pilot; the Arabic entry is a known published-caption control, not counted as an unseen video.",
+  "required_coverage": {
+    "caption_track_kinds": [
+      "youtube_auto_generated",
+      "youtube_publisher_uploaded"
+    ],
+    "transcript_timeline_classes": [
+      "short",
+      "long"
+    ],
+    "failure_codes": [],
+    "minimum_unseen_video_count": 2
+  },
+  "cases": [
+    {
+      "case_id": "UVE01",
+      "cohort": "unseen_new_video",
+      "video_id": "XGLx-Anjxvg",
+      "languages": [
+        "en"
+      ],
+      "expected_outcome": "ready",
+      "expected_language_code": "en",
+      "expected_generated": true,
+      "verify_repeat_reuse": true
+    },
+    {
+      "case_id": "UVE02",
+      "cohort": "unseen_new_video",
+      "video_id": "jzjHxh9nPkA",
+      "languages": [
+        "hi"
+      ],
+      "expected_outcome": "ready",
+      "expected_language_code": "hi",
+      "expected_generated": true,
+      "verify_repeat_reuse": true
+    },
+    {
+      "case_id": "CAP01",
+      "cohort": "pilot_caption_control",
+      "video_id": "fAd2nKfrDB8",
+      "languages": [
+        "ar"
+      ],
+      "expected_outcome": "ready",
+      "expected_language_code": "ar",
+      "expected_generated": false,
+      "verify_repeat_reuse": true
+    }
+  ]
+}
