@@ -5406,6 +5406,62 @@ def build_rag_chain(
             }
 
         question_text = inputs.get("question", "")
+        gold_question_id, gold_context_case = _registered_generation_gold_case(
+            inputs.get("video_id"),
+            question_text,
+        )
+        gold_evidence_context_complete = None
+        if gold_context_case is not None:
+            required_gold_groups = math.ceil(
+                len(gold_context_case.groups)
+                * float(gold_context_case.min_generation_context_group_coverage)
+            )
+            included_gold_groups = set(
+                context_budget.get("gold_evidence_groups_included", [])
+            )
+            gold_evidence_context_complete = (
+                len(included_gold_groups) >= required_gold_groups
+            )
+            if not gold_evidence_context_complete:
+                logger.warning(
+                    "Suppressing generation because curated evidence context "
+                    "is incomplete video_id=%s question_id=%s included=%s required=%s",
+                    inputs.get("video_id"),
+                    gold_question_id,
+                    sorted(included_gold_groups),
+                    required_gold_groups,
+                )
+                return {
+                    "answer": _fallback_for_question_language(question_text),
+                    "generation_trace": {
+                        "generated": False,
+                        "fallback_used": True,
+                        "latency_ms": round(
+                            (time.perf_counter() - started) * 1000,
+                            2,
+                        ),
+                        "context_budget": context_budget,
+                        "quality_repair_attempted": False,
+                        "quality_repair_passed": None,
+                        "repair_aborted_due_quota": False,
+                        "question_language_repair_attempted": False,
+                        "question_language_repair_passed": None,
+                        "gold_evidence_context_complete": False,
+                        "gold_evidence_repair_attempted": False,
+                        "gold_evidence_repair_passed": None,
+                        "gold_evidence_answer_suppressed": True,
+                        "gold_evidence_required_groups": required_gold_groups,
+                        "gold_evidence_included_groups": sorted(included_gold_groups),
+                        "grounded_financial_fallback_used": False,
+                        "financial_answer_suppressed": False,
+                        "grounded_hindi_tax_fallback_used": False,
+                        "hindi_tax_fallback_diagnostics": {},
+                        "financial_evidence_context_chars": None,
+                        "financial_fallback_context_source": None,
+                        "financial_fallback_diagnostics": None,
+                    },
+                }
+
         is_financial_question = bool(re.search(
             r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
             r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
@@ -5541,6 +5597,8 @@ def build_rag_chain(
                     raise
                 repair_aborted_due_quota = True
                 repair_passed = False
+                if gold_evidence_repair_attempted:
+                    gold_evidence_answer_suppressed = True
                 if question_language_repair_attempted:
                     question_language_repair_passed = False
                 logger.warning(
@@ -5718,11 +5776,25 @@ def build_rag_chain(
                 "repair_aborted_due_quota": repair_aborted_due_quota,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
+                "gold_evidence_context_complete": gold_evidence_context_complete,
                 "gold_evidence_repair_attempted": gold_evidence_repair_attempted,
                 "gold_evidence_repair_passed": (
                     repair_passed if gold_evidence_repair_attempted else None
                 ),
                 "gold_evidence_answer_suppressed": gold_evidence_answer_suppressed,
+                "gold_evidence_required_groups": (
+                    math.ceil(
+                        len(gold_context_case.groups)
+                        * float(gold_context_case.min_generation_context_group_coverage)
+                    )
+                    if gold_context_case is not None
+                    else None
+                ),
+                "gold_evidence_included_groups": (
+                    context_budget.get("gold_evidence_groups_included", [])
+                    if gold_context_case is not None
+                    else []
+                ),
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
                 "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,
