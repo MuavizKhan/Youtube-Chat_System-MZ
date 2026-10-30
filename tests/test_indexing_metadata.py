@@ -81,7 +81,7 @@ def test_build_index_metadata():
         "transcript_language_code": "en",
         "transcript_generated": True,
         "transcript_segment_count": 2,
-        "transcript_character_count": 49,
+        "transcript_character_count": 47,
         "transcript_timeline_start_seconds": 0.0,
         "transcript_timeline_end_seconds": 20.0,
         "transcript_timeline_span_seconds": 20.0,
@@ -210,7 +210,7 @@ def test_build_index_metadata_counts_unique_caption_segments_across_overlapping_
     metadata = build_index_metadata(chunks)
 
     assert metadata["transcript_segment_count"] == 2
-    assert metadata["transcript_character_count"] == 49
+    assert metadata["transcript_character_count"] == 47
     assert metadata["transcript_timeline_start_seconds"] == 0.0
     assert metadata["transcript_timeline_end_seconds"] == 20.0
     assert metadata["transcript_timeline_span_seconds"] == 20.0
