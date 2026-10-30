@@ -867,17 +867,6 @@ def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "header_value, expected",
-    [
-        ("30", 30.0),
-        ("0", 0.0),
-        ("invalid", None),
-        ("-1", None),
-        ("nan", None),
-    ],
-)
-@pytest.mark.unit
 @pytest.mark.parametrize("requested_tokens", [4010, 4030])
 def test_groq_tpm_rate_limit_token_count_is_not_misclassified_as_auth_or_forbidden(
     monkeypatch, requested_tokens
@@ -896,6 +885,17 @@ def test_groq_tpm_rate_limit_token_count_is_not_misclassified_as_auth_or_forbidd
         chain.generate_with_groq(fake, prompt)
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "header_value, expected",
+    [
+        ("30", 30.0),
+        ("0", 0.0),
+        ("invalid", None),
+        ("-1", None),
+        ("nan", None),
+    ],
+)
 def test_provider_retry_after_seconds_reads_valid_numeric_header(
     header_value, expected
 ):
