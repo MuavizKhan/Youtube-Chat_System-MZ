@@ -1698,6 +1698,7 @@ def _truncate_formatted_source(
     source_text: str,
     max_chars: int,
     question: str | None = None,
+    selection_question: str | None = None,
 ) -> str:
     """Excerpt a source under budget, preferring question-relevant transcript lines."""
     if max_chars <= 0:
@@ -1706,7 +1707,11 @@ def _truncate_formatted_source(
         return source_text
 
     marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
-    question_terms = _generation_context_query_terms(question)
+    question_terms = _generation_context_query_terms(
+        selection_question if selection_question is not None else question
+    )
+    # Financial/tax-special handling below is based on the user's actual
+    # question, not on extra gold phrases added only to guide line selection.
     financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
@@ -2688,7 +2693,8 @@ def build_generation_context(
         excerpt = _truncate_formatted_source(
             record["text"],
             per_group_budget,
-            context_selection_question,
+            question,
+            selection_question=context_selection_question,
         )
         if excerpt:
             selected.append({
