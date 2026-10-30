@@ -68,6 +68,8 @@ caption-track variant. The live smoke runner must confirm that YouTube returns
 an English caption track and that its timestamp span falls in the requested
 class.
 
+The audit runner automatically retries HTTP 429 responses up to two additional times, honoring the backend's `Retry-After` header plus a one-second safety buffer. Per-case request attempts and cumulative retry wait are included in the JSON report. This avoids treating a transient Groq TPM window as an immediate permanent case failure; it does not increase the provider quota.
+
 The runner checks:
 - index readiness and persisted FAISS/metadata files;
 - selected caption language and auto-generated vs publisher-uploaded variant;
