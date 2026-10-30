@@ -1706,7 +1706,7 @@ def _truncate_formatted_source(
         return source_text
 
     marker = "\n[Transcript excerpt shortened to fit the generation context budget.]"
-    question_terms = _generation_context_query_terms(context_selection_question)
+    question_terms = _generation_context_query_terms(question)
     financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
@@ -2297,7 +2297,7 @@ def build_generation_context(
             },
         }
 
-    question_terms = _generation_context_query_terms(question)
+    question_terms = _generation_context_query_terms(context_selection_question)
     financial_question = bool(re.search(
         r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|liabilit|cost|price|invest(?:ed|ment)?)\b",
         question or "",
