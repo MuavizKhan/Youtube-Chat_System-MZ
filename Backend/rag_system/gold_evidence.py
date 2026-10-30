@@ -34,6 +34,10 @@ class GoldEvidenceCase:
     groups: tuple[tuple[str, ...], ...]
     min_group_coverage: float
     min_context_group_coverage: float | None = None
+    # Optional stricter requirement for the excerpts actually sent to generation.
+    # This is separate from retrieval-context evaluation so prompt packing can
+    # reserve the evidence needed to answer the registered question.
+    min_generation_context_group_coverage: float | None = None
 
 
 GOLD_EVIDENCE_CASES = (
@@ -105,6 +109,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q05",
@@ -180,6 +185,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_group_coverage=2 / 3,
         min_context_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q10",
@@ -199,6 +205,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
     ),
 )
 
