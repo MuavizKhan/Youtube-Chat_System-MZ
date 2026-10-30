@@ -1,4 +1,5 @@
 import pytest
+from dataclasses import replace
 
 from Backend.rag_system import index_service
 from Backend.rag_system.index_jobs import (
@@ -586,24 +587,31 @@ def test_worker_persists_and_status_exposes_every_known_transcript_failure(
     )
 
     class TranscriptFailureStore:
+        def __init__(self):
+            self.job = job
+
         def get(self, video_id):
-            return job
+            return self.job
 
         def claim(self, video_id, worker_id):
-            return job
+            return self.job
 
         def renew_lease(self, job_id, worker_id):
             return True
 
         def mark_failed(self, job_id, worker_id, error):
-            job.status = JOB_FAILED
-            job.error = error
-            job.lease_until = 0.0
-            job.worker_id = None
+            self.job = replace(
+                self.job,
+                status=JOB_FAILED,
+                error=error,
+                lease_until=0.0,
+                worker_id=None,
+            )
             return True
 
+    store = TranscriptFailureStore()
     monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
-    monkeypatch.setattr(index_service, "_JOB_STORE", TranscriptFailureStore())
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
     monkeypatch.setattr(
         index_service,
         "ensure_index_with_action",
@@ -620,8 +628,8 @@ def test_worker_persists_and_status_exposes_every_known_transcript_failure(
     index_service._run_index_job(VIDEO_ID)
     status = index_service.get_index_status(VIDEO_ID)
 
-    assert job.status == JOB_FAILED
-    assert job.error == f"{error_code}|{message}"
+    assert store.job.status == JOB_FAILED
+    assert store.job.error == f"{error_code}|{message}"
     assert status.state == "failed"
     assert status.error_code == error_code
     assert status.error_message == message
