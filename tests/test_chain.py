@@ -3180,7 +3180,7 @@ def test_named_tax_fallback_uses_full_source_groups_when_prompt_context_omits_as
     monkeypatch.setattr(
         chain,
         "build_generation_context",
-        lambda groups, question=None: {
+        lambda groups, question=None, video_id=None: {
             "context": "The bounded prompt does not retain the exact tax-name assertion.",
             "diagnostics": {
                 "budget_chars": 8000,
