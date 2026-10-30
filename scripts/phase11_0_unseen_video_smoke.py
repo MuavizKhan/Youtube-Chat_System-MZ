@@ -15,11 +15,20 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from Backend.rag_system.config import PROJECT_ROOT, RAG_INDEX_NAMESPACE, VECTOR_STORE_ROOT
+# Direct execution (python scripts/phase11_0_unseen_video_smoke.py) puts the
+# scripts/ directory, not the repository root, at sys.path[0]. Bootstrap the
+# project root before importing Backend so the documented command works from
+# a clean PowerShell session as well as module execution.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from Backend.rag_system.config import RAG_INDEX_NAMESPACE, VECTOR_STORE_ROOT
 
 
 REQUIRED_NAMESPACE = "phase11-0-unseen-video-smoke"
