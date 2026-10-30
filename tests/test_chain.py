@@ -867,6 +867,25 @@ def test_groq_generation_translates_errors(monkeypatch, error_text, expected):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("requested_tokens", [4010, 4030])
+def test_groq_tpm_rate_limit_token_count_is_not_misclassified_as_auth_or_forbidden(
+    monkeypatch, requested_tokens
+):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 0)
+    error = RuntimeError(
+        "Error code: 429 - Rate limit reached on tokens per minute; "
+        f"Requested {requested_tokens} tokens. Try again shortly."
+    )
+    error.status_code = 429
+    fake, _ = client(error=error)
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    with pytest.raises(chain.ProviderRateLimitError, match="rate limit was reached"):
+        chain.generate_with_groq(fake, prompt)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "header_value, expected",
     [

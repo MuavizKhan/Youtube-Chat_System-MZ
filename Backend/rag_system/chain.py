@@ -4271,13 +4271,17 @@ def generate_with_groq(
                     "Wait until quota is available or use an available model/provider."
                 ) from error
 
-            if "401" in error_text or "unauthorized" in error_text:
+            provider_status = _provider_error_status(error)
+            # Inspect the structured HTTP status rather than searching for
+            # numeric substrings: a 429 TPM message can contain "Requested
+            # 4010 tokens", which must not be mistaken for HTTP 401.
+            if provider_status == 401 or "unauthorized" in error_text:
                 raise RuntimeError(
                     "Groq authentication failed.\n\n"
                     "Check GROQ_API_KEY in .env."
                 ) from error
 
-            if "403" in error_text or "forbidden" in error_text:
+            if provider_status == 403 or "forbidden" in error_text:
                 raise RuntimeError(
                     "Groq rejected the inference request.\n\n"
                     "Check API key permissions and the selected model."

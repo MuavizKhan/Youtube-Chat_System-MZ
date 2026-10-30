@@ -1,4 +1,6 @@
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 
 import pytest
 
@@ -362,6 +364,81 @@ def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
     assert "sound_lungs_or_breathing" in failed
     assert "sound_stomach" in failed
     assert "sound_eyelids_blinking" in failed
+
+
+def test_post_chat_retries_rate_limit_after_retry_after_and_records_wait(monkeypatch):
+    case = {
+        "id": "Q13",
+        "video_id": "MdeQMVBuGgY",
+        "question": "What is the capital of Australia?",
+        "expected_behavior": "unanswerable",
+    }
+    response_payload = {
+        "answer": "I couldn't find enough information about that in the video. "
+        "It may not be covered by this video.",
+        "video_id": case["video_id"],
+        "sources": [],
+        "retrieval_config": {
+            "embedding_model": "BAAI/bge-m3",
+            "index_namespace": "test-namespace",
+            "citation_policy": "prompt_included_chunks",
+        },
+        "observability": {"retrieval": {}, "generation": {}},
+    }
+    successful_body = json.dumps(response_payload, ensure_ascii=False).encode("utf-8")
+    rate_limited_body = json.dumps({
+        "error": "ai_provider_rate_limited",
+        "message": "The AI provider is temporarily rate-limited.",
+    }).encode("utf-8")
+
+    class FakeResponse:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return successful_body
+
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        if len(calls) == 1:
+            raise HTTPError(
+                request.full_url,
+                429,
+                "Too Many Requests",
+                {"Retry-After": "2", "Content-Type": "application/json"},
+                BytesIO(rate_limited_body),
+            )
+        return FakeResponse()
+
+    sleeps = []
+    monkeypatch.setattr(audit_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        audit_module.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = audit_module._post_chat(
+        "http://127.0.0.1:8000",
+        case,
+        timeout_seconds=5.0,
+    )
+
+    assert result["status"] == "success"
+    assert result["http_status"] == 200
+    assert result["request_attempts"] == 2
+    assert result["rate_limit_retry_count"] == 1
+    assert result["rate_limit_retry_wait_seconds"] == 3.0
+    assert sleeps == [3.0]
+    assert len(calls) == 2
 
 
 def test_run_audit_fails_quality_gate_even_when_all_http_requests_succeed(tmp_path, monkeypatch):
