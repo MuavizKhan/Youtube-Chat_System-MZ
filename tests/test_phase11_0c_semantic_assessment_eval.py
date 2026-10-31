@@ -305,6 +305,8 @@ def test_metrics_separate_question_and_transcript_language_cohorts():
     assert metrics["per_question_language"]["hi"]["observations"] == 0
     assert metrics["per_transcript_language"]["hi"]["observations"] == 1
     assert metrics["per_transcript_language"]["en"]["observations"] == 0
+    assert metrics["per_language_pair"]["en->hi"]["observations"] == 1
+    assert metrics["per_language_pair"]["en->ar"]["observations"] == 0
 
 
 def test_supported_binary_metrics_count_false_supported_predictions():
