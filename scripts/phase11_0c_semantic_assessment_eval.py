@@ -416,6 +416,11 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         raise DatasetValidationError(
             f"dataset.split must be one of {', '.join(VALID_SPLITS)} when supplied."
         )
+    if manifest_status == "adjudicated" and declared_split is None:
+        raise DatasetValidationError(
+            "Human-adjudicated evaluation manifests must declare exactly one split "
+            "so development and held-out labels remain in separate files."
+        )
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
         raise DatasetValidationError("dataset.cases must be a non-empty array.")
