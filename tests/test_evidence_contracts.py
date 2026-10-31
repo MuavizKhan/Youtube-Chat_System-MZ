@@ -315,6 +315,50 @@ def test_retrieval_diagnostics_validate_video_scope_and_accepted_candidates():
         )
 
 
+
+@pytest.mark.unit
+def test_evidence_assessment_enforces_status_score_consistency():
+    with pytest.raises(ValueError, match="zero support_score"):
+        assessment("a", EvidenceSupportStatus.MISSING, 0.4)
+    with pytest.raises(ValueError, match="below 1.0"):
+        assessment("a", EvidenceSupportStatus.PARTIAL, 1.0, reference())
+    with pytest.raises(ValueError, match="zero support_score"):
+        assessment("a", EvidenceSupportStatus.UNKNOWN, 0.2)
+
+
+@pytest.mark.unit
+def test_evidence_reference_rejects_null_or_boolean_chunk_ids():
+    with pytest.raises(TypeError, match="chunk_id"):
+        EvidenceReference("video-A", None)
+    with pytest.raises(TypeError, match="chunk_id"):
+        EvidenceReference("video-A", True)
+
+
+@pytest.mark.unit
+def test_coverage_summary_rejects_inconsistent_status_and_counts():
+    with pytest.raises(ValueError, match="support every required aspect"):
+        EvidenceCoverageSummary(
+            status=CoverageStatus.SUFFICIENT,
+            required_aspect_count=2,
+            supported_required_aspect_count=1,
+            coverage_ratio=0.5,
+            missing_aspect_ids=("missing",),
+            contradicted_aspect_ids=(),
+            unknown_aspect_ids=(),
+            assessments=(),
+        )
+    with pytest.raises(ValueError, match="zero required aspects"):
+        EvidenceCoverageSummary(
+            status=CoverageStatus.INDETERMINATE,
+            required_aspect_count=1,
+            supported_required_aspect_count=0,
+            coverage_ratio=0.0,
+            missing_aspect_ids=("missing",),
+            contradicted_aspect_ids=(),
+            unknown_aspect_ids=(),
+            assessments=(),
+        )
+
 @pytest.mark.unit
 def test_contracts_serialize_to_json_without_transcript_text():
     parsed = analysis(
