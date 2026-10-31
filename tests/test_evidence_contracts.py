@@ -31,10 +31,11 @@ def reference(chunk_id="chunk-1", video_id="video-A", start=10.0, end=20.0):
     )
 
 
-def analysis(*aspects, intent=QuestionIntent.EXPLANATION, language="en"):
+def analysis(*aspects, intent=QuestionIntent.EXPLANATION, language="en", video_id=None):
     return QuestionAnalysis(
         intent=intent,
         language=language,
+        video_id=video_id,
         subject="airline operations",
         aspects=tuple(aspects),
         constraints=("attribute claims to the interviewee",),
@@ -62,6 +63,54 @@ def test_question_analysis_accepts_english_hindi_and_arabic_language_tags():
         parsed = analysis(*aspects, language=language)
         assert parsed.language == language
         assert parsed.aspects == aspects
+
+
+
+@pytest.mark.unit
+def test_question_analysis_preserves_native_hindi_and_arabic_script():
+    hindi = QuestionAnalysis(
+        intent=QuestionIntent.EXPLANATION,
+        language="hi",
+        aspects=(
+            EvidenceAspect("movement_cause", "किसान आंदोलन के प्रमुख कारण"),
+        ),
+        subject="किसान आंदोलन",
+    )
+    arabic = QuestionAnalysis(
+        intent=QuestionIntent.EXPLANATION,
+        language="ar",
+        aspects=(
+            EvidenceAspect("silence_effect", "تأثير الصمت على الراحة والإدراك"),
+        ),
+        subject="الصمت والراحة",
+    )
+
+    assert hindi.aspects[0].description == "किसान आंदोलन के प्रमुख कारण"
+    assert hindi.subject == "किसान आंदोलन"
+    assert arabic.aspects[0].description == "تأثير الصمت على الراحة والإدراك"
+    assert arabic.subject == "الصمت والراحة"
+
+
+@pytest.mark.unit
+def test_evidence_coverage_rejects_cross_video_evidence_when_question_is_scoped():
+    parsed = analysis(
+        EvidenceAspect("answer", "Transcript-supported answer"),
+        video_id="video-A",
+    )
+    foreign_evidence = reference("foreign-chunk", video_id="video-B")
+
+    with pytest.raises(ValueError, match="QuestionAnalysis.video_id"):
+        evaluate_evidence_coverage(
+            parsed,
+            (
+                assessment(
+                    "answer",
+                    EvidenceSupportStatus.SUPPORTED,
+                    0.95,
+                    foreign_evidence,
+                ),
+            ),
+        )
 
 
 @pytest.mark.unit
