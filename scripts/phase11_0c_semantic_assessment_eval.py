@@ -898,6 +898,7 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
 
     per_question_language = {}
     per_transcript_language = {}
+    per_language_pair = {}
     for language in SUPPORTED_LANGUAGES:
         question_rows = [
             row for row in aspect_rows
@@ -909,6 +910,14 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
         ]
         per_question_language[language] = _class_metrics(question_rows)
         per_transcript_language[language] = _class_metrics(transcript_rows)
+        for transcript_language in SUPPORTED_LANGUAGES:
+            pair_key = f"{language}->{transcript_language}"
+            pair_rows = [
+                row for row in aspect_rows
+                if row["question_language_group"] == language
+                and row["transcript_language_group"] == transcript_language
+            ]
+            per_language_pair[pair_key] = _class_metrics(pair_rows)
 
     diagnostics = [record for record in case_records]
     status_counts = dict(Counter(
@@ -932,6 +941,7 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
         "semantic": metrics,
         "per_question_language": per_question_language,
         "per_transcript_language": per_transcript_language,
+        "per_language_pair": per_language_pair,
         "operational": {
             "attempted_cases": len(diagnostics),
             "completed_assessments": completed,
