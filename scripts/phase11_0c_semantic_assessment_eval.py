@@ -1610,6 +1610,7 @@ def run_evaluation(
     ]
     complete_selection = (
         not selection_was_truncated
+        and stop_reason is None
         and len(report["case_results"]) == len(selected)
         and len(report["case_results"]) == split_case_count
     )
