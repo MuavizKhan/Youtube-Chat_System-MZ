@@ -50,6 +50,8 @@ DEFAULT_DATASET = (
     PROJECT_ROOT / "evaluation_data" / "phase11_0C_semantic_assessment_seed.json"
 )
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "evaluation_reports"
+PRIVATE_DATA_DIR = PROJECT_ROOT / "evaluation_data" / "private"
+PRIVATE_REPORT_DIR = PRIVATE_DATA_DIR / "reports"
 STATUS_ORDER = tuple(status.value for status in EvidenceSupportStatus)
 SUPPORTED_LANGUAGES = ("en", "hi", "ar")
 VALID_SPLITS = ("development", "held_out")
@@ -1492,6 +1494,46 @@ def load_threshold_lock(
     }
 
 
+def _resolve_report_path(
+    requested_path: Path | None,
+    *,
+    annotation_status: str,
+    split: str,
+    timestamp: str,
+) -> Path:
+    """Keep real adjudicated reports out of tracked repository paths by default."""
+    if requested_path is None:
+        output_dir = (
+            PRIVATE_REPORT_DIR
+            if annotation_status == "adjudicated"
+            else DEFAULT_OUTPUT_DIR
+        )
+        return output_dir / f"phase11_0C_{split}_{timestamp}.json"
+
+    candidate = (
+        requested_path
+        if requested_path.is_absolute()
+        else PROJECT_ROOT / requested_path
+    )
+    resolved = candidate.resolve()
+    project_root = PROJECT_ROOT.resolve()
+    private_dir = PRIVATE_DATA_DIR.resolve()
+
+    if annotation_status == "adjudicated":
+        try:
+            resolved.relative_to(project_root)
+            is_inside_repository = True
+        except ValueError:
+            is_inside_repository = False
+        if is_inside_repository and not resolved.is_relative_to(private_dir):
+            raise DatasetValidationError(
+                "Human-adjudicated evaluation reports contain reference labels and "
+                "must not be written to tracked repository paths. Use "
+                "evaluation_data/private/ or an external private directory."
+            )
+    return resolved
+
+
 def _write_report_atomic(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -1769,9 +1811,11 @@ def main(argv: list[str] | None = None) -> int:
 
     client = create_llm_client()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output_path = args.output or (
-        DEFAULT_OUTPUT_DIR
-        / f"phase11_0C_{args.split}_{timestamp}.json"
+    output_path = _resolve_report_path(
+        args.output,
+        annotation_status=manifest["annotation_status"],
+        split=args.split,
+        timestamp=timestamp,
     )
 
     report = run_evaluation(
