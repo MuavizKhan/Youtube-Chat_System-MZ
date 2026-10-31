@@ -1362,7 +1362,7 @@ def main(argv: list[str] | None = None) -> int:
             packet_a, packet_b = _load_two_review_packets(
                 args.reviewer_packets, manifest, source_sha256
             )
-            adjudicator = _safe_id(args.adjudicator_id, "adjudicator_id")
+            adjudicator = _annotator_id(args.adjudicator_id, "adjudicator_id")
             packet = build_adjudication_packet(
                 manifest, source_sha256, packet_a, packet_b, adjudicator
             )
