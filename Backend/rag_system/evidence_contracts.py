@@ -14,7 +14,7 @@ import re
 from typing import Sequence
 
 
-_CONTRACT_VERSION = "1.0"
+CONTRACT_SCHEMA_VERSION = "1.0"
 _LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
@@ -172,7 +172,7 @@ class QuestionAnalysis:
     subject: str | None = None
     constraints: tuple[str, ...] = ()
     temporal_constraint: TemporalConstraint | None = None
-    planner_version: str = _CONTRACT_VERSION
+    planner_version: str = CONTRACT_SCHEMA_VERSION
     analysis_source: str = "unspecified"
     confidence: float | None = None
 
@@ -235,6 +235,10 @@ class EvidenceReference:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "video_id", _clean_text(self.video_id, "video_id"))
+        if isinstance(self.chunk_id, bool) or self.chunk_id is None:
+            raise TypeError("chunk_id must be a non-empty string or integer.")
+        if not isinstance(self.chunk_id, (str, int)):
+            raise TypeError("chunk_id must be a non-empty string or integer.")
         object.__setattr__(self, "chunk_id", _clean_text(str(self.chunk_id), "chunk_id"))
         if (self.start_seconds is None) != (self.end_seconds is None):
             raise ValueError("start_seconds and end_seconds must both be set or both be None.")
@@ -287,19 +291,30 @@ class EvidenceAssessment:
                 raise ValueError(
                     "Use CONFLICTED when an aspect has both supporting and contradicting evidence."
                 )
+            if status is EvidenceSupportStatus.SUPPORTED and self.support_score <= 0.0:
+                raise ValueError("SUPPORTED assessments require a positive support_score.")
+            if status is EvidenceSupportStatus.PARTIAL and self.support_score >= 1.0:
+                raise ValueError("PARTIAL assessments require support_score below 1.0.")
         elif status is EvidenceSupportStatus.MISSING:
             if supporting or contradicting:
                 raise ValueError("MISSING assessments must not include evidence references.")
+            if self.support_score != 0.0:
+                raise ValueError("MISSING assessments must have a zero support_score.")
         elif status is EvidenceSupportStatus.CONTRADICTED:
             if not contradicting or supporting:
                 raise ValueError(
                     "CONTRADICTED assessments require contradicting_evidence only."
                 )
+            if self.support_score != 0.0:
+                raise ValueError("CONTRADICTED assessments must have a zero support_score.")
         elif status is EvidenceSupportStatus.CONFLICTED:
             if not supporting or not contradicting:
                 raise ValueError(
                     "CONFLICTED assessments require both supporting and contradicting evidence."
                 )
+        elif status is EvidenceSupportStatus.UNKNOWN:
+            if self.support_score != 0.0:
+                raise ValueError("UNKNOWN assessments must have a zero support_score.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,7 +351,28 @@ class EvidenceCoverageSummary:
             "unknown_aspect_ids",
         ):
             object.__setattr__(self, name, _string_tuple(getattr(self, name), name))
-        object.__setattr__(self, "assessments", tuple(self.assessments))
+        if isinstance(self.assessments, (str, bytes)) or not isinstance(self.assessments, Sequence):
+            raise TypeError("assessments must be a sequence of EvidenceAssessment values.")
+        assessments = tuple(self.assessments)
+        if any(not isinstance(item, EvidenceAssessment) for item in assessments):
+            raise TypeError("assessments must contain only EvidenceAssessment values.")
+        assessment_ids = [item.aspect_id for item in assessments]
+        if len(assessment_ids) != len(set(assessment_ids)):
+            raise ValueError("summary assessments must not contain duplicate aspect IDs.")
+        object.__setattr__(self, "assessments", assessments)
+        if self.status is CoverageStatus.INDETERMINATE:
+            if self.required_aspect_count != 0 or self.coverage_ratio is not None:
+                raise ValueError("INDETERMINATE summaries require zero required aspects and no ratio.")
+        elif self.required_aspect_count == 0 or self.coverage_ratio is None:
+            raise ValueError("SUFFICIENT and INSUFFICIENT summaries require assessed required aspects.")
+        if self.status is CoverageStatus.SUFFICIENT:
+            if self.supported_required_aspect_count != self.required_aspect_count:
+                raise ValueError("SUFFICIENT summaries must support every required aspect.")
+            if self.missing_aspect_ids or self.contradicted_aspect_ids or self.unknown_aspect_ids:
+                raise ValueError("SUFFICIENT summaries must not contain missing or unresolved aspects.")
+        elif self.status is CoverageStatus.INSUFFICIENT:
+            if self.supported_required_aspect_count >= self.required_aspect_count:
+                raise ValueError("INSUFFICIENT summaries must have at least one unsupported required aspect.")
 
 
 def evaluate_evidence_coverage(
@@ -549,6 +585,10 @@ class RetrievalDiagnostics:
     @property
     def accepted_candidate_count(self) -> int:
         return sum(attempt.accepted_count for attempt in self.attempts)
+
+    @property
+    def final_evidence_count(self) -> int:
+        return len(self.final_evidence)
 
 
 def contract_to_dict(value) -> dict | list | str | int | float | bool | None:
