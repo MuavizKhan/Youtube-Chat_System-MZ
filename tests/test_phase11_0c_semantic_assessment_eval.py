@@ -267,6 +267,8 @@ def _valid_development_report(manifest, dataset_sha256):
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
         "annotation_status": "adjudicated",
+        "provider": "groq",
+        "model": "test-model",
         "assessor_protocol": _effective_assessor_protocol("groq", "test-model"),
         "case_count_in_split": 1,
         "selected_case_count": 1,
