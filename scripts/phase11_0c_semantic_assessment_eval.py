@@ -24,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from Backend.rag_system import evidence_assessment as evidence_assessment_module  # noqa: E402
 from Backend.rag_system.evidence_assessment import (  # noqa: E402
     AssessmentRunStatus,
     EvidencePassage,
@@ -892,6 +893,31 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
+    """Capture non-secret settings and code fingerprints that affect calibration."""
+    from Backend.rag_system import config
+
+    if provider == "groq":
+        reasoning_effort = config.GROQ_REASONING_EFFORT
+        configured_max_tokens = config.GROQ_MAX_TOKENS
+    elif provider == "huggingface":
+        reasoning_effort = config.HF_REASONING_EFFORT
+        configured_max_tokens = config.HF_MAX_TOKENS
+    else:
+        raise ValueError("provider must be 'groq' or 'huggingface'.")
+    return {
+        "provider": provider,
+        "model": model,
+        "temperature": 0.0,
+        "reasoning_effort": reasoning_effort,
+        "configured_max_output_tokens": configured_max_tokens,
+        "assessor_module_sha256": _sha256_file(
+            Path(evidence_assessment_module.__file__)
+        ),
+        "evaluation_runner_sha256": _sha256_file(Path(__file__)),
+    }
+
+
 def load_threshold_lock(
     lock_path: Path,
     *,
@@ -899,6 +925,8 @@ def load_threshold_lock(
     dataset_sha256: str,
     annotation_status: str,
     expected_development_case_ids: set[str],
+    provider: str,
+    model: str,
 ) -> tuple[float, dict[str, Any]]:
     """Require a frozen threshold backed by a completed development report."""
     try:
@@ -912,6 +940,13 @@ def load_threshold_lock(
     if annotation_status != "adjudicated":
         raise ThresholdLockError(
             "Threshold calibration requires independently adjudicated human labels."
+        )
+
+    current_assessor_protocol = _effective_assessor_protocol(provider, model)
+    if lock.get("assessor_protocol") != current_assessor_protocol:
+        raise ThresholdLockError(
+            "Threshold lock assessor protocol does not match the current provider, model, "
+            "configuration, or code fingerprints."
         )
 
     threshold = lock.get("minimum_support_score")
@@ -963,6 +998,7 @@ def load_threshold_lock(
         or dev_report.get("dataset_id") != dataset_id
         or dev_report.get("dataset_sha256") != dataset_sha256
         or dev_report.get("minimum_support_score") != float(threshold)
+        or dev_report.get("assessor_protocol") != current_assessor_protocol
         or dev_report.get("selected_case_count") != split_case_count
         or len(dev_cases) != split_case_count
         or len(dev_case_ids) != len(set(dev_case_ids))
@@ -1052,6 +1088,7 @@ def run_evaluation(
         "split": split,
         "provider": provider,
         "model": model,
+        "assessor_protocol": _effective_assessor_protocol(provider, model),
         "minimum_support_score": float(minimum_support_score),
         "threshold_lock": threshold_lock_metadata,
         "case_count_in_split": split_case_count,
@@ -1176,6 +1213,14 @@ def main(argv: list[str] | None = None) -> int:
             "for harness smoke tests; provisional labels cannot qualify a quality gate."
         )
 
+    if not args.validate_only:
+        from Backend.rag_system import config
+        provider = config.LLM_PROVIDER
+        model = config.GROQ_MODEL_ID if provider == "groq" else config.HF_MODEL_ID
+    else:
+        provider = None
+        model = None
+
     threshold_lock_metadata = None
     if args.split == "held_out" and not args.validate_only:
         if args.threshold_lock is None:
@@ -1191,6 +1236,8 @@ def main(argv: list[str] | None = None) -> int:
                 case["case_id"] for case in manifest["cases"]
                 if case["split"] == "development"
             },
+            provider=provider,
+            model=model,
         )
         if (
             args.minimum_support_score is not None
@@ -1229,12 +1276,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 
-    from Backend.rag_system import config
     from Backend.rag_system.chain import create_llm_client
 
     client = create_llm_client()
-    provider = config.LLM_PROVIDER
-    model = config.GROQ_MODEL_ID if provider == "groq" else config.HF_MODEL_ID
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_path = args.output or (
         DEFAULT_OUTPUT_DIR
