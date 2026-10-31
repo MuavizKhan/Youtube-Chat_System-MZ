@@ -179,9 +179,9 @@ def _heldout_adjudicated_roundtrip(*, balanced: bool):
     source_sha256 = "a" * 64
     labels_by_case: dict[str, list[dict]] = {}
     observation_index = 0
-    passage_id = "p1"
     for case in manifest["cases"]:
         case_labels = []
+        passage_id = case["passages"][0]["passage_id"]
         for aspect in case["question_analysis"]["aspects"]:
             status = (
                 STATUS_ORDER[observation_index % len(STATUS_ORDER)]
@@ -324,6 +324,49 @@ def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(
     assert first["cases"][0]["labels"][0]["expected_status"] == ""
     assert "predicted_status" not in json.dumps(first)
     assert "support_score" not in json.dumps(first)
+
+
+@pytest.mark.parametrize(
+    "primary_language, regional_track",
+    [("en", "en-US"), ("hi", "hi-IN"), ("ar", "ar-SA")],
+)
+def test_source_manifest_accepts_regional_bcp47_caption_tracks(
+    primary_language, regional_track, tmp_path, monkeypatch
+):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    case = next(
+        item for item in candidate["cases"]
+        if item["transcript_language_group"] == primary_language
+    )
+    case["source"]["transcript_track"] = regional_track
+
+    validated = workflow.validate_source_manifest(candidate)
+
+    matching = next(item for item in validated["cases"] if item["case_id"] == case["case_id"])
+    assert matching["source"]["transcript_track"] == regional_track
+
+
+def test_source_manifest_rejects_caption_track_with_wrong_primary_language(tmp_path, monkeypatch):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    candidate["cases"][0]["source"]["transcript_track"] = "hi-IN"
+
+    with pytest.raises(workflow.DatasetValidationError, match="primary language must match"):
+        workflow.validate_source_manifest(candidate)
+
+
+@pytest.mark.parametrize("annotator_id", ["MuavizKhan", "name@example.com", "JohnSmith"])
+def test_annotator_identifiers_must_be_pseudonymous_role_ids(annotator_id):
+    with pytest.raises(workflow.DatasetValidationError, match="pseudonymous role ID"):
+        workflow._annotator_id(annotator_id, "annotator_id")
+
+
+def test_supported_pseudonymous_annotator_roles_are_accepted():
+    assert workflow._annotator_id("R01", "reviewer_id") == "R01"
+    assert workflow._annotator_id("reviewer-A", "reviewer_id") == "reviewer-A"
+    assert workflow._annotator_id("adjudicator-C", "adjudicator_id") == "adjudicator-C"
+    assert workflow._annotator_id("CURATOR-01", "curator_id") == "CURATOR-01"
 
 
 def test_source_manifest_rejects_passages_over_the_phase11_0b_input_budget(tmp_path, monkeypatch):
@@ -575,6 +618,11 @@ def test_complete_annotation_round_trip_produces_valid_phase11_0c_manifest(tmp_p
     assert validated["annotation_status"] == "adjudicated"
     assert validated["split"] == "development"
     assert len(validated["cases"]) == 16
+    workflow_provenance = validated["annotation_workflow_provenance"]
+    assert workflow_provenance["source_manifest_sha256"] == digest
+    assert len(workflow_provenance["reviewer_packets"]) == 2
+    assert workflow_provenance["adjudication_packet"]["canonical_sha256"]
+    assert workflow_provenance["workflow_tool_sha256"]
     assert all(case["annotation"]["blinding_attested"] for case in validated["cases"])
     assert all(
         len(case["annotation"]["independent_reviews"]) == 2
