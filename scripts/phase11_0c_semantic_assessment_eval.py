@@ -1222,25 +1222,47 @@ def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
 def load_threshold_lock(
     lock_path: Path,
     *,
-    dataset_id: str,
-    dataset_sha256: str,
+    heldout_dataset_id: str,
+    heldout_dataset_sha256: str,
     annotation_status: str,
-    expected_development_aspects: dict[str, set[str]],
+    heldout_identity_fingerprints: dict[str, list[str]],
     provider: str,
     model: str,
 ) -> tuple[float, dict[str, Any]]:
-    """Require a frozen threshold backed by a completed development report."""
+    """Require a frozen development threshold for a separate held-out manifest."""
     try:
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ThresholdLockError(f"Cannot read threshold lock: {lock_path}") from error
     if not isinstance(lock, dict) or lock.get("schema_version") != LOCK_SCHEMA_VERSION:
         raise ThresholdLockError("Threshold lock has an unsupported schema.")
-    if lock.get("dataset_id") != dataset_id or lock.get("dataset_sha256") != dataset_sha256:
-        raise ThresholdLockError("Threshold lock does not match this exact dataset revision.")
-    if annotation_status != "adjudicated":
+
+    if (
+        lock.get("heldout_dataset_id") != heldout_dataset_id
+        or lock.get("heldout_dataset_sha256") != heldout_dataset_sha256
+    ):
         raise ThresholdLockError(
-            "Threshold calibration requires independently adjudicated human labels."
+            "Threshold lock does not match this exact held-out dataset revision."
+        )
+    if annotation_status != "adjudicated" or lock.get("annotation_status") != "adjudicated":
+        raise ThresholdLockError(
+            "Held-out evaluation requires independently adjudicated human labels."
+        )
+
+    development_dataset_id = _require_text(
+        lock.get("development_dataset_id"),
+        "threshold_lock.development_dataset_id",
+    )
+    development_dataset_sha256 = _require_text(
+        lock.get("development_dataset_sha256"),
+        "threshold_lock.development_dataset_sha256",
+    )
+    if (
+        development_dataset_id == heldout_dataset_id
+        or development_dataset_sha256 == heldout_dataset_sha256
+    ):
+        raise ThresholdLockError(
+            "Development and held-out data must be distinct dataset revisions."
         )
 
     current_assessor_protocol = _effective_assessor_protocol(provider, model)
@@ -1260,7 +1282,8 @@ def load_threshold_lock(
         raise ThresholdLockError("Threshold lock minimum_support_score is invalid.")
 
     report_rel = _require_text(
-        lock.get("development_report_path"), "threshold_lock.development_report_path"
+        lock.get("development_report_path"),
+        "threshold_lock.development_report_path",
     )
     report_path = Path(report_rel)
     if not report_path.is_absolute():
@@ -1278,6 +1301,7 @@ def load_threshold_lock(
         raise ThresholdLockError("Development report hash does not match the threshold lock.")
     if not isinstance(dev_report, dict):
         raise ThresholdLockError("Development report must be a JSON object.")
+
     dev_cases = dev_report.get("case_results")
     split_case_count = dev_report.get("case_count_in_split")
     if (
@@ -1287,6 +1311,27 @@ def load_threshold_lock(
         or split_case_count <= 0
     ):
         raise ThresholdLockError("Development report is missing complete case-level results.")
+
+    expected_case_aspects_raw = dev_report.get("expected_case_aspect_ids")
+    if not isinstance(expected_case_aspects_raw, dict) or not expected_case_aspects_raw:
+        raise ThresholdLockError(
+            "Development report is missing the expected case/aspect schema."
+        )
+    expected_development_aspects: dict[str, set[str]] = {}
+    for case_id, aspect_ids in expected_case_aspects_raw.items():
+        if (
+            not isinstance(case_id, str)
+            or not case_id
+            or not isinstance(aspect_ids, list)
+            or not aspect_ids
+            or any(not isinstance(item, str) or not item for item in aspect_ids)
+            or len(aspect_ids) != len(set(aspect_ids))
+        ):
+            raise ThresholdLockError(
+                "Development report contains an invalid expected case/aspect schema."
+            )
+        expected_development_aspects[case_id] = set(aspect_ids)
+
     dev_case_ids = [
         case.get("case_id") if isinstance(case, dict) else None
         for case in dev_cases
@@ -1296,15 +1341,17 @@ def load_threshold_lock(
         dev_report.get("split") != "development"
         or dev_report.get("run_status") != "completed"
         or dev_report.get("annotation_status") != "adjudicated"
-        or lock.get("annotation_status") != "adjudicated"
-        or dev_report.get("dataset_id") != dataset_id
-        or dev_report.get("dataset_sha256") != dataset_sha256
+        or dev_report.get("dataset_id") != development_dataset_id
+        or dev_report.get("dataset_sha256") != development_dataset_sha256
         or dev_report.get("minimum_support_score") != float(threshold)
         or dev_report.get("assessor_protocol") != current_assessor_protocol
         or dev_report.get("provider") != provider
         or dev_report.get("model") != model
         or not isinstance(dev_annotation_agreement, dict)
         or dev_annotation_agreement.get("available") is not True
+        or isinstance(
+            dev_annotation_agreement.get("reviewed_aspect_observations"), bool
+        )
         or not isinstance(
             dev_annotation_agreement.get("reviewed_aspect_observations"), int
         )
@@ -1339,8 +1386,28 @@ def load_threshold_lock(
     ):
         raise ThresholdLockError(
             "Threshold lock must reference a complete, successful development run on "
-            "this exact human-adjudicated dataset and selected threshold."
+            "the exact human-adjudicated development dataset and selected threshold."
         )
+
+    development_identities = _identity_fingerprint_sets(
+        dev_report.get("source_identity_fingerprints"),
+        "development_report.source_identity_fingerprints",
+    )
+    heldout_identities = _identity_fingerprint_sets(
+        heldout_identity_fingerprints,
+        "heldout_identity_fingerprints",
+    )
+    overlapping_categories = [
+        category
+        for category in development_identities
+        if development_identities[category] & heldout_identities[category]
+    ]
+    if overlapping_categories:
+        raise ThresholdLockError(
+            "Development and held-out manifests share video/source/independence identities: "
+            + ", ".join(sorted(overlapping_categories))
+        )
+
     _require_text(lock.get("selected_by"), "threshold_lock.selected_by")
     _require_text(lock.get("selection_rationale"), "threshold_lock.selection_rationale")
     return float(threshold), {
@@ -1348,6 +1415,8 @@ def load_threshold_lock(
         "lock_sha256": _sha256_file(lock_path),
         "development_report_path": str(report_path),
         "development_report_sha256": actual_report_sha,
+        "development_dataset_id": development_dataset_id,
+        "heldout_dataset_id": heldout_dataset_id,
         "selected_by": lock["selected_by"],
     }
 
