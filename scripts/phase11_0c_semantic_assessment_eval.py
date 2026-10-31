@@ -311,17 +311,69 @@ def _validate_case(
         adjudicator_id = _require_text(
             annotation.get("adjudicator_id"), f"{case_id}.annotation.adjudicator_id"
         )
+        independent_reviews = annotation.get("independent_reviews")
         if annotation_case_status != "adjudicated":
             raise DatasetValidationError(
                 f"{case_id}: every case must be marked adjudicated."
             )
-        if len(reviewer_ids) < 2:
+        if len(reviewer_ids) != 2:
             raise DatasetValidationError(
-                f"{case_id}: at least two independent reviewer IDs are required."
+                f"{case_id}: exactly two independent reviewer IDs are required."
             )
         if adjudicator_id in reviewer_ids:
             raise DatasetValidationError(
                 f"{case_id}: adjudicator must be distinct from the two reviewers."
+            )
+        if annotation.get("blinding_attested") is not True:
+            raise DatasetValidationError(
+                f"{case_id}: independent reviewers must attest that they were blinded "
+                "to model predictions and each other's labels."
+            )
+        if not isinstance(independent_reviews, list) or len(independent_reviews) != 2:
+            raise DatasetValidationError(
+                f"{case_id}: exactly two independent review records are required."
+            )
+        observed_reviewer_ids = []
+        for review in independent_reviews:
+            if not isinstance(review, dict):
+                raise DatasetValidationError(
+                    f"{case_id}: every independent review must be an object."
+                )
+            reviewer_id = _require_text(
+                review.get("reviewer_id"), f"{case_id}.independent_review.reviewer_id"
+            )
+            observed_reviewer_ids.append(reviewer_id)
+            review_labels = review.get("labels")
+            if not isinstance(review_labels, list):
+                raise DatasetValidationError(
+                    f"{case_id}/{reviewer_id}: independent review labels must be an array."
+                )
+            review_aspect_ids = []
+            for review_label in review_labels:
+                if not isinstance(review_label, dict):
+                    raise DatasetValidationError(
+                        f"{case_id}/{reviewer_id}: every review label must be an object."
+                    )
+                _validate_status_label(
+                    review_label,
+                    passage_ids,
+                    {aspect.aspect_id for aspect in aspects},
+                )
+                review_aspect_ids.append(review_label["aspect_id"])
+            if (
+                len(review_aspect_ids) != len(set(review_aspect_ids))
+                or set(review_aspect_ids) != {aspect.aspect_id for aspect in aspects}
+            ):
+                raise DatasetValidationError(
+                    f"{case_id}/{reviewer_id}: every aspect must have exactly one "
+                    "independent reviewer label."
+                )
+        if (
+            len(observed_reviewer_ids) != len(set(observed_reviewer_ids))
+            or set(observed_reviewer_ids) != set(reviewer_ids)
+        ):
+            raise DatasetValidationError(
+                f"{case_id}: independent review records must match the two declared reviewers."
             )
         if source_kind == "synthetic_fixture":
             raise DatasetValidationError(
@@ -498,6 +550,110 @@ def _case_inputs(case: dict[str, Any]) -> tuple[QuestionAnalysis, tuple[Evidence
 
 def _enum_value(value: Any) -> str:
     return value.value if hasattr(value, "value") else str(value)
+
+
+def _cohens_kappa(
+    first_labels: list[str],
+    second_labels: list[str],
+) -> dict[str, Any]:
+    """Return nominal two-annotator agreement without assuming ordered statuses."""
+    if len(first_labels) != len(second_labels):
+        raise ValueError("Annotator label vectors must have equal lengths.")
+    total = len(first_labels)
+    if total == 0:
+        return {
+            "observations": 0,
+            "observed_agreement": None,
+            "expected_agreement": None,
+            "cohens_kappa": None,
+        }
+    observed = sum(
+        first == second for first, second in zip(first_labels, second_labels)
+    ) / total
+    first_counts = Counter(first_labels)
+    second_counts = Counter(second_labels)
+    expected = sum(
+        first_counts[status] * second_counts[status]
+        for status in STATUS_ORDER
+    ) / (total * total)
+    kappa = (
+        None if math.isclose(expected, 1.0)
+        else (observed - expected) / (1.0 - expected)
+    )
+    return {
+        "observations": total,
+        "observed_agreement": observed,
+        "expected_agreement": expected,
+        "cohens_kappa": kappa,
+    }
+
+
+def build_annotation_agreement_metrics(
+    manifest: dict[str, Any],
+    split: str,
+) -> dict[str, Any]:
+    """Measure blinded two-reviewer status agreement for a dataset split."""
+    selected = [case for case in manifest["cases"] if case["split"] == split]
+    if manifest.get("annotation_status") != "adjudicated":
+        return {
+            "available": False,
+            "reason": "independent_human_reviews_not_present_in_provisional_dataset",
+            "split": split,
+        }
+
+    rows = []
+    for case in selected:
+        review_by_id = {
+            review["reviewer_id"]: {
+                label["aspect_id"]: label["expected_status"]
+                for label in review["labels"]
+            }
+            for review in case["annotation"]["independent_reviews"]
+        }
+        reviewer_ids = case["annotation"]["reviewer_ids"]
+        first, second = reviewer_ids
+        for aspect in case["question_analysis"]["aspects"]:
+            aspect_id = aspect["aspect_id"]
+            rows.append({
+                "case_id": case["case_id"],
+                "aspect_id": aspect_id,
+                "question_language_group": case["question_language_group"],
+                "transcript_language_group": case["transcript_language_group"],
+                "reviewer_1_status": review_by_id[first][aspect_id],
+                "reviewer_2_status": review_by_id[second][aspect_id],
+            })
+
+    def agreement(selected_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return _cohens_kappa(
+            [row["reviewer_1_status"] for row in selected_rows],
+            [row["reviewer_2_status"] for row in selected_rows],
+        )
+
+    return {
+        "available": True,
+        "split": split,
+        "reviewed_aspect_observations": len(rows),
+        "overall": agreement(rows),
+        "per_question_language": {
+            language: agreement([
+                row for row in rows
+                if row["question_language_group"] == language
+            ])
+            for language in SUPPORTED_LANGUAGES
+        },
+        "per_transcript_language": {
+            language: agreement([
+                row for row in rows
+                if row["transcript_language_group"] == language
+            ])
+            for language in SUPPORTED_LANGUAGES
+        },
+        "note": (
+            "Cohen's kappa measures agreement between the two independent status "
+            "labels before adjudication. It does not determine whether the final "
+            "adjudicated label is substantively correct."
+        ),
+    }
 
 
 def _case_prediction_record(
@@ -1112,6 +1268,7 @@ def run_evaluation(
         "assessor_protocol": _effective_assessor_protocol(provider, model),
         "minimum_support_score": float(minimum_support_score),
         "threshold_lock": threshold_lock_metadata,
+        "annotation_agreement": build_annotation_agreement_metrics(manifest, split),
         "case_count_in_split": split_case_count,
         "selected_case_count": len(selected),
         "case_results": [],
@@ -1291,6 +1448,9 @@ def main(argv: list[str] | None = None) -> int:
                 for case in selected_cases
                 for label in case["labels"]
             )),
+            "annotation_agreement": build_annotation_agreement_metrics(
+                manifest, args.split
+            ),
             "validation": "passed",
             "quality_gate_eligible": False,
         }
