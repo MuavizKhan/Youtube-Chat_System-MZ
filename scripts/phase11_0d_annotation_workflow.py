@@ -285,7 +285,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             f"{case_id}: question_analysis.language must match question_language_group."
         )
     aspects_raw = _require_list(
-        analysis.get("aspects"), f"{case_id}.question_analysis.aspects"
+        analysis.get("aspects"), f"{case_id}.question_analysis.aspects", minimum=0
     )
     if not 1 <= len(aspects_raw) <= 8:
         raise DatasetValidationError(
@@ -359,7 +359,9 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             raise
         raise DatasetValidationError(f"{case_id}: invalid question analysis: {error}") from error
 
-    passages_raw = _require_list(case.get("passages"), f"{case_id}.passages")
+    passages_raw = _require_list(
+        case.get("passages"), f"{case_id}.passages", minimum=0
+    )
     if not 1 <= len(passages_raw) <= 12:
         raise DatasetValidationError(
             f"{case_id}: between one and twelve evidence passages are required."
