@@ -410,7 +410,10 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
     source = _require_mapping(case.get("source"), f"{case_id}.source")
     _reject_unexpected_keys(
         source,
-        {"kind", "source_group", "source_url", "transcript_track"},
+        {
+            "kind", "source_group", "source_url", "transcript_track",
+            "caption_track_kind", "verification",
+        },
         f"{case_id}.source",
     )
     source_kind = _require_text(source.get("kind"), f"{case_id}.source.kind")
@@ -427,6 +430,34 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
         raise DatasetValidationError(
             f"{case_id}: source.transcript_track must match transcript_language_group."
         )
+    caption_track_kind = _require_text(
+        source.get("caption_track_kind"), f"{case_id}.source.caption_track_kind"
+    )
+    if caption_track_kind not in {"auto_generated", "publisher_uploaded"}:
+        raise DatasetValidationError(
+            f"{case_id}: caption_track_kind must be auto_generated or publisher_uploaded."
+        )
+    verification = _require_mapping(
+        source.get("verification"), f"{case_id}.source.verification"
+    )
+    _reject_unexpected_keys(
+        verification,
+        {
+            "video_id_confirmed", "caption_track_confirmed",
+            "timestamps_confirmed", "verified_by",
+        },
+        f"{case_id}.source.verification",
+    )
+    for check_name in (
+        "video_id_confirmed", "caption_track_confirmed", "timestamps_confirmed"
+    ):
+        if verification.get(check_name) is not True:
+            raise DatasetValidationError(
+                f"{case_id}: source verification requires {check_name}=true."
+            )
+    verified_by = _safe_id(
+        verification.get("verified_by"), f"{case_id}.source.verification.verified_by"
+    )
     source_group = _safe_id(
         source.get("source_group"), f"{case_id}.source.source_group"
     )
@@ -443,6 +474,12 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
         "source": {
             **source,
             "source_group": source_group,
+            "verification": {
+                "video_id_confirmed": True,
+                "caption_track_confirmed": True,
+                "timestamps_confirmed": True,
+                "verified_by": verified_by,
+            },
         },
     }
 
