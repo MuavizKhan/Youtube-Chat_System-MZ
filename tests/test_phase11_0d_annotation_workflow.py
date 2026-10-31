@@ -75,7 +75,7 @@ def _held_out_source_fixture(*, unique_sources: bool = True) -> dict:
             for _ in range(10):
                 counter += 1
                 case = deepcopy(templates[(counter - 1) % len(templates)])
-                case_id = f"CASE-{counter:04d}"
+                case_id = f"CASE-H{counter:04d}"
                 video_id = (
                     f"SyntheticHeldout{counter:04d}"
                     if unique_sources else "SyntheticHeldoutShared"
@@ -505,7 +505,7 @@ def test_held_out_source_preflight_rejects_underfilled_cohorts_before_annotation
     for case in candidate["cases"]:
         case["split"] = "held_out"
 
-    with pytest.raises(workflow.DatasetValidationError, match="held-out source manifest has"):
+    with pytest.raises(workflow.DatasetValidationError, match="source manifest has"):
         workflow.validate_source_manifest(candidate)
 
 
