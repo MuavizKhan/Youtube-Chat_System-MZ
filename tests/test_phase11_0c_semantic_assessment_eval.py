@@ -337,6 +337,32 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
         )
 
 
+def test_threshold_lock_rejects_assessor_protocol_drift(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="protocol"):
+        load_threshold_lock(
+            lock_path,
+            dataset_id=manifest["dataset_id"],
+            dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
+            expected_development_case_ids={"DEV01"},
+            provider="huggingface",
+            model="test-model",
+        )
+
+
 def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
     manifest, dataset_sha256 = _load_seed()
     lock_path = tmp_path / "lock.json"
