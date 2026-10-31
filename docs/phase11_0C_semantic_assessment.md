@@ -245,11 +245,11 @@ Each case receives at most one application-level assessment invocation. The runn
 
 Phase 11.0C is accepted as an evaluation-harness implementation when:
 1. Dataset validation rejects malformed labels, incomplete/duplicated independent reviews, missing blinding attestation, invalid provenance, and cross-split leakage.
-2. Metrics tests cover all six statuses, supported false positives, per-question-language and per-transcript-language aggregation, confidence intervals, and pre-adjudication inter-annotator agreement.
-3. Threshold locks reject changed datasets, changed development reports, missing annotation-agreement records, incomplete development runs, missing/duplicated aspects, provider/model/protocol drift, and threshold mismatch.
-4. Reports contain no transcript text or raw prompts.
+2. Metrics tests cover all six statuses, supported false positives, per-question-language, per-transcript-language and language-pair aggregation, confidence intervals, and pre-adjudication inter-annotator agreement.
+3. Threshold locks reject changed development/held-out datasets, changed development reports, missing annotation-agreement records, incomplete development runs, missing/duplicated aspects, cross-split source identity overlap, provider/model/protocol drift, and threshold mismatch.
+4. Reports contain no transcript text, raw prompts, raw provider responses, or unexpected exception messages; unexpected runner errors create sanitized partial checkpoints and stop further calls.
 5. Direct CLI help and validate-only invocation work without API keys.
 6. Full local and CI tests pass.
-7. No production RAG code, Phase 10.11 config/index/report, dependency, or API behavior changes.
+7. Only the four Phase 11.0C evaluation files and the `.gitignore` exclusion for private evaluation data change; no production RAG code, Phase 10.11 config/index/report, dependency, or API behavior changes.
 
 The phase is **not** complete as a semantic-quality claim until real excerpts have been independently adjudicated and the development and held-out runs have been performed and reviewed. No production integration is authorized by this phase.
