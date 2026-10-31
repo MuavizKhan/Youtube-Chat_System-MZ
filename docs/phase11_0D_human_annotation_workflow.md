@@ -215,9 +215,28 @@ Assemble and validate the final Phase 11.0C manifest:
 
 The final command runs the Phase 11.0C validate_manifest contract before writing. It rejects incomplete status/language coverage as well as malformed labels, unverified provenance, missing timestamps, incomplete reviews, and invalid annotator identities. The output is private and is not committed.
 
-Repeat with a separate held-out source manifest, separate reviewer packets, and a separate adjudicator process. Keep held-out annotations inaccessible to anyone changing the assessor or selecting the development threshold.
+### Held-out commands
 
-Finally, validate the assembled real dataset using the evaluator with --validate-only (without --allow-provisional-labels). Only after the development cohort is adjudicated and validated should threshold calibration begin.
+The held-out source preflight, reviewer export, adjudication-packet build, and final assembly must all be supplied the development source manifest. The workflow checks video IDs, source groups, and independence groups for overlap before any held-out reviewer packets can be issued.
+
+~~~powershell
+$devSource = "evaluation_data/private/phase11_0C_development_sources.json"
+$testSource = "evaluation_data/private/phase11_0C_held_out_sources.json"
+
+& $python scripts/phase11_0d_annotation_workflow.py validate-source --source-manifest $testSource --development-source-manifest $devSource
+
+& $python scripts/phase11_0d_annotation_workflow.py export-review-packets --source-manifest $testSource --development-source-manifest $devSource --reviewer-ids R11 R12 --output-dir evaluation_data/private/annotation_packets/held_out
+
+& $python scripts/phase11_0d_annotation_workflow.py build-adjudication-packet --source-manifest $testSource --development-source-manifest $devSource --reviewer-packets evaluation_data/private/annotation_packets/held_out/reviewer_R11.json evaluation_data/private/annotation_packets/held_out/reviewer_R12.json --adjudicator-id R13 --output evaluation_data/private/annotation_packets/held_out/adjudicator_R13.json
+
+& $python scripts/phase11_0d_annotation_workflow.py assemble --source-manifest $testSource --development-source-manifest $devSource --reviewer-packets evaluation_data/private/annotation_packets/held_out/reviewer_R11.json evaluation_data/private/annotation_packets/held_out/reviewer_R12.json --adjudication-packet evaluation_data/private/annotation_packets/held_out/adjudicator_R13.json --output evaluation_data/private/phase11_0C_held_out.json
+~~~
+
+Use a distinct reviewer/adjudicator group for held-out where practical. Keep held-out labels inaccessible to anyone changing the assessor or selecting the development threshold.
+
+The adjudication packet is bound to the canonical SHA-256 of each completed reviewer packet. Changing either review after the adjudicator packet was produced invalidates assembly; regenerate the adjudication packet only after the adjudicator has reviewed the correct two revisions.
+
+Finally, validate both assembled real datasets using the Phase 11.0C evaluator with --validate-only (without --allow-provisional-labels). The held-out assembler also enforces at least 10 adjudicated aspect observations per status before the evaluator can make any provider calls. Only after the development cohort is adjudicated and validated should threshold calibration begin.
 
 ## 7. Acceptance gates and stop conditions
 
