@@ -1,0 +1,1491 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "phase11_0C_semantic_seed_fixture_v1",
+  "description": "Provisional synthetic fixtures for validating the Phase 11.0C evaluation harness. These cases are not real transcript excerpts, are not human-adjudicated, and must never be used to claim semantic accuracy or calibrate a production threshold.",
+  "annotation_status": "provisional_synthetic",
+  "annotation_policy": {
+    "final_status": "adjudicated",
+    "minimum_independent_reviewers": 2,
+    "adjudication_required": true,
+    "annotators_must_not_see_model_predictions": true,
+    "source_evidence_required": true,
+    "split_policy": "Keep each source video and independence group wholly within one split."
+  },
+  "status_labels": [
+    "supported",
+    "partial",
+    "missing",
+    "contradicted",
+    "conflicted",
+    "unknown"
+  ],
+  "languages": [
+    "en",
+    "hi",
+    "ar"
+  ],
+  "cases": [
+    {
+      "case_id": "D-EN-SUP-01",
+      "split": "development",
+      "independence_group": "development-d-en-sup-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "direct_entailment",
+        "causal_relation"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "en",
+        "video_id": "synthetic-development-01",
+        "subject": "lender funding",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker says the global financial crisis caused lenders to stop extending credit.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The speaker says the global financial crisis caused lenders to stop providing new credit.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-development-01",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-01",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-HI-SUP-01",
+      "split": "development",
+      "independence_group": "development-d-hi-sup-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "direct_entailment",
+        "native_hindi"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "hi",
+        "video_id": "synthetic-development-02",
+        "subject": "farmers protest",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "वक्ता कहता है कि कृषि कानूनों के विरोध में किसानों ने आंदोलन शुरू किया।",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता कहता है कि किसानों ने कृषि कानूनों के विरोध में आंदोलन शुरू किया।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-development-02",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-02",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-AR-PAR-01",
+      "split": "development",
+      "independence_group": "development-d-ar-par-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "incomplete_multi_part",
+        "native_arabic"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "ar",
+        "video_id": "synthetic-development-03",
+        "subject": "business problem",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker identifies two distinct causes of the problem.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يذكر المتحدث أن ارتفاع التكاليف كان أحد أسباب المشكلة.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-development-03",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "partial",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-03",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-EN-PAR-01",
+      "split": "development",
+      "independence_group": "development-d-en-par-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "incomplete_detail",
+        "same_topic"
+      ],
+      "question_analysis": {
+        "intent": "list",
+        "language": "en",
+        "video_id": "synthetic-development-04",
+        "subject": "operating costs",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript identifies two specific measures that reduced operating costs.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The company reviewed its operating costs during the year.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-development-04",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "partial",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-04",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-HI-MIS-01",
+      "split": "development",
+      "independence_group": "development-d-hi-mis-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "same_topic_but_unrelated_detail",
+        "missing"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "hi",
+        "video_id": "synthetic-development-05",
+        "subject": "programming language",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript identifies the speaker's favourite programming language.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता विमान सेवाओं और हवाई अड्डे की फीस पर चर्चा करता है।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-development-05",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "missing",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-05",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-AR-MIS-01",
+      "split": "development",
+      "independence_group": "development-d-ar-mis-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "same_topic_but_unrelated_detail",
+        "missing"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "ar",
+        "video_id": "synthetic-development-06",
+        "subject": "birthplace",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript identifies the city where the speaker was born.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يتحدث المتحدث عن دعم البنوك للشركة وتكاليف الوقود.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-development-06",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "missing",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-06",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-EN-CON-01",
+      "split": "development",
+      "independence_group": "development-d-en-con-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "negation",
+        "direct_contradiction"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "en",
+        "video_id": "synthetic-development-07",
+        "subject": "bank support",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker says the banks agreed to continue lending.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The speaker explicitly says the banks did not agree to continue lending.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-development-07",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "contradicted",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": [
+            "p1"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-07",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-HI-CON-01",
+      "split": "development",
+      "independence_group": "development-d-hi-con-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "negation",
+        "direct_contradiction",
+        "native_hindi"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "hi",
+        "video_id": "synthetic-development-08",
+        "subject": "bank support",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "वक्ता कहता है कि बैंक ने वित्तीय सहायता दी।",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता स्पष्ट कहता है कि बैंक ने कोई वित्तीय सहायता नहीं दी।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-development-08",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "contradicted",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": [
+            "p1"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-08",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-AR-CFL-01",
+      "split": "development",
+      "independence_group": "development-d-ar-cfl-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "opposing_statements",
+        "conflict"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "ar",
+        "video_id": "synthetic-development-09",
+        "subject": "bank support",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript consistently establishes whether the bank provided support.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "في المقطع نفسه، يقول المتحدث إن البنك قدّم الدعم للشركة.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-development-09",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        },
+        {
+          "passage_id": "p2",
+          "text": "وفي المقطع نفسه، يقول المتحدث إن البنك لم يقدّم أي دعم للشركة.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-development-09",
+              "chunk_id": "chunk-2",
+              "start_seconds": 30,
+              "end_seconds": 38
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "conflicted",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": [
+            "p2"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-09",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-EN-CFL-01",
+      "split": "development",
+      "independence_group": "development-d-en-cfl-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "opposing_statements",
+        "conflict"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "en",
+        "video_id": "synthetic-development-10",
+        "subject": "supplier approval",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript gives one consistent answer about whether the supplier approved the extension.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The speaker says the supplier approved the extension.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-development-10",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        },
+        {
+          "passage_id": "p2",
+          "text": "The speaker says the supplier did not approve the extension.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-development-10",
+              "chunk_id": "chunk-2",
+              "start_seconds": 30,
+              "end_seconds": 38
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "conflicted",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": [
+            "p2"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-10",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-HI-UNK-01",
+      "split": "development",
+      "independence_group": "development-d-hi-unk-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "fragmented_caption",
+        "ambiguous_reference"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "hi",
+        "video_id": "synthetic-development-11",
+        "subject": "policy and losses",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker explicitly attributes the losses to the policy.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता कहता है, 'क्योंकि वह... फिर उन्होंने इसे...'",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-development-11",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "unknown",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-11",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "D-AR-UNK-01",
+      "split": "development",
+      "independence_group": "development-d-ar-unk-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "fragmented_caption",
+        "ambiguous_reference"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "ar",
+        "video_id": "synthetic-development-12",
+        "subject": "cause of problem",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript makes the specific cause of the problem clear.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "لأنهم عندما... ثم كان ذلك بالنسبة إليه...",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-development-12",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "unknown",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-12",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-EN-SUP-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-en-sup-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "direct_entailment",
+        "causal_relation"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "en",
+        "video_id": "synthetic-held_out-13",
+        "subject": "backup system outage",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The technician says the damaged battery cell caused the backup system to shut down.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The technician says the damaged battery cell caused the backup system to shut down.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-13",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-13",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-AR-SUP-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-ar-sup-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "direct_entailment",
+        "native_arabic"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "ar",
+        "video_id": "synthetic-held_out-14",
+        "subject": "flight delay",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker says dense fog caused the flight to be delayed.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يوضح المتحدث أن الضباب الكثيف تسبب في تأخر الرحلة.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-14",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-14",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-HI-PAR-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-hi-par-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "incomplete_multi_part",
+        "native_hindi"
+      ],
+      "question_analysis": {
+        "intent": "list",
+        "language": "hi",
+        "video_id": "synthetic-held_out-15",
+        "subject": "traffic disruption",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript identifies two distinct consequences of the heavy rain.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "भारी बारिश के कारण सड़क यातायात धीमा हो गया।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-15",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "partial",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-15",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-EN-PAR-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-en-par-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "incomplete_sequence",
+        "partial_evidence"
+      ],
+      "question_analysis": {
+        "intent": "sequence",
+        "language": "en",
+        "video_id": "synthetic-held_out-16",
+        "subject": "sampling process",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript provides every step in the team's sampling process.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "First, the team collected samples from the three locations.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-16",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "partial",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-16",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-AR-MIS-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-ar-mis-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "same_topic_but_unrelated_detail",
+        "missing"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "ar",
+        "video_id": "synthetic-held_out-17",
+        "subject": "university attended",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript names the university attended by the speaker.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يناقش المتحدث نتائج المختبر وتمويل المشروع وتكاليف التشغيل.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-17",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "missing",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-17",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-HI-MIS-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-hi-mis-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "same_topic_but_unrelated_detail",
+        "missing"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "hi",
+        "video_id": "synthetic-held_out-18",
+        "subject": "car colour",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript states the colour of the car purchased by the speaker.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता नई तकनीक और उत्पादन लागत पर चर्चा करता है।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-18",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "missing",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-18",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-EN-CON-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-en-con-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "negation",
+        "direct_contradiction"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "en",
+        "video_id": "synthetic-held_out-19",
+        "subject": "device safety",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker says the tests confirmed that the device was safe.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The speaker says the tests did not confirm that the device was safe.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-19",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "contradicted",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": [
+            "p1"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-19",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-AR-CON-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-ar-con-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "negation",
+        "direct_contradiction"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "ar",
+        "video_id": "synthetic-held_out-20",
+        "subject": "report conclusion",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker says the report confirmed success.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يقول المتحدث إن التقرير لم يؤكد النجاح.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-20",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "contradicted",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": [
+            "p1"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-20",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-HI-CFL-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-hi-cfl-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "opposing_statements",
+        "temporal_conflict"
+      ],
+      "question_analysis": {
+        "intent": "temporal",
+        "language": "hi",
+        "video_id": "synthetic-held_out-21",
+        "subject": "report publication",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript consistently establishes whether the report was released on Friday.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "वक्ता कहता है कि रिपोर्ट शुक्रवार को जारी हुई।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-21",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        },
+        {
+          "passage_id": "p2",
+          "text": "वक्ता कहता है कि रिपोर्ट शुक्रवार को जारी नहीं हुई।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-21",
+              "chunk_id": "chunk-2",
+              "start_seconds": 30,
+              "end_seconds": 38
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "conflicted",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": [
+            "p2"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-21",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-EN-CFL-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-en-cfl-01",
+      "language_group": "en",
+      "challenge_tags": [
+        "opposing_statements",
+        "negation",
+        "conflict"
+      ],
+      "question_analysis": {
+        "intent": "direct_fact",
+        "language": "en",
+        "video_id": "synthetic-held_out-22",
+        "subject": "shipment arrival",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript consistently establishes whether the shipment arrived on Monday.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "The manager says the shipment arrived on Monday.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-22",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        },
+        {
+          "passage_id": "p2",
+          "text": "The manager says the shipment did not arrive on Monday.",
+          "transcript_language": "en",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-22",
+              "chunk_id": "chunk-2",
+              "start_seconds": 30,
+              "end_seconds": 38
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "conflicted",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": [
+            "p2"
+          ]
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-22",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-AR-UNK-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-ar-unk-01",
+      "language_group": "ar",
+      "challenge_tags": [
+        "fragmented_caption",
+        "ambiguous_reference"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "ar",
+        "video_id": "synthetic-held_out-23",
+        "subject": "outage cause",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The transcript clearly states the exact cause of the service outage.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "إذا كان هذا هو... فقد يكون من...",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-23",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "unknown",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-23",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-HI-UNK-01",
+      "split": "held_out",
+      "independence_group": "held_out-h-hi-unk-01",
+      "language_group": "hi",
+      "challenge_tags": [
+        "fragmented_caption",
+        "ambiguous_reference"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "hi",
+        "video_id": "synthetic-held_out-24",
+        "subject": "equipment failure",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The speaker clearly attributes the delay to equipment failure.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "जब उन्होंने कहा कि यह... तब उसे...",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-24",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 18
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "unknown",
+          "supporting_passage_ids": [],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-24",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    }
+  ]
+}
