@@ -739,6 +739,7 @@ def _case_prediction_record(
         "challenge_tags": list(case.get("challenge_tags", [])),
         "assessment_run_status": diag_status,
         "error_code": diagnostics.error_code,
+        "assessor_invocation_count": 1,
         "request_count": diagnostics.request_count,
         "elapsed_ms": round(float(diagnostics.elapsed_ms), 3),
         "input_chars": diagnostics.input_chars,
@@ -749,6 +750,56 @@ def _case_prediction_record(
         "aspect_count": diagnostics.aspect_count,
         "assessments": assessments,
         # Deliberately no transcript text, prompt, raw provider response, or summary.
+    }
+
+
+def _case_runner_error_record(
+    case: dict[str, Any],
+    elapsed_ms: float,
+    error: Exception,
+) -> dict[str, Any]:
+    """Create a sanitized failed-case record if the assessor unexpectedly raises."""
+    status_code = getattr(error, "status_code", None)
+    error_code = (
+        "provider_rate_limited"
+        if status_code == 429
+        else "assessor_invocation_error"
+    )
+    return {
+        "case_id": case["case_id"],
+        "split": case["split"],
+        "question_language_group": case["question_language_group"],
+        "transcript_language_group": case["transcript_language_group"],
+        "challenge_tags": list(case.get("challenge_tags", [])),
+        "assessment_run_status": "runner_error",
+        "error_code": error_code,
+        "assessor_invocation_count": 1,
+        "request_count": 0,
+        "elapsed_ms": round(float(elapsed_ms), 3),
+        "input_chars": None,
+        "input_limit_chars": DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
+        "input_tokens": None,
+        "output_tokens": None,
+        "passage_count": len(case.get("passages", [])),
+        "aspect_count": len(case["question_analysis"]["aspects"]),
+        "assessments": [
+            {
+                "aspect_id": label["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": None,
+                "support_score": None,
+                "expected_supporting_passage_ids": label.get(
+                    "supporting_passage_ids", []
+                ),
+                "predicted_supporting_passage_ids": [],
+                "expected_contradicting_passage_ids": label.get(
+                    "contradicting_passage_ids", []
+                ),
+                "predicted_contradicting_passage_ids": [],
+            }
+            for label in case["labels"]
+        ],
+        # Exception text, transcript text, prompt, and provider response are omitted.
     }
 
 
@@ -950,6 +1001,10 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
         record["assessment_run_status"] for record in diagnostics
     ))
     attempted_calls = sum(record["request_count"] for record in diagnostics)
+    assessor_invocations = sum(
+        record.get("assessor_invocation_count", record["request_count"])
+        for record in diagnostics
+    )
     input_token_values = [
         record["input_tokens"] for record in diagnostics
         if record["input_tokens"] is not None
@@ -960,7 +1015,7 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     elapsed_values = [
         record["elapsed_ms"] for record in diagnostics
-        if record["request_count"] > 0
+        if record.get("assessor_invocation_count", record["request_count"]) > 0
     ]
     completed = status_counts.get(AssessmentRunStatus.COMPLETED.value, 0)
     return {
@@ -972,7 +1027,9 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
             "attempted_cases": len(diagnostics),
             "completed_assessments": completed,
             "assessment_run_status_counts": status_counts,
+            "application_level_assessor_invocations": assessor_invocations,
             "application_level_provider_calls": attempted_calls,
+            "runner_error_count": status_counts.get("runner_error", 0),
             "provider_error_count": status_counts.get(
                 AssessmentRunStatus.PROVIDER_ERROR.value, 0
             ),
@@ -1516,21 +1573,32 @@ def run_evaluation(
 
     stop_reason = None
     for index, case in enumerate(selected):
-        analysis, passages = _case_inputs(case)
-        result = assessor(
-            analysis,
-            passages,
-            client,
-            provider=provider,
-            model=model,
-            minimum_support_score=float(minimum_support_score),
-        )
-        record = _case_prediction_record(case, result)
+        invocation_started = time.perf_counter()
+        try:
+            analysis, passages = _case_inputs(case)
+            result = assessor(
+                analysis,
+                passages,
+                client,
+                provider=provider,
+                model=model,
+                minimum_support_score=float(minimum_support_score),
+            )
+            record = _case_prediction_record(case, result)
+        except Exception as error:
+            record = _case_runner_error_record(
+                case,
+                (time.perf_counter() - invocation_started) * 1000,
+                error,
+            )
         report["case_results"].append(record)
         _write_report_atomic(output_path, report)
 
         if record["error_code"] == "provider_rate_limited":
             stop_reason = "provider_rate_limited_no_retry_or_further_calls"
+            break
+        if record["assessment_run_status"] == "runner_error":
+            stop_reason = "assessor_invocation_error_stop_no_further_calls"
             break
         if index < len(selected) - 1 and sleep_seconds:
             time.sleep(float(sleep_seconds))
