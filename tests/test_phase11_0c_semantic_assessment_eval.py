@@ -207,6 +207,7 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
     }
     report_path = tmp_path / "development.json"
     report_path.write_text(json.dumps(development_report), encoding="utf-8")
@@ -217,6 +218,7 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
         "development_report_path": "development.json",
         "development_report_sha256": report_sha,
         "selected_by": "reviewer-1",
@@ -229,6 +231,7 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         lock_path,
         dataset_id=manifest["dataset_id"],
         dataset_sha256=dataset_sha256,
+        annotation_status="adjudicated",
     )
     assert threshold == 0.75
     assert metadata["development_report_sha256"] == report_sha
@@ -243,6 +246,7 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
     }), encoding="utf-8")
     report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
     lock_path = tmp_path / "threshold-lock.json"
@@ -251,6 +255,7 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
         "development_report_path": "development.json",
         "development_report_sha256": report_sha,
         "selected_by": "reviewer-1",
@@ -263,7 +268,47 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
             lock_path,
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
         )
+
+
+def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ThresholdLockError, match="human labels"):
+        load_threshold_lock(
+            lock_path,
+            dataset_id=manifest["dataset_id"],
+            dataset_sha256=dataset_sha256,
+            annotation_status="provisional_synthetic",
+        )
+
+
+def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_attempted():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "language_group": case["language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+    records[0]["assessment_run_status"] = "provider_error"
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_assessment_calls_failed_or_returned_invalid_output"
+        in result["reasons"]
+    )
 
 
 def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp_path):
