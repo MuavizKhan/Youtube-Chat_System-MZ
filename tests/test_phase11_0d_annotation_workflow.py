@@ -291,7 +291,7 @@ def test_source_manifest_rejects_unsafe_or_invalid_inputs(tmp_path, monkeypatch,
     "case_id",
     [
         "DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02",
-        "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02",
+        "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02", "case-0001",
     ],
 )
 @pytest.mark.parametrize(
@@ -388,7 +388,10 @@ def test_source_manifest_rejects_caption_track_with_wrong_primary_language(tmp_p
         workflow.validate_source_manifest(candidate)
 
 
-@pytest.mark.parametrize("annotator_id", ["MuavizKhan", "name@example.com", "JohnSmith"])
+@pytest.mark.parametrize(
+    "annotator_id",
+    ["MuavizKhan", "name@example.com", "JohnSmith", "reviewer-a", "adj-01"],
+)
 def test_annotator_identifiers_must_be_pseudonymous_role_ids(annotator_id):
     with pytest.raises(workflow.DatasetValidationError, match="pseudonymous role ID"):
         workflow._annotator_id(annotator_id, "annotator_id")
