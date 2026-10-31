@@ -21,6 +21,7 @@ import statistics
 import sys
 import time
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -96,6 +97,52 @@ def _require_string_list(value: Any, field_name: str) -> list[str]:
     if len(cleaned) != len(set(cleaned)):
         raise DatasetValidationError(f"{field_name} must not contain duplicates.")
     return cleaned
+
+
+def _validate_youtube_source_url(source_url: str, video_id: str, field_name: str) -> None:
+    """Require an HTTPS YouTube watch/share/embed URL for the exact case video."""
+    try:
+        parsed = urlparse(source_url)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError as error:
+        raise DatasetValidationError(f"{field_name} must be a valid HTTPS YouTube URL.") from error
+
+    allowed_hosts = {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    }
+    if (
+        parsed.scheme != "https"
+        or hostname not in allowed_hosts
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+    ):
+        raise DatasetValidationError(
+            f"{field_name} must be an HTTPS URL on an approved YouTube host."
+        )
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    source_video_id = None
+    if hostname in {"youtu.be", "www.youtu.be"}:
+        source_video_id = path_parts[0] if path_parts else None
+    elif parsed.path.rstrip("/").lower() == "/watch":
+        source_video_id = parse_qs(parsed.query).get("v", [None])[0]
+    elif len(path_parts) >= 2 and path_parts[0].lower() in {
+        "shorts", "live", "embed",
+    }:
+        source_video_id = path_parts[1]
+
+    if source_video_id != video_id:
+        raise DatasetValidationError(
+            f"{field_name} must identify the case video_id exactly."
+        )
 
 
 def _validate_status_label(label: dict[str, Any], passage_ids: set[str], aspect_ids: set[str]) -> None:
@@ -384,8 +431,24 @@ def _validate_case(
             raise DatasetValidationError(
                 f"{case_id}: synthetic fixtures cannot be marked human-adjudicated."
             )
-        _require_text(source.get("source_url"), f"{case_id}.source.source_url")
-        _require_text(source.get("transcript_track"), f"{case_id}.source.transcript_track")
+        source_url = _require_text(
+            source.get("source_url"), f"{case_id}.source.source_url"
+        )
+        _validate_youtube_source_url(
+            source_url, video_id, f"{case_id}.source.source_url"
+        )
+        _require_text(
+            source.get("transcript_track"), f"{case_id}.source.transcript_track"
+        )
+        if any(
+            reference.start_seconds is None or reference.end_seconds is None
+            for passage in passages
+            for reference in passage.references
+        ):
+            raise DatasetValidationError(
+                f"{case_id}: every adjudicated evidence reference must include "
+                "an exact start_seconds/end_seconds timestamp interval."
+            )
     elif annotation_case_status != "provisional_synthetic":
         raise DatasetValidationError(
             f"{case_id}: provisional manifests must mark every case provisional_synthetic."
