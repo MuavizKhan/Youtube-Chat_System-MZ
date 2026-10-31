@@ -378,6 +378,46 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
     )
 
 
+def test_completed_assessor_output_missing_aspect_is_recorded_as_failed_case(tmp_path):
+    manifest, digest = _load_seed()
+    case = manifest["cases"][0]
+    output = tmp_path / "malformed-completed.json"
+
+    class Diagnostics:
+        status = AssessmentRunStatus.COMPLETED
+        error_code = None
+        request_count = 1
+        elapsed_ms = 1.0
+        input_chars = 10
+        input_limit_chars = 8000
+        input_tokens = 1
+        output_tokens = 1
+        passage_count = len(case["passages"])
+        aspect_count = len(case["question_analysis"]["aspects"])
+
+    class Result:
+        diagnostics = Diagnostics()
+        assessments = ()
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=digest,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=output,
+        max_cases=1,
+        sleep_seconds=0,
+        assessor=lambda *args, **kwargs: Result(),
+    )
+
+    assert report["run_status"] == "partial"
+    assert report["case_results"][0]["assessment_run_status"] == "runner_error"
+    assert report["case_results"][0]["assessments"][0]["predicted_status"] is None
+
+
 def test_failed_assessments_remain_in_semantic_metric_denominators():
     records = [{
         "case_id": "CASE-FAILED",
