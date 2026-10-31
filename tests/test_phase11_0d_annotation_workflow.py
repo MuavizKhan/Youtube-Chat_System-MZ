@@ -566,20 +566,26 @@ def test_adjudication_packet_preserves_original_review_labels(tmp_path, monkeypa
         labels,
         rationale="Second.",
     )
+    original_a = deepcopy(review_a)
+    original_b = deepcopy(review_b)
     adjudication = workflow.build_adjudication_packet(
         manifest, digest, review_a, review_b, "ADJUDICATOR-C"
     )
+
+    assert review_a == original_a
+    assert review_b == original_b
     adjudication["adjudication_attested"] = True
-    # Change only a human rationale so the reviewer label remains schema-valid;
-    # the integrity comparison, not status/reference validation, must catch it.
+    # Alter the adjudicator's copied view while keeping its schema valid.
     adjudication["cases"][0]["reviewer_labels_by_aspect"][0]["reviewer_labels"][0][
         "label"
     ]["rationale"] = "Tampered rationale"
 
-    with pytest.raises(workflow.DatasetValidationError, match="altered an independent review"):
+    with pytest.raises(workflow.DatasetValidationError, match="exact independent review revisions"):
         workflow.assemble_adjudicated_manifest(
             manifest, digest, review_a, review_b, adjudication
         )
+    assert review_a == original_a
+    assert review_b == original_b
 
 
 def test_held_out_adjudication_roundtrip_meets_phase11_0c_acceptance_contract():
