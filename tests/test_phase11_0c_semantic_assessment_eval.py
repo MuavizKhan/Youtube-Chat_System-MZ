@@ -930,6 +930,52 @@ def test_stopped_run_is_partial_even_when_error_occurs_on_last_case(tmp_path):
     assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
 
 
+def test_adjudicated_report_defaults_to_ignored_private_directory():
+    path = _resolve_report_path(
+        None,
+        annotation_status="adjudicated",
+        split="held_out",
+        timestamp="20261031T120000Z",
+    )
+
+    assert path == (
+        DEFAULT_DATASET.parents[0]
+        / "private"
+        / "reports"
+        / "phase11_0C_held_out_20261031T120000Z.json"
+    )
+
+
+def test_adjudicated_report_rejects_tracked_repository_output_path():
+    with pytest.raises(ValueError, match="must not be written to tracked repository paths"):
+        _resolve_report_path(
+            Path("evaluation_reports/heldout.json"),
+            annotation_status="adjudicated",
+            split="held_out",
+            timestamp="20261031T120000Z",
+        )
+
+
+def test_adjudicated_report_allows_external_private_output_path(tmp_path):
+    path = _resolve_report_path(
+        tmp_path / "heldout.json",
+        annotation_status="adjudicated",
+        split="held_out",
+        timestamp="20261031T120000Z",
+    )
+    assert path == (tmp_path / "heldout.json").resolve()
+
+
+def test_provisional_report_can_use_evaluation_reports_directory():
+    path = _resolve_report_path(
+        Path("evaluation_reports/synthetic.json"),
+        annotation_status="provisional_synthetic",
+        split="development",
+        timestamp="20261031T120000Z",
+    )
+    assert path == (Path(__file__).resolve().parents[1] / "evaluation_reports" / "synthetic.json")
+
+
 def test_runner_script_supports_documented_direct_help_invocation():
     project_root = Path(__file__).resolve().parents[1]
     script = project_root / "scripts" / "phase11_0c_semantic_assessment_eval.py"
