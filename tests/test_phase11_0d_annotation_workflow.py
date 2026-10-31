@@ -9,7 +9,11 @@ import sys
 import pytest
 
 from scripts import phase11_0d_annotation_workflow as workflow
-from scripts.phase11_0c_semantic_assessment_eval import DEFAULT_DATASET, validate_manifest
+from scripts.phase11_0c_semantic_assessment_eval import (
+    DEFAULT_DATASET,
+    STATUS_ORDER,
+    validate_manifest,
+)
 
 
 def _source_fixture() -> tuple[dict, dict[str, list[dict]]]:
@@ -168,6 +172,55 @@ def _fill_adjudication_packet(
             for label in labels_by_case[case["case_id"]]
         ]
     return result
+
+
+def _heldout_adjudicated_roundtrip(*, balanced: bool):
+    manifest = workflow.validate_source_manifest(_held_out_source_fixture())
+    source_sha256 = "a" * 64
+    labels_by_case: dict[str, list[dict]] = {}
+    observation_index = 0
+    passage_id = "p1"
+    for case in manifest["cases"]:
+        case_labels = []
+        for aspect in case["question_analysis"]["aspects"]:
+            status = (
+                STATUS_ORDER[observation_index % len(STATUS_ORDER)]
+                if balanced or observation_index < len(STATUS_ORDER)
+                else STATUS_ORDER[0]
+            )
+            observation_index += 1
+            supporting = [passage_id] if status in {
+                "supported", "partial", "conflicted"
+            } else []
+            contradicting = [passage_id] if status in {
+                "contradicted", "conflicted"
+            } else []
+            case_labels.append({
+                "aspect_id": aspect["aspect_id"],
+                "expected_status": status,
+                "supporting_passage_ids": supporting,
+                "contradicting_passage_ids": contradicting,
+            })
+        labels_by_case[case["case_id"]] = case_labels
+
+    review_a = _make_completed_review(
+        workflow.export_review_packet(manifest, source_sha256, "reviewer-A"),
+        labels_by_case,
+        rationale="Independent review A checked the cited excerpt.",
+    )
+    review_b = _make_completed_review(
+        workflow.export_review_packet(manifest, source_sha256, "reviewer-B"),
+        labels_by_case,
+        rationale="Independent review B checked the cited excerpt.",
+    )
+    adjudication = workflow.build_adjudication_packet(
+        manifest, source_sha256, review_a, review_b, "adjudicator-C"
+    )
+    adjudication = _fill_adjudication_packet(adjudication, labels_by_case)
+    final = workflow.assemble_adjudicated_manifest(
+        manifest, source_sha256, review_a, review_b, adjudication
+    )
+    return final
 
 
 def test_source_manifest_validates_and_reports_language_pair_coverage(tmp_path, monkeypatch):
@@ -392,6 +445,53 @@ def test_adjudication_packet_preserves_original_review_labels(tmp_path, monkeypa
     ]["rationale"] = "Tampered rationale"
 
     with pytest.raises(workflow.DatasetValidationError, match="altered an independent review"):
+        workflow.assemble_adjudicated_manifest(
+            manifest, digest, review_a, review_b, adjudication
+        )
+
+
+def test_held_out_adjudication_roundtrip_meets_phase11_0c_acceptance_contract():
+    final = _heldout_adjudicated_roundtrip(balanced=True)
+
+    assert final["annotation_status"] == "adjudicated"
+    assert final["split"] == "held_out"
+    assert len(final["cases"]) == 90
+    counts = {
+        status: sum(
+            1
+            for case in final["cases"]
+            for label in case["labels"]
+            if label["expected_status"] == status
+        )
+        for status in STATUS_ORDER
+    }
+    assert all(counts[status] >= 10 for status in STATUS_ORDER)
+
+
+def test_held_out_assembler_rejects_status_counts_below_final_eligibility_floor():
+    with pytest.raises(workflow.DatasetValidationError, match="per-status eligibility floor"):
+        _heldout_adjudicated_roundtrip(balanced=False)
+
+
+def test_adjudication_packet_detects_review_packet_revision_drift(tmp_path, monkeypatch):
+    _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
+    review_a = _make_completed_review(
+        workflow.export_review_packet(manifest, digest, "reviewer-A"),
+        labels,
+        rationale="Original review A.",
+    )
+    review_b = _make_completed_review(
+        workflow.export_review_packet(manifest, digest, "reviewer-B"),
+        labels,
+        rationale="Original review B.",
+    )
+    adjudication = workflow.build_adjudication_packet(
+        manifest, digest, review_a, review_b, "adjudicator-C"
+    )
+    adjudication = _fill_adjudication_packet(adjudication, labels)
+    review_a["cases"][0]["labels"][0]["rationale"] = "Changed after adjudication packet creation."
+
+    with pytest.raises(workflow.DatasetValidationError, match="exact independent review revisions"):
         workflow.assemble_adjudicated_manifest(
             manifest, digest, review_a, review_b, adjudication
         )
