@@ -345,6 +345,7 @@ def test_provisional_synthetic_labels_never_qualify_for_heldout_gate():
             "transcript_language_group": case["transcript_language_group"],
             "assessments": [
                 {
+                    "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
                     "expected_status": case["labels"][0]["expected_status"],
                     "predicted_status": case["labels"][0]["expected_status"],
                 }
@@ -566,6 +567,7 @@ def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_at
             "transcript_language_group": case["transcript_language_group"],
             "assessment_run_status": "completed",
             "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
                 "expected_status": label["expected_status"],
                 "predicted_status": label["expected_status"],
             }],
@@ -576,6 +578,32 @@ def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_at
     assert result["eligible"] is False
     assert (
         "one_or_more_held_out_assessment_calls_failed_or_returned_invalid_output"
+        in result["reasons"]
+    )
+
+
+def test_heldout_eligibility_rejects_missing_aspect_even_when_all_cases_are_present():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": case["labels"][0]["expected_status"],
+                "predicted_status": case["labels"][0]["expected_status"],
+            }],
+        })
+    records[0]["assessments"] = []
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
         in result["reasons"]
     )
 
