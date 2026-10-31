@@ -17,6 +17,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (
     ThresholdLockError,
     _effective_assessor_protocol,
     _quality_gate_eligibility,
+    build_annotation_agreement_metrics,
     _wilson_interval,
     build_metrics,
     load_manifest,
@@ -59,6 +60,99 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
         case["question_language_group"] != case["transcript_language_group"]
         for case in cross_lingual
     )
+
+
+def _make_adjudicated_test_manifest():
+    """Create schema-only test fixtures; these are not real human annotations."""
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["dataset_id"] = "phase11_0C_adjudicated_schema_test_only"
+    changed["annotation_status"] = "adjudicated"
+    for case in changed["cases"]:
+        case["source"]["kind"] = "test_fixture_not_real_source"
+        case["source"]["source_url"] = (
+            f"https://example.test/transcript/{case['case_id']}"
+        )
+        case["source"]["transcript_track"] = case["transcript_language_group"]
+        case["annotation"] = {
+            "status": "adjudicated",
+            "reviewer_ids": ["test-reviewer-1", "test-reviewer-2"],
+            "adjudicator_id": "test-adjudicator",
+            "blinding_attested": True,
+            "independent_reviews": [
+                {
+                    "reviewer_id": reviewer_id,
+                    "labels": deepcopy(case["labels"]),
+                }
+                for reviewer_id in ("test-reviewer-1", "test-reviewer-2")
+            ],
+        }
+    return changed
+
+
+def test_adjudicated_manifest_requires_two_complete_blinded_reviewers():
+    manifest = _make_adjudicated_test_manifest()
+
+    validated = validate_manifest(manifest)
+    assert validated["annotation_status"] == "adjudicated"
+
+
+def test_adjudicated_manifest_rejects_missing_blinding_attestation():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["blinding_attested"] = False
+
+    with pytest.raises(ValueError, match="blinded"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_incomplete_independent_review_labels():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["independent_reviews"][1]["labels"] = []
+
+    with pytest.raises(ValueError, match="every aspect must have exactly one"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_reviewer_id_mismatch():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["independent_reviews"][1]["reviewer_id"] = (
+        "different-reviewer"
+    )
+
+    with pytest.raises(ValueError, match="must match the two declared reviewers"):
+        validate_manifest(manifest)
+
+
+def test_annotation_agreement_metrics_report_pre_adjudication_kappa():
+    manifest = _make_adjudicated_test_manifest()
+
+    validate_manifest(manifest)
+    metrics = build_annotation_agreement_metrics(manifest, "held_out")
+
+    assert metrics["available"] is True
+    assert metrics["reviewed_aspect_observations"] == 13
+    assert metrics["overall"]["observed_agreement"] == 1.0
+    assert metrics["overall"]["cohens_kappa"] == pytest.approx(1.0)
+    assert metrics["per_question_language"]["en"]["observations"] == 5
+    assert metrics["per_transcript_language"]["ar"]["observations"] == 5
+    assert "test-reviewer-1" not in json.dumps(metrics)
+
+
+def test_annotation_agreement_metrics_expose_disagreement_before_adjudication():
+    manifest = _make_adjudicated_test_manifest()
+    case = next(
+        item for item in manifest["cases"]
+        if item["case_id"] == "H-EN-SUP-01"
+    )
+    label = case["annotation"]["independent_reviews"][1]["labels"][0]
+    label["expected_status"] = "partial"
+
+    validate_manifest(manifest)
+    metrics = build_annotation_agreement_metrics(manifest, "held_out")
+
+    assert metrics["overall"]["observations"] == 13
+    assert metrics["overall"]["observed_agreement"] < 1.0
+    assert metrics["overall"]["cohens_kappa"] < 1.0
 
 
 def test_manifest_rejects_independence_group_leakage_between_splits():
