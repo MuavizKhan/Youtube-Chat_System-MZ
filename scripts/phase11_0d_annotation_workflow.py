@@ -619,6 +619,43 @@ def load_source_manifest(path: Path | str) -> tuple[dict[str, Any], str]:
     return validate_source_manifest(manifest), digest
 
 
+def validate_split_isolation(
+    development_manifest: dict[str, Any],
+    heldout_manifest: dict[str, Any],
+) -> None:
+    """Reject shared video/source/scenario identities before held-out annotation."""
+    if development_manifest.get("split") != "development":
+        raise DatasetValidationError(
+            "The comparison manifest must be the development split."
+        )
+    if heldout_manifest.get("split") != "held_out":
+        raise DatasetValidationError(
+            "The target manifest must be the held_out split."
+        )
+
+    identity_fields = {
+        "video_id": lambda case: case["question_analysis"]["video_id"],
+        "source_group": lambda case: case["source"]["source_group"],
+        "independence_group": lambda case: case["independence_group"],
+    }
+    overlaps = {}
+    for identity_name, getter in identity_fields.items():
+        development_values = {
+            getter(case) for case in development_manifest["cases"]
+        }
+        heldout_values = {
+            getter(case) for case in heldout_manifest["cases"]
+        }
+        shared = development_values & heldout_values
+        if shared:
+            overlaps[identity_name] = sorted(shared)
+    if overlaps:
+        raise DatasetValidationError(
+            "Development/held-out source leakage detected before annotation: "
+            f"{overlaps}."
+        )
+
+
 def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
     # Do not disclose split, dataset ID, source/independence groups, planner
     # confidence, or retrieval hints. The manifest digest binds the packet to
@@ -1131,20 +1168,44 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate = commands.add_parser("validate-source", help="Validate a source-only manifest.")
     validate.add_argument("--source-manifest", type=Path, required=True)
+    validate.add_argument(
+        "--development-source-manifest",
+        type=Path,
+        default=None,
+        help="Required for held_out: compare against development to reject source leakage.",
+    )
 
     export = commands.add_parser("export-review-packets", help="Create two separate blind reviewer packets.")
     export.add_argument("--source-manifest", type=Path, required=True)
+    export.add_argument(
+        "--development-source-manifest",
+        type=Path,
+        default=None,
+        help="Required for held_out: compare against development before reviewers receive packets.",
+    )
     export.add_argument("--reviewer-ids", nargs=2, required=True)
     export.add_argument("--output-dir", type=Path, required=True)
 
     adjudicate = commands.add_parser("build-adjudication-packet", help="Combine two completed blind reviews for a third adjudicator.")
     adjudicate.add_argument("--source-manifest", type=Path, required=True)
+    adjudicate.add_argument(
+        "--development-source-manifest",
+        type=Path,
+        default=None,
+        help="Required for held_out: recheck split isolation before adjudication.",
+    )
     adjudicate.add_argument("--reviewer-packets", nargs=2, type=Path, required=True)
     adjudicate.add_argument("--adjudicator-id", required=True)
     adjudicate.add_argument("--output", type=Path, required=True)
 
     assemble = commands.add_parser("assemble", help="Create and validate the final Phase 11.0C dataset.")
     assemble.add_argument("--source-manifest", type=Path, required=True)
+    assemble.add_argument(
+        "--development-source-manifest",
+        type=Path,
+        default=None,
+        help="Required for held_out: recheck split isolation before final dataset assembly.",
+    )
     assemble.add_argument("--reviewer-packets", nargs=2, type=Path, required=True)
     assemble.add_argument("--adjudication-packet", type=Path, required=True)
     assemble.add_argument("--output", type=Path, required=True)
@@ -1155,6 +1216,20 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         manifest, source_sha256 = load_source_manifest(args.source_manifest)
+        development_source_path = args.development_source_manifest
+        if manifest["split"] == "held_out":
+            if development_source_path is None:
+                raise DatasetValidationError(
+                    "Held-out workflows require --development-source-manifest so split "
+                    "leakage is rejected before reviewer or adjudicator packets are issued."
+                )
+            development_manifest, _ = load_source_manifest(development_source_path)
+            validate_split_isolation(development_manifest, manifest)
+        elif development_source_path is not None:
+            raise DatasetValidationError(
+                "--development-source-manifest is only valid for held_out workflows."
+            )
+
         if args.command == "validate-source":
             summary = _summary(manifest)
             summary["source_manifest_sha256"] = source_sha256
