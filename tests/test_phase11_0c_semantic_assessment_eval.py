@@ -90,6 +90,14 @@ def _make_adjudicated_test_manifest():
     return changed
 
 
+def test_provisional_seed_has_no_independent_annotator_agreement():
+    manifest, _ = _load_seed()
+    metrics = build_annotation_agreement_metrics(manifest, "development")
+
+    assert metrics["available"] is False
+    assert metrics["split"] == "development"
+
+
 def test_adjudicated_manifest_requires_two_complete_blinded_reviewers():
     manifest = _make_adjudicated_test_manifest()
 
@@ -364,6 +372,10 @@ def _valid_development_report(manifest, dataset_sha256):
         "provider": "groq",
         "model": "test-model",
         "assessor_protocol": _effective_assessor_protocol("groq", "test-model"),
+        "annotation_agreement": {
+            "available": True,
+            "reviewed_aspect_observations": 1,
+        },
         "case_count_in_split": 1,
         "selected_case_count": 1,
         "case_results": [{
@@ -432,6 +444,31 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
     report_path.write_text("{}", encoding="utf-8")
 
     with pytest.raises(ThresholdLockError, match="hash"):
+        load_threshold_lock(
+            lock_path,
+            dataset_id=manifest["dataset_id"],
+            dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
+            expected_development_case_ids={"DEV01"},
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_missing_independent_annotation_agreement(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    dev_report = _valid_development_report(manifest, dataset_sha256)
+    dev_report["annotation_agreement"] = {"available": False}
+    report_path = tmp_path / "development.json"
+    report_path.write_text(json.dumps(dev_report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="complete, successful"):
         load_threshold_lock(
             lock_path,
             dataset_id=manifest["dataset_id"],
