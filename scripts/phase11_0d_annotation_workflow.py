@@ -737,7 +737,7 @@ def export_review_packet(
     source_sha256: str,
     reviewer_id: str,
 ) -> dict[str, Any]:
-    reviewer_id = _safe_id(reviewer_id, "reviewer_id")
+    reviewer_id = _annotator_id(reviewer_id, "reviewer_id")
     cases = []
     for case in manifest["cases"]:
         labels = [
