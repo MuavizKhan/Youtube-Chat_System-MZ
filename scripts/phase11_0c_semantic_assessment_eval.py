@@ -14,6 +14,8 @@ import hashlib
 import json
 import math
 from datetime import datetime, timezone
+from importlib.metadata import version as package_version
+import platform
 from pathlib import Path
 import statistics
 import sys
@@ -1090,14 +1092,19 @@ def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
     if provider == "groq":
         reasoning_effort = config.GROQ_REASONING_EFFORT
         configured_max_tokens = config.GROQ_MAX_TOKENS
+        sdk_distribution = "groq"
     elif provider == "huggingface":
         reasoning_effort = config.HF_REASONING_EFFORT
         configured_max_tokens = config.HF_MAX_TOKENS
+        sdk_distribution = "huggingface-hub"
     else:
         raise ValueError("provider must be 'groq' or 'huggingface'.")
     return {
         "provider": provider,
         "model": model,
+        "provider_sdk_distribution": sdk_distribution,
+        "provider_sdk_version": package_version(sdk_distribution),
+        "python_version": platform.python_version(),
         "huggingface_provider_policy": (
             config.HF_PROVIDER if provider == "huggingface" else None
         ),
