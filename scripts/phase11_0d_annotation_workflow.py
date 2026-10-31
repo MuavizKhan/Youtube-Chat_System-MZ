@@ -435,6 +435,15 @@ def _validate_review_packet(
         if case_id not in expected_cases or case_id in observed_cases:
             raise DatasetValidationError(f"{reviewer_id}: unknown or duplicate case {case_id!r}.")
         source_case = expected_cases[case_id]
+        projection = _case_packet_projection(source_case)
+        if any(review_case.get(key) != value for key, value in projection.items()):
+            raise DatasetValidationError(
+                f"{reviewer_id}/{case_id}: source content differs from the issued blind packet."
+            )
+        if set(review_case) != set(projection) | {"labels"}:
+            raise DatasetValidationError(
+                f"{reviewer_id}/{case_id}: unexpected or missing reviewer packet fields."
+            )
         labels = _require_list(review_case.get("labels"), f"{case_id}.labels")
         aspect_ids = {aspect["aspect_id"] for aspect in source_case["question_analysis"]["aspects"]}
         passage_ids = {passage["passage_id"] for passage in source_case["passages"]}
@@ -530,8 +539,10 @@ def _validate_adjudication_packet(
     manifest: dict[str, Any],
     source_sha256: str,
     reviewer_ids: tuple[str, str],
+    reviewer_labels: dict[str, dict[str, list[dict[str, Any]]]],
 ) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     _validate_packet_binding(packet, manifest, source_sha256, "adjudication")
+    _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "adjudication_packet")
     adjudicator_id = _safe_id(packet.get("adjudicator_id"), "adjudication_packet.adjudicator_id")
     declared_reviewers = packet.get("reviewer_ids")
     if declared_reviewers != list(reviewer_ids):
@@ -547,9 +558,68 @@ def _validate_adjudication_packet(
         case_id = _require_text(case.get("case_id"), "adjudication_case.case_id")
         if case_id not in expected_cases or case_id in observed:
             raise DatasetValidationError(f"Adjudication packet has unknown or duplicate case {case_id!r}.")
-        labels = _require_list(case.get("adjudicated_labels"), f"{case_id}.adjudicated_labels")
         expected = expected_cases[case_id]
+        projection = _case_packet_projection(expected)
+        if any(case.get(key) != value for key, value in projection.items()):
+            raise DatasetValidationError(
+                f"{case_id}: adjudication source content differs from the issued packet."
+            )
+        if set(case) != set(projection) | {"reviewer_labels_by_aspect", "adjudicated_labels"}:
+            raise DatasetValidationError(
+                f"{case_id}: unexpected or missing adjudication packet fields."
+            )
         aspect_ids = {aspect["aspect_id"] for aspect in expected["question_analysis"]["aspects"]}
+        aspect_descriptions = {
+            aspect["aspect_id"]: aspect["description"]
+            for aspect in expected["question_analysis"]["aspects"]
+        }
+        reviewer_rows = _require_list(
+            case.get("reviewer_labels_by_aspect"),
+            f"{case_id}.reviewer_labels_by_aspect",
+        )
+        seen_reviewer_aspects: set[str] = set()
+        for row in reviewer_rows:
+            row = _require_mapping(row, f"{case_id}.reviewer_label_row")
+            aspect_id = _require_text(row.get("aspect_id"), f"{case_id}.reviewer_label_row.aspect_id")
+            if aspect_id not in aspect_ids or aspect_id in seen_reviewer_aspects:
+                raise DatasetValidationError(
+                    f"{case_id}: adjudication packet has an unknown or duplicate reviewer aspect."
+                )
+            seen_reviewer_aspects.add(aspect_id)
+            if row.get("description") != aspect_descriptions[aspect_id]:
+                raise DatasetValidationError(
+                    f"{case_id}/{aspect_id}: adjudication aspect description was altered."
+                )
+            displayed = _require_list(
+                row.get("reviewer_labels"),
+                f"{case_id}/{aspect_id}.reviewer_labels",
+            )
+            if len(displayed) != 2:
+                raise DatasetValidationError(
+                    f"{case_id}/{aspect_id}: adjudicator must see exactly two independent labels."
+                )
+            for expected_reviewer in reviewer_ids:
+                matched = [
+                    item for item in displayed
+                    if isinstance(item, dict) and item.get("reviewer_id") == expected_reviewer
+                ]
+                if len(matched) != 1:
+                    raise DatasetValidationError(
+                        f"{case_id}/{aspect_id}: reviewer label attribution is invalid."
+                    )
+                source_labels = {
+                    label["aspect_id"]: label
+                    for label in reviewer_labels[expected_reviewer][case_id]
+                }
+                if matched[0].get("label") != source_labels[aspect_id]:
+                    raise DatasetValidationError(
+                        f"{case_id}/{aspect_id}: adjudication packet altered an independent review."
+                    )
+        if seen_reviewer_aspects != aspect_ids:
+            raise DatasetValidationError(
+                f"{case_id}: adjudication packet must show both labels for every aspect."
+            )
+        labels = _require_list(case.get("adjudicated_labels"), f"{case_id}.adjudicated_labels")
         passage_ids = {passage["passage_id"] for passage in expected["passages"]}
         seen: set[str] = set()
         for label in labels:
@@ -581,7 +651,11 @@ def assemble_adjudicated_manifest(
     if reviewer_a == reviewer_b:
         raise DatasetValidationError("The two independent reviewer IDs must be distinct.")
     adjudicator_id, final_labels = _validate_adjudication_packet(
-        adjudication_packet, manifest, source_sha256, (reviewer_a, reviewer_b)
+        adjudication_packet,
+        manifest,
+        source_sha256,
+        (reviewer_a, reviewer_b),
+        {reviewer_a: labels_a, reviewer_b: labels_b},
     )
 
     cases = []
