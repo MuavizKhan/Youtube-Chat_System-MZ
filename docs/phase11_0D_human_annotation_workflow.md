@@ -32,7 +32,7 @@ Suggested private layout:
 - evaluation_data/private/phase11_0C_development.json
 - equivalent separate files and packet folder for held-out
 
-Use opaque case IDs that do not reveal the split (for example, CASE-001, not DEV-001 or HOLDOUT-001). Use pseudonymous reviewer IDs such as R01, R02, and R03. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be unique within every case.
+Use opaque case IDs matching CASE- followed by 3–16 uppercase letters/digits (for example, CASE-001 or CASE-00A91). Never encode language, expected status, challenge type, source cohort, or split in a case ID. Use pseudonymous reviewer IDs such as R01, R02, and R03. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be unique within every case.
 
 A source manifest has schema version 1.0.0:
 
@@ -82,7 +82,14 @@ A source manifest has schema version 1.0.0:
         "kind": "youtube_caption",
         "source_group": "video-and-source-family-001",
         "source_url": "https://www.youtube.com/watch?v=VIDEO_ID",
-        "transcript_track": "en"
+        "transcript_track": "en",
+        "caption_track_kind": "auto_generated",
+        "verification": {
+          "video_id_confirmed": true,
+          "caption_track_confirmed": true,
+          "timestamps_confirmed": true,
+          "verified_by": "CURATOR-01"
+        }
       }
     }
   ]
@@ -99,12 +106,14 @@ Replace VIDEO_ID, timestamps and excerpt text with verified values. This is a sc
 - question_analysis.video_id must match every passage reference and the video ID in the HTTPS YouTube source URL.
 - Keep the actual user question in question_text, and describe every independently assessable evidence aspect in question_analysis.aspects.
 - Use 1–8 aspects and 1–12 passages per case, matching the Phase 11.0B request limits.
-- Each passage must be an exact transcript excerpt with at least one exact video/chunk/timestamp reference. Every reference needs both start_seconds and end_seconds, with end strictly after start.
-- Verify the transcript track against the actual YouTube video. Do not label a translated transcript as a publisher caption track.
+- Each case must contain at least one required aspect. Each passage must be an exact transcript excerpt with at least one exact video/chunk/timestamp reference. Every reference needs both start_seconds and end_seconds, with end strictly after start.
+- Keep the exact Phase 11.0B request within its 8,000-character hard limit. The validator uses the assessor's prompt builder and a maximum-length threshold representation, rather than estimating from transcript-text characters alone.
+- source.kind must be youtube_caption. caption_track_kind must be auto_generated or publisher_uploaded, and transcript_track must match the declared transcript language group.
+- Set source.verification.video_id_confirmed, caption_track_confirmed, and timestamps_confirmed to true only after manually checking the actual YouTube video, caption track, and every excerpt/timestamp. verified_by is a pseudonymous curator ID. These are audit attestations, not automatic YouTube API verification.
 - Use stable source chunk IDs. A source chunk must not be assigned to two different passage IDs in the same case.
 - The source URL must be an HTTPS YouTube watch, share, Shorts, live, or embed URL identifying the exact video.
 - source_group and independence_group must identify source/scenario relationships that could create leakage. Reused or near-duplicate material belongs to the same group.
-- The source-only manifest must not contain labels, assessor predictions, scores, or threshold-lock data.
+- The source-only manifest must not contain labels, assessor predictions, scores, confidence values, retrieval hints exposed to reviewers, or threshold-lock data.
 
 The existing five-video Phase 11.0 registry can be considered as a development source shortlist, not as pre-adjudicated semantic-assessor data. Its registered video IDs include MdeQMVBuGgY, pOnl-Zndcls, A-JBaNvv3Tk, INpnuL7qnzY, and fAd2nKfrDB8. Reconfirm the actual YouTube caption track and exact timestamps for every excerpt. Existing retrieval gold phrases and answer-audit outcomes are not substitutes for two independent semantic evidence reviews. Do not reuse any development video in held-out data.
 
@@ -134,9 +143,10 @@ The Phase 11.0C eligibility floor is:
 - at least 10 aspect observations for each of the six statuses;
 - at least 20 cases in each question-language cohort;
 - at least 20 cases in each transcript-language cohort;
-- at least 10 cases in each of the nine question→transcript language pairs.
+- at least 10 cases in each of the nine question→transcript language pairs;
+- at least 20 distinct source videos, source groups, and independence groups.
 
-The pair floor implies at least 90 held-out cases before exclusions. Plan above the minimum (for example, 120 or more cases and 150–200 aspects) to retain a buffer for invalid source tracks, ambiguous excerpts, or adjudication exclusions. This is a review-volume safeguard, not a statistical-power claim.
+The pair floor implies at least 90 held-out cases before exclusions. The Phase 11.0D source preflight enforces these cohort, aspect-volume, and source-diversity floors before exporting any reviewer packet. After adjudication, assembly also enforces at least 10 adjudicated aspects per status before allowing the held-out dataset to be evaluated. Plan above the minimum (for example, 120 or more cases, 30 or more distinct videos, and 150–200 aspects) to retain a buffer for invalid source tracks, ambiguous excerpts, or adjudication exclusions. These are safeguards against obviously underfilled or heavily repeated samples, not a statistical-power claim.
 
 Do not split by random case rows. Assign videos, source groups and independence/scenario groups to one split only. Do not put alternate excerpts, paraphrases, or related segments of one source video on opposite sides. The Phase 11.0C threshold lock independently checks hashed source identities before a held-out provider call.
 
