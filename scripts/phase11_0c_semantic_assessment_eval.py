@@ -27,6 +27,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from Backend.rag_system import evidence_assessment as evidence_assessment_module  # noqa: E402
 from Backend.rag_system import evidence_contracts as evidence_contracts_module  # noqa: E402
 from Backend.rag_system.evidence_assessment import (  # noqa: E402
+    DEFAULT_MAX_ASSESSMENT_ASPECTS,
+    DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
+    DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS,
+    DEFAULT_MAX_ASSESSMENT_PASSAGES,
     AssessmentRunStatus,
     EvidencePassage,
     assess_evidence_support,
@@ -911,7 +915,14 @@ def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
         "model": model,
         "temperature": 0.0,
         "reasoning_effort": reasoning_effort,
+        "max_input_chars": DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
+        "max_passages": DEFAULT_MAX_ASSESSMENT_PASSAGES,
+        "max_aspects": DEFAULT_MAX_ASSESSMENT_ASPECTS,
         "configured_max_output_tokens": configured_max_tokens,
+        "effective_max_output_tokens": min(
+            DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS,
+            configured_max_tokens,
+        ),
         "assessor_module_sha256": _sha256_file(
             Path(evidence_assessment_module.__file__)
         ),
