@@ -5826,6 +5826,10 @@ def build_rag_chain(
         hindi_tax_fallback_diagnostics: dict[str, Any] = {}
         repair_aborted_due_quota = False
         if repair_instruction:
+            # A provider failure can abort the repair before a second answer
+            # exists. Keep that state distinct from a repair response that was
+            # produced but still omitted curated evidence.
+            gold_evidence_answer_groups_after_repair = None
             logger.warning(
                 "Answer completeness repair triggered for question_length=%s",
                 len(inputs.get("question", "")),
