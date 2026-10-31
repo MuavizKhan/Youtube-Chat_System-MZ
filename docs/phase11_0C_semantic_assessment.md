@@ -66,6 +66,8 @@ Replace or extend the seed fixture with transcript excerpts from verified source
 3. Each reviewer uses a distinct reviewer ID. The adjudicator uses a third, distinct ID.
 4. A separate adjudicator reviews disagreements, records the final adjudicated label in `labels`, and resolves the source-reference decision. Do not overwrite or discard the two original review records.
 5. Preserve source video ID, caption language/track, source URL, chunk identity, and timestamp interval for each passage.
+6. Use an HTTPS YouTube watch, share, Shorts, live, or embed URL whose video ID exactly matches the case's `question_analysis.video_id`.
+7. Every reference in a human-adjudicated case must include both `start_seconds` and `end_seconds`; timestamp-less references are accepted only in provisional harness fixtures.
 6. Use source videos and scenario families that do not cross the development/held-out boundary.
 7. Keep the held-out labels inaccessible to anyone tuning the prompt, model, or threshold.
 
@@ -123,7 +125,7 @@ Reference-label semantics must match the Phase 11.0A/11.0B contracts:
 
 Do not label a same-topic passage as supported merely because it shares keywords. Preserve negation, direction, quantities, dates, attribution, causality, and temporal context. For unknown, record why the excerpt is genuinely indeterminate rather than merely difficult.
 
-The validator rejects incomplete reviewer labels, duplicated reviewer IDs, reviewer-ID mismatches, missing blinding attestation, and an adjudicator who is also one of the reviewers. A final dataset must set the manifest and every case annotation status to `adjudicated`, use real source metadata including `source_url` and `transcript_track`, and retain the individual review records. Synthetic fixtures cannot be marked adjudicated.
+The validator rejects incomplete reviewer labels, duplicated reviewer IDs, reviewer-ID mismatches, missing blinding attestation, an adjudicator who is also one of the reviewers, non-YouTube or mismatched source URLs, and adjudicated references without exact timestamp intervals. A final dataset must set the manifest and every case annotation status to `adjudicated`, use source metadata including a matching HTTPS `source_url` and `transcript_track`, and retain the individual review records. Synthetic fixtures cannot be marked adjudicated.
 
 ### Inter-annotator agreement
 
