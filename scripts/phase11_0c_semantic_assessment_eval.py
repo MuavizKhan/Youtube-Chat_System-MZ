@@ -143,10 +143,21 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
     independence_group = _require_text(
         case.get("independence_group"), f"{case_id}.independence_group"
     )
-    language = _require_text(case.get("language_group"), f"{case_id}.language_group")
-    if language not in SUPPORTED_LANGUAGES:
+    question_language = _require_text(
+        case.get("question_language_group"),
+        f"{case_id}.question_language_group",
+    )
+    transcript_language = _require_text(
+        case.get("transcript_language_group"),
+        f"{case_id}.transcript_language_group",
+    )
+    if question_language not in SUPPORTED_LANGUAGES:
         raise DatasetValidationError(
-            f"{case_id}: language_group must be one of {', '.join(SUPPORTED_LANGUAGES)}."
+            f"{case_id}: question_language_group must be one of {', '.join(SUPPORTED_LANGUAGES)}."
+        )
+    if transcript_language not in SUPPORTED_LANGUAGES:
+        raise DatasetValidationError(
+            f"{case_id}: transcript_language_group must be one of {', '.join(SUPPORTED_LANGUAGES)}."
         )
 
     analysis = _require_mapping(case.get("question_analysis"), f"{case_id}.question_analysis")
@@ -189,9 +200,9 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
     except (KeyError, TypeError, ValueError) as error:
         raise DatasetValidationError(f"{case_id}: invalid question analysis: {error}") from error
 
-    if parsed_analysis.language != language:
+    if parsed_analysis.language != question_language:
         raise DatasetValidationError(
-            f"{case_id}: question language and language_group must agree."
+            f"{case_id}: question_analysis.language must match question_language_group."
         )
     if len(aspects) > 8:
         raise DatasetValidationError(f"{case_id}: Phase 11.0B allows at most 8 aspects.")
@@ -212,6 +223,12 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
             raise DatasetValidationError(f"{case_id}: duplicate passage ID {passage_id}.")
         passage_ids.add(passage_id)
 
+        passage_language = passage.get("transcript_language", transcript_language)
+        if passage_language != transcript_language:
+            raise DatasetValidationError(
+                f"{case_id}/{passage_id}: transcript_language must match "
+                "transcript_language_group for this case."
+            )
         refs_raw = passage.get("references")
         if not isinstance(refs_raw, list) or not refs_raw:
             raise DatasetValidationError(
@@ -308,7 +325,13 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
             f"{case_id}: provisional manifests must mark every case provisional_synthetic."
         )
 
-    return split, {independence_group, source_group}, {video_id}
+    return (
+        split,
+        {independence_group, source_group},
+        {video_id},
+        question_language,
+        transcript_language,
+    )
 
 
 def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -332,7 +355,8 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     group_splits: dict[str, set[str]] = defaultdict(set)
     video_splits: dict[str, set[str]] = defaultdict(set)
     status_by_split: dict[str, set[str]] = defaultdict(set)
-    language_by_split: dict[str, set[str]] = defaultdict(set)
+    question_language_by_split: dict[str, set[str]] = defaultdict(set)
+    transcript_language_by_split: dict[str, set[str]] = defaultdict(set)
     counts_by_split: Counter[str] = Counter()
 
     for case in cases:
@@ -341,9 +365,16 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if case_id in case_ids:
             raise DatasetValidationError(f"Duplicate case_id: {case_id}.")
         case_ids.add(case_id)
-        split, groups, videos = _validate_case(case, manifest_status)
+        (
+            split,
+            groups,
+            videos,
+            question_language,
+            transcript_language,
+        ) = _validate_case(case, manifest_status)
         counts_by_split[split] += 1
-        language_by_split[split].add(case["language_group"])
+        question_language_by_split[split].add(question_language)
+        transcript_language_by_split[split].add(transcript_language)
         for group in groups:
             group_splits[group].add(split)
         for video in videos:
@@ -370,10 +401,21 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             raise DatasetValidationError(
                 f"{split}: every evidence status must be represented; missing {missing}."
             )
-        if language_by_split[split] != set(SUPPORTED_LANGUAGES):
-            missing = sorted(set(SUPPORTED_LANGUAGES) - language_by_split[split])
+        if question_language_by_split[split] != set(SUPPORTED_LANGUAGES):
+            missing = sorted(
+                set(SUPPORTED_LANGUAGES) - question_language_by_split[split]
+            )
             raise DatasetValidationError(
-                f"{split}: English, Hindi, and Arabic must all be represented; missing {missing}."
+                f"{split}: English, Hindi, and Arabic question languages must all "
+                f"be represented; missing {missing}."
+            )
+        if transcript_language_by_split[split] != set(SUPPORTED_LANGUAGES):
+            missing = sorted(
+                set(SUPPORTED_LANGUAGES) - transcript_language_by_split[split]
+            )
+            raise DatasetValidationError(
+                f"{split}: English, Hindi, and Arabic transcript languages must all "
+                f"be represented; missing {missing}."
             )
 
     return manifest
@@ -499,7 +541,8 @@ def _case_prediction_record(
     return {
         "case_id": case["case_id"],
         "split": case["split"],
-        "language_group": case["language_group"],
+        "question_language_group": case["question_language_group"],
+        "transcript_language_group": case["transcript_language_group"],
         "challenge_tags": list(case.get("challenge_tags", [])),
         "assessment_run_status": diag_status,
         "error_code": diagnostics.error_code,
@@ -670,7 +713,8 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
         {
             **aspect,
             "case_id": record["case_id"],
-            "language_group": record["language_group"],
+            "question_language_group": record["question_language_group"],
+            "transcript_language_group": record["transcript_language_group"],
         }
         for record in case_records
         for aspect in record["assessments"]
@@ -685,12 +729,19 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
         aspect_rows, "contradicting"
     )
 
-    per_language = {}
+    per_question_language = {}
+    per_transcript_language = {}
     for language in SUPPORTED_LANGUAGES:
-        language_rows = [
-            row for row in aspect_rows if row["language_group"] == language
+        question_rows = [
+            row for row in aspect_rows
+            if row["question_language_group"] == language
         ]
-        per_language[language] = _class_metrics(language_rows)
+        transcript_rows = [
+            row for row in aspect_rows
+            if row["transcript_language_group"] == language
+        ]
+        per_question_language[language] = _class_metrics(question_rows)
+        per_transcript_language[language] = _class_metrics(transcript_rows)
 
     diagnostics = [record for record in case_records]
     status_counts = dict(Counter(
@@ -712,7 +763,8 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
     completed = status_counts.get(AssessmentRunStatus.COMPLETED.value, 0)
     return {
         "semantic": metrics,
-        "per_language": per_language,
+        "per_question_language": per_question_language,
+        "per_transcript_language": per_transcript_language,
         "operational": {
             "attempted_cases": len(diagnostics),
             "completed_assessments": completed,
@@ -796,13 +848,22 @@ def _quality_gate_eligibility(
     for status in STATUS_ORDER:
         if status_counts[status] < MIN_HELD_OUT_PER_STATUS:
             reasons.append(f"held_out_{status}_below_minimum_{MIN_HELD_OUT_PER_STATUS}")
-    language_counts = Counter(
-        record["language_group"] for record in case_records
+    question_language_counts = Counter(
+        record["question_language_group"] for record in case_records
+    )
+    transcript_language_counts = Counter(
+        record["transcript_language_group"] for record in case_records
     )
     for language in SUPPORTED_LANGUAGES:
-        if language_counts[language] < MIN_HELD_OUT_PER_LANGUAGE:
+        if question_language_counts[language] < MIN_HELD_OUT_PER_LANGUAGE:
             reasons.append(
-                f"held_out_{language}_cases_below_minimum_{MIN_HELD_OUT_PER_LANGUAGE}"
+                f"held_out_{language}_question_language_cases_below_minimum_"
+                f"{MIN_HELD_OUT_PER_LANGUAGE}"
+            )
+        if transcript_language_counts[language] < MIN_HELD_OUT_PER_LANGUAGE:
+            reasons.append(
+                f"held_out_{language}_transcript_language_cases_below_minimum_"
+                f"{MIN_HELD_OUT_PER_LANGUAGE}"
             )
     return {
         "eligible": not reasons,
@@ -810,7 +871,8 @@ def _quality_gate_eligibility(
         "minimums": {
             "total_aspect_observations": MIN_HELD_OUT_ASPECTS,
             "per_status": MIN_HELD_OUT_PER_STATUS,
-            "per_language_cases": MIN_HELD_OUT_PER_LANGUAGE,
+            "per_question_language_cases": MIN_HELD_OUT_PER_LANGUAGE,
+            "per_transcript_language_cases": MIN_HELD_OUT_PER_LANGUAGE,
         },
         "note": (
             "Eligibility is not a semantic pass. Human review of metrics and failure "
@@ -1124,7 +1186,12 @@ def main(argv: list[str] | None = None) -> int:
             "annotation_status": manifest["annotation_status"],
             "selected_split": args.split,
             "selected_cases": len(selected_cases),
-            "language_counts": dict(Counter(case["language_group"] for case in selected_cases)),
+            "question_language_counts": dict(Counter(
+                case["question_language_group"] for case in selected_cases
+            )),
+            "transcript_language_counts": dict(Counter(
+                case["transcript_language_group"] for case in selected_cases
+            )),
             "status_counts": dict(Counter(
                 label["expected_status"]
                 for case in selected_cases
