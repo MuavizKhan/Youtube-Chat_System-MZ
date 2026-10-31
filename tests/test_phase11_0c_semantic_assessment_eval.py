@@ -24,6 +24,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (
     load_threshold_lock,
     main,
     run_evaluation,
+    _resolve_report_path,
     validate_manifest,
 )
 
@@ -159,8 +160,8 @@ def test_annotation_agreement_metrics_report_pre_adjudication_kappa():
     assert metrics["reviewed_aspect_observations"] == 16
     assert metrics["overall"]["observed_agreement"] == 1.0
     assert metrics["overall"]["cohens_kappa"] == pytest.approx(1.0)
-    assert metrics["per_question_language"]["en"]["observations"] == 5
-    assert metrics["per_transcript_language"]["ar"]["observations"] == 5
+    assert metrics["per_question_language"]["en"]["observations"] == 6
+    assert metrics["per_transcript_language"]["ar"]["observations"] == 6
     assert metrics["per_language_pair"]["en->ar"]["observations"] == 1
     assert metrics["per_language_pair"]["en->hi"]["observations"] == 0
     assert "test-reviewer-1" not in json.dumps(metrics)
@@ -178,7 +179,7 @@ def test_annotation_agreement_metrics_expose_disagreement_before_adjudication():
     validate_manifest(manifest)
     metrics = build_annotation_agreement_metrics(manifest, "held_out")
 
-    assert metrics["overall"]["observations"] == 13
+    assert metrics["overall"]["observations"] == 16
     assert metrics["overall"]["observed_agreement"] < 1.0
     assert metrics["overall"]["cohens_kappa"] < 1.0
 
@@ -890,7 +891,7 @@ def test_runner_checkpoints_sanitized_partial_report_on_unexpected_assessor_erro
     assert report["run_status"] == "partial"
     assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
     assert len(report["case_results"]) == 1
-    assert len(report["skipped_case_ids"]) == 12
+    assert len(report["skipped_case_ids"]) == sum(case["split"] == "development" for case in manifest["cases"]) - 1
     assert report["metrics"]["operational"]["runner_error_count"] == 1
     assert report["metrics"]["operational"]["application_level_assessor_invocations"] == 1
     assert report["metrics"]["operational"]["application_level_provider_calls"] == 0
