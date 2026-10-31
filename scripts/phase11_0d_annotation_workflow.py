@@ -35,7 +35,6 @@ from Backend.rag_system.evidence_contracts import (  # noqa: E402
 from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
     DATASET_SCHEMA_VERSION,
     PRIVATE_DATA_DIR,
-    STATUS_ORDER,
     SUPPORTED_LANGUAGES,
     VALID_SPLITS,
     DatasetValidationError,
@@ -56,6 +55,10 @@ FORBIDDEN_SOURCE_KEYS = {
     "assessor_predictions",
     "model_predictions",
     "threshold_lock",
+    "minimum_support_score",
+    "minimum_threshold",
+    "score",
+    "threshold",
 }
 FORBIDDEN_REVIEW_KEYS = {
     "predicted_status",
@@ -65,6 +68,9 @@ FORBIDDEN_REVIEW_KEYS = {
     "raw_provider_response",
     "prompt",
     "gold_labels",
+    "minimum_support_score",
+    "minimum_threshold",
+    "threshold",
 }
 
 
@@ -426,6 +432,12 @@ def _validate_review_packet(
     source_sha256: str,
 ) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     _validate_packet_binding(packet, manifest, source_sha256, "independent_review")
+    allowed_fields = {
+        "packet_schema_version", "packet_type", "packet_id",
+        "source_manifest_sha256", "reviewer_id", "blinding_attested", "cases",
+    }
+    if set(packet) != allowed_fields:
+        raise DatasetValidationError("Reviewer packet contains unexpected or missing top-level fields.")
     _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "review_packet")
     reviewer_id = _safe_id(packet.get("reviewer_id"), "review_packet.reviewer_id")
     expected_packet_id = hashlib.sha256(
@@ -552,6 +564,13 @@ def _validate_adjudication_packet(
     reviewer_labels: dict[str, dict[str, list[dict[str, Any]]]],
 ) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     _validate_packet_binding(packet, manifest, source_sha256, "adjudication")
+    allowed_fields = {
+        "packet_schema_version", "packet_type", "packet_id",
+        "source_manifest_sha256", "reviewer_ids", "adjudicator_id",
+        "adjudication_attested", "cases",
+    }
+    if set(packet) != allowed_fields:
+        raise DatasetValidationError("Adjudication packet contains unexpected or missing top-level fields.")
     _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "adjudication_packet")
     adjudicator_id = _safe_id(packet.get("adjudicator_id"), "adjudication_packet.adjudicator_id")
     declared_reviewers = packet.get("reviewer_ids")
@@ -782,10 +801,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise DatasetValidationError("Exactly two distinct reviewer IDs are required.")
             output_dir = _private_path(args.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
+            targets = [output_dir / f"reviewer_{reviewer_id}.json" for reviewer_id in reviewer_ids]
+            existing = [str(target) for target in targets if target.exists()]
+            if existing:
+                raise DatasetValidationError(
+                    f"Refusing to overwrite existing reviewer packet(s): {existing}"
+                )
             created = []
-            for reviewer_id in reviewer_ids:
+            for reviewer_id, target in zip(reviewer_ids, targets, strict=True):
                 packet = export_review_packet(manifest, source_sha256, reviewer_id)
-                target = output_dir / f"reviewer_{reviewer_id}.json"
                 created.append(str(_write_json_private(target, packet)))
             print(json.dumps({
                 "dataset_id": manifest["dataset_id"],
