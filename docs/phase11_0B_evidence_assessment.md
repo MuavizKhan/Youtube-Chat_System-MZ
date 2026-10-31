@@ -62,9 +62,9 @@ Each assessment uses at most one provider call and does not retry. Input passage
 are explicitly treated as untrusted data; instructions embedded inside transcript
 text must not change the assessor's task or schema. The model receives no tools.
 
-Default limits:
+Hard upper bounds (callers may choose smaller values, never larger ones):
 
-| Limit | Default |
+| Limit | Maximum |
 |---|---:|
 | Transcript passages | 12 |
 | Requested aspects | 8 |
