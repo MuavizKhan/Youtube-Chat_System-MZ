@@ -381,7 +381,7 @@ def _valid_development_report(manifest, dataset_sha256):
         "case_results": [{
             "case_id": "DEV01",
             "assessment_run_status": "completed",
-            "assessments": [{"predicted_status": "supported"}],
+            "assessments": [{"aspect_id": "aspect-1", "predicted_status": "supported"}],
         }],
     }
 
@@ -420,7 +420,7 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         dataset_id=manifest["dataset_id"],
         dataset_sha256=dataset_sha256,
         annotation_status="adjudicated",
-        expected_development_case_ids={"DEV01"},
+        expected_development_aspects={"DEV01": {"aspect-1"}},
         provider="groq",
         model="test-model",
     )
@@ -449,7 +449,7 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
-            expected_development_case_ids={"DEV01"},
+            expected_development_aspects={"DEV01": {"aspect-1"}},
             provider="groq",
             model="test-model",
         )
@@ -474,7 +474,7 @@ def test_threshold_lock_rejects_missing_independent_annotation_agreement(tmp_pat
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
-            expected_development_case_ids={"DEV01"},
+            expected_development_aspects={"DEV01": {"aspect-1"}},
             provider="groq",
             model="test-model",
         )
@@ -500,7 +500,7 @@ def test_threshold_lock_rejects_assessor_protocol_drift(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
-            expected_development_case_ids={"DEV01"},
+            expected_development_aspects={"DEV01": {"aspect-1"}},
             provider="huggingface",
             model="test-model",
         )
@@ -523,7 +523,7 @@ def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="provisional_synthetic",
-            expected_development_case_ids={"DEV01"},
+            expected_development_aspects={"DEV01": {"aspect-1"}},
             provider="groq",
             model="test-model",
         )
@@ -548,7 +548,7 @@ def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
-            expected_development_case_ids={"DEV01"},
+            expected_development_aspects={"DEV01": {"aspect-1"}},
             provider="groq",
             model="test-model",
         )
