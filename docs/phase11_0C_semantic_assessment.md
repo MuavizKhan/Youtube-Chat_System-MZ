@@ -171,6 +171,9 @@ evaluation_data/phase11_0C_threshold_lock.json
   "assessor_protocol": {
     "provider": "groq",
     "model": "openai/gpt-oss-20b",
+    "provider_sdk_distribution": "groq",
+    "provider_sdk_version": "pinned-installed-sdk-version",
+    "python_version": "3.14.7",
     "huggingface_provider_policy": null,
     "temperature": 0.0,
     "reasoning_effort": "low",
@@ -227,7 +230,7 @@ The held-out run requires a completed development report and its threshold lock:
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment.json --split held_out --threshold-lock evaluation_data/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
 \`\`\`
 
-Each case receives at most one application-level assessment call. There are no runner retries. On a provider rate-limit response, the runner stops further calls and saves a partial report. Check provider quota before a full live run.
+Each case receives at most one application-level assessment invocation. The runner does not retry an assessment and stops issuing further cases after a classified rate-limit response. The reported call count is the number of application-level assessor invocations; it does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
 
 ## 8. Acceptance and non-goals
 
