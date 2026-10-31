@@ -399,7 +399,7 @@ def _validate_case(
 
 
 def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    """Validate the complete dataset, provenance, annotations, and split isolation."""
+    """Validate a complete combined seed or one split-specific real dataset manifest."""
     manifest = _require_mapping(manifest, "dataset")
     if manifest.get("schema_version") != DATASET_SCHEMA_VERSION:
         raise DatasetValidationError(
@@ -410,6 +410,11 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if manifest_status not in {"provisional_synthetic", "adjudicated"}:
         raise DatasetValidationError(
             "annotation_status must be provisional_synthetic or adjudicated."
+        )
+    declared_split = manifest.get("split")
+    if declared_split is not None and declared_split not in VALID_SPLITS:
+        raise DatasetValidationError(
+            f"dataset.split must be one of {', '.join(VALID_SPLITS)} when supplied."
         )
     cases = manifest.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -436,6 +441,11 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             question_language,
             transcript_language,
         ) = _validate_case(case, manifest_status)
+        if declared_split is not None and split != declared_split:
+            raise DatasetValidationError(
+                f"{case_id}: case split {split!r} does not match manifest split "
+                f"{declared_split!r}."
+            )
         counts_by_split[split] += 1
         question_language_by_split[split].add(question_language)
         transcript_language_by_split[split].add(transcript_language)
@@ -457,7 +467,8 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
                 f"Data leakage: video {video!r} occurs in multiple splits."
             )
 
-    for split in VALID_SPLITS:
+    splits_to_validate = (declared_split,) if declared_split is not None else VALID_SPLITS
+    for split in splits_to_validate:
         if not counts_by_split[split]:
             raise DatasetValidationError(f"Dataset has no {split} cases.")
         if status_by_split[split] != set(STATUS_ORDER):
