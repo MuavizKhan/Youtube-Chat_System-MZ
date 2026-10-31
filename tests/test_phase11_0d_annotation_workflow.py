@@ -603,7 +603,7 @@ def test_adjudication_packet_preserves_original_review_labels(tmp_path, monkeypa
         "label"
     ]["rationale"] = "Tampered rationale"
 
-    with pytest.raises(workflow.DatasetValidationError, match="exact independent review revisions"):
+    with pytest.raises(workflow.DatasetValidationError, match="adjudication packet altered an independent review"):
         workflow.assemble_adjudicated_manifest(
             manifest, digest, review_a, review_b, adjudication
         )
