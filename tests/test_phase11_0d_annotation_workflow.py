@@ -27,6 +27,9 @@ def _source_fixture() -> tuple[dict, dict[str, list[dict]]]:
         case_id = f"CASE-{case_index + 1:04d}"
         original_labels[case_id] = deepcopy(case.pop("labels"))
         case.pop("annotation", None)
+        # Seed-only challenge metadata can disclose curator/evaluation intent;
+        # Phase 11.0D source manifests and blind reviewer packets must omit it.
+        case.pop("challenge_tags", None)
         case["case_id"] = case_id
         video_id = case["question_analysis"]["video_id"]
         case["independence_group"] = f"source-family-{video_id}"
