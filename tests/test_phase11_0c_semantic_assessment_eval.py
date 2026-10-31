@@ -851,6 +851,43 @@ def test_validate_only_runs_without_constructing_a_provider_client(capsys):
     assert output["quality_gate_eligible"] is False
 
 
+def test_runner_checkpoints_sanitized_partial_report_on_unexpected_assessor_error(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    output_path = tmp_path / "runner-error.json"
+    secret_message = "provider response body secret transcript must not be logged"
+
+    def broken_assessor(analysis, passages, client, **kwargs):
+        raise RuntimeError(secret_message)
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=dataset_sha256,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=output_path,
+        sleep_seconds=0,
+        assessor=broken_assessor,
+    )
+
+    serialized = output_path.read_text(encoding="utf-8")
+    assert report["run_status"] == "partial"
+    assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
+    assert len(report["case_results"]) == 1
+    assert len(report["skipped_case_ids"]) == 12
+    assert report["metrics"]["operational"]["runner_error_count"] == 1
+    assert report["metrics"]["operational"]["application_level_assessor_invocations"] == 1
+    assert report["metrics"]["operational"]["application_level_provider_calls"] == 0
+    assert secret_message not in serialized
+    assert report["case_results"][0]["assessment_run_status"] == "runner_error"
+    assert all(
+        item["predicted_status"] is None
+        for item in report["case_results"][0]["assessments"]
+    )
+
+
 def test_runner_script_supports_documented_direct_help_invocation():
     project_root = Path(__file__).resolve().parents[1]
     script = project_root / "scripts" / "phase11_0c_semantic_assessment_eval.py"
