@@ -46,6 +46,10 @@ from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
 SOURCE_SCHEMA_VERSION = "1.0.0"
 PACKET_SCHEMA_VERSION = "1.0.0"
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+SPLIT_LEAKING_CASE_ID_PATTERN = re.compile(
+    r"^(?:dev(?:elopment)?|held[_-]?out|holdout|test|train)(?:[-_.]|$)",
+    re.IGNORECASE,
+)
 FORBIDDEN_SOURCE_KEYS = {
     "labels",
     "annotation",
@@ -166,6 +170,10 @@ def _write_json_private(path: Path | str, value: dict[str, Any]) -> Path:
 
 def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
     case_id = _require_text(case.get("case_id"), "case.case_id")
+    if SPLIT_LEAKING_CASE_ID_PATTERN.match(case_id):
+        raise DatasetValidationError(
+            f"{case_id}: case IDs must not disclose the development/held-out split."
+        )
     if case.get("split") != split:
         raise DatasetValidationError(f"{case_id}: case split must match its source manifest.")
     _require_text(case.get("independence_group"), f"{case_id}.independence_group")
