@@ -149,6 +149,16 @@ def test_source_manifest_rejects_unsafe_or_invalid_inputs(tmp_path, monkeypatch,
         workflow.validate_source_manifest(candidate)
 
 
+@pytest.mark.parametrize("case_id", ["DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02", "TEST-001"])
+def test_source_manifest_rejects_case_ids_that_reveal_split(case_id, tmp_path, monkeypatch):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    candidate["cases"][0]["case_id"] = case_id
+
+    with pytest.raises(workflow.DatasetValidationError, match="must not disclose"):
+        workflow.validate_source_manifest(candidate)
+
+
 def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(tmp_path, monkeypatch):
     _, _, manifest, digest, _ = _write_private_source(tmp_path, monkeypatch)
 
