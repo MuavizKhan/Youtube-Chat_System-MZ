@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -916,12 +917,12 @@ def build_adjudication_packet(
                 "aspect_id": aspect_id,
                 "description": aspect["description"],
                 "reviewer_labels": [
-                    {"reviewer_id": reviewer_a, "label": labels_a[case_id][
-                        next(i for i, item in enumerate(labels_a[case_id]) if item["aspect_id"] == aspect_id)
-                    ]},
-                    {"reviewer_id": reviewer_b, "label": labels_b[case_id][
-                        next(i for i, item in enumerate(labels_b[case_id]) if item["aspect_id"] == aspect_id)
-                    ]},
+                    {"reviewer_id": reviewer_a, "label": deepcopy(next(
+                        item for item in labels_a[case_id] if item["aspect_id"] == aspect_id
+                    ))},
+                    {"reviewer_id": reviewer_b, "label": deepcopy(next(
+                        item for item in labels_b[case_id] if item["aspect_id"] == aspect_id
+                    ))},
                 ],
             })
         cases.append({
