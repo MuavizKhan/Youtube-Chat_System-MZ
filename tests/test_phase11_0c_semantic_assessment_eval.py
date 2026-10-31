@@ -557,6 +557,32 @@ def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path
         )
 
 
+def test_heldout_eligibility_requires_minimum_coverage_for_each_language_pair():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "held_out_language_pair_en_to_hi_below_minimum_10"
+        in result["reasons"]
+    )
+
+
 def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_attempted():
     manifest, _ = _load_seed()
     held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
