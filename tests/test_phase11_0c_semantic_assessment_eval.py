@@ -147,6 +147,8 @@ def test_annotation_agreement_metrics_report_pre_adjudication_kappa():
     assert metrics["overall"]["cohens_kappa"] == pytest.approx(1.0)
     assert metrics["per_question_language"]["en"]["observations"] == 5
     assert metrics["per_transcript_language"]["ar"]["observations"] == 5
+    assert metrics["per_language_pair"]["en->ar"]["observations"] == 1
+    assert metrics["per_language_pair"]["en->hi"]["observations"] == 0
     assert "test-reviewer-1" not in json.dumps(metrics)
 
 
