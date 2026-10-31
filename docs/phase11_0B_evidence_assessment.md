@@ -1,9 +1,9 @@
 # Phase 11.0B — bounded semantic evidence assessment
 
-**Status:** implementation PR based on merged Phase 11.0A  
-**Base commit:** `b1ff077f6700d6655752491617eb13c3d38c92f3`  
-**Phase 10.11 accepted retrieval configuration:** unchanged  
-**Production integration:** intentionally deferred
+- **Status:** implementation PR based on merged Phase 11.0A
+- **Base commit:** `b1ff077f6700d6655752491617eb13c3d38c92f3`
+- **Phase 10.11 accepted retrieval configuration:** unchanged
+- **Production integration:** intentionally deferred
 
 ## 1. Purpose
 
