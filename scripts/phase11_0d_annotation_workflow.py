@@ -287,8 +287,10 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
     aspects_raw = _require_list(
         analysis.get("aspects"), f"{case_id}.question_analysis.aspects"
     )
-    if len(aspects_raw) > 8:
-        raise DatasetValidationError(f"{case_id}: at most eight aspects are supported.")
+    if not 1 <= len(aspects_raw) <= 8:
+        raise DatasetValidationError(
+            f"{case_id}: between one and eight evidence aspects are required."
+        )
     aspect_ids: set[str] = set()
     aspects: list[EvidenceAspect] = []
     parsed_analysis: QuestionAnalysis | None = None
@@ -358,8 +360,10 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
         raise DatasetValidationError(f"{case_id}: invalid question analysis: {error}") from error
 
     passages_raw = _require_list(case.get("passages"), f"{case_id}.passages")
-    if len(passages_raw) > 12:
-        raise DatasetValidationError(f"{case_id}: at most twelve passages are supported.")
+    if not 1 <= len(passages_raw) <= 12:
+        raise DatasetValidationError(
+            f"{case_id}: between one and twelve evidence passages are required."
+        )
     passage_ids: set[str] = set()
     source_chunks: set[tuple[str, str]] = set()
     parsed_passages: list[EvidencePassage] = []
