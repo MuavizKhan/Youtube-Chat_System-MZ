@@ -133,10 +133,10 @@ The report also includes observed agreement and expected agreement. Kappa is und
 
 The report computes:
 - six-class confusion matrix, per-class precision/recall/F1, overall accuracy and macro F1;
-- pre-adjudication inter-annotator observed agreement, expected agreement, and Cohen's kappa overall and by question/transcript language;
+- pre-adjudication inter-annotator observed agreement, expected agreement, and Cohen's kappa overall and by question language, transcript language, and language pair;
 - binary supported precision/recall/F1, false-positive supported rate on all non-supported labels, and specificity;
 - Wilson 95% intervals for supported precision and recall;
-- per-question-language and per-transcript-language confusion matrices and classification metrics;
+- per-question-language, per-transcript-language, and question→transcript language-pair confusion matrices and classification metrics;
 - alignment of predicted supporting/contradicting passage IDs with reference passage IDs;
 - provider call count, result/failure categories, input/output token usage when available, and latency p50/p95/mean.
 
