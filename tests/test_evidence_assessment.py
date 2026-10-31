@@ -510,6 +510,40 @@ def test_mixed_video_passages_are_rejected_before_model_call():
 
 
 @pytest.mark.unit
+def test_same_source_reference_cannot_be_counted_in_two_passages():
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    shared = EvidenceReference("video-A", "shared-chunk")
+    passages = (
+        EvidencePassage("p1", "First excerpt.", (shared,)),
+        EvidencePassage("p2", "Second excerpt from same chunk.", (shared,)),
+    )
+    client, completions = fake_client(output())
+
+    with pytest.raises(ValueError, match="only one passage"):
+        assess_evidence_support(parsed, passages, client)
+
+    assert completions.calls == []
+
+
+@pytest.mark.unit
+def test_assessment_limits_cannot_be_increased_above_hard_maxima():
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    client, _ = fake_client(output())
+
+    with pytest.raises(ValueError, match="hard maximum"):
+        assess_evidence_support(
+            parsed, (source,), client,
+            max_passages=13,
+        )
+    with pytest.raises(ValueError, match="hard maximum"):
+        assess_evidence_support(
+            parsed, (source,), client,
+            max_output_tokens=901,
+        )
+
+
+@pytest.mark.unit
 def test_duplicate_passage_ids_are_rejected():
     parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
     passages = (
