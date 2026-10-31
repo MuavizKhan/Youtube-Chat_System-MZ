@@ -428,6 +428,11 @@ def _validate_review_packet(
     _validate_packet_binding(packet, manifest, source_sha256, "independent_review")
     _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "review_packet")
     reviewer_id = _safe_id(packet.get("reviewer_id"), "review_packet.reviewer_id")
+    expected_packet_id = hashlib.sha256(
+        f"{manifest['dataset_id']}|{source_sha256}|{reviewer_id}".encode("utf-8")
+    ).hexdigest()
+    if packet.get("packet_id") != expected_packet_id:
+        raise DatasetValidationError("Reviewer packet ID binding is invalid.")
     if packet.get("blinding_attested") is not True:
         raise DatasetValidationError(
             f"{reviewer_id}: reviewer must attest to independent blind annotation."
@@ -554,6 +559,13 @@ def _validate_adjudication_packet(
         raise DatasetValidationError("Adjudication packet reviewer IDs do not match supplied reviews.")
     if adjudicator_id in set(reviewer_ids):
         raise DatasetValidationError("The adjudicator must be distinct from both reviewers.")
+    expected_packet_binding = (
+        f"{manifest['dataset_id']}|{source_sha256}|{reviewer_ids[0]}|"
+        f"{reviewer_ids[1]}|{adjudicator_id}"
+    )
+    expected_packet_id = hashlib.sha256(expected_packet_binding.encode("utf-8")).hexdigest()
+    if packet.get("packet_id") != expected_packet_id:
+        raise DatasetValidationError("Adjudication packet ID binding is invalid.")
     if packet.get("adjudication_attested") is not True:
         raise DatasetValidationError("Adjudicator must attest that final labels were independently adjudicated.")
     expected_cases = {case["case_id"]: case for case in manifest["cases"]}
