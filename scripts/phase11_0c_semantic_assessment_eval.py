@@ -1227,6 +1227,11 @@ def _quality_gate_eligibility(
         if (
             len(actual_aspect_ids) != len(set(actual_aspect_ids))
             or set(actual_aspect_ids) != expected_aspect_ids
+            or any(
+                not isinstance(item, dict)
+                or item.get("predicted_status") not in STATUS_ORDER
+                for item in assessments
+            )
         ):
             reasons.append(
                 "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
