@@ -36,8 +36,18 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
     assert len(manifest["cases"]) == 24
     for split in ("development", "held_out"):
         cases = [case for case in manifest["cases"] if case["split"] == split]
-        assert len(cases) == 12
-        assert {case["language_group"] for case in cases} == {"en", "hi", "ar"}
+        assert len(cases) == 13
+        assert {case["question_language_group"] for case in cases} == {"en", "hi", "ar"}
+        assert {case["transcript_language_group"] for case in cases} == {"en", "hi", "ar"}
+    cross_lingual = [
+        case for case in manifest["cases"]
+        if "cross_lingual" in case["challenge_tags"]
+    ]
+    assert len(cross_lingual) == 2
+    assert all(
+        case["question_language_group"] != case["transcript_language_group"]
+        for case in cross_lingual
+    )
         assert {
             label["expected_status"]
             for case in cases
@@ -114,7 +124,8 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
             "expected_status": status,
             "predicted_status": status,
             "case_id": f"case-{index}",
-            "language_group": "en",
+            "question_language_group": "en",
+            "transcript_language_group": "en",
             "expected_supporting_passage_ids": [],
             "predicted_supporting_passage_ids": [],
             "expected_contradicting_passage_ids": [],
@@ -126,7 +137,8 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
     result = build_metrics([
         {
             "case_id": row["case_id"],
-            "language_group": row["language_group"],
+            "question_language_group": row["question_language_group"],
+            "transcript_language_group": row["transcript_language_group"],
             "assessment_run_status": "completed",
             "request_count": 1,
             "elapsed_ms": 10.0,
@@ -145,6 +157,40 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
         result["semantic"]["confusion_matrix"][status][status] == 1
         for status in statuses
     )
+
+
+def test_metrics_separate_question_and_transcript_language_cohorts():
+    from scripts.phase11_0c_semantic_assessment_eval import build_metrics
+
+    records = [
+        {
+            "case_id": "XL-HI",
+            "question_language_group": "en",
+            "transcript_language_group": "hi",
+            "assessment_run_status": "completed",
+            "request_count": 1,
+            "elapsed_ms": 10.0,
+            "input_tokens": 50,
+            "output_tokens": 20,
+            "error_code": None,
+            "assessments": [{
+                "aspect_id": "a",
+                "expected_status": "supported",
+                "predicted_status": "supported",
+                "support_score": 0.9,
+                "expected_supporting_passage_ids": ["p1"],
+                "predicted_supporting_passage_ids": ["p1"],
+                "expected_contradicting_passage_ids": [],
+                "predicted_contradicting_passage_ids": [],
+            }],
+        }
+    ]
+
+    metrics = build_metrics(records)
+    assert metrics["per_question_language"]["en"]["observations"] == 1
+    assert metrics["per_question_language"]["hi"]["observations"] == 0
+    assert metrics["per_transcript_language"]["hi"]["observations"] == 1
+    assert metrics["per_transcript_language"]["en"]["observations"] == 0
 
 
 def test_supported_binary_metrics_count_false_supported_predictions():
@@ -330,7 +376,8 @@ def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_at
         label = case["labels"][0]
         records.append({
             "case_id": case["case_id"],
-            "language_group": case["language_group"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
             "assessment_run_status": "completed",
             "assessments": [{
                 "expected_status": label["expected_status"],
