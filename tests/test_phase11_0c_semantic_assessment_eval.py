@@ -33,12 +33,21 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
     manifest, digest = _load_seed()
 
     assert len(digest) == 64
-    assert len(manifest["cases"]) == 24
+    assert len(manifest["cases"]) == 26
     for split in ("development", "held_out"):
         cases = [case for case in manifest["cases"] if case["split"] == split]
         assert len(cases) == 13
         assert {case["question_language_group"] for case in cases} == {"en", "hi", "ar"}
         assert {case["transcript_language_group"] for case in cases} == {"en", "hi", "ar"}
+        assert {
+            label["expected_status"]
+            for case in cases
+            for label in case["labels"]
+        } == {
+            "supported", "partial", "missing",
+            "contradicted", "conflicted", "unknown",
+        }
+
     cross_lingual = [
         case for case in manifest["cases"]
         if "cross_lingual" in case["challenge_tags"]
@@ -48,14 +57,6 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
         case["question_language_group"] != case["transcript_language_group"]
         for case in cross_lingual
     )
-        assert {
-            label["expected_status"]
-            for case in cases
-            for label in case["labels"]
-        } == {
-            "supported", "partial", "missing",
-            "contradicted", "conflicted", "unknown",
-        }
 
 
 def test_manifest_rejects_independence_group_leakage_between_splits():
@@ -227,7 +228,8 @@ def test_provisional_synthetic_labels_never_qualify_for_heldout_gate():
     records = [
         {
             "case_id": case["case_id"],
-            "language_group": case["language_group"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
             "assessments": [
                 {
                     "expected_status": case["labels"][0]["expected_status"],
