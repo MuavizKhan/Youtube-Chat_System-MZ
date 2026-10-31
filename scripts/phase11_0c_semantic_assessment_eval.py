@@ -1122,6 +1122,56 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _source_identity_fingerprints(
+    manifest: dict[str, Any],
+    split: str,
+) -> dict[str, list[str]]:
+    """Hash split-scoped source identities for cross-manifest leakage checks."""
+    values: dict[str, set[str]] = {
+        "video_ids": set(),
+        "source_groups": set(),
+        "independence_groups": set(),
+    }
+    for case in manifest["cases"]:
+        if case["split"] != split:
+            continue
+        identities = {
+            "video_ids": case["question_analysis"]["video_id"],
+            "source_groups": case["source"]["source_group"],
+            "independence_groups": case["independence_group"],
+        }
+        for category, value in identities.items():
+            digest = hashlib.sha256(
+                f"{category}:{value}".encode("utf-8")
+            ).hexdigest()
+            values[category].add(digest)
+    return {category: sorted(items) for category, items in values.items()}
+
+
+def _identity_fingerprint_sets(
+    value: Any,
+    field_name: str,
+) -> dict[str, set[str]]:
+    if not isinstance(value, dict):
+        raise ThresholdLockError(f"{field_name} must be a JSON object.")
+    expected_categories = {"video_ids", "source_groups", "independence_groups"}
+    if set(value) != expected_categories:
+        raise ThresholdLockError(f"{field_name} has unexpected identity categories.")
+    result = {}
+    for category in expected_categories:
+        entries = value[category]
+        if (
+            not isinstance(entries, list)
+            or any(not isinstance(item, str) or len(item) != 64 for item in entries)
+            or len(entries) != len(set(entries))
+        ):
+            raise ThresholdLockError(
+                f"{field_name}.{category} must contain unique SHA-256 fingerprints."
+            )
+        result[category] = set(entries)
+    return result
+
+
 def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
     """Capture non-secret settings and code fingerprints that affect calibration."""
     from Backend.rag_system import config
@@ -1364,6 +1414,16 @@ def run_evaluation(
         "annotation_agreement": build_annotation_agreement_metrics(manifest, split),
         "case_count_in_split": split_case_count,
         "selected_case_count": len(selected),
+        "expected_case_aspect_ids": {
+            case["case_id"]: [
+                aspect["aspect_id"]
+                for aspect in case["question_analysis"]["aspects"]
+            ]
+            for case in split_cases
+        },
+        "source_identity_fingerprints": _source_identity_fingerprints(
+            manifest, split
+        ),
         "case_results": [],
         "metrics": None,
         "quality_gate_eligibility": None,
