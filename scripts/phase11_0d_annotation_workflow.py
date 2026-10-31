@@ -53,6 +53,9 @@ from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
 
 SOURCE_SCHEMA_VERSION = "1.0.0"
 PACKET_SCHEMA_VERSION = "1.0.0"
+MIN_HELD_OUT_UNIQUE_VIDEOS = 20
+MIN_HELD_OUT_SOURCE_GROUPS = 20
+MIN_HELD_OUT_INDEPENDENCE_GROUPS = 20
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 OPAQUE_CASE_ID_PATTERN = re.compile(r"^CASE-[A-Z0-9]{3,16}$", re.IGNORECASE)
 FORBIDDEN_SOURCE_KEYS = {
@@ -559,6 +562,35 @@ def validate_source_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             raise DatasetValidationError(
                 "Held-out source coverage is below Phase 11.0C eligibility floors "
                 f"(observed case counts): {underfilled}."
+            )
+        unique_videos = {
+            case["question_analysis"]["video_id"] for case in cases
+        }
+        unique_source_groups = {
+            case["source"]["source_group"] for case in cases
+        }
+        unique_independence_groups = {
+            case["independence_group"] for case in cases
+        }
+        diversity_counts = {
+            "unique_videos": len(unique_videos),
+            "unique_source_groups": len(unique_source_groups),
+            "unique_independence_groups": len(unique_independence_groups),
+        }
+        diversity_minimums = {
+            "unique_videos": MIN_HELD_OUT_UNIQUE_VIDEOS,
+            "unique_source_groups": MIN_HELD_OUT_SOURCE_GROUPS,
+            "unique_independence_groups": MIN_HELD_OUT_INDEPENDENCE_GROUPS,
+        }
+        diversity_failures = {
+            name: {"observed": diversity_counts[name], "required": minimum}
+            for name, minimum in diversity_minimums.items()
+            if diversity_counts[name] < minimum
+        }
+        if diversity_failures:
+            raise DatasetValidationError(
+                "Held-out source diversity is too low; repeated cases from a small "
+                f"number of videos/groups are not independent evidence: {diversity_failures}."
             )
 
     return {
