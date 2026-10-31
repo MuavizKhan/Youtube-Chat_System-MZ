@@ -391,6 +391,12 @@ def _valid_development_report(manifest, dataset_sha256):
             "source_groups": ["b" * 64],
             "independence_groups": ["c" * 64],
         },
+        "expected_case_aspect_ids": {"DEV01": ["aspect-1"]},
+        "source_identity_fingerprints": {
+            "video_ids": ["a" * 64],
+            "source_groups": ["b" * 64],
+            "independence_groups": ["c" * 64],
+        },
         "case_results": [{
             "case_id": "DEV01",
             "assessment_run_status": "completed",
@@ -440,10 +446,10 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
 
     threshold, metadata = load_threshold_lock(
         lock_path,
-        dataset_id=manifest["dataset_id"],
-        dataset_sha256=dataset_sha256,
+        heldout_dataset_id="heldout-dataset",
+        heldout_dataset_sha256="d" * 64,
         annotation_status="adjudicated",
-        expected_development_aspects={"DEV01": {"aspect-1"}},
+        heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
         provider="groq",
         model="test-model",
     )
