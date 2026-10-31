@@ -125,6 +125,19 @@ def _reject_unexpected_keys(
         )
 
 
+def _require_text_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise DatasetValidationError(
+            f"{field} must be an array of non-empty strings."
+        )
+    normalized = [item.strip() for item in value]
+    if len(normalized) != len(set(normalized)):
+        raise DatasetValidationError(f"{field} must not contain duplicate values.")
+    return normalized
+
+
 def _safe_id(value: Any, field: str) -> str:
     result = _require_text(value, field)
     if not SAFE_ID_PATTERN.fullmatch(result):
@@ -291,6 +304,10 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             if aspect_id in aspect_ids:
                 raise DatasetValidationError(f"{case_id}: duplicate aspect ID {aspect_id!r}.")
             aspect_ids.add(aspect_id)
+            retrieval_hints = _require_text_list(
+                item.get("retrieval_hints", []),
+                f"{case_id}/{aspect_id}.retrieval_hints",
+            )
             aspects.append(EvidenceAspect(
                 aspect_id=aspect_id,
                 description=_require_text(
@@ -298,7 +315,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
                 ),
                 required=item.get("required", True),
                 weight=item.get("weight", 1.0),
-                retrieval_hints=tuple(item.get("retrieval_hints", ())),
+                retrieval_hints=tuple(retrieval_hints),
             ))
         if not any(aspect.required for aspect in aspects):
             raise DatasetValidationError(
@@ -320,13 +337,17 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             )
         else:
             temporal = None
+        constraints = _require_text_list(
+            analysis.get("constraints", []),
+            f"{case_id}.question_analysis.constraints",
+        )
         parsed_analysis = QuestionAnalysis(
             intent=QuestionIntent(analysis.get("intent", "unknown")),
             language=question_language,
             aspects=tuple(aspects),
             video_id=video_id,
             subject=analysis.get("subject"),
-            constraints=tuple(analysis.get("constraints", ())),
+            constraints=tuple(constraints),
             temporal_constraint=temporal,
             planner_version=analysis.get("planner_version", "phase11_0D_source_v1"),
             analysis_source="phase11_0D_annotation_source",
