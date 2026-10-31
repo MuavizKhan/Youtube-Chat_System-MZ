@@ -1050,7 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     threshold_lock_metadata = None
-    if args.split == "held_out":
+    if args.split == "held_out" and not args.validate_only:
         if args.threshold_lock is None:
             raise ThresholdLockError(
                 "Held-out runs require --threshold-lock from a completed development run."
