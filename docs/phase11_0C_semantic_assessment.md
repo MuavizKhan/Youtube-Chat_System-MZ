@@ -130,7 +130,8 @@ The validator rejects incomplete reviewer labels, duplicated reviewer IDs, revie
 Before adjudication, the harness computes nominal two-rater Cohen's kappa from the independent status labels:
 - overall across all reviewed aspects;
 - separately by question language;
-- separately by transcript language.
+- separately by transcript language;
+- separately for each question→transcript language pair.
 
 The report also includes observed agreement and expected agreement. Kappa is undefined when chance agreement is 1.0; in that case the value is recorded as unavailable rather than fabricated. Agreement statistics measure consistency, not truth. A high kappa does not prove that labels are correct; review disagreements and final adjudications still require human scrutiny. No automatic kappa cut-off is imposed by this phase.
 
