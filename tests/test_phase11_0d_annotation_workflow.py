@@ -288,13 +288,6 @@ def test_source_manifest_rejects_unsafe_or_invalid_inputs(tmp_path, monkeypatch,
 
 
 @pytest.mark.parametrize(
-    "case_id",
-    [
-        "DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02",
-        "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02", "case-0001",
-    ],
-)
-@pytest.mark.parametrize(
     "mutation, message",
     [
         (
@@ -326,6 +319,13 @@ def test_source_manifest_rejects_malformed_string_array_fields(
         workflow.validate_source_manifest(candidate)
 
 
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        "DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02",
+        "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02", "case-0001",
+    ],
+)
 def test_source_manifest_rejects_non_opaque_case_ids(case_id, tmp_path, monkeypatch):
     _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
     candidate = deepcopy(manifest)
