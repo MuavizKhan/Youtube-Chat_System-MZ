@@ -603,6 +603,36 @@ def _validate_packet_binding(
         raise DatasetValidationError("Annotation packet source manifest hash mismatch.")
 
 
+def _validate_packet_label(
+    label: dict[str, Any],
+    passage_ids: set[str],
+    aspect_ids: set[str],
+    field: str,
+) -> None:
+    _reject_unexpected_keys(
+        label,
+        {
+            "aspect_id", "expected_status", "supporting_passage_ids",
+            "contradicting_passage_ids", "rationale",
+        },
+        field,
+    )
+    required = {
+        "aspect_id", "expected_status", "supporting_passage_ids",
+        "contradicting_passage_ids", "rationale",
+    }
+    if set(label) != required:
+        raise DatasetValidationError(
+            f"{field} must contain exactly one status, evidence references, and rationale."
+        )
+    _validate_status_label(label, passage_ids, aspect_ids)
+    rationale = label.get("rationale")
+    if not isinstance(rationale, str) or len(rationale) > 1000:
+        raise DatasetValidationError(
+            f"{field}.rationale must be text of at most 1000 characters."
+        )
+
+
 def _validate_review_packet(
     packet: dict[str, Any],
     manifest: dict[str, Any],
@@ -650,16 +680,16 @@ def _validate_review_packet(
         seen_aspects: set[str] = set()
         for label in labels:
             label = _require_mapping(label, f"{case_id}.label")
-            _validate_status_label(label, passage_ids, aspect_ids)
+            _validate_packet_label(
+                label,
+                passage_ids,
+                aspect_ids,
+                f"{reviewer_id}/{case_id}.label",
+            )
             aspect_id = label["aspect_id"]
             if aspect_id in seen_aspects:
                 raise DatasetValidationError(f"{reviewer_id}/{case_id}: duplicate aspect label.")
             seen_aspects.add(aspect_id)
-            rationale = label.get("rationale", "")
-            if not isinstance(rationale, str):
-                raise DatasetValidationError(
-                    f"{reviewer_id}/{case_id}/{aspect_id}: rationale must be text."
-                )
         if seen_aspects != aspect_ids:
             raise DatasetValidationError(
                 f"{reviewer_id}/{case_id}: every aspect must have exactly one label."
@@ -793,6 +823,10 @@ def _validate_adjudication_packet(
         seen_reviewer_aspects: set[str] = set()
         for row in reviewer_rows:
             row = _require_mapping(row, f"{case_id}.reviewer_label_row")
+            if set(row) != {"aspect_id", "description", "reviewer_labels"}:
+                raise DatasetValidationError(
+                    f"{case_id}: reviewer-label row contains unexpected or missing fields."
+                )
             aspect_id = _require_text(row.get("aspect_id"), f"{case_id}.reviewer_label_row.aspect_id")
             if aspect_id not in aspect_ids or aspect_id in seen_reviewer_aspects:
                 raise DatasetValidationError(
@@ -811,10 +845,17 @@ def _validate_adjudication_packet(
                 raise DatasetValidationError(
                     f"{case_id}/{aspect_id}: adjudicator must see exactly two independent labels."
                 )
+            if any(
+                not isinstance(item, dict) or set(item) != {"reviewer_id", "label"}
+                for item in displayed
+            ):
+                raise DatasetValidationError(
+                    f"{case_id}/{aspect_id}: reviewer-label wrapper schema is invalid."
+                )
             for expected_reviewer in reviewer_ids:
                 matched = [
                     item for item in displayed
-                    if isinstance(item, dict) and item.get("reviewer_id") == expected_reviewer
+                    if item.get("reviewer_id") == expected_reviewer
                 ]
                 if len(matched) != 1:
                     raise DatasetValidationError(
@@ -837,13 +878,16 @@ def _validate_adjudication_packet(
         seen: set[str] = set()
         for label in labels:
             label = _require_mapping(label, f"{case_id}.adjudicated_label")
-            _validate_status_label(label, passage_ids, aspect_ids)
+            _validate_packet_label(
+                label,
+                passage_ids,
+                aspect_ids,
+                f"{case_id}.adjudicated_label",
+            )
             aspect_id = label["aspect_id"]
             if aspect_id in seen:
                 raise DatasetValidationError(f"{case_id}: duplicate adjudicated aspect label.")
             seen.add(aspect_id)
-            if not isinstance(label.get("rationale", ""), str):
-                raise DatasetValidationError(f"{case_id}/{aspect_id}: rationale must be text.")
         if seen != aspect_ids:
             raise DatasetValidationError(f"{case_id}: adjudicator must label every aspect exactly once.")
         observed[case_id] = labels
