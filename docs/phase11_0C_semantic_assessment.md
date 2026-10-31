@@ -29,21 +29,21 @@ Dataset schema version: **1.0.0**.
 
 Every case contains:
 - a unique case ID and split (development or held_out);
-- an independence group and language group;
+- an independence group, question-language group, and transcript-language group;
 - a QuestionAnalysis with distinct required evidence aspects;
 - one or more transcript passages with exact video/chunk/timestamp references;
 - one reference label per aspect, including expected status and expected supporting/contradicting passage IDs;
 - source metadata and annotation metadata.
 
-The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, language and status coverage, and cross-split leakage.
+The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, question-language and transcript-language coverage, and cross-split leakage. Every passage in a case must match that case's declared transcript-language group.
 
 **Leakage rule:** the same video, source group, or independence group may not occur in both development and held-out. Split by source video and scenario family, not by randomly scattering paraphrases of one underlying example.
 
-Supported languages in this phase are English (en), Hindi (hi), and Arabic (ar). Urdu is intentionally excluded until a verified publisher-uploaded Urdu-script caption source is available.
+Supported question and transcript languages in this phase are English (en), Hindi (hi), and Arabic (ar). They are measured separately: an English question over a Hindi or Arabic transcript is a cross-lingual case, not an English-transcript case. The seed includes one provisional cross-lingual case in each split. Urdu is intentionally excluded until a verified publisher-uploaded Urdu-script caption source is available.
 
 ### Seed fixture warning
 
-evaluation_data/phase11_0C_semantic_assessment_seed.json contains 24 assistant-authored synthetic cases: 12 development and 12 held-out. Each split contains all six labels and all three languages.
+evaluation_data/phase11_0C_semantic_assessment_seed.json contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
 
 These examples exist only to validate the runner, split checks, metrics, and reporting pipeline. They are not real YouTube transcripts, have not been independently reviewed, and must not be used to claim live-model accuracy or select a production threshold.
 
@@ -78,7 +78,7 @@ The report computes:
 - six-class confusion matrix, per-class precision/recall/F1, overall accuracy and macro F1;
 - binary supported precision/recall/F1, false-positive supported rate on all non-supported labels, and specificity;
 - Wilson 95% intervals for supported precision and recall;
-- per-language confusion matrices and classification metrics;
+- per-question-language and per-transcript-language confusion matrices and classification metrics;
 - alignment of predicted supporting/contradicting passage IDs with reference passage IDs;
 - provider call count, result/failure categories, input/output token usage when available, and latency p50/p95/mean.
 
@@ -86,7 +86,7 @@ The most safety-critical error is a false-positive supported result: the assesso
 
 The support_score remains an uncalibrated assessor-strength label, not a probability. Do not compute or report Brier scores or interpret it as calibrated confidence. Token counts are observed from provider response usage when supplied; missing usage is recorded as unavailable, not zero.
 
-A report never emits an automatic quality_passed decision. It reports whether the dataset and run are eligible for final human review. Eligibility requires a complete held-out run with human-adjudicated labels, every assessment call completed with valid output, every held-out case represented exactly once, at least 100 aspect observations, at least 10 examples per status, and at least 20 cases per language. These are minimum review-volume safeguards, not proof of statistical adequacy or model quality.
+A report never emits an automatic quality_passed decision. It reports whether the dataset and run are eligible for final human review. Eligibility requires a complete held-out run with human-adjudicated labels, every assessment call completed with valid output, every held-out case represented exactly once, at least 100 aspect observations, at least 10 examples per status, and at least 20 cases in each question-language and transcript-language cohort. These are minimum review-volume safeguards, not proof of statistical adequacy or model quality.
 
 ## 6. Threshold calibration protocol
 
@@ -158,7 +158,7 @@ Each case receives at most one application-level assessment call. There are no r
 
 Phase 11.0C is accepted as an evaluation-harness implementation when:
 1. Dataset validation rejects malformed labels, invalid provenance, and cross-split leakage.
-2. Metrics tests cover all six statuses, supported false positives, per-language aggregation, and confidence intervals.
+2. Metrics tests cover all six statuses, supported false positives, per-question-language and per-transcript-language aggregation, and confidence intervals.
 3. Threshold locks reject changed datasets, changed development reports, incomplete development runs, and threshold mismatch.
 4. Reports contain no transcript text or raw prompts.
 5. Direct CLI help and validate-only invocation work without API keys.
