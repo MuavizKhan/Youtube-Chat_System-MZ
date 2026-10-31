@@ -110,6 +110,7 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
     )
     rows = [
         {
+            "aspect_id": f"aspect-{index}",
             "expected_status": status,
             "predicted_status": status,
             "case_id": f"case-{index}",
