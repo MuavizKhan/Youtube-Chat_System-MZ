@@ -1,9 +1,9 @@
 # Phase 11.0C — independent semantic evidence evaluation
 
-**Status:** isolated evaluation harness and provisional synthetic fixtures  
-**Base:** merged Phase 11.0B / PR #157  
-**Production integration:** explicitly excluded  
-**Frozen Phase 10.11 baseline:** unchanged
+- **Status:** isolated evaluation harness and provisional synthetic fixtures
+- **Base:** merged Phase 11.0B / PR #157
+- **Production integration:** explicitly excluded
+- **Frozen Phase 10.11 baseline:** unchanged
 
 ## 1. Objective
 
