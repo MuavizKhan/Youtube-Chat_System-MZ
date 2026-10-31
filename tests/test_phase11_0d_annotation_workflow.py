@@ -294,6 +294,38 @@ def test_source_manifest_rejects_unsafe_or_invalid_inputs(tmp_path, monkeypatch,
         "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02",
     ],
 )
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (
+            lambda case: case["question_analysis"].update(constraints="single string"),
+            "constraints must be an array",
+        ),
+        (
+            lambda case: case["question_analysis"]["aspects"][0].update(
+                retrieval_hints="single string"
+            ),
+            "retrieval_hints must be an array",
+        ),
+        (
+            lambda case: case["question_analysis"]["aspects"][0].update(
+                retrieval_hints=["repeat", "repeat"]
+            ),
+            "retrieval_hints must not contain duplicate",
+        ),
+    ],
+)
+def test_source_manifest_rejects_malformed_string_array_fields(
+    mutation, message, tmp_path, monkeypatch
+):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    mutation(candidate["cases"][0])
+
+    with pytest.raises(workflow.DatasetValidationError, match=message):
+        workflow.validate_source_manifest(candidate)
+
+
 def test_source_manifest_rejects_non_opaque_case_ids(case_id, tmp_path, monkeypatch):
     _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
     candidate = deepcopy(manifest)
