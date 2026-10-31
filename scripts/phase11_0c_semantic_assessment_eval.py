@@ -761,6 +761,25 @@ def _quality_gate_eligibility(
     if run_status != "completed":
         reasons.append("held_out_run_is_incomplete_or_interrupted")
 
+    expected_case_ids = {
+        case["case_id"] for case in manifest.get("cases", [])
+        if case.get("split") == "held_out"
+    }
+    actual_case_ids = {record.get("case_id") for record in case_records}
+    if actual_case_ids != expected_case_ids:
+        reasons.append("held_out_case_coverage_is_incomplete_or_inconsistent")
+    if any(
+        record.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
+        for record in case_records
+    ):
+        reasons.append("one_or_more_held_out_assessment_calls_failed_or_returned_invalid_output")
+    if any(
+        aspect.get("predicted_status") not in STATUS_ORDER
+        for record in case_records
+        for aspect in record.get("assessments", [])
+    ):
+        reasons.append("one_or_more_held_out_aspects_has_no_valid_prediction")
+
     aspect_rows = [
         aspect
         for record in case_records
@@ -810,6 +829,7 @@ def load_threshold_lock(
     *,
     dataset_id: str,
     dataset_sha256: str,
+    annotation_status: str,
 ) -> tuple[float, dict[str, Any]]:
     """Require a frozen threshold backed by a completed development report."""
     try:
@@ -820,6 +840,10 @@ def load_threshold_lock(
         raise ThresholdLockError("Threshold lock has an unsupported schema.")
     if lock.get("dataset_id") != dataset_id or lock.get("dataset_sha256") != dataset_sha256:
         raise ThresholdLockError("Threshold lock does not match this exact dataset revision.")
+    if annotation_status != "adjudicated":
+        raise ThresholdLockError(
+            "Threshold calibration requires independently adjudicated human labels."
+        )
 
     threshold = lock.get("minimum_support_score")
     if (
@@ -850,13 +874,15 @@ def load_threshold_lock(
     if (
         dev_report.get("split") != "development"
         or dev_report.get("run_status") != "completed"
+        or dev_report.get("annotation_status") != "adjudicated"
+        or lock.get("annotation_status") != "adjudicated"
         or dev_report.get("dataset_id") != dataset_id
         or dev_report.get("dataset_sha256") != dataset_sha256
         or dev_report.get("minimum_support_score") != float(threshold)
     ):
         raise ThresholdLockError(
-            "Threshold lock must reference a completed development run on this dataset "
-            "using the exact selected threshold."
+            "Threshold lock must reference a completed development run on this exact "
+            "human-adjudicated dataset and selected threshold."
         )
     _require_text(lock.get("selected_by"), "threshold_lock.selected_by")
     _require_text(lock.get("selection_rationale"), "threshold_lock.selection_rationale")
@@ -1059,6 +1085,7 @@ def main(argv: list[str] | None = None) -> int:
             args.threshold_lock,
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
+            annotation_status=manifest["annotation_status"],
         )
         if (
             args.minimum_support_score is not None
