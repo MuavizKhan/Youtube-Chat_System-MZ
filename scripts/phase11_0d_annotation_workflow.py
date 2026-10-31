@@ -598,7 +598,7 @@ def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
     ]
     public_source = {
         key: value for key, value in case["source"].items()
-        if key != "source_group"
+        if key not in {"source_group", "verification"}
     }
     return {
         "case_id": case["case_id"],
@@ -1023,7 +1023,7 @@ def _summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "phase11_0c_input_character_limit": DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
         "all_cases_within_assessor_input_budget": True,
         "held_out_sample_floors_met": (
-            manifest["split"] == "held_out"
+            True if manifest["split"] == "held_out" else None
         ),
         "source_manifest_sha256": None,
         "contains_transcript_passages": True,
