@@ -635,12 +635,15 @@ def _binary_supported_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _reference_set_metrics(rows: list[dict[str, Any]], kind: str) -> dict[str, Any]:
     expected_key = f"expected_{kind}_passage_ids"
     predicted_key = f"predicted_{kind}_passage_ids"
-    expected_all: set[tuple[str, str]] = set()
-    predicted_all: set[tuple[str, str]] = set()
-    # Passage IDs are unique only inside a case; include the case ID in each key.
+    expected_all: set[tuple[str, str, str]] = set()
+    predicted_all: set[tuple[str, str, str]] = set()
+    # Passage IDs are unique only within a case, and one case may have several
+    # distinct aspects. Include both case and aspect IDs to prevent cross-aspect
+    # matches from being counted as correct provenance.
     for row in rows:
-        expected_all.update((row["case_id"], item) for item in row[expected_key])
-        predicted_all.update((row["case_id"], item) for item in row[predicted_key])
+        identity = (row["case_id"], row["aspect_id"])
+        expected_all.update((*identity, item) for item in row[expected_key])
+        predicted_all.update((*identity, item) for item in row[predicted_key])
     true_positive = len(expected_all & predicted_all)
     precision = true_positive / len(predicted_all) if predicted_all else None
     recall = true_positive / len(expected_all) if expected_all else None
@@ -871,6 +874,10 @@ def load_threshold_lock(
         raise ThresholdLockError("Referenced development report cannot be read.") from error
     if actual_report_sha != expected_report_sha:
         raise ThresholdLockError("Development report hash does not match the threshold lock.")
+    dev_cases = dev_report.get("case_results")
+    split_case_count = dev_report.get("case_count_in_split")
+    if not isinstance(dev_cases, list) or not isinstance(split_case_count, int):
+        raise ThresholdLockError("Development report is missing complete case-level results.")
     if (
         dev_report.get("split") != "development"
         or dev_report.get("run_status") != "completed"
@@ -879,10 +886,20 @@ def load_threshold_lock(
         or dev_report.get("dataset_id") != dataset_id
         or dev_report.get("dataset_sha256") != dataset_sha256
         or dev_report.get("minimum_support_score") != float(threshold)
+        or dev_report.get("selected_case_count") != split_case_count
+        or len(dev_cases) != split_case_count
+        or any(
+            case.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
+            or any(
+                aspect.get("predicted_status") not in STATUS_ORDER
+                for aspect in case.get("assessments", [])
+            )
+            for case in dev_cases
+        )
     ):
         raise ThresholdLockError(
-            "Threshold lock must reference a completed development run on this exact "
-            "human-adjudicated dataset and selected threshold."
+            "Threshold lock must reference a complete, successful development run on "
+            "this exact human-adjudicated dataset and selected threshold."
         )
     _require_text(lock.get("selected_by"), "threshold_lock.selected_by")
     _require_text(lock.get("selection_rationale"), "threshold_lock.selection_rationale")
