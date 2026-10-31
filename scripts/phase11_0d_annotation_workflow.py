@@ -54,10 +54,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
 SOURCE_SCHEMA_VERSION = "1.0.0"
 PACKET_SCHEMA_VERSION = "1.0.0"
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-SPLIT_LEAKING_CASE_ID_PATTERN = re.compile(
-    r"^(?:dev(?:elopment)?|held[_-]?out|holdout|test|train)(?:[-_.]|$)",
-    re.IGNORECASE,
-)
+OPAQUE_CASE_ID_PATTERN = re.compile(r"^CASE-[A-Z0-9]{3,16}$", re.IGNORECASE)
 FORBIDDEN_SOURCE_KEYS = {
     "labels",
     "annotation",
@@ -189,10 +186,11 @@ def _write_json_private(path: Path | str, value: dict[str, Any]) -> Path:
 
 
 def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
-    case_id = _safe_id(case.get("case_id"), "case.case_id")
-    if SPLIT_LEAKING_CASE_ID_PATTERN.match(case_id):
+    case_id = _require_text(case.get("case_id"), "case.case_id")
+    if not OPAQUE_CASE_ID_PATTERN.fullmatch(case_id):
         raise DatasetValidationError(
-            f"{case_id}: case IDs must not disclose the development/held-out split."
+            f"{case_id}: case IDs must use the opaque CASE-XXXXXXXX format and must not "
+            "encode language, label, challenge, or split membership."
         )
     _reject_unexpected_keys(
         case,
@@ -230,7 +228,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
         analysis,
         {
             "intent", "language", "aspects", "video_id", "subject", "constraints",
-            "temporal_constraint", "planner_version", "analysis_source", "confidence",
+            "temporal_constraint", "planner_version",
         },
         f"{case_id}.question_analysis",
     )
@@ -541,8 +539,26 @@ def load_source_manifest(path: Path | str) -> tuple[dict[str, Any], str]:
 
 
 def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
-    # Do not disclose split, dataset ID, or source/independence grouping metadata.
-    # The source-manifest digest binds the packet to the original curator file.
+    # Do not disclose split, dataset ID, source/independence groups, planner
+    # confidence, or retrieval hints. The manifest digest binds the packet to
+    # the original source file without sharing curator-only metadata.
+    analysis = case["question_analysis"]
+    public_analysis = {
+        key: analysis[key]
+        for key in (
+            "intent", "language", "video_id", "subject", "constraints",
+            "temporal_constraint", "planner_version",
+        )
+        if key in analysis
+    }
+    public_analysis["aspects"] = [
+        {
+            key: aspect[key]
+            for key in ("aspect_id", "description", "required", "weight")
+            if key in aspect
+        }
+        for aspect in analysis["aspects"]
+    ]
     public_source = {
         key: value for key, value in case["source"].items()
         if key != "source_group"
@@ -552,7 +568,7 @@ def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
         "question_text": case["question_text"],
         "question_language_group": case["question_language_group"],
         "transcript_language_group": case["transcript_language_group"],
-        "question_analysis": case["question_analysis"],
+        "question_analysis": public_analysis,
         "passages": case["passages"],
         "source": public_source,
     }
