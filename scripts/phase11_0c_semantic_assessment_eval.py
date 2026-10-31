@@ -62,6 +62,7 @@ LOCK_SCHEMA_VERSION = "1.0.0"
 MIN_HELD_OUT_ASPECTS = 100
 MIN_HELD_OUT_PER_STATUS = 10
 MIN_HELD_OUT_PER_LANGUAGE = 20
+MIN_HELD_OUT_PER_LANGUAGE_PAIR = 10
 
 
 class DatasetValidationError(ValueError):
@@ -1060,6 +1061,10 @@ def _quality_gate_eligibility(
     transcript_language_counts = Counter(
         record["transcript_language_group"] for record in case_records
     )
+    language_pair_counts = Counter(
+        f"{record['question_language_group']}->{record['transcript_language_group']}"
+        for record in case_records
+    )
     for language in SUPPORTED_LANGUAGES:
         if question_language_counts[language] < MIN_HELD_OUT_PER_LANGUAGE:
             reasons.append(
@@ -1071,6 +1076,14 @@ def _quality_gate_eligibility(
                 f"held_out_{language}_transcript_language_cases_below_minimum_"
                 f"{MIN_HELD_OUT_PER_LANGUAGE}"
             )
+    for question_language in SUPPORTED_LANGUAGES:
+        for transcript_language in SUPPORTED_LANGUAGES:
+            pair = f"{question_language}->{transcript_language}"
+            if language_pair_counts[pair] < MIN_HELD_OUT_PER_LANGUAGE_PAIR:
+                reasons.append(
+                    f"held_out_language_pair_{question_language}_to_{transcript_language}_"
+                    f"below_minimum_{MIN_HELD_OUT_PER_LANGUAGE_PAIR}"
+                )
     return {
         "eligible": not reasons,
         "reasons": reasons,
@@ -1079,6 +1092,9 @@ def _quality_gate_eligibility(
             "per_status": MIN_HELD_OUT_PER_STATUS,
             "per_question_language_cases": MIN_HELD_OUT_PER_LANGUAGE,
             "per_transcript_language_cases": MIN_HELD_OUT_PER_LANGUAGE,
+            "per_question_to_transcript_language_pair_cases": (
+                MIN_HELD_OUT_PER_LANGUAGE_PAIR
+            ),
         },
         "note": (
             "Eligibility is not a semantic pass. Human review of metrics and failure "
