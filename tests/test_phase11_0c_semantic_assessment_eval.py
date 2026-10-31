@@ -36,10 +36,10 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
     manifest, digest = _load_seed()
 
     assert len(digest) == 64
-    assert len(manifest["cases"]) == 26
+    assert len(manifest["cases"]) == 32
     for split in ("development", "held_out"):
         cases = [case for case in manifest["cases"] if case["split"] == split]
-        assert len(cases) == 13
+        assert len(cases) == 16
         assert {case["question_language_group"] for case in cases} == {"en", "hi", "ar"}
         assert {case["transcript_language_group"] for case in cases} == {"en", "hi", "ar"}
         assert {
@@ -50,6 +50,20 @@ def test_seed_manifest_is_balanced_and_split_disjoint():
             "supported", "partial", "missing",
             "contradicted", "conflicted", "unknown",
         }
+
+    required_challenges = {
+        "correlation_not_causation",
+        "speaker_attribution",
+        "wrong_direction",
+        "prompt_injection",
+        "untrusted_transcript",
+    }
+    all_challenge_tags = {
+        tag
+        for case in manifest["cases"]
+        for tag in case["challenge_tags"]
+    }
+    assert required_challenges.issubset(all_challenge_tags)
 
     cross_lingual = [
         case for case in manifest["cases"]
@@ -142,7 +156,7 @@ def test_annotation_agreement_metrics_report_pre_adjudication_kappa():
     metrics = build_annotation_agreement_metrics(manifest, "held_out")
 
     assert metrics["available"] is True
-    assert metrics["reviewed_aspect_observations"] == 13
+    assert metrics["reviewed_aspect_observations"] == 16
     assert metrics["overall"]["observed_agreement"] == 1.0
     assert metrics["overall"]["cohens_kappa"] == pytest.approx(1.0)
     assert metrics["per_question_language"]["en"]["observations"] == 5
@@ -828,7 +842,7 @@ def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp
     serialized = output_path.read_text(encoding="utf-8")
     assert report["run_status"] == "partial"
     assert report["stop_reason"] == "max_cases_limit_reached_partial_run"
-    assert len(report["skipped_case_ids"]) == 12
+    assert len(report["skipped_case_ids"]) == 15
     assert report["metrics"]["semantic"]["observations"] == 1
     assert passage["text"] not in serialized
     assert "Transcript text" not in serialized
@@ -845,9 +859,9 @@ def test_validate_only_runs_without_constructing_a_provider_client(capsys):
     output = json.loads(capsys.readouterr().out)
     assert result == 0
     assert output["validation"] == "passed"
-    assert output["selected_cases"] == 13
-    assert output["question_language_counts"] == {"en": 5, "hi": 4, "ar": 4}
-    assert output["transcript_language_counts"] == {"en": 4, "hi": 4, "ar": 5}
+    assert output["selected_cases"] == 16
+    assert output["question_language_counts"] == {"en": 6, "hi": 5, "ar": 5}
+    assert output["transcript_language_counts"] == {"en": 5, "hi": 5, "ar": 6}
     assert output["quality_gate_eligible"] is False
 
 
