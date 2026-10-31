@@ -35,7 +35,7 @@ Every case contains:
 - one reference label per aspect, including expected status and expected supporting/contradicting passage IDs;
 - source metadata and annotation metadata.
 
-The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, question-language and transcript-language coverage, and split consistency. Every passage in a case must match that case's declared transcript-language group.
+The validator checks the contract types, status/reference consistency, unique aspect and passage IDs, unique source references, valid positive timestamp intervals, question-language and transcript-language coverage, and split consistency. Every passage in a case must match that case's declared transcript-language group.
 
 **Real development and held-out data must be stored in separate manifests.** Each human-adjudicated manifest must declare exactly one top-level `split` value (`development` or `held_out`). Use unique dataset IDs and separate files:
 - `evaluation_data/private/phase11_0C_development.json`
