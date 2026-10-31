@@ -58,6 +58,68 @@ def _source_fixture() -> tuple[dict, dict[str, list[dict]]]:
     }, original_labels
 
 
+def _held_out_source_fixture(*, unique_sources: bool = True) -> dict:
+    source_manifest, _ = _source_fixture()
+    templates = source_manifest["cases"]
+    cases = []
+    counter = 0
+    for question_language in ("en", "hi", "ar"):
+        for transcript_language in ("en", "hi", "ar"):
+            for _ in range(10):
+                counter += 1
+                case = deepcopy(templates[(counter - 1) % len(templates)])
+                case_id = f"CASE-{counter:04d}"
+                video_id = (
+                    f"SyntheticHeldout{counter:04d}"
+                    if unique_sources else "SyntheticHeldoutShared"
+                )
+                source_group = (
+                    f"source-group-{counter:04d}"
+                    if unique_sources else "source-group-shared"
+                )
+                independence_group = (
+                    f"independence-group-{counter:04d}"
+                    if unique_sources else "independence-group-shared"
+                )
+                case["case_id"] = case_id
+                case["split"] = "held_out"
+                case["independence_group"] = independence_group
+                case["question_language_group"] = question_language
+                case["transcript_language_group"] = transcript_language
+                case["question_text"] = f"Question-language cohort {question_language}."
+                analysis = case["question_analysis"]
+                analysis["video_id"] = video_id
+                analysis["language"] = question_language
+                if len(analysis["aspects"]) < 2:
+                    analysis["aspects"].append({
+                        "aspect_id": "aspect-extra",
+                        "description": "An additional independently assessed information need.",
+                        "required": True,
+                        "weight": 1.0,
+                        "retrieval_hints": [],
+                    })
+                for passage_index, passage in enumerate(case["passages"]):
+                    passage["transcript_language"] = transcript_language
+                    for ref_index, reference in enumerate(passage["references"]):
+                        reference["video_id"] = video_id
+                        reference["chunk_id"] = (
+                            f"chunk-{counter:04d}-{passage_index}-{ref_index}"
+                        )
+                        reference["start_seconds"] = 10.0 + counter + passage_index * 10
+                        reference["end_seconds"] = reference["start_seconds"] + 5.0
+                source = case["source"]
+                source["source_group"] = source_group
+                source["source_url"] = f"https://www.youtube.com/watch?v={video_id}"
+                source["transcript_track"] = transcript_language
+                cases.append(case)
+    return {
+        "schema_version": workflow.SOURCE_SCHEMA_VERSION,
+        "dataset_id": "annotation-heldout-test",
+        "split": "held_out",
+        "cases": cases,
+    }
+
+
 def _make_completed_review(
     packet: dict,
     labels_by_case: dict[str, list[dict]],
@@ -228,6 +290,25 @@ def test_source_manifest_requires_at_least_one_required_aspect(tmp_path, monkeyp
 
     with pytest.raises(workflow.DatasetValidationError, match="at least one evidence aspect"):
         workflow.validate_source_manifest(candidate)
+
+
+def test_held_out_source_preflight_accepts_all_phase11_0c_source_floors():
+    manifest = _held_out_source_fixture(unique_sources=True)
+
+    validated = workflow.validate_source_manifest(manifest)
+    summary = workflow._summary(validated)
+
+    assert len(validated["cases"]) == 90
+    assert summary["aspect_observations"] >= 100
+    assert set(summary["question_to_transcript_pair_case_counts"].values()) == {10}
+    assert summary["held_out_sample_floors_met"] is True
+
+
+def test_held_out_source_preflight_rejects_repeated_cases_from_too_few_sources():
+    manifest = _held_out_source_fixture(unique_sources=False)
+
+    with pytest.raises(workflow.DatasetValidationError, match="source diversity is too low"):
+        workflow.validate_source_manifest(manifest)
 
 
 def test_held_out_source_preflight_rejects_underfilled_cohorts_before_annotation(
