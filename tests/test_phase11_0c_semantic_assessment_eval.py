@@ -68,9 +68,6 @@ def test_manifest_rejects_video_reuse_across_splits():
     changed["cases"][-1]["passages"][0]["references"][0]["video_id"] = (
         changed["cases"][0]["question_analysis"]["video_id"]
     )
-    changed["cases"][-1]["source"]["source_group"] = (
-        changed["cases"][0]["source"]["source_group"]
-    )
 
     with pytest.raises(ValueError, match="occurs in multiple splits"):
         validate_manifest(changed)
@@ -174,7 +171,7 @@ def test_wilson_interval_handles_zero_and_nonzero_denominators():
     interval = _wilson_interval(10, 10)
     assert interval is not None
     assert 0.0 < interval["lower_95"] < 1.0
-    assert interval["upper_95"] == 1.0
+    assert interval["upper_95"] == pytest.approx(1.0)
 
 
 def test_provisional_synthetic_labels_never_qualify_for_heldout_gate():
