@@ -59,10 +59,9 @@ MIN_HELD_OUT_UNIQUE_VIDEOS = 20
 MIN_HELD_OUT_SOURCE_GROUPS = 20
 MIN_HELD_OUT_INDEPENDENCE_GROUPS = 20
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-OPAQUE_CASE_ID_PATTERN = re.compile(r"^CASE-[A-Z0-9]{3,16}$", re.IGNORECASE)
+OPAQUE_CASE_ID_PATTERN = re.compile(r"^CASE-[A-Z0-9]{3,16}$")
 ANNOTATOR_ID_PATTERN = re.compile(
     r"^(?:R(?:EVIEWER)?|ADJ(?:UDICATOR)?|CURATOR)-?[A-Z0-9]{1,12}$",
-    re.IGNORECASE,
 )
 LANGUAGE_TRACK_PATTERN = re.compile(
     r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"
