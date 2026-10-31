@@ -68,6 +68,10 @@ def _make_adjudicated_test_manifest():
     changed = deepcopy(manifest)
     changed["dataset_id"] = "phase11_0C_adjudicated_schema_test_only"
     changed["annotation_status"] = "adjudicated"
+    changed["split"] = "held_out"
+    changed["cases"] = [
+        case for case in changed["cases"] if case["split"] == "held_out"
+    ]
     for case in changed["cases"]:
         case["source"]["kind"] = "test_fixture_not_real_source"
         case["source"]["source_url"] = (
