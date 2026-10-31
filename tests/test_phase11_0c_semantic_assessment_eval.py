@@ -90,7 +90,8 @@ def _make_adjudicated_test_manifest():
     for case in changed["cases"]:
         case["source"]["kind"] = "test_fixture_not_real_source"
         case["source"]["source_url"] = (
-            f"https://example.test/transcript/{case['case_id']}"
+            "https://www.youtube.com/watch?v="
+            + case["question_analysis"]["video_id"]
         )
         case["source"]["transcript_track"] = case["transcript_language_group"]
         case["annotation"] = {
@@ -129,6 +130,36 @@ def test_adjudicated_manifest_rejects_missing_blinding_attestation():
     manifest["cases"][0]["annotation"]["blinding_attested"] = False
 
     with pytest.raises(ValueError, match="blinded"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_source_url_that_does_not_match_video():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["source"]["source_url"] = (
+        "https://www.youtube.com/watch?v=another-video"
+    )
+
+    with pytest.raises(ValueError, match="identify the case video_id"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_non_youtube_source_url():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["source"]["source_url"] = (
+        "https://example.test/transcript/source"
+    )
+
+    with pytest.raises(ValueError, match="approved YouTube host"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_requires_exact_source_timestamps():
+    manifest = _make_adjudicated_test_manifest()
+    reference = manifest["cases"][0]["passages"][0]["references"][0]
+    reference["start_seconds"] = None
+    reference["end_seconds"] = None
+
+    with pytest.raises(ValueError, match="exact start_seconds/end_seconds"):
         validate_manifest(manifest)
 
 
