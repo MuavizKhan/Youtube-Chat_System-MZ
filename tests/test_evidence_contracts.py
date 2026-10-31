@@ -59,7 +59,7 @@ def assessment(aspect_id, status, score, *supporting, contradicting=()):
 def test_question_analysis_accepts_english_hindi_and_arabic_language_tags():
     aspects = (EvidenceAspect("reason", "A stated reason for the outcome"),)
 
-    for language in ("en", "hi", "ar", "en-IN", "ar-EG"):
+    for language in ("en", "hi", "ar", "en-IN", "ar-EG", "en-u-ca-gregory"):
         parsed = analysis(*aspects, language=language)
         assert parsed.language == language
         assert parsed.aspects == aspects
