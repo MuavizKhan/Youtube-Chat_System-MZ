@@ -240,9 +240,11 @@ def test_adjudication_packet_preserves_original_review_labels(tmp_path, monkeypa
         manifest, digest, review_a, review_b, "adjudicator-C"
     )
     adjudication["adjudication_attested"] = True
+    # Change only a human rationale so the reviewer label remains schema-valid;
+    # the integrity comparison, not status/reference validation, must catch it.
     adjudication["cases"][0]["reviewer_labels_by_aspect"][0]["reviewer_labels"][0][
         "label"
-    ]["expected_status"] = "unknown"
+    ]["rationale"] = "Tampered rationale"
 
     with pytest.raises(workflow.DatasetValidationError, match="altered an independent review"):
         workflow.assemble_adjudicated_manifest(
