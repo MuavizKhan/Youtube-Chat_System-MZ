@@ -148,7 +148,7 @@ The Phase 11.0C eligibility floor is:
 
 The pair floor implies at least 90 held-out cases before exclusions. The Phase 11.0D source preflight enforces these cohort, aspect-volume, and source-diversity floors before exporting any reviewer packet. After adjudication, assembly also enforces at least 10 adjudicated aspects per status before allowing the held-out dataset to be evaluated. Plan above the minimum (for example, 120 or more cases, 30 or more distinct videos, and 150–200 aspects) to retain a buffer for invalid source tracks, ambiguous excerpts, or adjudication exclusions. These are safeguards against obviously underfilled or heavily repeated samples, not a statistical-power claim.
 
-Do not split by random case rows. Assign videos, source groups and independence/scenario groups to one split only. Do not put alternate excerpts, paraphrases, or related segments of one source video on opposite sides. The Phase 11.0C threshold lock independently checks hashed source identities before a held-out provider call.
+Do not split by random case rows. Assign videos, source groups and independence/scenario groups to one split only. Use different dataset IDs and non-overlapping opaque case IDs for development and held-out. Do not put alternate excerpts, paraphrases, or related segments of one source video on opposite sides. Phase 11.0D requires the development source manifest when running any held-out workflow command and rejects shared dataset IDs, case IDs, video IDs, source groups, or independence groups before reviewer packets are exported. The Phase 11.0C threshold lock independently checks hashed source identities again before a held-out provider call.
 
 ## 4. Blind independent review
 
