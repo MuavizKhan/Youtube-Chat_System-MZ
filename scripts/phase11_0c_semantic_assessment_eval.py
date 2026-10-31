@@ -778,35 +778,54 @@ def _case_prediction_record(
             )
 
     expected_by_id = {item["aspect_id"]: item for item in case["labels"]}
-    predicted_by_id = {item.aspect_id: item for item in result.assessments}
+    predictions_raw = getattr(result, "assessments", ())
+    predicted_by_id = {
+        item.aspect_id: item for item in predictions_raw
+        if getattr(item, "aspect_id", None) is not None
+    }
+    is_semantic_result = diag_status == AssessmentRunStatus.COMPLETED.value
+    expected_aspect_ids = set(expected_by_id)
+    observed_aspect_ids = set(predicted_by_id)
+    if is_semantic_result and observed_aspect_ids != expected_aspect_ids:
+        raise ValueError(
+            "Completed assessor output does not contain exactly one result for every "
+            "expected aspect."
+        )
     assessments = []
     for aspect_id in sorted(expected_by_id):
         expected = expected_by_id[aspect_id]
-        prediction = predicted_by_id[aspect_id]
-        is_semantic_result = diag_status == AssessmentRunStatus.COMPLETED.value
+        prediction = predicted_by_id.get(aspect_id)
         supporting_ids = sorted({
             ref_to_passage[(ref.video_id, str(ref.chunk_id))]
-            for ref in prediction.supporting_evidence
+            for ref in (getattr(prediction, "supporting_evidence", ()) or ())
             if (ref.video_id, str(ref.chunk_id)) in ref_to_passage
-        })
+        }) if prediction is not None else []
         contradicting_ids = sorted({
             ref_to_passage[(ref.video_id, str(ref.chunk_id))]
-            for ref in prediction.contradicting_evidence
+            for ref in (getattr(prediction, "contradicting_evidence", ()) or ())
             if (ref.video_id, str(ref.chunk_id)) in ref_to_passage
-        })
+        }) if prediction is not None else []
         assessments.append({
             "aspect_id": aspect_id,
             "expected_status": expected["expected_status"],
             "predicted_status": (
-                _enum_value(prediction.status) if is_semantic_result else None
+                _enum_value(prediction.status)
+                if is_semantic_result and prediction is not None
+                else None
             ),
             "support_score": (
-                float(prediction.support_score) if is_semantic_result else None
+                float(prediction.support_score)
+                if is_semantic_result and prediction is not None
+                else None
             ),
             "expected_supporting_passage_ids": expected.get("supporting_passage_ids", []),
-            "predicted_supporting_passage_ids": supporting_ids if is_semantic_result else [],
+            "predicted_supporting_passage_ids": (
+                supporting_ids if is_semantic_result else []
+            ),
             "expected_contradicting_passage_ids": expected.get("contradicting_passage_ids", []),
-            "predicted_contradicting_passage_ids": contradicting_ids if is_semantic_result else [],
+            "predicted_contradicting_passage_ids": (
+                contradicting_ids if is_semantic_result else []
+            ),
         })
 
     return {
@@ -1733,6 +1752,7 @@ def run_evaluation(
                 error,
             )
         report["case_results"].append(record)
+        # Persist the in-progress case checkpoint even for an error record.
         _write_report_atomic(output_path, report)
 
         if record["error_code"] == "provider_rate_limited":
@@ -1754,6 +1774,7 @@ def run_evaluation(
         and stop_reason is None
         and len(report["case_results"]) == len(selected)
         and len(report["case_results"]) == split_case_count
+        and len(processed_ids) == len(report["case_results"])
     )
     if selection_was_truncated and stop_reason is None:
         stop_reason = "max_cases_limit_reached_partial_run"
