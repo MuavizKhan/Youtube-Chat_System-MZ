@@ -32,7 +32,7 @@ Suggested private layout:
 - evaluation_data/private/phase11_0C_development.json
 - equivalent separate files and packet folder for held-out
 
-Use opaque case IDs matching CASE- followed by 3–16 uppercase letters/digits (for example, CASE-001 or CASE-00A91). Never encode language, expected status, challenge type, source cohort, or split in a case ID. Use pseudonymous reviewer IDs such as R01, R02, and R03. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be unique within every case.
+Use opaque case IDs matching CASE- followed by 3–16 uppercase letters/digits (for example, CASE-001 or CASE-00A91). Never encode language, expected status, challenge type, source cohort, or split in a case ID. Use pseudonymous role IDs such as R01, REVIEWER-02, ADJ-01, and CURATOR-01. The validator rejects personal names and contact-style identifiers. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be distinct.
 
 A source manifest has schema version 1.0.0:
 
@@ -108,7 +108,7 @@ Replace VIDEO_ID, timestamps and excerpt text with verified values. This is a sc
 - Use 1–8 aspects and 1–12 passages per case, matching the Phase 11.0B request limits.
 - Each case must contain at least one required aspect. Each passage must be an exact transcript excerpt with at least one exact video/chunk/timestamp reference. Every reference needs both start_seconds and end_seconds, with end strictly after start.
 - Keep the exact Phase 11.0B request within its 8,000-character hard limit. The validator uses the assessor's prompt builder and a maximum-length threshold representation, rather than estimating from transcript-text characters alone.
-- source.kind must be youtube_caption. caption_track_kind must be auto_generated or publisher_uploaded, and transcript_track must match the declared transcript language group.
+- source.kind must be youtube_caption. caption_track_kind must be auto_generated or publisher_uploaded. transcript_track must be a BCP-47 language tag whose primary subtag matches the declared transcript language group (for example, en-US maps to en, hi-IN maps to hi, and ar-SA maps to ar). Keep the exact track tag in the manifest; do not discard its regional detail.
 - Set source.verification.video_id_confirmed, caption_track_confirmed, and timestamps_confirmed to true only after manually checking the actual YouTube video, caption track, and every excerpt/timestamp. verified_by is a pseudonymous curator ID. These are audit attestations, not automatic YouTube API verification.
 - Use stable source chunk IDs. A source chunk must not be assigned to two different passage IDs in the same case.
 - The source URL must be an HTTPS YouTube watch, share, Shorts, live, or embed URL identifying the exact video.
@@ -234,7 +234,7 @@ $testSource = "evaluation_data/private/phase11_0C_held_out_sources.json"
 
 Use a distinct reviewer/adjudicator group for held-out where practical. Keep held-out labels inaccessible to anyone changing the assessor or selecting the development threshold.
 
-The adjudication packet is bound to the canonical SHA-256 of each completed reviewer packet. Changing either review after the adjudicator packet was produced invalidates assembly; regenerate the adjudication packet only after the adjudicator has reviewed the correct two revisions.
+The adjudication packet is bound to the canonical SHA-256 of each completed reviewer packet. Changing either review after the adjudicator packet was produced invalidates assembly; regenerate the adjudication packet only after the adjudicator has reviewed the correct two revisions. The final dataset preserves the source-manifest hash, both reviewer-packet hashes, the adjudication-packet hash, packet IDs, and the annotation-workflow tool hash in annotation_workflow_provenance for reproducibility.
 
 Finally, validate both assembled real datasets using the Phase 11.0C evaluator with --validate-only (without --allow-provisional-labels). The held-out assembler also enforces at least 10 adjudicated aspect observations per status before the evaluator can make any provider calls. Only after the development cohort is adjudicated and validated should threshold calibration begin.
 
