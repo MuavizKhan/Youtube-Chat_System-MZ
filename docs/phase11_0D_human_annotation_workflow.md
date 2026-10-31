@@ -32,7 +32,7 @@ Suggested private layout:
 - evaluation_data/private/phase11_0C_development.json
 - equivalent separate files and packet folder for held-out
 
-Use opaque case IDs matching CASE- followed by 3–16 uppercase letters/digits (for example, CASE-001 or CASE-00A91). Never encode language, expected status, challenge type, source cohort, or split in a case ID. Use pseudonymous role IDs such as R01, REVIEWER-02, ADJ-01, and CURATOR-01. The validator rejects personal names and contact-style identifiers. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be distinct.
+Use opaque case IDs matching CASE- followed by 3–16 uppercase letters/digits (for example, CASE-001 or CASE-00A91). Never encode language, expected status, challenge type, source cohort, or split in a case ID. Use canonical uppercase pseudonymous role IDs such as R01, REVIEWER-02, ADJ-01, and CURATOR-01. Lowercase variants are rejected so the same person cannot appear to be two reviewers through case-only spelling differences. The validator rejects personal names and contact-style identifiers. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be distinct.
 
 A source manifest has schema version 1.0.0:
 
