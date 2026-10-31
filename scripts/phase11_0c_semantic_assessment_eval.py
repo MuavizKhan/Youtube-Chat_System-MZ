@@ -132,7 +132,10 @@ def _validate_status_label(label: dict[str, Any], passage_ids: set[str], aspect_
         )
 
 
-def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set[str], set[str]]:
+def _validate_case(
+    case: dict[str, Any],
+    manifest_status: str,
+) -> tuple[str, set[str], set[str], str, str]:
     case_id = _require_text(case.get("case_id"), "case.case_id")
     split = _require_text(case.get("split"), f"{case_id}.split")
     if split not in VALID_SPLITS:
@@ -188,7 +191,7 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
         )
         parsed_analysis = QuestionAnalysis(
             intent=QuestionIntent(analysis.get("intent", "unknown")),
-            language=analysis.get("language", language),
+            language=analysis.get("language", question_language),
             aspects=aspects,
             video_id=video_id,
             subject=analysis.get("subject"),
@@ -261,7 +264,7 @@ def _validate_case(case: dict[str, Any], manifest_status: str) -> tuple[str, set
                     passage_id=passage_id,
                     text=passage.get("text"),
                     references=tuple(references),
-                    transcript_language=passage.get("transcript_language", language),
+                    transcript_language=passage.get("transcript_language", transcript_language),
                 )
             )
         except (TypeError, ValueError) as error:
@@ -458,7 +461,7 @@ def _case_inputs(case: dict[str, Any]) -> tuple[QuestionAnalysis, tuple[Evidence
     )
     analysis = QuestionAnalysis(
         intent=QuestionIntent(analysis_raw.get("intent", "unknown")),
-        language=analysis_raw.get("language", case["language_group"]),
+        language=analysis_raw.get("language", case["question_language_group"]),
         aspects=aspects,
         video_id=analysis_raw["video_id"],
         subject=analysis_raw.get("subject"),
@@ -471,7 +474,7 @@ def _case_inputs(case: dict[str, Any]) -> tuple[QuestionAnalysis, tuple[Evidence
         EvidencePassage(
             passage_id=item["passage_id"],
             text=item["text"],
-            transcript_language=item.get("transcript_language", case["language_group"]),
+            transcript_language=item.get("transcript_language", case["transcript_language_group"]),
             references=tuple(
                 EvidenceReference(
                     video_id=ref["video_id"],
