@@ -1107,6 +1107,29 @@ def assemble_adjudicated_manifest(
         "dataset_id": manifest["dataset_id"],
         "annotation_status": "adjudicated",
         "split": manifest["split"],
+        "annotation_workflow_provenance": {
+            "workflow_schema_version": PACKET_SCHEMA_VERSION,
+            "source_manifest_sha256": source_sha256,
+            "reviewer_packets": [
+                {
+                    "reviewer_id": reviewer_a,
+                    "packet_id": review_packet_a["packet_id"],
+                    "canonical_sha256": _canonical_json_sha256(review_packet_a),
+                },
+                {
+                    "reviewer_id": reviewer_b,
+                    "packet_id": review_packet_b["packet_id"],
+                    "canonical_sha256": _canonical_json_sha256(review_packet_b),
+                },
+            ],
+            "adjudication_packet": {
+                "packet_id": adjudication_packet["packet_id"],
+                "canonical_sha256": _canonical_json_sha256(adjudication_packet),
+            },
+            "workflow_tool_sha256": hashlib.sha256(
+                Path(__file__).read_bytes()
+            ).hexdigest(),
+        },
         "cases": cases,
     }
     # The Phase 11.0C validator is the final authority for all labels,
