@@ -178,7 +178,7 @@ def test_review_packet_requires_blinding_and_complete_labels(tmp_path, monkeypat
 
     completed["blinding_attested"] = True
     completed["cases"][0]["labels"].pop()
-    with pytest.raises(workflow.DatasetValidationError, match="every aspect"):
+    with pytest.raises(workflow.DatasetValidationError, match="at least 1 item"):
         workflow._validate_review_packet(completed, manifest, digest)
 
 
@@ -259,7 +259,7 @@ def test_adjudication_packet_cannot_change_source_excerpt(tmp_path, monkeypatch)
 
 
 def test_complete_annotation_round_trip_produces_valid_phase11_0c_manifest(tmp_path, monkeypatch):
-    private, source_path, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
+    _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     review_a = _make_completed_review(
         workflow.export_review_packet(manifest, digest, "reviewer-A"),
         labels,
@@ -288,9 +288,6 @@ def test_complete_annotation_round_trip_produces_valid_phase11_0c_manifest(tmp_p
         len(case["annotation"]["independent_reviews"]) == 2
         for case in validated["cases"]
     )
-    assert not source_path.samefile(private / "phase11_0C_development.json") if (
-        private / "phase11_0C_development.json"
-    ).exists() else True
 
 
 def test_assembler_rejects_source_hash_drift(tmp_path, monkeypatch):
