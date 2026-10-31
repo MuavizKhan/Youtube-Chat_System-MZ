@@ -1102,7 +1102,7 @@ def load_threshold_lock(
     dataset_id: str,
     dataset_sha256: str,
     annotation_status: str,
-    expected_development_case_ids: set[str],
+    expected_development_aspects: dict[str, set[str]],
     provider: str,
     model: str,
 ) -> tuple[float, dict[str, Any]]:
@@ -1189,13 +1189,23 @@ def load_threshold_lock(
         or dev_report.get("selected_case_count") != split_case_count
         or len(dev_cases) != split_case_count
         or len(dev_case_ids) != len(set(dev_case_ids))
-        or set(dev_case_ids) != set(expected_development_case_ids)
-        or split_case_count != len(expected_development_case_ids)
+        or set(dev_case_ids) != set(expected_development_aspects)
+        or split_case_count != len(expected_development_aspects)
         or any(
             not isinstance(case, dict)
             or case.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
             or not isinstance(case.get("assessments"), list)
             or not case["assessments"]
+            or len({
+                aspect.get("aspect_id")
+                for aspect in case["assessments"]
+                if isinstance(aspect, dict)
+            }) != len(case["assessments"])
+            or {
+                aspect.get("aspect_id")
+                for aspect in case["assessments"]
+                if isinstance(aspect, dict)
+            } != expected_development_aspects.get(case.get("case_id"), set())
             or any(
                 not isinstance(aspect, dict)
                 or aspect.get("predicted_status") not in STATUS_ORDER
@@ -1420,8 +1430,12 @@ def main(argv: list[str] | None = None) -> int:
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status=manifest["annotation_status"],
-            expected_development_case_ids={
-                case["case_id"] for case in manifest["cases"]
+            expected_development_aspects={
+                case["case_id"]: {
+                    aspect["aspect_id"]
+                    for aspect in case["question_analysis"]["aspects"]
+                }
+                for case in manifest["cases"]
                 if case["split"] == "development"
             },
             provider=provider,
