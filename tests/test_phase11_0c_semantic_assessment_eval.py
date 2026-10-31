@@ -167,6 +167,38 @@ def test_annotation_agreement_metrics_expose_disagreement_before_adjudication():
     assert metrics["overall"]["cohens_kappa"] < 1.0
 
 
+def test_real_adjudicated_manifests_can_be_validated_as_separate_splits():
+    manifest, _ = _load_seed()
+
+    for split in ("development", "held_out"):
+        single_split = deepcopy(manifest)
+        single_split["dataset_id"] = f"phase11_0C_{split}_schema_test"
+        single_split["split"] = split
+        single_split["cases"] = [
+            case for case in single_split["cases"] if case["split"] == split
+        ]
+        validated = validate_manifest(single_split)
+        assert validated["split"] == split
+        assert all(case["split"] == split for case in validated["cases"])
+
+
+def test_split_specific_manifest_rejects_cases_from_other_split():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["split"] = "development"
+
+    with pytest.raises(ValueError, match="does not match manifest split"):
+        validate_manifest(changed)
+
+
+def test_adjudicated_manifest_must_declare_one_split():
+    manifest = _make_adjudicated_test_manifest()
+    manifest.pop("split")
+
+    with pytest.raises(ValueError, match="separate files"):
+        validate_manifest(manifest)
+
+
 def test_manifest_rejects_independence_group_leakage_between_splits():
     manifest, _ = _load_seed()
     changed = deepcopy(manifest)
@@ -391,12 +423,6 @@ def _valid_development_report(manifest, dataset_sha256):
             "source_groups": ["b" * 64],
             "independence_groups": ["c" * 64],
         },
-        "expected_case_aspect_ids": {"DEV01": ["aspect-1"]},
-        "source_identity_fingerprints": {
-            "video_ids": ["a" * 64],
-            "source_groups": ["b" * 64],
-            "independence_groups": ["c" * 64],
-        },
         "case_results": [{
             "case_id": "DEV01",
             "assessment_run_status": "completed",
@@ -455,6 +481,60 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
     )
     assert threshold == 0.75
     assert metadata["development_report_sha256"] == report_sha
+
+
+def test_threshold_lock_rejects_development_heldout_source_overlap(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+    heldout_identities = _non_overlapping_heldout_identities()
+    heldout_identities["source_groups"] = ["b" * 64]
+
+    with pytest.raises(ThresholdLockError, match="share video/source/independence"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=heldout_identities,
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_same_development_and_heldout_revision(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock = _valid_threshold_lock(manifest, dataset_sha256, report_sha)
+    lock["heldout_dataset_id"] = manifest["dataset_id"]
+    lock["heldout_dataset_sha256"] = dataset_sha256
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    with pytest.raises(ThresholdLockError, match="must be distinct"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id=manifest["dataset_id"],
+            heldout_dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
 
 
 def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
