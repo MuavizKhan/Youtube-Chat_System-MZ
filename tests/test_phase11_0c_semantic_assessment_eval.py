@@ -163,6 +163,27 @@ def test_adjudicated_manifest_requires_exact_source_timestamps():
         validate_manifest(manifest)
 
 
+def test_manifest_rejects_non_positive_reference_time_range():
+    manifest, _ = _load_seed()
+    reference = manifest["cases"][0]["passages"][0]["references"][0]
+    reference["end_seconds"] = reference["start_seconds"]
+
+    with pytest.raises(ValueError, match="strictly greater"):
+        validate_manifest(manifest)
+
+
+def test_manifest_rejects_duplicate_aspect_ids():
+    manifest, _ = _load_seed()
+    case = manifest["cases"][0]
+    case["question_analysis"]["aspects"].append(
+        deepcopy(case["question_analysis"]["aspects"][0])
+    )
+    case["labels"].append(deepcopy(case["labels"][0]))
+
+    with pytest.raises(ValueError, match="aspect IDs must be unique"):
+        validate_manifest(manifest)
+
+
 def test_adjudicated_manifest_rejects_incomplete_independent_review_labels():
     manifest = _make_adjudicated_test_manifest()
     manifest["cases"][0]["annotation"]["independent_reviews"][1]["labels"] = []
