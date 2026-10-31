@@ -42,6 +42,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
     MIN_HELD_OUT_ASPECTS,
     MIN_HELD_OUT_PER_LANGUAGE,
     MIN_HELD_OUT_PER_LANGUAGE_PAIR,
+    MIN_HELD_OUT_PER_STATUS,
     PRIVATE_DATA_DIR,
     SUPPORTED_LANGUAGES,
     VALID_SPLITS,
@@ -1025,7 +1026,24 @@ def assemble_adjudicated_manifest(
     }
     # The Phase 11.0C validator is the final authority for all labels,
     # provenance, per-split language/status coverage and annotation records.
-    return validate_manifest(result)
+    validated = validate_manifest(result)
+    if manifest["split"] == "held_out":
+        status_counts = Counter(
+            label["expected_status"]
+            for case in validated["cases"]
+            for label in case["labels"]
+        )
+        underfilled_statuses = {
+            status: status_counts[status]
+            for status in STATUS_ORDER
+            if status_counts[status] < MIN_HELD_OUT_PER_STATUS
+        }
+        if underfilled_statuses:
+            raise DatasetValidationError(
+                "Adjudicated held-out labels are below the Phase 11.0C per-status "
+                f"eligibility floor of {MIN_HELD_OUT_PER_STATUS}: {underfilled_statuses}."
+            )
+    return validated
 
 
 def _summary(manifest: dict[str, Any]) -> dict[str, Any]:
