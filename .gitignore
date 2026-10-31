@@ -15,3 +15,6 @@ htmlcov/
 *.sqlite3-wal
 *.sqlite3-shm
 *.db
+
+# Real Phase 11.0C adjudicated datasets and threshold locks stay local/private.
+evaluation_data/private/

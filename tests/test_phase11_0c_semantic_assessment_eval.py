@@ -1,0 +1,1158 @@
+"""Regression tests for the isolated Phase 11.0C assessment evaluation runner."""
+
+from copy import deepcopy
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from Backend.rag_system.evidence_assessment import AssessmentRunStatus
+from Backend.rag_system.evidence_contracts import EvidenceReference, EvidenceSupportStatus
+from scripts.phase11_0c_semantic_assessment_eval import (
+    DEFAULT_DATASET,
+    ThresholdLockError,
+    _effective_assessor_protocol,
+    _quality_gate_eligibility,
+    build_annotation_agreement_metrics,
+    _wilson_interval,
+    build_metrics,
+    load_manifest,
+    load_threshold_lock,
+    main,
+    run_evaluation,
+    _resolve_report_path,
+    validate_manifest,
+)
+
+
+def _load_seed():
+    return load_manifest(DEFAULT_DATASET)
+
+
+def test_seed_manifest_is_balanced_and_split_disjoint():
+    manifest, digest = _load_seed()
+
+    assert len(digest) == 64
+    assert len(manifest["cases"]) == 32
+    for split in ("development", "held_out"):
+        cases = [case for case in manifest["cases"] if case["split"] == split]
+        assert len(cases) == 16
+        assert {case["question_language_group"] for case in cases} == {"en", "hi", "ar"}
+        assert {case["transcript_language_group"] for case in cases} == {"en", "hi", "ar"}
+        assert {
+            label["expected_status"]
+            for case in cases
+            for label in case["labels"]
+        } == {
+            "supported", "partial", "missing",
+            "contradicted", "conflicted", "unknown",
+        }
+
+    required_challenges = {
+        "correlation_not_causation",
+        "speaker_attribution",
+        "wrong_direction",
+        "prompt_injection",
+        "untrusted_transcript",
+    }
+    all_challenge_tags = {
+        tag
+        for case in manifest["cases"]
+        for tag in case["challenge_tags"]
+    }
+    assert required_challenges.issubset(all_challenge_tags)
+
+    cross_lingual = [
+        case for case in manifest["cases"]
+        if "cross_lingual" in case["challenge_tags"]
+    ]
+    assert len(cross_lingual) == 2
+    assert all(
+        case["question_language_group"] != case["transcript_language_group"]
+        for case in cross_lingual
+    )
+
+
+def _make_adjudicated_test_manifest():
+    """Create schema-only test fixtures; these are not real human annotations."""
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["dataset_id"] = "phase11_0C_adjudicated_schema_test_only"
+    changed["annotation_status"] = "adjudicated"
+    changed["split"] = "held_out"
+    changed["cases"] = [
+        case for case in changed["cases"] if case["split"] == "held_out"
+    ]
+    for case in changed["cases"]:
+        case["source"]["kind"] = "test_fixture_not_real_source"
+        case["source"]["source_url"] = (
+            "https://www.youtube.com/watch?v="
+            + case["question_analysis"]["video_id"]
+        )
+        case["source"]["transcript_track"] = case["transcript_language_group"]
+        case["annotation"] = {
+            "status": "adjudicated",
+            "reviewer_ids": ["test-reviewer-1", "test-reviewer-2"],
+            "adjudicator_id": "test-adjudicator",
+            "blinding_attested": True,
+            "independent_reviews": [
+                {
+                    "reviewer_id": reviewer_id,
+                    "labels": deepcopy(case["labels"]),
+                }
+                for reviewer_id in ("test-reviewer-1", "test-reviewer-2")
+            ],
+        }
+    return changed
+
+
+def test_provisional_seed_has_no_independent_annotator_agreement():
+    manifest, _ = _load_seed()
+    metrics = build_annotation_agreement_metrics(manifest, "development")
+
+    assert metrics["available"] is False
+    assert metrics["split"] == "development"
+
+
+def test_adjudicated_manifest_requires_two_complete_blinded_reviewers():
+    manifest = _make_adjudicated_test_manifest()
+
+    validated = validate_manifest(manifest)
+    assert validated["annotation_status"] == "adjudicated"
+
+
+def test_adjudicated_manifest_rejects_missing_blinding_attestation():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["blinding_attested"] = False
+
+    with pytest.raises(ValueError, match="blinded"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_source_url_that_does_not_match_video():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["source"]["source_url"] = (
+        "https://www.youtube.com/watch?v=another-video"
+    )
+
+    with pytest.raises(ValueError, match="identify the case video_id"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_non_youtube_source_url():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["source"]["source_url"] = (
+        "https://example.test/transcript/source"
+    )
+
+    with pytest.raises(ValueError, match="approved YouTube host"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_requires_exact_source_timestamps():
+    manifest = _make_adjudicated_test_manifest()
+    reference = manifest["cases"][0]["passages"][0]["references"][0]
+    reference["start_seconds"] = None
+    reference["end_seconds"] = None
+
+    with pytest.raises(ValueError, match="exact start_seconds/end_seconds"):
+        validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_positive_reference_time_range():
+    manifest, _ = _load_seed()
+    reference = manifest["cases"][0]["passages"][0]["references"][0]
+    reference["end_seconds"] = reference["start_seconds"]
+
+    with pytest.raises(ValueError, match="strictly greater"):
+        validate_manifest(manifest)
+
+
+def test_manifest_rejects_duplicate_aspect_ids():
+    manifest, _ = _load_seed()
+    case = manifest["cases"][0]
+    case["question_analysis"]["aspects"].append(
+        deepcopy(case["question_analysis"]["aspects"][0])
+    )
+    case["labels"].append(deepcopy(case["labels"][0]))
+
+    with pytest.raises(ValueError, match="aspect IDs must be unique"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_incomplete_independent_review_labels():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["independent_reviews"][1]["labels"] = []
+
+    with pytest.raises(ValueError, match="every aspect must have exactly one"):
+        validate_manifest(manifest)
+
+
+def test_adjudicated_manifest_rejects_reviewer_id_mismatch():
+    manifest = _make_adjudicated_test_manifest()
+    manifest["cases"][0]["annotation"]["independent_reviews"][1]["reviewer_id"] = (
+        "different-reviewer"
+    )
+
+    with pytest.raises(ValueError, match="must match the two declared reviewers"):
+        validate_manifest(manifest)
+
+
+def test_annotation_agreement_metrics_report_pre_adjudication_kappa():
+    manifest = _make_adjudicated_test_manifest()
+
+    validate_manifest(manifest)
+    metrics = build_annotation_agreement_metrics(manifest, "held_out")
+
+    assert metrics["available"] is True
+    assert metrics["reviewed_aspect_observations"] == 16
+    assert metrics["overall"]["observed_agreement"] == 1.0
+    assert metrics["overall"]["cohens_kappa"] == pytest.approx(1.0)
+    assert metrics["per_question_language"]["en"]["observations"] == 6
+    assert metrics["per_transcript_language"]["ar"]["observations"] == 6
+    assert metrics["per_language_pair"]["en->ar"]["observations"] == 1
+    assert metrics["per_language_pair"]["en->hi"]["observations"] == 0
+    assert "test-reviewer-1" not in json.dumps(metrics)
+
+
+def test_annotation_agreement_metrics_expose_disagreement_before_adjudication():
+    manifest = _make_adjudicated_test_manifest()
+    case = next(
+        item for item in manifest["cases"]
+        if item["case_id"] == "H-EN-SUP-01"
+    )
+    label = case["annotation"]["independent_reviews"][1]["labels"][0]
+    label["expected_status"] = "partial"
+
+    validate_manifest(manifest)
+    metrics = build_annotation_agreement_metrics(manifest, "held_out")
+
+    assert metrics["overall"]["observations"] == 16
+    assert metrics["overall"]["observed_agreement"] < 1.0
+    assert metrics["overall"]["cohens_kappa"] < 1.0
+
+
+def test_real_adjudicated_manifests_can_be_validated_as_separate_splits():
+    manifest, _ = _load_seed()
+
+    for split in ("development", "held_out"):
+        single_split = deepcopy(manifest)
+        single_split["dataset_id"] = f"phase11_0C_{split}_schema_test"
+        single_split["split"] = split
+        single_split["cases"] = [
+            case for case in single_split["cases"] if case["split"] == split
+        ]
+        validated = validate_manifest(single_split)
+        assert validated["split"] == split
+        assert all(case["split"] == split for case in validated["cases"])
+
+
+def test_split_specific_manifest_rejects_cases_from_other_split():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["split"] = "development"
+
+    with pytest.raises(ValueError, match="does not match manifest split"):
+        validate_manifest(changed)
+
+
+def test_adjudicated_manifest_must_declare_one_split():
+    manifest = _make_adjudicated_test_manifest()
+    manifest.pop("split")
+
+    with pytest.raises(ValueError, match="separate files"):
+        validate_manifest(manifest)
+
+
+def test_manifest_rejects_independence_group_leakage_between_splits():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["cases"][-1]["independence_group"] = (
+        changed["cases"][0]["independence_group"]
+    )
+
+    with pytest.raises(ValueError, match="crosses splits"):
+        validate_manifest(changed)
+
+
+def test_manifest_rejects_video_reuse_across_splits():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["cases"][-1]["question_analysis"]["video_id"] = (
+        changed["cases"][0]["question_analysis"]["video_id"]
+    )
+    changed["cases"][-1]["passages"][0]["references"][0]["video_id"] = (
+        changed["cases"][0]["question_analysis"]["video_id"]
+    )
+
+    with pytest.raises(ValueError, match="occurs in multiple splits"):
+        validate_manifest(changed)
+
+
+def test_manifest_rejects_transcript_language_group_mismatch():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["cases"][0]["passages"][0]["transcript_language"] = "ar"
+
+    with pytest.raises(ValueError, match="transcript_language_group"):
+        validate_manifest(changed)
+
+
+def test_manifest_rejects_unknown_gold_passage_reference():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    label = changed["cases"][0]["labels"][0]
+    label["supporting_passage_ids"] = ["passage-not-in-case"]
+
+    with pytest.raises(ValueError, match="absent from the case"):
+        validate_manifest(changed)
+
+
+def test_manifest_rejects_status_and_reference_inconsistency():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    label = changed["cases"][0]["labels"][0]
+    label["supporting_passage_ids"] = []
+    label["expected_status"] = "supported"
+
+    with pytest.raises(ValueError, match="inconsistent with supported"):
+        validate_manifest(changed)
+
+
+def test_manifest_requires_every_aspect_to_have_one_label():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["cases"][0]["labels"] = []
+
+    with pytest.raises(ValueError, match="exactly one reference label"):
+        validate_manifest(changed)
+
+
+def test_class_metrics_produce_complete_six_way_confusion_matrix():
+    statuses = (
+        "supported", "partial", "missing",
+        "contradicted", "conflicted", "unknown",
+    )
+    rows = [
+        {
+            "aspect_id": f"aspect-{index}",
+            "expected_status": status,
+            "predicted_status": status,
+            "case_id": f"case-{index}",
+            "question_language_group": "en",
+            "transcript_language_group": "en",
+            "expected_supporting_passage_ids": [],
+            "predicted_supporting_passage_ids": [],
+            "expected_contradicting_passage_ids": [],
+            "predicted_contradicting_passage_ids": [],
+        }
+        for index, status in enumerate(statuses)
+    ]
+
+    result = build_metrics([
+        {
+            "case_id": row["case_id"],
+            "question_language_group": row["question_language_group"],
+            "transcript_language_group": row["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "request_count": 1,
+            "elapsed_ms": 10.0,
+            "input_tokens": 40,
+            "output_tokens": 20,
+            "error_code": None,
+            "assessments": [row],
+        }
+        for row in rows
+    ])
+
+    assert result["semantic"]["observations"] == 6
+    assert result["semantic"]["accuracy"] == 1.0
+    assert result["semantic"]["macro_f1"] == 1.0
+    assert all(
+        result["semantic"]["confusion_matrix"][status][status] == 1
+        for status in statuses
+    )
+
+
+def test_completed_assessor_output_missing_aspect_is_recorded_as_failed_case(tmp_path):
+    manifest, digest = _load_seed()
+    case = manifest["cases"][0]
+    output = tmp_path / "malformed-completed.json"
+
+    class Diagnostics:
+        status = AssessmentRunStatus.COMPLETED
+        error_code = None
+        request_count = 1
+        elapsed_ms = 1.0
+        input_chars = 10
+        input_limit_chars = 8000
+        input_tokens = 1
+        output_tokens = 1
+        passage_count = len(case["passages"])
+        aspect_count = len(case["question_analysis"]["aspects"])
+
+    class Result:
+        diagnostics = Diagnostics()
+        assessments = ()
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=digest,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=output,
+        max_cases=1,
+        sleep_seconds=0,
+        assessor=lambda *args, **kwargs: Result(),
+    )
+
+    assert report["run_status"] == "partial"
+    assert report["case_results"][0]["assessment_run_status"] == "runner_error"
+    assert report["case_results"][0]["assessments"][0]["predicted_status"] is None
+
+
+def test_failed_assessments_remain_in_semantic_metric_denominators():
+    records = [{
+        "case_id": "CASE-FAILED",
+        "question_language_group": "en",
+        "transcript_language_group": "ar",
+        "assessment_run_status": "runner_error",
+        "request_count": 0,
+        "assessor_invocation_count": 1,
+        "elapsed_ms": 2.0,
+        "input_tokens": None,
+        "output_tokens": None,
+        "assessments": [{
+            "aspect_id": "aspect-1",
+            "expected_status": "supported",
+            "predicted_status": None,
+            "expected_supporting_passage_ids": ["p1"],
+            "predicted_supporting_passage_ids": [],
+            "expected_contradicting_passage_ids": [],
+            "predicted_contradicting_passage_ids": [],
+        }],
+    }]
+
+    metrics = build_metrics(records)
+
+    assert metrics["semantic"]["observations"] == 1
+    assert metrics["semantic"]["accuracy"] == 0.0
+    assert metrics["semantic"]["unpredicted_observations"] == 1
+    assert metrics["semantic"]["confusion_matrix"]["supported"]["no_valid_prediction"] == 1
+    assert metrics["semantic"]["supported_binary"]["false_negative"] == 1
+    assert metrics["semantic"]["supporting_reference_alignment"]["recall"] == 0.0
+
+
+def test_metrics_separate_question_and_transcript_language_cohorts():
+    from scripts.phase11_0c_semantic_assessment_eval import build_metrics
+
+    records = [
+        {
+            "case_id": "XL-HI",
+            "question_language_group": "en",
+            "transcript_language_group": "hi",
+            "assessment_run_status": "completed",
+            "request_count": 1,
+            "elapsed_ms": 10.0,
+            "input_tokens": 50,
+            "output_tokens": 20,
+            "error_code": None,
+            "assessments": [{
+                "aspect_id": "a",
+                "expected_status": "supported",
+                "predicted_status": "supported",
+                "support_score": 0.9,
+                "expected_supporting_passage_ids": ["p1"],
+                "predicted_supporting_passage_ids": ["p1"],
+                "expected_contradicting_passage_ids": [],
+                "predicted_contradicting_passage_ids": [],
+            }],
+        }
+    ]
+
+    metrics = build_metrics(records)
+    assert metrics["per_question_language"]["en"]["observations"] == 1
+    assert metrics["per_question_language"]["hi"]["observations"] == 0
+    assert metrics["per_transcript_language"]["hi"]["observations"] == 1
+    assert metrics["per_transcript_language"]["en"]["observations"] == 0
+    assert metrics["per_language_pair"]["en->hi"]["observations"] == 1
+    assert metrics["per_language_pair"]["en->ar"]["observations"] == 0
+
+
+def test_supported_binary_metrics_count_false_supported_predictions():
+    rows = [
+        {"expected_status": "supported", "predicted_status": "supported"},
+        {"expected_status": "missing", "predicted_status": "supported"},
+        {"expected_status": "contradicted", "predicted_status": "partial"},
+        {"expected_status": "conflicted", "predicted_status": "contradicted"},
+    ]
+    from scripts.phase11_0c_semantic_assessment_eval import _binary_supported_metrics
+
+    metrics = _binary_supported_metrics(rows)
+    assert metrics["true_positive"] == 1
+    assert metrics["false_positive"] == 1
+    assert metrics["false_negative"] == 0
+    assert metrics["true_negative"] == 2
+    assert metrics["supported_precision"] == 0.5
+    assert metrics["unsupported_specificity"] == pytest.approx(2 / 3)
+    assert metrics["false_supported_rate_on_unsupported"] == pytest.approx(1 / 3)
+    assert metrics["supported_precision_wilson_95"]["lower_95"] < 0.5
+
+
+def test_wilson_interval_handles_zero_and_nonzero_denominators():
+    assert _wilson_interval(0, 0) is None
+    interval = _wilson_interval(10, 10)
+    assert interval is not None
+    assert 0.0 < interval["lower_95"] < 1.0
+    assert interval["upper_95"] == pytest.approx(1.0)
+
+
+def test_provisional_synthetic_labels_never_qualify_for_heldout_gate():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = [
+        {
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessments": [
+                {
+                    "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                    "expected_status": case["labels"][0]["expected_status"],
+                    "predicted_status": case["labels"][0]["expected_status"],
+                }
+            ],
+        }
+        for case in held_out
+    ]
+
+    result = _quality_gate_eligibility(
+        manifest, "held_out", "completed", records
+    )
+    assert result["eligible"] is False
+    assert "labels_are_not_independently_adjudicated" in result["reasons"]
+    assert "held_out_aspects_below_minimum_100" in result["reasons"]
+
+
+def _valid_development_report(manifest, dataset_sha256):
+    return {
+        "split": "development",
+        "run_status": "completed",
+        "dataset_id": manifest["dataset_id"],
+        "dataset_sha256": dataset_sha256,
+        "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
+        "provider": "groq",
+        "model": "test-model",
+        "assessor_protocol": _effective_assessor_protocol("groq", "test-model"),
+        "annotation_agreement": {
+            "available": True,
+            "reviewed_aspect_observations": 1,
+        },
+        "case_count_in_split": 1,
+        "selected_case_count": 1,
+        "expected_case_aspect_ids": {"DEV01": ["aspect-1"]},
+        "source_identity_fingerprints": {
+            "video_ids": ["a" * 64],
+            "source_groups": ["b" * 64],
+            "independence_groups": ["c" * 64],
+        },
+        "case_results": [{
+            "case_id": "DEV01",
+            "assessment_run_status": "completed",
+            "assessments": [{"aspect_id": "aspect-1", "predicted_status": "supported"}],
+        }],
+    }
+
+
+def _valid_threshold_lock(manifest, dataset_sha256, report_sha):
+    return {
+        "schema_version": "1.0.0",
+        "development_dataset_id": manifest["dataset_id"],
+        "development_dataset_sha256": dataset_sha256,
+        "heldout_dataset_id": "heldout-dataset",
+        "heldout_dataset_sha256": "d" * 64,
+        "minimum_support_score": 0.75,
+        "annotation_status": "adjudicated",
+        "assessor_protocol": _effective_assessor_protocol("groq", "test-model"),
+        "development_report_path": "development.json",
+        "development_report_sha256": report_sha,
+        "selected_by": "reviewer-1",
+        "selection_rationale": "Selected after reviewing development-only metrics.",
+    }
+
+
+def _non_overlapping_heldout_identities():
+    return {
+        "video_ids": ["e" * 64],
+        "source_groups": ["f" * 64],
+        "independence_groups": ["0" * 64],
+    }
+
+
+def test_threshold_lock_requires_matching_completed_development_report(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    threshold, metadata = load_threshold_lock(
+        lock_path,
+        heldout_dataset_id="heldout-dataset",
+        heldout_dataset_sha256="d" * 64,
+        annotation_status="adjudicated",
+        heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+        provider="groq",
+        model="test-model",
+    )
+    assert threshold == 0.75
+    assert metadata["development_report_sha256"] == report_sha
+
+
+def test_threshold_lock_rejects_development_heldout_source_overlap(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+    heldout_identities = _non_overlapping_heldout_identities()
+    heldout_identities["source_groups"] = ["b" * 64]
+
+    with pytest.raises(ThresholdLockError, match="share video/source/independence"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=heldout_identities,
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_same_development_and_heldout_revision(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock = _valid_threshold_lock(manifest, dataset_sha256, report_sha)
+    lock["heldout_dataset_id"] = manifest["dataset_id"]
+    lock["heldout_dataset_sha256"] = dataset_sha256
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    with pytest.raises(ThresholdLockError, match="must be distinct"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id=manifest["dataset_id"],
+            heldout_dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+    report_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ThresholdLockError, match="hash"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_missing_independent_annotation_agreement(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    dev_report = _valid_development_report(manifest, dataset_sha256)
+    dev_report["annotation_agreement"] = {"available": False}
+    report_path = tmp_path / "development.json"
+    report_path.write_text(json.dumps(dev_report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="complete, successful"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_assessor_protocol_drift(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="protocol"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="huggingface",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "heldout_dataset_id": "heldout-dataset",
+        "heldout_dataset_sha256": "d" * 64,
+        "annotation_status": "provisional_synthetic",
+        "minimum_support_score": 0.75,
+    }), encoding="utf-8")
+
+    with pytest.raises(ThresholdLockError, match="human labels"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="provisional_synthetic",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    dev_report = _valid_development_report(manifest, dataset_sha256)
+    dev_report["case_results"][0]["assessment_run_status"] = "provider_error"
+    report_path = tmp_path / "development.json"
+    report_path.write_text(json.dumps(dev_report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="complete, successful"):
+        load_threshold_lock(
+            lock_path,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
+            annotation_status="adjudicated",
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
+            provider="groq",
+            model="test-model",
+        )
+
+
+def test_heldout_eligibility_requires_minimum_coverage_for_each_language_pair():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "held_out_language_pair_en_to_hi_below_minimum_10"
+        in result["reasons"]
+    )
+
+
+def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_attempted():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+    records[0]["assessment_run_status"] = "provider_error"
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_assessment_calls_failed_or_returned_invalid_output"
+        in result["reasons"]
+    )
+
+
+def test_heldout_eligibility_rejects_missing_aspect_even_when_all_cases_are_present():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": case["labels"][0]["expected_status"],
+                "predicted_status": case["labels"][0]["expected_status"],
+            }],
+        })
+    records[0]["assessments"] = []
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
+        in result["reasons"]
+    )
+
+
+def test_heldout_eligibility_rejects_invalid_prediction_status_even_when_coverage_is_complete():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+    records[0]["assessments"][0]["predicted_status"] = None
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
+        in result["reasons"]
+    )
+
+
+def test_provenance_alignment_is_scoped_to_aspect_not_only_case():
+    from scripts.phase11_0c_semantic_assessment_eval import _reference_set_metrics
+
+    rows = [
+        {
+            "case_id": "CASE01",
+            "aspect_id": "aspect-A",
+            "expected_supporting_passage_ids": ["p1"],
+            "predicted_supporting_passage_ids": [],
+        },
+        {
+            "case_id": "CASE01",
+            "aspect_id": "aspect-B",
+            "expected_supporting_passage_ids": [],
+            "predicted_supporting_passage_ids": ["p1"],
+        },
+    ]
+    metrics = _reference_set_metrics(rows, "supporting")
+    assert metrics["expected_references"] == 1
+    assert metrics["predicted_references"] == 1
+    assert metrics["matched_references"] == 0
+
+
+def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    case = manifest["cases"][0]
+    passage = case["passages"][0]
+    reference = passage["references"][0]
+    aspect_id = case["question_analysis"]["aspects"][0]["aspect_id"]
+
+    def fake_assessor(analysis, passages, client, **kwargs):
+        assert kwargs["minimum_support_score"] == 0.75
+        return SimpleNamespace(
+            diagnostics=SimpleNamespace(
+                status=AssessmentRunStatus.COMPLETED,
+                provider="groq",
+                model="test-model",
+                video_id=analysis.video_id,
+                request_count=1,
+                elapsed_ms=5.0,
+                input_chars=500,
+                input_limit_chars=8000,
+                passage_count=len(passages),
+                aspect_count=len(analysis.aspects),
+                error_code=None,
+                input_tokens=100,
+                output_tokens=30,
+            ),
+            assessments=(
+                SimpleNamespace(
+                    aspect_id=aspect_id,
+                    status=EvidenceSupportStatus.SUPPORTED,
+                    support_score=0.91,
+                    supporting_evidence=(
+                        EvidenceReference(
+                            video_id=reference["video_id"],
+                            chunk_id=reference["chunk_id"],
+                            start_seconds=reference["start_seconds"],
+                            end_seconds=reference["end_seconds"],
+                        ),
+                    ),
+                    contradicting_evidence=(),
+                ),
+            ),
+        )
+
+    output_path = tmp_path / "partial-report.json"
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=dataset_sha256,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=output_path,
+        max_cases=1,
+        sleep_seconds=0,
+        assessor=fake_assessor,
+    )
+
+    serialized = output_path.read_text(encoding="utf-8")
+    assert report["run_status"] == "partial"
+    assert report["stop_reason"] == "max_cases_limit_reached_partial_run"
+    assert len(report["skipped_case_ids"]) == 15
+    assert report["metrics"]["semantic"]["observations"] == 1
+    assert passage["text"] not in serialized
+    assert "Transcript text" not in serialized
+
+
+def test_validate_only_runs_without_constructing_a_provider_client(capsys):
+    result = main([
+        "--dataset", str(DEFAULT_DATASET),
+        "--split", "held_out",
+        "--allow-provisional-labels",
+        "--validate-only",
+    ])
+
+    output = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert output["validation"] == "passed"
+    assert output["selected_cases"] == 16
+    assert output["question_language_counts"] == {"en": 6, "hi": 5, "ar": 5}
+    assert output["transcript_language_counts"] == {"en": 5, "hi": 5, "ar": 6}
+    assert output["quality_gate_eligible"] is False
+
+
+def test_runner_checkpoints_sanitized_partial_report_on_unexpected_assessor_error(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    output_path = tmp_path / "runner-error.json"
+    secret_message = "provider response body secret transcript must not be logged"
+
+    def broken_assessor(analysis, passages, client, **kwargs):
+        raise RuntimeError(secret_message)
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=dataset_sha256,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=output_path,
+        sleep_seconds=0,
+        assessor=broken_assessor,
+    )
+
+    serialized = output_path.read_text(encoding="utf-8")
+    assert report["run_status"] == "partial"
+    assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
+    assert len(report["case_results"]) == 1
+    assert len(report["skipped_case_ids"]) == sum(case["split"] == "development" for case in manifest["cases"]) - 1
+    assert report["metrics"]["operational"]["runner_error_count"] == 1
+    assert report["metrics"]["operational"]["application_level_assessor_invocations"] == 1
+    assert report["metrics"]["operational"]["application_level_provider_calls"] == 0
+    assert secret_message not in serialized
+    assert report["case_results"][0]["assessment_run_status"] == "runner_error"
+    assert all(
+        item["predicted_status"] is None
+        for item in report["case_results"][0]["assessments"]
+    )
+
+
+def test_stopped_run_is_partial_even_when_error_occurs_on_last_case(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    manifest = deepcopy(manifest)
+    manifest["cases"] = [
+        case for case in manifest["cases"] if case["split"] == "development"
+    ][:1]
+
+    def broken_assessor(analysis, passages, client, **kwargs):
+        raise RuntimeError("unexpected final-case failure")
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=dataset_sha256,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=tmp_path / "last-case-error.json",
+        sleep_seconds=0,
+        assessor=broken_assessor,
+    )
+
+    assert report["selected_case_count"] == 1
+    assert report["run_status"] == "partial"
+    assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
+
+
+def test_adjudicated_report_defaults_to_ignored_private_directory():
+    path = _resolve_report_path(
+        None,
+        annotation_status="adjudicated",
+        split="held_out",
+        timestamp="20261031T120000Z",
+    )
+
+    assert path == (
+        DEFAULT_DATASET.parents[0]
+        / "private"
+        / "reports"
+        / "phase11_0C_held_out_20261031T120000Z.json"
+    )
+
+
+def test_adjudicated_report_rejects_tracked_repository_output_path():
+    with pytest.raises(ValueError, match="must not be written to tracked repository paths"):
+        _resolve_report_path(
+            Path("evaluation_reports/heldout.json"),
+            annotation_status="adjudicated",
+            split="held_out",
+            timestamp="20261031T120000Z",
+        )
+
+
+def test_adjudicated_report_allows_external_private_output_path(tmp_path):
+    path = _resolve_report_path(
+        tmp_path / "heldout.json",
+        annotation_status="adjudicated",
+        split="held_out",
+        timestamp="20261031T120000Z",
+    )
+    assert path == (tmp_path / "heldout.json").resolve()
+
+
+def test_provisional_report_can_use_evaluation_reports_directory():
+    path = _resolve_report_path(
+        Path("evaluation_reports/synthetic.json"),
+        annotation_status="provisional_synthetic",
+        split="development",
+        timestamp="20261031T120000Z",
+    )
+    assert path == (Path(__file__).resolve().parents[1] / "evaluation_reports" / "synthetic.json")
+
+
+def test_sleep_seconds_cli_rejects_negative_and_non_finite_values():
+    from scripts.phase11_0c_semantic_assessment_eval import build_parser
+
+    for value in ("-1", "nan", "inf", "-inf"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([
+                "--split", "development",
+                "--sleep-seconds", value,
+            ])
+
+
+def test_runner_script_supports_documented_direct_help_invocation():
+    project_root = Path(__file__).resolve().parents[1]
+    script = project_root / "scripts" / "phase11_0c_semantic_assessment_eval.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--threshold-lock" in completed.stdout
+    assert "--allow-provisional-labels" in completed.stdout
+    assert "--split" in completed.stdout
