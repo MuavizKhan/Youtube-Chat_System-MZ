@@ -978,6 +978,9 @@ def _quality_gate_eligibility(
         reasons.append("final_quality_gate_requires_held_out_split")
     if manifest.get("annotation_status") != "adjudicated":
         reasons.append("labels_are_not_independently_adjudicated")
+    agreement_metrics = build_annotation_agreement_metrics(manifest, split)
+    if not agreement_metrics.get("available"):
+        reasons.append("independent_annotation_agreement_is_unavailable")
     if run_status != "completed":
         reasons.append("held_out_run_is_incomplete_or_interrupted")
 
@@ -1165,6 +1168,7 @@ def load_threshold_lock(
         case.get("case_id") if isinstance(case, dict) else None
         for case in dev_cases
     ]
+    dev_annotation_agreement = dev_report.get("annotation_agreement")
     if (
         dev_report.get("split") != "development"
         or dev_report.get("run_status") != "completed"
@@ -1176,6 +1180,12 @@ def load_threshold_lock(
         or dev_report.get("assessor_protocol") != current_assessor_protocol
         or dev_report.get("provider") != provider
         or dev_report.get("model") != model
+        or not isinstance(dev_annotation_agreement, dict)
+        or dev_annotation_agreement.get("available") is not True
+        or not isinstance(
+            dev_annotation_agreement.get("reviewed_aspect_observations"), int
+        )
+        or dev_annotation_agreement.get("reviewed_aspect_observations") <= 0
         or dev_report.get("selected_case_count") != split_case_count
         or len(dev_cases) != split_case_count
         or len(dev_case_ids) != len(set(dev_case_ids))
