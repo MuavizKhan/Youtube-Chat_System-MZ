@@ -60,6 +60,13 @@ MIN_HELD_OUT_SOURCE_GROUPS = 20
 MIN_HELD_OUT_INDEPENDENCE_GROUPS = 20
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 OPAQUE_CASE_ID_PATTERN = re.compile(r"^CASE-[A-Z0-9]{3,16}$", re.IGNORECASE)
+ANNOTATOR_ID_PATTERN = re.compile(
+    r"^(?:R(?:EVIEWER)?|ADJ(?:UDICATOR)?|CURATOR)-?[A-Z0-9]{1,12}$",
+    re.IGNORECASE,
+)
+LANGUAGE_TRACK_PATTERN = re.compile(
+    r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"
+)
 FORBIDDEN_SOURCE_KEYS = {
     "labels",
     "annotation",
@@ -123,6 +130,16 @@ def _safe_id(value: Any, field: str) -> str:
     if not SAFE_ID_PATTERN.fullmatch(result):
         raise DatasetValidationError(
             f"{field} must use 1-64 letters, numbers, dots, underscores, or hyphens."
+        )
+    return result
+
+
+def _annotator_id(value: Any, field: str) -> str:
+    result = _require_text(value, field)
+    if not ANNOTATOR_ID_PATTERN.fullmatch(result):
+        raise DatasetValidationError(
+            f"{field} must be a pseudonymous role ID such as R01, REVIEWER-02, "
+            "ADJ-01, or CURATOR-01; personal names and contact details are not allowed."
         )
     return result
 
@@ -438,9 +455,15 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
     source_track = _require_text(
         source.get("transcript_track"), f"{case_id}.source.transcript_track"
     )
-    if source_track.lower() != transcript_language.lower():
+    if not LANGUAGE_TRACK_PATTERN.fullmatch(source_track):
         raise DatasetValidationError(
-            f"{case_id}: source.transcript_track must match transcript_language_group."
+            f"{case_id}: source.transcript_track must be a valid BCP-47 language tag."
+        )
+    primary_track_language = source_track.split("-", 1)[0].lower()
+    if primary_track_language != transcript_language.lower():
+        raise DatasetValidationError(
+            f"{case_id}: source.transcript_track primary language must match "
+            "transcript_language_group (regional subtags are allowed)."
         )
     caption_track_kind = _require_text(
         source.get("caption_track_kind"), f"{case_id}.source.caption_track_kind"
@@ -467,7 +490,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             raise DatasetValidationError(
                 f"{case_id}: source verification requires {check_name}=true."
             )
-    verified_by = _safe_id(
+    verified_by = _annotator_id(
         verification.get("verified_by"), f"{case_id}.source.verification.verified_by"
     )
     source_group = _safe_id(
@@ -777,7 +800,7 @@ def _validate_review_packet(
     if set(packet) != allowed_fields:
         raise DatasetValidationError("Reviewer packet contains unexpected or missing top-level fields.")
     _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "review_packet")
-    reviewer_id = _safe_id(packet.get("reviewer_id"), "review_packet.reviewer_id")
+    reviewer_id = _annotator_id(packet.get("reviewer_id"), "review_packet.reviewer_id")
     expected_packet_id = hashlib.sha256(
         f"{manifest['dataset_id']}|{source_sha256}|{reviewer_id}".encode("utf-8")
     ).hexdigest()
@@ -841,7 +864,7 @@ def build_adjudication_packet(
 ) -> dict[str, Any]:
     reviewer_a, labels_a = _validate_review_packet(review_packet_a, manifest, source_sha256)
     reviewer_b, labels_b = _validate_review_packet(review_packet_b, manifest, source_sha256)
-    adjudicator_id = _safe_id(adjudicator_id, "adjudicator_id")
+    adjudicator_id = _annotator_id(adjudicator_id, "adjudicator_id")
     if reviewer_a == reviewer_b:
         raise DatasetValidationError("The two independent reviewer IDs must be distinct.")
     if adjudicator_id in {reviewer_a, reviewer_b}:
@@ -918,7 +941,7 @@ def _validate_adjudication_packet(
     if set(packet) != allowed_fields:
         raise DatasetValidationError("Adjudication packet contains unexpected or missing top-level fields.")
     _reject_keys(packet, FORBIDDEN_REVIEW_KEYS, "adjudication_packet")
-    adjudicator_id = _safe_id(packet.get("adjudicator_id"), "adjudication_packet.adjudicator_id")
+    adjudicator_id = _annotator_id(packet.get("adjudicator_id"), "adjudication_packet.adjudicator_id")
     declared_reviewers = packet.get("reviewer_ids")
     if declared_reviewers != list(reviewer_ids):
         raise DatasetValidationError("Adjudication packet reviewer IDs do not match supplied reviews.")
@@ -1247,7 +1270,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "export-review-packets":
-            reviewer_ids = [_safe_id(item, "reviewer_id") for item in args.reviewer_ids]
+            reviewer_ids = [_annotator_id(item, "reviewer_id") for item in args.reviewer_ids]
             if len(set(reviewer_ids)) != 2:
                 raise DatasetValidationError("Exactly two distinct reviewer IDs are required.")
             output_dir = _private_path(args.output_dir)
