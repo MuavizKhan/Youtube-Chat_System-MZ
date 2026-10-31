@@ -20,9 +20,10 @@ def _source_fixture() -> tuple[dict, dict[str, list[dict]]]:
         case for case in seed["cases"] if case["split"] == "development"
     ):
         case = deepcopy(original)
-        case_id = case["case_id"]
+        case_id = f"CASE-{case_index + 1:04d}"
         original_labels[case_id] = deepcopy(case.pop("labels"))
         case.pop("annotation", None)
+        case["case_id"] = case_id
         video_id = case["question_analysis"]["video_id"]
         case["independence_group"] = f"source-family-{video_id}"
         case["split"] = "development"
@@ -149,13 +150,19 @@ def test_source_manifest_rejects_unsafe_or_invalid_inputs(tmp_path, monkeypatch,
         workflow.validate_source_manifest(candidate)
 
 
-@pytest.mark.parametrize("case_id", ["DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02", "TEST-001"])
-def test_source_manifest_rejects_case_ids_that_reveal_split(case_id, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "case_id",
+    [
+        "DEV-001", "DEVELOPMENT-01", "HOLDOUT-01", "HELD_OUT-02",
+        "TEST-001", "CASE-EN-SUP-01", "CASE-AR-CON-02",
+    ],
+)
+def test_source_manifest_rejects_non_opaque_case_ids(case_id, tmp_path, monkeypatch):
     _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
     candidate = deepcopy(manifest)
     candidate["cases"][0]["case_id"] = case_id
 
-    with pytest.raises(workflow.DatasetValidationError, match="must not disclose"):
+    with pytest.raises(workflow.DatasetValidationError, match="opaque CASE"):
         workflow.validate_source_manifest(candidate)
 
 
@@ -173,6 +180,8 @@ def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(
     assert "dataset_id" not in first
     assert "independence_group" not in first["cases"][0]
     assert "source_group" not in first["cases"][0]["source"]
+    assert "retrieval_hints" not in json.dumps(first)
+    assert "confidence" not in json.dumps(first)
     assert "labels" in first["cases"][0]
     assert first["cases"][0]["labels"][0]["expected_status"] == ""
     assert "predicted_status" not in json.dumps(first)
