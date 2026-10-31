@@ -667,6 +667,15 @@ def build_annotation_agreement_metrics(
             ])
             for language in SUPPORTED_LANGUAGES
         },
+        "per_language_pair": {
+            f"{question_language}->{transcript_language}": agreement([
+                row for row in rows
+                if row["question_language_group"] == question_language
+                and row["transcript_language_group"] == transcript_language
+            ])
+            for question_language in SUPPORTED_LANGUAGES
+            for transcript_language in SUPPORTED_LANGUAGES
+        },
         "note": (
             "Cohen's kappa measures agreement between the two independent status "
             "labels before adjudication. It does not determine whether the final "
