@@ -199,21 +199,26 @@ def test_provisional_synthetic_labels_never_qualify_for_heldout_gate():
     assert "held_out_aspects_below_minimum_100" in result["reasons"]
 
 
-def test_threshold_lock_requires_matching_completed_development_report(tmp_path):
-    manifest, dataset_sha256 = _load_seed()
-    development_report = {
+def _valid_development_report(manifest, dataset_sha256):
+    return {
         "split": "development",
         "run_status": "completed",
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
         "minimum_support_score": 0.75,
         "annotation_status": "adjudicated",
+        "case_count_in_split": 1,
+        "selected_case_count": 1,
+        "case_results": [{
+            "case_id": "DEV01",
+            "assessment_run_status": "completed",
+            "assessments": [{"predicted_status": "supported"}],
+        }],
     }
-    report_path = tmp_path / "development.json"
-    report_path.write_text(json.dumps(development_report), encoding="utf-8")
-    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
 
-    lock = {
+
+def _valid_threshold_lock(manifest, dataset_sha256, report_sha):
+    return {
         "schema_version": "1.0.0",
         "dataset_id": manifest["dataset_id"],
         "dataset_sha256": dataset_sha256,
@@ -224,8 +229,21 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         "selected_by": "reviewer-1",
         "selection_rationale": "Selected after reviewing development-only metrics.",
     }
+
+
+def test_threshold_lock_requires_matching_completed_development_report(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    report_path = tmp_path / "development.json"
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
     lock_path = tmp_path / "threshold-lock.json"
-    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
 
     threshold, metadata = load_threshold_lock(
         lock_path,
@@ -240,27 +258,16 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
 def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
     manifest, dataset_sha256 = _load_seed()
     report_path = tmp_path / "development.json"
-    report_path.write_text(json.dumps({
-        "split": "development",
-        "run_status": "completed",
-        "dataset_id": manifest["dataset_id"],
-        "dataset_sha256": dataset_sha256,
-        "minimum_support_score": 0.75,
-        "annotation_status": "adjudicated",
-    }), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(_valid_development_report(manifest, dataset_sha256)),
+        encoding="utf-8",
+    )
     report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
     lock_path = tmp_path / "threshold-lock.json"
-    lock_path.write_text(json.dumps({
-        "schema_version": "1.0.0",
-        "dataset_id": manifest["dataset_id"],
-        "dataset_sha256": dataset_sha256,
-        "minimum_support_score": 0.75,
-        "annotation_status": "adjudicated",
-        "development_report_path": "development.json",
-        "development_report_sha256": report_sha,
-        "selected_by": "reviewer-1",
-        "selection_rationale": "Development-only selection.",
-    }), encoding="utf-8")
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
     report_path.write_text("{}", encoding="utf-8")
 
     with pytest.raises(ThresholdLockError, match="hash"):
@@ -275,7 +282,13 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
 def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
     manifest, dataset_sha256 = _load_seed()
     lock_path = tmp_path / "lock.json"
-    lock_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "dataset_id": manifest["dataset_id"],
+        "dataset_sha256": dataset_sha256,
+        "annotation_status": "provisional_synthetic",
+        "minimum_support_score": 0.75,
+    }), encoding="utf-8")
 
     with pytest.raises(ThresholdLockError, match="human labels"):
         load_threshold_lock(
@@ -283,6 +296,28 @@ def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="provisional_synthetic",
+        )
+
+
+def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    dev_report = _valid_development_report(manifest, dataset_sha256)
+    dev_report["case_results"][0]["assessment_run_status"] = "provider_error"
+    report_path = tmp_path / "development.json"
+    report_path.write_text(json.dumps(dev_report), encoding="utf-8")
+    report_sha = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    lock_path = tmp_path / "threshold-lock.json"
+    lock_path.write_text(
+        json.dumps(_valid_threshold_lock(manifest, dataset_sha256, report_sha)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ThresholdLockError, match="complete, successful"):
+        load_threshold_lock(
+            lock_path,
+            dataset_id=manifest["dataset_id"],
+            dataset_sha256=dataset_sha256,
+            annotation_status="adjudicated",
         )
 
 
@@ -309,6 +344,29 @@ def test_heldout_eligibility_rejects_failed_assessment_even_if_every_case_was_at
         "one_or_more_held_out_assessment_calls_failed_or_returned_invalid_output"
         in result["reasons"]
     )
+
+
+def test_provenance_alignment_is_scoped_to_aspect_not_only_case():
+    from scripts.phase11_0c_semantic_assessment_eval import _reference_set_metrics
+
+    rows = [
+        {
+            "case_id": "CASE01",
+            "aspect_id": "aspect-A",
+            "expected_supporting_passage_ids": ["p1"],
+            "predicted_supporting_passage_ids": [],
+        },
+        {
+            "case_id": "CASE01",
+            "aspect_id": "aspect-B",
+            "expected_supporting_passage_ids": [],
+            "predicted_supporting_passage_ids": ["p1"],
+        },
+    ]
+    metrics = _reference_set_metrics(rows, "supporting")
+    assert metrics["expected_references"] == 1
+    assert metrics["predicted_references"] == 1
+    assert metrics["matched_references"] == 0
 
 
 def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp_path):
