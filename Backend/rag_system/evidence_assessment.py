@@ -805,7 +805,7 @@ def assess_evidence_support(
             passage_values,
             minimum_support_score=minimum_support_score,
         )
-    except EvidenceAssessmentOutputError:
+    except (EvidenceAssessmentOutputError, TypeError, ValueError, OverflowError):
         diagnostics = EvidenceAssessmentDiagnostics(
             status=AssessmentRunStatus.INVALID_RESPONSE,
             provider=provider_name,
