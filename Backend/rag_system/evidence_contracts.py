@@ -229,7 +229,7 @@ class EvidenceReference:
     """Video-scoped transcript chunk provenance; transcript text is not stored."""
 
     video_id: str
-    chunk_id: str
+    chunk_id: str | int
     start_seconds: float | None = None
     end_seconds: float | None = None
 
