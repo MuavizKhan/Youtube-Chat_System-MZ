@@ -32,7 +32,7 @@ Suggested private layout:
 - evaluation_data/private/phase11_0C_development.json
 - equivalent separate files and packet folder for held-out
 
-Use pseudonymous reviewer IDs such as R01, R02, and R03. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be unique within every case.
+Use opaque case IDs that do not reveal the split (for example, CASE-001, not DEV-001 or HOLDOUT-001). Use pseudonymous reviewer IDs such as R01, R02, and R03. Do not store annotators' names, email addresses, employer details, or other personal information in dataset files. Reviewer IDs and the adjudicator ID must be unique within every case.
 
 A source manifest has schema version 1.0.0:
 
@@ -43,7 +43,7 @@ A source manifest has schema version 1.0.0:
   "split": "development",
   "cases": [
     {
-      "case_id": "DEV-001",
+      "case_id": "CASE-001",
       "split": "development",
       "independence_group": "video-and-scenario-family-001",
       "question_language_group": "en",
