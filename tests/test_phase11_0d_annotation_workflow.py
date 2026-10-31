@@ -160,7 +160,9 @@ def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(
     assert first["packet_id"] != second["packet_id"]
     assert first["blinding_attested"] is False
     assert "split" not in first
+    assert "dataset_id" not in first
     assert "independence_group" not in first["cases"][0]
+    assert "source_group" not in first["cases"][0]["source"]
     assert "labels" in first["cases"][0]
     assert first["cases"][0]["labels"][0]["expected_status"] == ""
     assert "predicted_status" not in json.dumps(first)
