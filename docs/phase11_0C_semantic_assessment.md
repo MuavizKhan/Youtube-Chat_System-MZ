@@ -117,6 +117,9 @@ evaluation_data/phase11_0C_threshold_lock.json
     "reasoning_effort": "low",
     "configured_max_output_tokens": 1200,
     "assessor_module_sha256": "64-character-assessor-module-sha256",
+    "contracts_module_sha256": "64-character-contracts-module-sha256",
+    "config_module_sha256": "64-character-config-module-sha256",
+    "client_factory_module_sha256": "64-character-client-factory-module-sha256",
     "evaluation_runner_sha256": "64-character-evaluation-runner-sha256"
   },
   "minimum_support_score": 0.75,
@@ -127,7 +130,7 @@ evaluation_data/phase11_0C_threshold_lock.json
 }
 \`\`\`
 
-The lock is bound to an exact human-adjudicated dataset revision, complete development case set, completed development report, provider/model settings, and hashes of the assessor and evaluation runner. Provisional/synthetic development data cannot create a threshold lock. The development and held-out runs must use the same provider/model and non-secret inference configuration. It is not a substitute for preserving all development reports and annotator records.
+The lock is bound to an exact human-adjudicated dataset revision, complete development case set, completed development report, provider/model settings, and hashes of the assessor, evidence contracts, configuration, provider-client factory, and evaluation runner. Provisional/synthetic development data cannot create a threshold lock. The development and held-out runs must use the same provider/model and non-secret inference configuration. It is not a substitute for preserving all development reports and annotator records.
 
 ## 7. Commands
 
