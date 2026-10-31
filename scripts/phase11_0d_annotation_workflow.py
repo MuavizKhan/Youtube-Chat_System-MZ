@@ -312,10 +312,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
             constraints=tuple(analysis.get("constraints", ())),
             temporal_constraint=temporal,
             planner_version=analysis.get("planner_version", "phase11_0D_source_v1"),
-            analysis_source=analysis.get(
-                "analysis_source", "phase11_0D_annotation_source"
-            ),
-            confidence=analysis.get("confidence"),
+            analysis_source="phase11_0D_annotation_source",
         )
     except (KeyError, TypeError, ValueError) as error:
         if isinstance(error, DatasetValidationError):
@@ -407,7 +404,7 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
     payload = _build_prompt_payload(
         parsed_analysis,
         tuple(parsed_passages),
-        0.9999999999999999,
+        0.12345678901234566,
     )
     input_chars = (
         len(SYSTEM_PROMPT)
@@ -1126,11 +1123,23 @@ def _summary(manifest: dict[str, Any]) -> dict[str, Any]:
         for question_language in SUPPORTED_LANGUAGES
         for transcript_language in SUPPORTED_LANGUAGES
     }
+    unique_video_count = len({
+        case["question_analysis"]["video_id"] for case in manifest["cases"]
+    })
+    unique_source_group_count = len({
+        case["source"]["source_group"] for case in manifest["cases"]
+    })
+    unique_independence_group_count = len({
+        case["independence_group"] for case in manifest["cases"]
+    })
     return {
         "dataset_id": manifest["dataset_id"],
         "split": manifest["split"],
         "case_count": len(manifest["cases"]),
         "aspect_observations": aspect_observations,
+        "unique_video_count": unique_video_count,
+        "unique_source_group_count": unique_source_group_count,
+        "unique_independence_group_count": unique_independence_group_count,
         "question_language_case_counts": dict(sorted(question_counts.items())),
         "transcript_language_case_counts": dict(sorted(transcript_counts.items())),
         "question_to_transcript_pair_case_counts": dict(sorted(pair_counts.items())),
