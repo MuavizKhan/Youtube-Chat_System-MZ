@@ -357,6 +357,38 @@ def test_class_metrics_produce_complete_six_way_confusion_matrix():
     )
 
 
+def test_failed_assessments_remain_in_semantic_metric_denominators():
+    records = [{
+        "case_id": "CASE-FAILED",
+        "question_language_group": "en",
+        "transcript_language_group": "ar",
+        "assessment_run_status": "runner_error",
+        "request_count": 0,
+        "assessor_invocation_count": 1,
+        "elapsed_ms": 2.0,
+        "input_tokens": None,
+        "output_tokens": None,
+        "assessments": [{
+            "aspect_id": "aspect-1",
+            "expected_status": "supported",
+            "predicted_status": None,
+            "expected_supporting_passage_ids": ["p1"],
+            "predicted_supporting_passage_ids": [],
+            "expected_contradicting_passage_ids": [],
+            "predicted_contradicting_passage_ids": [],
+        }],
+    }]
+
+    metrics = build_metrics(records)
+
+    assert metrics["semantic"]["observations"] == 1
+    assert metrics["semantic"]["accuracy"] == 0.0
+    assert metrics["semantic"]["unpredicted_observations"] == 1
+    assert metrics["semantic"]["confusion_matrix"]["supported"]["no_valid_prediction"] == 1
+    assert metrics["semantic"]["supported_binary"]["false_negative"] == 1
+    assert metrics["semantic"]["supporting_reference_alignment"]["recall"] == 0.0
+
+
 def test_metrics_separate_question_and_transcript_language_cohorts():
     from scripts.phase11_0c_semantic_assessment_eval import build_metrics
 
