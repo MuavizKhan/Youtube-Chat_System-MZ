@@ -84,7 +84,7 @@ The report computes:
 
 The most safety-critical error is a false-positive supported result: the assessor accepts a passage that does not actually establish the requested aspect. Review these examples individually, especially same-topic irrelevance, reversed relationships, negation, speaker attribution, and cross-lingual cases.
 
-The support_score remains an uncalibrated assessor-strength label, not a probability. Do not compute or report Brier scores or interpret it as calibrated confidence. Token counts are observed from provider response usage when supplied; missing usage is recorded as unavailable, not zero.
+The support_score remains an uncalibrated assessor-strength label, not a probability. Do not compute or report Brier scores or interpret it as calibrated confidence. Token counts are observed from provider response usage when supplied; missing usage is recorded as unavailable, not zero. The 8,000-character request ceiling is not tokenizer preflight. The report must distinguish characters from provider-reported input tokens; it must not infer token counts from characters. If provider usage is absent, token usage remains unavailable.
 
 A report never emits an automatic quality_passed decision. It reports whether the dataset and run are eligible for final human review. Eligibility requires a complete held-out run with human-adjudicated labels, every assessment call completed with valid output, every held-out case represented exactly once, at least 100 aspect observations, at least 10 examples per status, and at least 20 cases in each question-language and transcript-language cohort. These are minimum review-volume safeguards, not proof of statistical adequacy or model quality.
 
@@ -115,7 +115,11 @@ evaluation_data/phase11_0C_threshold_lock.json
     "model": "openai/gpt-oss-20b",
     "temperature": 0.0,
     "reasoning_effort": "low",
+    "max_input_chars": 8000,
+    "max_passages": 12,
+    "max_aspects": 8,
     "configured_max_output_tokens": 1200,
+    "effective_max_output_tokens": 900,
     "assessor_module_sha256": "64-character-assessor-module-sha256",
     "contracts_module_sha256": "64-character-contracts-module-sha256",
     "config_module_sha256": "64-character-config-module-sha256",
