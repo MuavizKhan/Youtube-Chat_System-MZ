@@ -898,6 +898,7 @@ def load_threshold_lock(
     dataset_id: str,
     dataset_sha256: str,
     annotation_status: str,
+    expected_development_case_ids: set[str],
 ) -> tuple[float, dict[str, Any]]:
     """Require a frozen threshold backed by a completed development report."""
     try:
@@ -939,10 +940,21 @@ def load_threshold_lock(
         raise ThresholdLockError("Referenced development report cannot be read.") from error
     if actual_report_sha != expected_report_sha:
         raise ThresholdLockError("Development report hash does not match the threshold lock.")
+    if not isinstance(dev_report, dict):
+        raise ThresholdLockError("Development report must be a JSON object.")
     dev_cases = dev_report.get("case_results")
     split_case_count = dev_report.get("case_count_in_split")
-    if not isinstance(dev_cases, list) or not isinstance(split_case_count, int):
+    if (
+        not isinstance(dev_cases, list)
+        or isinstance(split_case_count, bool)
+        or not isinstance(split_case_count, int)
+        or split_case_count <= 0
+    ):
         raise ThresholdLockError("Development report is missing complete case-level results.")
+    dev_case_ids = [
+        case.get("case_id") if isinstance(case, dict) else None
+        for case in dev_cases
+    ]
     if (
         dev_report.get("split") != "development"
         or dev_report.get("run_status") != "completed"
@@ -953,11 +965,18 @@ def load_threshold_lock(
         or dev_report.get("minimum_support_score") != float(threshold)
         or dev_report.get("selected_case_count") != split_case_count
         or len(dev_cases) != split_case_count
+        or len(dev_case_ids) != len(set(dev_case_ids))
+        or set(dev_case_ids) != set(expected_development_case_ids)
+        or split_case_count != len(expected_development_case_ids)
         or any(
-            case.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
+            not isinstance(case, dict)
+            or case.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
+            or not isinstance(case.get("assessments"), list)
+            or not case["assessments"]
             or any(
-                aspect.get("predicted_status") not in STATUS_ORDER
-                for aspect in case.get("assessments", [])
+                not isinstance(aspect, dict)
+                or aspect.get("predicted_status") not in STATUS_ORDER
+                for aspect in case["assessments"]
             )
             for case in dev_cases
         )
@@ -1168,6 +1187,10 @@ def main(argv: list[str] | None = None) -> int:
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status=manifest["annotation_status"],
+            expected_development_case_ids={
+                case["case_id"] for case in manifest["cases"]
+                if case["split"] == "development"
+            },
         )
         if (
             args.minimum_support_score is not None
