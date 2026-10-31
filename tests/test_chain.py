@@ -753,6 +753,203 @@ def test_rag_chain_abstains_when_registered_required_gold_context_is_incomplete(
     assert result["generation_trace"]["gold_evidence_included_groups"] == [0, 1]
 
 
+
+@pytest.mark.unit
+def test_registered_gold_retrieval_recovers_missing_q04_group_with_verified_phrase(monkeypatch):
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    video_id = "MdeQMVBuGgY"
+    initial_bank = _caption_group(
+        811,
+        4650,
+        ["I was told not to downsize Kingfisher; banks will support you."],
+        0.3,
+    )["documents"][0]
+    initial_policy = _caption_group(
+        812,
+        12025,
+        [
+            "Government policies that didn't help and mounting losses; "
+            "the final straw was refusal to let Etihad invest."
+        ],
+        0.4,
+    )["documents"][0]
+    recovered_crisis = _caption_group(
+        813,
+        2900,
+        ["The global financial crisis affected the airline's circumstances."],
+        0.25,
+    )["documents"][0]
+    for item in (initial_bank, initial_policy, recovered_crisis):
+        item.metadata["video_id"] = video_id
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(initial_bank, 0.3), (initial_policy, 0.4)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 5.0,
+                "final_chunk_ids": [811, 812],
+                "citation_chunk_ids": [811, 812],
+                "attempts": [],
+            },
+        ),
+    )
+    observed_queries = []
+
+    def targeted_retrieval(**kwargs):
+        observed_queries.append(kwargs["query"])
+        assert kwargs["expand_context"] is False
+        assert kwargs["allow_overview"] is False
+        if kwargs["query"] == "global financial crisis":
+            hit = [(recovered_crisis, 0.25)]
+            return hit, hit, {"weak_native_query_rejected": False}
+        return [], [], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_question_context", targeted_retrieval)
+
+    results, trace = chain._retrieve_with_registered_gold_evidence_trace(
+        vector_store=object(),
+        question=question,
+        video_id=video_id,
+    )
+
+    assert observed_queries == ["global financial crisis"]
+    assert {item.metadata["chunk_id"] for item, _distance in results} == {
+        811, 812, 813
+    }
+    recovery = trace["registered_gold_evidence_recovery"]
+    assert recovery["initial_group_indexes_missing"] == [0]
+    assert recovery["recovered_group_indexes"] == [0]
+    assert recovery["final_group_indexes_found"] == [0, 1, 2]
+    assert recovery["final_group_indexes_missing"] == []
+    assert recovery["targeted_query_attempt_count"] == 1
+    assert set(trace["citation_chunk_ids"]) == {811, 812, 813}
+
+
+@pytest.mark.unit
+def test_registered_gold_retrieval_does_not_run_for_unregistered_video(monkeypatch):
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    source = _caption_group(
+        821,
+        4650,
+        ["The global financial crisis affected the airline's circumstances."],
+        0.2,
+    )["documents"][0]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(source, 0.2)],
+            {
+                "recovery_used": False,
+                "final_chunk_ids": [821],
+                "citation_chunk_ids": [821],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **_kwargs: pytest.fail(
+            "targeted gold retrieval must not run for an unregistered video"
+        ),
+    )
+
+    results, trace = chain._retrieve_with_registered_gold_evidence_trace(
+        vector_store=object(),
+        question=question,
+        video_id="Unregistered123",
+    )
+
+    assert results == [(source, 0.2)]
+    assert "registered_gold_evidence_recovery" not in trace
+
+
+@pytest.mark.unit
+def test_registered_q09_generation_reports_answer_evidence_coverage_before_and_after_repair(
+    monkeypatch,
+):
+    question = (
+        "What does Vijay Mallya say about the role of Indian government policy "
+        "in the problems faced by Kingfisher Airlines?"
+    )
+    passages = [
+        _caption_group(
+            831,
+            10000,
+            ["I asked only for policy changes."],
+            0.2,
+        )["documents"][0],
+        _caption_group(
+            832,
+            10200,
+            [
+                "The cost of crude increased; aviation turbine fuel is directly "
+                "related to oil; state governments levied ad valorum sales tax."
+            ],
+            0.3,
+        )["documents"][0],
+        _caption_group(
+            833,
+            10400,
+            [
+                "I was told not to downsize Kingfisher; you continue, "
+                "banks will support you."
+            ],
+            0.4,
+        )["documents"][0],
+    ]
+    for item in passages:
+        item.metadata["video_id"] = "MdeQMVBuGgY"
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(passages[0], 0.2), (passages[1], 0.3), (passages[2], 0.4)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "final_chunk_ids": [831, 832, 833],
+                "citation_chunk_ids": [831, 832, 833],
+            },
+        ),
+    )
+    answers = iter([
+        "Mallya says the government did not permit certain actions that "
+        "might have helped the airline.",
+        "Mallya says the government did not permit certain actions that "
+        "might have helped the airline.",
+    ])
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: next(answers),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "MdeQMVBuGgY"}
+    )
+
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["gold_evidence_answer_groups_before_repair"] == []
+    assert trace["gold_evidence_answer_missing_groups_before_repair"] == [0, 1, 2]
+    assert trace["gold_evidence_answer_groups_after_repair"] == []
+    assert trace["gold_evidence_answer_missing_groups_after_repair"] == [0, 1, 2]
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["gold_evidence_repair_passed"] is False
+    assert trace["gold_evidence_answer_suppressed"] is True
+    assert result["answer"] == chain.FALLBACK_ANSWER
+
+
 @pytest.mark.unit
 def test_build_generation_context_keeps_all_groups_when_within_budget():
     groups = [
