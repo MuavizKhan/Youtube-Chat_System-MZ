@@ -672,6 +672,22 @@ def validate_split_isolation(
         raise DatasetValidationError(
             "The target manifest must be the held_out split."
         )
+    if development_manifest.get("dataset_id") == heldout_manifest.get("dataset_id"):
+        raise DatasetValidationError(
+            "Development and held-out source manifests must have different dataset IDs."
+        )
+    development_case_ids = {
+        case["case_id"] for case in development_manifest["cases"]
+    }
+    heldout_case_ids = {
+        case["case_id"] for case in heldout_manifest["cases"]
+    }
+    shared_case_ids = development_case_ids & heldout_case_ids
+    if shared_case_ids:
+        raise DatasetValidationError(
+            "Development/held-out source leakage detected through reused case IDs: "
+            f"{sorted(shared_case_ids)}."
+        )
 
     identity_fields = {
         "video_id": lambda case: case["question_analysis"]["video_id"],
