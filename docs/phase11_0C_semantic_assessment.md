@@ -37,11 +37,11 @@ Every case contains:
 
 The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, question-language and transcript-language coverage, and split consistency. Every passage in a case must match that case's declared transcript-language group.
 
-**Real development and held-out data must be stored in separate manifests.** Each human-adjudicated manifest must declare exactly one top-level \`split\` value (\`development\` or \`held_out\`). Use unique dataset IDs and separate files:
-- \`evaluation_data/private/phase11_0C_development.json\`
-- \`evaluation_data/private/phase11_0C_held_out.json\`
+**Real development and held-out data must be stored in separate manifests.** Each human-adjudicated manifest must declare exactly one top-level `split` value (`development` or `held_out`). Use unique dataset IDs and separate files:
+- `evaluation_data/private/phase11_0C_development.json`
+- `evaluation_data/private/phase11_0C_held_out.json`
 
-The repository's \`.gitignore\` excludes \`evaluation_data/private/\`. Do not commit real held-out labels or place them in the same manifest as development labels. The combined seed fixture is provisional synthetic data only.
+The repository's `.gitignore` excludes `evaluation_data/private/`. Do not commit real held-out labels or place them in the same manifest as development labels. The combined seed fixture is provisional synthetic data only.
 
 **Leakage rule:** the same video, source group, or independence group may not occur in both development and held-out. The development report records SHA-256 fingerprints of those identities; the held-out runner compares its own fingerprints against them before any provider call. A collision blocks the held-out run. Split by source video and scenario family, not by randomly scattering paraphrases of one underlying example.
 
@@ -49,11 +49,11 @@ Supported question and transcript languages in this phase are English (en), Hind
 
 ### Seed fixture warning
 
-\`evaluation_data/phase11_0C_semantic_assessment_seed.json\` contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
+`evaluation_data/phase11_0C_semantic_assessment_seed.json` contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
 
 These examples exist only to validate the runner, split checks, metrics, and reporting pipeline. They are not real YouTube transcripts, have not been independently reviewed, and must not be used to claim live-model accuracy or select a production threshold.
 
-The CLI refuses provisional datasets by default. The \`--allow-provisional-labels\` flag is an explicit smoke-test override; reports generated from provisional labels remain ineligible for a quality gate.
+The CLI refuses provisional datasets by default. The `--allow-provisional-labels` flag is an explicit smoke-test override; reports generated from provisional labels remain ineligible for a quality gate.
 
 ## 4. Human annotation protocol for the real dataset
 
@@ -64,21 +64,21 @@ Replace or extend the seed fixture with transcript excerpts from verified source
 1. Two annotators independently label every aspect without seeing assessor predictions, model scores, each other's labels, or the eventual adjudicated label.
 2. Each annotator records the expected status and exact passage IDs that support and/or contradict the aspect.
 3. Each reviewer uses a distinct reviewer ID. The adjudicator uses a third, distinct ID.
-4. A separate adjudicator reviews disagreements, records the final adjudicated label in \`labels\`, and resolves the source-reference decision. Do not overwrite or discard the two original review records.
+4. A separate adjudicator reviews disagreements, records the final adjudicated label in `labels`, and resolves the source-reference decision. Do not overwrite or discard the two original review records.
 5. Preserve source video ID, caption language/track, source URL, chunk identity, and timestamp interval for each passage.
 6. Use source videos and scenario families that do not cross the development/held-out boundary.
 7. Keep the held-out labels inaccessible to anyone tuning the prompt, model, or threshold.
 
-The case-level \`annotation\` object must contain:
-- \`status\`: \`adjudicated\`;
-- \`reviewer_ids\`: exactly the two independent reviewer IDs;
-- \`adjudicator_id\`: the distinct final adjudicator ID;
-- \`blinding_attested\`: \`true\`, confirming neither reviewer saw model predictions or the other reviewer's labels;
-- \`independent_reviews\`: exactly two objects, each containing \`reviewer_id\` and a complete \`labels\` array.
+The case-level `annotation` object must contain:
+- `status`: `adjudicated`;
+- `reviewer_ids`: exactly the two independent reviewer IDs;
+- `adjudicator_id`: the distinct final adjudicator ID;
+- `blinding_attested`: `true`, confirming neither reviewer saw model predictions or the other reviewer's labels;
+- `independent_reviews`: exactly two objects, each containing `reviewer_id` and a complete `labels` array.
 
-Each independent review's \`labels\` array must have exactly one entry for every aspect and use the same reference-label schema as the final \`labels\` array:
+Each independent review's `labels` array must have exactly one entry for every aspect and use the same reference-label schema as the final `labels` array:
 
-\`\`\`json
+```json
 {
   "status": "adjudicated",
   "reviewer_ids": ["annotator-A", "annotator-B"],
@@ -109,21 +109,21 @@ Each independent review's \`labels\` array must have exactly one entry for every
     }
   ]
 }
-\`\`\`
+```
 
 The example above intentionally shows a disagreement: the adjudicator must determine the final case label and retain both initial reviews. It is a schema illustration, not a real annotation.
 
 Reference-label semantics must match the Phase 11.0A/11.0B contracts:
-- \`supported\`: clear substantive support;
-- \`partial\`: relevant but incomplete support;
-- \`missing\`: supplied passages do not address the aspect;
-- \`contradicted\`: supplied evidence directly refutes the aspect;
-- \`conflicted\`: material evidence supports and contradicts the aspect;
-- \`unknown\`: the excerpt is too ambiguous or incomplete to assess reliably.
+- `supported`: clear substantive support;
+- `partial`: relevant but incomplete support;
+- `missing`: supplied passages do not address the aspect;
+- `contradicted`: supplied evidence directly refutes the aspect;
+- `conflicted`: material evidence supports and contradicts the aspect;
+- `unknown`: the excerpt is too ambiguous or incomplete to assess reliably.
 
 Do not label a same-topic passage as supported merely because it shares keywords. Preserve negation, direction, quantities, dates, attribution, causality, and temporal context. For unknown, record why the excerpt is genuinely indeterminate rather than merely difficult.
 
-The validator rejects incomplete reviewer labels, duplicated reviewer IDs, reviewer-ID mismatches, missing blinding attestation, and an adjudicator who is also one of the reviewers. A final dataset must set the manifest and every case annotation status to \`adjudicated\`, use real source metadata including \`source_url\` and \`transcript_track\`, and retain the individual review records. Synthetic fixtures cannot be marked adjudicated.
+The validator rejects incomplete reviewer labels, duplicated reviewer IDs, reviewer-ID mismatches, missing blinding attestation, and an adjudicator who is also one of the reviewers. A final dataset must set the manifest and every case annotation status to `adjudicated`, use real source metadata including `source_url` and `transcript_track`, and retain the individual review records. Synthetic fixtures cannot be marked adjudicated.
 
 ### Inter-annotator agreement
 
@@ -155,21 +155,21 @@ A report never emits an automatic quality_passed decision. It reports whether th
 
 ## 6. Threshold calibration protocol
 
-The development dataset is the only place to choose \`minimum_support_score\`.
+The development dataset is the only place to choose `minimum_support_score`.
 
 1. Run the complete, independently adjudicated development manifest at a documented candidate threshold.
 2. Repeat development runs at other predeclared thresholds only when needed; retain every report.
 3. Compare supported precision/recall, false-supported rate, per-status errors, language and language-pair metrics, inter-annotator agreement, operational errors, and the underlying false-positive examples.
 4. Record the selected threshold and rationale in a threshold-lock JSON file. It must reference the development dataset ID/SHA-256, the separate held-out dataset ID/SHA-256, and the SHA-256 of the completed development report.
-5. Run the held-out manifest using \`--threshold-lock\`. Before any provider call, the runner verifies both dataset revisions, checks hashed video/source/independence identities for overlap, and rejects any threshold, provider, model, SDK/Python version, reasoning-effort, token-budget, assessor-code, contracts/config/client-factory, or evaluation-runner mismatch.
+5. Run the held-out manifest using `--threshold-lock`. Before any provider call, the runner verifies both dataset revisions, checks hashed video/source/independence identities for overlap, and rejects any threshold, provider, model, SDK/Python version, reasoning-effort, token-budget, assessor-code, contracts/config/client-factory, or evaluation-runner mismatch.
 
 Do not run multiple candidate thresholds on held-out data and do not use held-out results to revise the threshold, prompt, examples, or model. Any such change requires a new untouched held-out cohort.
 
 Example lock file (replace placeholders with the exact values from your manifests and completed development report):
 
-\`evaluation_data/private/phase11_0C_threshold_lock.json\`
+`evaluation_data/private/phase11_0C_threshold_lock.json`
 
-\`\`\`json
+```json
 {
   "schema_version": "1.0.0",
   "development_dataset_id": "phase11_0C_development_v1",
@@ -203,7 +203,7 @@ Example lock file (replace placeholders with the exact values from your manifest
   "selected_by": "reviewer-or-owner-id",
   "selection_rationale": "Describe development-only precision/recall and error review."
 }
-\`\`\`
+```
 
 The development report records the exact expected development case/aspect IDs and hashed source identities. The held-out manifest is supplied separately at execution time; its exact dataset hash is bound by the lock. The lock cannot be used with the development file as the held-out file, and overlapping hashed video/source/independence identities block the run. Provisional/synthetic data cannot create a threshold lock. Preserve all development reports and blinded annotator records.
 
@@ -213,31 +213,31 @@ From the repository root in PowerShell:
 
 Validate the provisional seed without calling a model:
 
-\`\`\`powershell
+```powershell
 $python = ".\\.venv\\Scripts\\python.exe"
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment_seed.json --split development --allow-provisional-labels --validate-only
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment_seed.json --split held_out --allow-provisional-labels --validate-only
-\`\`\`
+```
 
 A small provider smoke run (this makes up to two live provider calls and is not a quality evaluation):
 
-\`\`\`powershell
+```powershell
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment_seed.json --split development --allow-provisional-labels --max-cases 2 --minimum-support-score 0.75 --sleep-seconds 2
-\`\`\`
+```
 
 The smoke run is partial by design. It cannot generate a threshold-lockable development report.
 
 A full human-adjudicated development run:
 
-\`\`\`powershell
+```powershell
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_development.json --split development --minimum-support-score 0.75 --sleep-seconds 2 --output evaluation_reports/phase11_0C_development_075.json
-\`\`\`
+```
 
 The held-out run requires a completed development report and its threshold lock:
 
-\`\`\`powershell
+```powershell
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_held_out.json --split held_out --threshold-lock evaluation_data/private/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
-\`\`\`
+```
 
 Each case receives at most one application-level assessment invocation. The runner does not retry an assessment, checkpoints a sanitized `runner_error` record and stops after an unexpected exception, and stops issuing further cases after a classified rate-limit response. The report distinguishes application-level assessor invocations from provider calls confirmed by assessor diagnostics. An unexpected exception may occur before the provider call is made; such a case increments the invocation count but not the confirmed provider-call count. It does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
 
