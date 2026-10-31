@@ -299,6 +299,7 @@ def test_threshold_lock_requires_matching_completed_development_report(tmp_path)
         dataset_id=manifest["dataset_id"],
         dataset_sha256=dataset_sha256,
         annotation_status="adjudicated",
+        expected_development_case_ids={"DEV01"},
     )
     assert threshold == 0.75
     assert metadata["development_report_sha256"] == report_sha
@@ -325,6 +326,7 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
+            expected_development_case_ids={"DEV01"},
         )
 
 
@@ -345,6 +347,7 @@ def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="provisional_synthetic",
+            expected_development_case_ids={"DEV01"},
         )
 
 
@@ -367,6 +370,7 @@ def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path
             dataset_id=manifest["dataset_id"],
             dataset_sha256=dataset_sha256,
             annotation_status="adjudicated",
+            expected_development_case_ids={"DEV01"},
         )
 
 
