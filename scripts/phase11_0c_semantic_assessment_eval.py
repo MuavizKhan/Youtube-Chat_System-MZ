@@ -1098,6 +1098,9 @@ def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
     return {
         "provider": provider,
         "model": model,
+        "huggingface_provider_policy": (
+            config.HF_PROVIDER if provider == "huggingface" else None
+        ),
         "temperature": 0.0,
         "reasoning_effort": reasoning_effort,
         "max_input_chars": DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
