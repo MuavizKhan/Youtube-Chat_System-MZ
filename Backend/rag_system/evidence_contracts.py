@@ -169,6 +169,7 @@ class QuestionAnalysis:
     intent: QuestionIntent
     language: str | None
     aspects: tuple[EvidenceAspect, ...]
+    video_id: str | None = None
     subject: str | None = None
     constraints: tuple[str, ...] = ()
     temporal_constraint: TemporalConstraint | None = None
@@ -199,6 +200,7 @@ class QuestionAnalysis:
         if len(aspect_ids) != len(set(aspect_ids)):
             raise ValueError("aspect IDs must be unique within a QuestionAnalysis.")
         object.__setattr__(self, "aspects", aspects)
+        object.__setattr__(self, "video_id", _optional_text(self.video_id, "video_id"))
 
         object.__setattr__(self, "subject", _optional_text(self.subject, "subject"))
         object.__setattr__(self, "constraints", _string_tuple(self.constraints, "constraints"))
@@ -373,6 +375,16 @@ class EvidenceCoverageSummary:
         elif self.status is CoverageStatus.INSUFFICIENT:
             if self.supported_required_aspect_count >= self.required_aspect_count:
                 raise ValueError("INSUFFICIENT summaries must have at least one unsupported required aspect.")
+            expected_missing_count = (
+                self.required_aspect_count - self.supported_required_aspect_count
+            )
+            if len(self.missing_aspect_ids) != expected_missing_count:
+                raise ValueError("INSUFFICIENT summaries must list every unsupported required aspect.")
+            missing_ids = set(self.missing_aspect_ids)
+            if not set(self.contradicted_aspect_ids).issubset(missing_ids):
+                raise ValueError("contradicted_aspect_ids must be included in missing_aspect_ids.")
+            if not set(self.unknown_aspect_ids).issubset(missing_ids):
+                raise ValueError("unknown_aspect_ids must be included in missing_aspect_ids.")
 
 
 def evaluate_evidence_coverage(
@@ -407,6 +419,17 @@ def evaluate_evidence_coverage(
     aspect_by_id = {aspect.aspect_id: aspect for aspect in analysis.aspects}
     assessment_by_id = {}
     for assessment in assessment_values:
+        evidence_references = (
+            *assessment.supporting_evidence,
+            *assessment.contradicting_evidence,
+        )
+        if analysis.video_id is not None and any(
+            reference.video_id != analysis.video_id
+            for reference in evidence_references
+        ):
+            raise ValueError(
+                "Evidence references must match QuestionAnalysis.video_id."
+            )
         if assessment.aspect_id not in aspect_by_id:
             raise ValueError(
                 f"Assessment references unknown aspect ID: {assessment.aspect_id!r}."
