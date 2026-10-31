@@ -892,12 +892,16 @@ def _class_metrics(
     rows: list[dict[str, Any]],
     statuses: tuple[str, ...] = STATUS_ORDER,
 ) -> dict[str, Any]:
+    predicted_statuses = (*statuses, "no_valid_prediction")
     matrix = {
-        expected: {predicted: 0 for predicted in statuses}
+        expected: {predicted: 0 for predicted in predicted_statuses}
         for expected in statuses
     }
     for row in rows:
-        matrix[row["expected_status"]][row["predicted_status"]] += 1
+        predicted = row["predicted_status"]
+        if predicted not in predicted_statuses:
+            raise ValueError(f"Unexpected predicted status: {predicted!r}")
+        matrix[row["expected_status"]][predicted] += 1
 
     per_class = {}
     f1_values = []
@@ -906,8 +910,9 @@ def _class_metrics(
         false_positive = sum(
             matrix[other][status] for other in statuses if other != status
         )
-        false_negative = sum(
-            matrix[status][other] for other in statuses if other != status
+        false_negative = (
+            sum(matrix[status][other] for other in predicted_statuses)
+            - matrix[status][status]
         )
         support = sum(matrix[status].values())
         predicted = sum(matrix[other][status] for other in statuses)
@@ -938,6 +943,9 @@ def _class_metrics(
         "accuracy": correct / total if total else None,
         "macro_f1": statistics.mean(f1_values) if f1_values else None,
         "confusion_matrix": matrix,
+        "unpredicted_observations": sum(
+            matrix[expected]["no_valid_prediction"] for expected in statuses
+        ),
         "per_status": per_class,
     }
 
@@ -946,7 +954,14 @@ def _binary_supported_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     tp = fp = fn = tn = 0
     for row in rows:
         actual = row["expected_status"] == EvidenceSupportStatus.SUPPORTED.value
-        predicted = row["predicted_status"] == EvidenceSupportStatus.SUPPORTED.value
+        predicted_status = row["predicted_status"]
+        if predicted_status == "no_valid_prediction":
+            if actual:
+                fn += 1
+            else:
+                tn += 1
+            continue
+        predicted = predicted_status == EvidenceSupportStatus.SUPPORTED.value
         if actual and predicted:
             tp += 1
         elif not actual and predicted:
@@ -995,7 +1010,8 @@ def _reference_set_metrics(rows: list[dict[str, Any]], kind: str) -> dict[str, A
     for row in rows:
         identity = (row["case_id"], row["aspect_id"])
         expected_all.update((*identity, item) for item in row[expected_key])
-        predicted_all.update((*identity, item) for item in row[predicted_key])
+        if row.get("predicted_status") != "no_valid_prediction":
+            predicted_all.update((*identity, item) for item in row[predicted_key])
     true_positive = len(expected_all & predicted_all)
     precision = true_positive / len(predicted_all) if predicted_all else None
     recall = true_positive / len(expected_all) if expected_all else None
@@ -1018,17 +1034,24 @@ def _nearest_rank_percentile(values: list[float], percentile: float) -> float | 
 
 def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
     """Build status, supported-vs-unsupported, language, provenance and runtime metrics."""
-    aspect_rows = [
-        {
-            **aspect,
-            "case_id": record["case_id"],
-            "question_language_group": record["question_language_group"],
-            "transcript_language_group": record["transcript_language_group"],
-        }
-        for record in case_records
-        for aspect in record["assessments"]
-        if aspect["predicted_status"] is not None
-    ]
+    # Every expected aspect remains in the classification denominator. A failed
+    # assessor invocation is an abstention/invalid prediction, not a dropped row.
+    # Map it to an explicit non-class sentinel so the confusion matrix exposes it
+    # as a missed prediction rather than inflating apparent accuracy.
+    aspect_rows = []
+    for record in case_records:
+        for aspect in record["assessments"]:
+            aspect_rows.append({
+                **aspect,
+                "case_id": record["case_id"],
+                "question_language_group": record["question_language_group"],
+                "transcript_language_group": record["transcript_language_group"],
+                "predicted_status": (
+                    aspect["predicted_status"]
+                    if aspect["predicted_status"] is not None
+                    else "no_valid_prediction"
+                ),
+            })
     metrics = _class_metrics(aspect_rows)
     metrics["supported_binary"] = _binary_supported_metrics(aspect_rows)
     metrics["supporting_reference_alignment"] = _reference_set_metrics(
