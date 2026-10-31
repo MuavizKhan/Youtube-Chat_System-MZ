@@ -44,6 +44,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (  # noqa: E402
     MIN_HELD_OUT_PER_LANGUAGE_PAIR,
     MIN_HELD_OUT_PER_STATUS,
     PRIVATE_DATA_DIR,
+    STATUS_ORDER,
     SUPPORTED_LANGUAGES,
     VALID_SPLITS,
     DatasetValidationError,
@@ -158,6 +159,16 @@ def _read_json(path: Path | str, *, private: bool = True) -> tuple[dict[str, Any
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise DatasetValidationError(f"Annotation file is not valid UTF-8 JSON: {resolved}") from error
     return _require_mapping(value, str(resolved)), hashlib.sha256(raw).hexdigest()
+
+
+def _canonical_json_sha256(value: dict[str, Any]) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _write_json_private(path: Path | str, value: dict[str, Any]) -> Path:
@@ -834,8 +845,14 @@ def build_adjudication_packet(
                 for aspect in case["question_analysis"]["aspects"]
             ],
         })
+    reviewer_packet_sha256 = {
+        reviewer_a: _canonical_json_sha256(review_packet_a),
+        reviewer_b: _canonical_json_sha256(review_packet_b),
+    }
     binding = (
-        f"{manifest['dataset_id']}|{source_sha256}|{reviewer_a}|{reviewer_b}|{adjudicator_id}"
+        f"{manifest['dataset_id']}|{source_sha256}|{reviewer_a}|{reviewer_b}|"
+        f"{adjudicator_id}|{reviewer_packet_sha256[reviewer_a]}|"
+        f"{reviewer_packet_sha256[reviewer_b]}"
     )
     return {
         "packet_schema_version": PACKET_SCHEMA_VERSION,
@@ -843,6 +860,7 @@ def build_adjudication_packet(
         "packet_id": hashlib.sha256(binding.encode("utf-8")).hexdigest(),
         "source_manifest_sha256": source_sha256,
         "reviewer_ids": [reviewer_a, reviewer_b],
+        "review_packet_sha256": reviewer_packet_sha256,
         "adjudicator_id": adjudicator_id,
         "adjudication_attested": False,
         "cases": cases,
@@ -855,12 +873,13 @@ def _validate_adjudication_packet(
     source_sha256: str,
     reviewer_ids: tuple[str, str],
     reviewer_labels: dict[str, dict[str, list[dict[str, Any]]]],
+    reviewer_packet_sha256: dict[str, str],
 ) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     _validate_packet_binding(packet, manifest, source_sha256, "adjudication")
     allowed_fields = {
         "packet_schema_version", "packet_type", "packet_id",
-        "source_manifest_sha256", "reviewer_ids", "adjudicator_id",
-        "adjudication_attested", "cases",
+        "source_manifest_sha256", "reviewer_ids", "review_packet_sha256",
+        "adjudicator_id", "adjudication_attested", "cases",
     }
     if set(packet) != allowed_fields:
         raise DatasetValidationError("Adjudication packet contains unexpected or missing top-level fields.")
@@ -871,9 +890,14 @@ def _validate_adjudication_packet(
         raise DatasetValidationError("Adjudication packet reviewer IDs do not match supplied reviews.")
     if adjudicator_id in set(reviewer_ids):
         raise DatasetValidationError("The adjudicator must be distinct from both reviewers.")
+    if packet.get("review_packet_sha256") != reviewer_packet_sha256:
+        raise DatasetValidationError(
+            "Adjudication packet no longer matches the exact independent review revisions."
+        )
     expected_packet_binding = (
         f"{manifest['dataset_id']}|{source_sha256}|{reviewer_ids[0]}|"
-        f"{reviewer_ids[1]}|{adjudicator_id}"
+        f"{reviewer_ids[1]}|{adjudicator_id}|{reviewer_packet_sha256[reviewer_ids[0]]}|"
+        f"{reviewer_packet_sha256[reviewer_ids[1]]}"
     )
     expected_packet_id = hashlib.sha256(expected_packet_binding.encode("utf-8")).hexdigest()
     if packet.get("packet_id") != expected_packet_id:
@@ -999,6 +1023,10 @@ def assemble_adjudicated_manifest(
         source_sha256,
         (reviewer_a, reviewer_b),
         {reviewer_a: labels_a, reviewer_b: labels_b},
+        {
+            reviewer_a: _canonical_json_sha256(review_packet_a),
+            reviewer_b: _canonical_json_sha256(review_packet_b),
+        },
     )
 
     cases = []
