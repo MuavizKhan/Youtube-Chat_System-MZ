@@ -204,17 +204,17 @@ def _heldout_adjudicated_roundtrip(*, balanced: bool):
         labels_by_case[case["case_id"]] = case_labels
 
     review_a = _make_completed_review(
-        workflow.export_review_packet(manifest, source_sha256, "reviewer-A"),
+        workflow.export_review_packet(manifest, source_sha256, "REVIEWER-A"),
         labels_by_case,
         rationale="Independent review A checked the cited excerpt.",
     )
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, source_sha256, "reviewer-B"),
+        workflow.export_review_packet(manifest, source_sha256, "REVIEWER-B"),
         labels_by_case,
         rationale="Independent review B checked the cited excerpt.",
     )
     adjudication = workflow.build_adjudication_packet(
-        manifest, source_sha256, review_a, review_b, "adjudicator-C"
+        manifest, source_sha256, review_a, review_b, "ADJUDICATOR-C"
     )
     adjudication = _fill_adjudication_packet(adjudication, labels_by_case)
     final = workflow.assemble_adjudicated_manifest(
@@ -338,11 +338,11 @@ def test_source_manifest_rejects_non_opaque_case_ids(case_id, tmp_path, monkeypa
 def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(tmp_path, monkeypatch):
     _, _, manifest, digest, _ = _write_private_source(tmp_path, monkeypatch)
 
-    first = workflow.export_review_packet(manifest, digest, "reviewer-A")
-    second = workflow.export_review_packet(manifest, digest, "reviewer-B")
+    first = workflow.export_review_packet(manifest, digest, "REVIEWER-A")
+    second = workflow.export_review_packet(manifest, digest, "REVIEWER-B")
 
-    assert first["reviewer_id"] == "reviewer-A"
-    assert second["reviewer_id"] == "reviewer-B"
+    assert first["reviewer_id"] == "REVIEWER-A"
+    assert second["reviewer_id"] == "REVIEWER-B"
     assert first["packet_id"] != second["packet_id"]
     assert first["blinding_attested"] is False
     assert "split" not in first
@@ -396,8 +396,8 @@ def test_annotator_identifiers_must_be_pseudonymous_role_ids(annotator_id):
 
 def test_supported_pseudonymous_annotator_roles_are_accepted():
     assert workflow._annotator_id("R01", "reviewer_id") == "R01"
-    assert workflow._annotator_id("reviewer-A", "reviewer_id") == "reviewer-A"
-    assert workflow._annotator_id("adjudicator-C", "adjudicator_id") == "adjudicator-C"
+    assert workflow._annotator_id("REVIEWER-A", "reviewer_id") == "REVIEWER-A"
+    assert workflow._annotator_id("ADJUDICATOR-C", "adjudicator_id") == "ADJUDICATOR-C"
     assert workflow._annotator_id("CURATOR-01", "curator_id") == "CURATOR-01"
 
 
@@ -487,7 +487,7 @@ def test_held_out_source_preflight_rejects_underfilled_cohorts_before_annotation
 
 def test_review_packet_requires_blinding_and_complete_labels(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
-    packet = workflow.export_review_packet(manifest, digest, "reviewer-A")
+    packet = workflow.export_review_packet(manifest, digest, "REVIEWER-A")
     completed = _make_completed_review(packet, labels, rationale="Checked against the excerpt.")
 
     completed["blinding_attested"] = False
@@ -502,7 +502,7 @@ def test_review_packet_requires_blinding_and_complete_labels(tmp_path, monkeypat
 
 def test_review_packet_cannot_change_source_text_or_timestamps(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
-    packet = workflow.export_review_packet(manifest, digest, "reviewer-A")
+    packet = workflow.export_review_packet(manifest, digest, "REVIEWER-A")
     completed = _make_completed_review(packet, labels, rationale="Verified.")
     completed["cases"][0]["passages"][0]["text"] = "Altered passage"
 
@@ -512,38 +512,38 @@ def test_review_packet_cannot_change_source_text_or_timestamps(tmp_path, monkeyp
 
 def test_adjudication_packet_requires_two_distinct_blinded_reviewers(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
-    base = workflow.export_review_packet(manifest, digest, "reviewer-A")
+    base = workflow.export_review_packet(manifest, digest, "REVIEWER-A")
     review_a = _make_completed_review(base, labels, rationale="First review.")
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"),
         labels,
         rationale="Second review.",
     )
 
     with pytest.raises(workflow.DatasetValidationError, match="distinct"):
         workflow.build_adjudication_packet(
-            manifest, digest, review_a, review_a, "adjudicator-C"
+            manifest, digest, review_a, review_a, "ADJUDICATOR-C"
         )
     with pytest.raises(workflow.DatasetValidationError, match="distinct"):
         workflow.build_adjudication_packet(
-            manifest, digest, review_a, review_b, "reviewer-A"
+            manifest, digest, review_a, review_b, "REVIEWER-A"
         )
 
 
 def test_adjudication_packet_preserves_original_review_labels(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     review_a = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-A"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-A"),
         labels,
         rationale="First.",
     )
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"),
         labels,
         rationale="Second.",
     )
     adjudication = workflow.build_adjudication_packet(
-        manifest, digest, review_a, review_b, "adjudicator-C"
+        manifest, digest, review_a, review_b, "ADJUDICATOR-C"
     )
     adjudication["adjudication_attested"] = True
     # Change only a human rationale so the reviewer label remains schema-valid;
@@ -584,17 +584,17 @@ def test_held_out_assembler_rejects_status_counts_below_final_eligibility_floor(
 def test_adjudication_packet_detects_review_packet_revision_drift(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     review_a = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-A"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-A"),
         labels,
         rationale="Original review A.",
     )
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"),
         labels,
         rationale="Original review B.",
     )
     adjudication = workflow.build_adjudication_packet(
-        manifest, digest, review_a, review_b, "adjudicator-C"
+        manifest, digest, review_a, review_b, "ADJUDICATOR-C"
     )
     adjudication = _fill_adjudication_packet(adjudication, labels)
     review_a["cases"][0]["labels"][0]["rationale"] = "Changed after adjudication packet creation."
@@ -608,13 +608,13 @@ def test_adjudication_packet_detects_review_packet_revision_drift(tmp_path, monk
 def test_adjudication_packet_cannot_change_source_excerpt(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     review_a = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-A"), labels, rationale="A"
+        workflow.export_review_packet(manifest, digest, "REVIEWER-A"), labels, rationale="A"
     )
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"), labels, rationale="B"
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"), labels, rationale="B"
     )
     adjudication = workflow.build_adjudication_packet(
-        manifest, digest, review_a, review_b, "adjudicator-C"
+        manifest, digest, review_a, review_b, "ADJUDICATOR-C"
     )
     adjudication["adjudication_attested"] = True
     adjudication["cases"][0]["passages"][0]["text"] = "Tampered source excerpt"
@@ -628,17 +628,17 @@ def test_adjudication_packet_cannot_change_source_excerpt(tmp_path, monkeypatch)
 def test_complete_annotation_round_trip_produces_valid_phase11_0c_manifest(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     review_a = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-A"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-A"),
         labels,
         rationale="Independent review A.",
     )
     review_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"),
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"),
         labels,
         rationale="Independent review B.",
     )
     adjudication = workflow.build_adjudication_packet(
-        manifest, digest, review_a, review_b, "adjudicator-C"
+        manifest, digest, review_a, review_b, "ADJUDICATOR-C"
     )
     adjudication = _fill_adjudication_packet(adjudication, labels)
 
@@ -665,10 +665,10 @@ def test_complete_annotation_round_trip_produces_valid_phase11_0c_manifest(tmp_p
 def test_assembler_rejects_source_hash_drift(tmp_path, monkeypatch):
     _, _, manifest, digest, labels = _write_private_source(tmp_path, monkeypatch)
     packet_a = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-A"), labels, rationale="A"
+        workflow.export_review_packet(manifest, digest, "REVIEWER-A"), labels, rationale="A"
     )
     packet_b = _make_completed_review(
-        workflow.export_review_packet(manifest, digest, "reviewer-B"), labels, rationale="B"
+        workflow.export_review_packet(manifest, digest, "REVIEWER-B"), labels, rationale="B"
     )
     packet_b["source_manifest_sha256"] = "0" * 64
 
@@ -685,7 +685,7 @@ def test_annotation_files_must_stay_inside_private_directory(tmp_path, monkeypat
 def test_private_writer_refuses_to_overwrite_existing_reviews(tmp_path, monkeypatch):
     private = tmp_path / "private"
     monkeypatch.setattr(workflow, "PRIVATE_DATA_DIR", private)
-    target = private / "reviewer-A.json"
+    target = private / "REVIEWER-A.json"
     workflow._write_json_private(target, {"one": 1})
 
     with pytest.raises(workflow.DatasetValidationError, match="Refusing to overwrite"):
