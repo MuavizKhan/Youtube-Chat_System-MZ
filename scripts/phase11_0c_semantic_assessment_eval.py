@@ -895,13 +895,17 @@ def run_evaluation(
     assessor: Callable[..., Any] = assess_evidence_support,
 ) -> dict[str, Any]:
     """Run one case at a time, checkpoint reports, and stop after provider 429."""
-    selected = [case for case in manifest["cases"] if case["split"] == split]
+    split_cases = [case for case in manifest["cases"] if case["split"] == split]
+    split_case_count = len(split_cases)
     if max_cases is not None:
         if isinstance(max_cases, bool) or not isinstance(max_cases, int) or max_cases <= 0:
             raise ValueError("max_cases must be a positive integer or None.")
-        selected = selected[:max_cases]
+        selected = split_cases[:max_cases]
+    else:
+        selected = split_cases
     if not selected:
         raise ValueError(f"No cases selected for split {split!r}.")
+    selection_was_truncated = len(selected) < split_case_count
     if (
         isinstance(sleep_seconds, bool)
         or not isinstance(sleep_seconds, (int, float))
@@ -923,9 +927,7 @@ def run_evaluation(
         "model": model,
         "minimum_support_score": float(minimum_support_score),
         "threshold_lock": threshold_lock_metadata,
-        "case_count_in_split": sum(
-            1 for case in manifest["cases"] if case["split"] == split
-        ),
+        "case_count_in_split": split_case_count,
         "selected_case_count": len(selected),
         "case_results": [],
         "metrics": None,
@@ -957,10 +959,16 @@ def run_evaluation(
 
     processed_ids = {record["case_id"] for record in report["case_results"]}
     skipped = [
-        case["case_id"] for case in selected
+        case["case_id"] for case in split_cases
         if case["case_id"] not in processed_ids
     ]
-    complete_selection = len(report["case_results"]) == len(selected)
+    complete_selection = (
+        not selection_was_truncated
+        and len(report["case_results"]) == len(selected)
+        and len(report["case_results"]) == split_case_count
+    )
+    if selection_was_truncated and stop_reason is None:
+        stop_reason = "max_cases_limit_reached_partial_run"
     report["run_status"] = "completed" if complete_selection else "partial"
     report["stop_reason"] = stop_reason
     report["skipped_case_ids"] = skipped
