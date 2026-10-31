@@ -21,6 +21,7 @@ from scripts.phase11_0c_semantic_assessment_eval import (
     build_metrics,
     load_manifest,
     load_threshold_lock,
+    main,
     run_evaluation,
     validate_manifest,
 )
@@ -82,6 +83,15 @@ def test_manifest_rejects_video_reuse_across_splits():
     )
 
     with pytest.raises(ValueError, match="occurs in multiple splits"):
+        validate_manifest(changed)
+
+
+def test_manifest_rejects_transcript_language_group_mismatch():
+    manifest, _ = _load_seed()
+    changed = deepcopy(manifest)
+    changed["cases"][0]["passages"][0]["transcript_language"] = "ar"
+
+    with pytest.raises(ValueError, match="transcript_language_group"):
         validate_manifest(changed)
 
 
@@ -525,6 +535,23 @@ def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp
     assert report["metrics"]["semantic"]["observations"] == 1
     assert passage["text"] not in serialized
     assert "Transcript text" not in serialized
+
+
+def test_validate_only_runs_without_constructing_a_provider_client(capsys):
+    result = main([
+        "--dataset", str(DEFAULT_DATASET),
+        "--split", "held_out",
+        "--allow-provisional-labels",
+        "--validate-only",
+    ])
+
+    output = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert output["validation"] == "passed"
+    assert output["selected_cases"] == 13
+    assert output["question_language_counts"] == {"en": 5, "hi": 4, "ar": 4}
+    assert output["transcript_language_counts"] == {"en": 4, "hi": 4, "ar": 5}
+    assert output["quality_gate_eligible"] is False
 
 
 def test_runner_script_supports_documented_direct_help_invocation():
