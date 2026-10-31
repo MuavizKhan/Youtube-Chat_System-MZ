@@ -888,6 +888,34 @@ def test_runner_checkpoints_sanitized_partial_report_on_unexpected_assessor_erro
     )
 
 
+def test_stopped_run_is_partial_even_when_error_occurs_on_last_case(tmp_path):
+    manifest, dataset_sha256 = _load_seed()
+    manifest = deepcopy(manifest)
+    manifest["cases"] = [
+        case for case in manifest["cases"] if case["split"] == "development"
+    ][:1]
+
+    def broken_assessor(analysis, passages, client, **kwargs):
+        raise RuntimeError("unexpected final-case failure")
+
+    report = run_evaluation(
+        manifest=manifest,
+        dataset_sha256=dataset_sha256,
+        split="development",
+        client=object(),
+        provider="groq",
+        model="test-model",
+        minimum_support_score=0.75,
+        output_path=tmp_path / "last-case-error.json",
+        sleep_seconds=0,
+        assessor=broken_assessor,
+    )
+
+    assert report["selected_case_count"] == 1
+    assert report["run_status"] == "partial"
+    assert report["stop_reason"] == "assessor_invocation_error_stop_no_further_calls"
+
+
 def test_runner_script_supports_documented_direct_help_invocation():
     project_root = Path(__file__).resolve().parents[1]
     script = project_root / "scripts" / "phase11_0c_semantic_assessment_eval.py"
