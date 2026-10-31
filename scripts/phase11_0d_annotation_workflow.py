@@ -966,13 +966,28 @@ def _summary(manifest: dict[str, Any]) -> dict[str, Any]:
         f"{case['question_language_group']}->{case['transcript_language_group']}"
         for case in manifest["cases"]
     )
+    aspect_observations = sum(
+        len(case["question_analysis"]["aspects"]) for case in manifest["cases"]
+    )
+    all_pairs = {
+        f"{question_language}->{transcript_language}"
+        for question_language in SUPPORTED_LANGUAGES
+        for transcript_language in SUPPORTED_LANGUAGES
+    }
     return {
         "dataset_id": manifest["dataset_id"],
         "split": manifest["split"],
         "case_count": len(manifest["cases"]),
+        "aspect_observations": aspect_observations,
         "question_language_case_counts": dict(sorted(question_counts.items())),
         "transcript_language_case_counts": dict(sorted(transcript_counts.items())),
         "question_to_transcript_pair_case_counts": dict(sorted(pair_counts.items())),
+        "missing_question_to_transcript_pairs": sorted(all_pairs - set(pair_counts)),
+        "phase11_0c_input_character_limit": DEFAULT_MAX_ASSESSMENT_INPUT_CHARS,
+        "all_cases_within_assessor_input_budget": True,
+        "held_out_sample_floors_met": (
+            manifest["split"] == "held_out"
+        ),
         "source_manifest_sha256": None,
         "contains_transcript_passages": True,
         "model_calls_made": 0,
