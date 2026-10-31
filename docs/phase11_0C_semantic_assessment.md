@@ -86,7 +86,7 @@ The most safety-critical error is a false-positive supported result: the assesso
 
 The support_score remains an uncalibrated assessor-strength label, not a probability. Do not compute or report Brier scores or interpret it as calibrated confidence. Token counts are observed from provider response usage when supplied; missing usage is recorded as unavailable, not zero.
 
-A report never emits an automatic quality_passed decision. It reports whether the dataset and run are eligible for final human review. Eligibility requires a complete held-out run with human-adjudicated labels, at least 100 aspect observations, at least 10 examples per status, and at least 20 cases per language. These are minimum review-volume safeguards, not proof of statistical adequacy or model quality.
+A report never emits an automatic quality_passed decision. It reports whether the dataset and run are eligible for final human review. Eligibility requires a complete held-out run with human-adjudicated labels, every assessment call completed with valid output, every held-out case represented exactly once, at least 100 aspect observations, at least 10 examples per status, and at least 20 cases per language. These are minimum review-volume safeguards, not proof of statistical adequacy or model quality.
 
 ## 6. Threshold calibration protocol
 
@@ -109,6 +109,7 @@ evaluation_data/phase11_0C_threshold_lock.json
   "schema_version": "1.0.0",
   "dataset_id": "your-adjudicated-dataset-id",
   "dataset_sha256": "64-character-dataset-sha256",
+  "annotation_status": "adjudicated",
   "minimum_support_score": 0.75,
   "development_report_path": "../evaluation_reports/phase11_0C_development.json",
   "development_report_sha256": "64-character-report-sha256",
@@ -117,7 +118,7 @@ evaluation_data/phase11_0C_threshold_lock.json
 }
 \`\`\`
 
-The lock is bound to an exact dataset revision and a completed development report. It is not a substitute for preserving all development reports and annotator records.
+The lock is bound to an exact human-adjudicated dataset revision and a completed development report. Provisional/synthetic development data cannot create a threshold lock. It is not a substitute for preserving all development reports and annotator records.
 
 ## 7. Commands
 
