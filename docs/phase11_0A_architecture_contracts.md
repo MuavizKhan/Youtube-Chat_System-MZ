@@ -98,7 +98,8 @@ The contracts live in `Backend/rag_system/evidence_contracts.py`.
 
 Describes the user's intent, language, subject, constraints, optional time window,
 and distinct requested information aspects. It does not state whether the transcript
-can answer the question.
+can answer the question. An optional `video_id` binds subsequent evidence assessments
+to the selected video; references from another video are rejected when this scope is set.
 
 ### EvidenceAspect
 
@@ -126,8 +127,9 @@ A high weighted average cannot hide a missing mandatory aspect. If there are no
 required aspects, the result is `indeterminate`, not a pass.
 
 The function `evaluate_evidence_coverage` is a deterministic contract aggregator.
-It does not decide whether a transcript passage semantically entails a claim. That
-assessment mechanism belongs to Phase 11.0B and must be tested independently.
+When `QuestionAnalysis.video_id` is set, it rejects assessments that cite another
+video. It does not decide whether a transcript passage semantically entails a claim.
+That assessment mechanism belongs to Phase 11.0B and must be tested independently.
 
 ### RetrievalAttempt and RetrievalDiagnostics
 
