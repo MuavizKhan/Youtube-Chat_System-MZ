@@ -303,6 +303,10 @@ def _validate_source_case(case: dict[str, Any], split: str) -> dict[str, Any]:
 
     return {
         "case_id": case_id,
+        "split": split,
+        "independence_group": _require_text(
+            case.get("independence_group"), f"{case_id}.independence_group"
+        ),
         "question_text": question_text,
         "question_language_group": question_language,
         "transcript_language_group": transcript_language,
