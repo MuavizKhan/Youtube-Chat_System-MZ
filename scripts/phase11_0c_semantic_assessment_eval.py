@@ -1830,6 +1830,16 @@ def _unit_interval(value: str) -> float:
     return result
 
 
+def _non_negative_finite_float(value: str) -> float:
+    try:
+        result = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a finite non-negative number") from error
+    if not math.isfinite(result) or result < 0:
+        raise argparse.ArgumentTypeError("must be a finite non-negative number")
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run isolated Phase 11.0C semantic evidence assessment evaluation."
@@ -1849,7 +1859,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required for held-out runs; ties the test threshold to a completed development report.",
     )
     parser.add_argument("--max-cases", type=_positive_int, default=None)
-    parser.add_argument("--sleep-seconds", type=float, default=1.0)
+    parser.add_argument("--sleep-seconds", type=_non_negative_finite_float, default=1.0)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
