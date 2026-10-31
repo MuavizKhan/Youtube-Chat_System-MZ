@@ -883,6 +883,34 @@ def test_heldout_eligibility_rejects_missing_aspect_even_when_all_cases_are_pres
     )
 
 
+def test_heldout_eligibility_rejects_invalid_prediction_status_even_when_coverage_is_complete():
+    manifest, _ = _load_seed()
+    held_out = [case for case in manifest["cases"] if case["split"] == "held_out"]
+    records = []
+    for case in held_out:
+        label = case["labels"][0]
+        records.append({
+            "case_id": case["case_id"],
+            "question_language_group": case["question_language_group"],
+            "transcript_language_group": case["transcript_language_group"],
+            "assessment_run_status": "completed",
+            "assessments": [{
+                "aspect_id": case["question_analysis"]["aspects"][0]["aspect_id"],
+                "expected_status": label["expected_status"],
+                "predicted_status": label["expected_status"],
+            }],
+        })
+    records[0]["assessments"][0]["predicted_status"] = None
+
+    result = _quality_gate_eligibility(manifest, "held_out", "completed", records)
+
+    assert result["eligible"] is False
+    assert (
+        "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
+        in result["reasons"]
+    )
+
+
 def test_provenance_alignment_is_scoped_to_aspect_not_only_case():
     from scripts.phase11_0c_semantic_assessment_eval import _reference_set_metrics
 
