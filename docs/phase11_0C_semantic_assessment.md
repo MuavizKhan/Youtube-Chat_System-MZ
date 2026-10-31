@@ -200,7 +200,7 @@ Example lock file (replace placeholders with the exact values from your manifest
     "evaluation_runner_sha256": "64-character-evaluation-runner-sha256"
   },
   "minimum_support_score": 0.75,
-  "development_report_path": "../../evaluation_reports/phase11_0C_development_075.json",
+  "development_report_path": "reports/phase11_0C_development_075.json",
   "development_report_sha256": "64-character-development-report-sha256",
   "selected_by": "reviewer-or-owner-id",
   "selection_rationale": "Describe development-only precision/recall and error review."
@@ -232,13 +232,13 @@ The smoke run is partial by design. It cannot generate a threshold-lockable deve
 A full human-adjudicated development run:
 
 ```powershell
-& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_development.json --split development --minimum-support-score 0.75 --sleep-seconds 2 --output evaluation_reports/phase11_0C_development_075.json
+& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_development.json --split development --minimum-support-score 0.75 --sleep-seconds 2 --output evaluation_data/private/reports/phase11_0C_development_075.json
 ```
 
 The held-out run requires a completed development report and its threshold lock:
 
 ```powershell
-& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_held_out.json --split held_out --threshold-lock evaluation_data/private/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
+& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_held_out.json --split held_out --threshold-lock evaluation_data/private/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_data/private/reports/phase11_0C_held_out_final.json
 ```
 
 Each case receives at most one application-level assessment invocation. The runner does not retry an assessment, checkpoints a sanitized `runner_error` record and stops after an unexpected exception, and stops issuing further cases after a classified rate-limit response. The report distinguishes application-level assessor invocations from provider calls confirmed by assessor diagnostics. An unexpected exception may occur before the provider call is made; such a case increments the invocation count but not the confirmed provider-call count. It does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
