@@ -302,21 +302,32 @@ def _validate_case(
         references = []
         for raw_ref in refs_raw:
             ref = _require_mapping(raw_ref, f"{case_id}/{passage_id}.reference")
-            reference = EvidenceReference(
-                video_id=ref.get("video_id"),
-                chunk_id=ref.get("chunk_id"),
-                start_seconds=ref.get("start_seconds"),
-                end_seconds=ref.get("end_seconds"),
-            )
+            raw_start_seconds = ref.get("start_seconds")
+            raw_end_seconds = ref.get("end_seconds")
+            # Validate an explicitly supplied, numeric interval before building
+            # EvidenceReference. Its contract also checks interval ordering, but
+            # this layer must raise DatasetValidationError with dataset context.
             if (
-                reference.start_seconds is not None
-                and reference.end_seconds is not None
-                and reference.end_seconds <= reference.start_seconds
+                raw_start_seconds is not None
+                and raw_end_seconds is not None
+                and isinstance(raw_start_seconds, (int, float))
+                and not isinstance(raw_start_seconds, bool)
+                and isinstance(raw_end_seconds, (int, float))
+                and not isinstance(raw_end_seconds, bool)
+                and math.isfinite(float(raw_start_seconds))
+                and math.isfinite(float(raw_end_seconds))
+                and raw_end_seconds <= raw_start_seconds
             ):
                 raise DatasetValidationError(
                     f"{case_id}/{passage_id}: reference end_seconds must be "
                     "strictly greater than start_seconds."
                 )
+            reference = EvidenceReference(
+                video_id=ref.get("video_id"),
+                chunk_id=ref.get("chunk_id"),
+                start_seconds=raw_start_seconds,
+                end_seconds=raw_end_seconds,
+            )
             if reference.video_id != video_id:
                 raise DatasetValidationError(
                     f"{case_id}/{passage_id}: every reference must match the case video."
@@ -1173,7 +1184,7 @@ def build_metrics(case_records: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             "rate_limit_count": sum(
                 1 for record in diagnostics
-                if record["error_code"] == "provider_rate_limited"
+                if record.get("error_code") == "provider_rate_limited"
             ),
             "input_token_usage_observed_count": len(input_token_values),
             "output_token_usage_observed_count": len(output_token_values),
