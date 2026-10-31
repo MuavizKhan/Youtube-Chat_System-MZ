@@ -51,31 +51,89 @@ The CLI refuses provisional datasets by default. The --allow-provisional-labels 
 
 ## 4. Human annotation protocol for the real dataset
 
-Replace or extend the seed fixture with transcript excerpts from verified source videos. Before a dataset can be marked adjudicated:
+Replace or extend the seed fixture with transcript excerpts from verified source videos. Every case in a real dataset must be reviewed independently by two human annotators before adjudication.
 
-1. Two annotators independently label every aspect without seeing assessor predictions, model scores, or each other's labels.
+### Blind independent review
+
+1. Two annotators independently label every aspect without seeing assessor predictions, model scores, each other's labels, or the eventual adjudicated label.
 2. Each annotator records the expected status and exact passage IDs that support and/or contradict the aspect.
-3. Disagreements are adjudicated by a distinct adjudicator; record reviewer IDs and adjudicator ID in the case metadata.
-4. Preserve source video ID, caption language/track, source URL, chunk identity, and timestamp interval for each passage.
-5. Use source videos and scenario families that do not cross the development/held-out boundary.
-6. Keep the held-out labels inaccessible to anyone tuning the prompt, model, or threshold.
+3. Each reviewer uses a distinct reviewer ID. The adjudicator uses a third, distinct ID.
+4. A separate adjudicator reviews disagreements, records the final adjudicated label in \`labels\`, and resolves the source-reference decision. Do not overwrite or discard the two original review records.
+5. Preserve source video ID, caption language/track, source URL, chunk identity, and timestamp interval for each passage.
+6. Use source videos and scenario families that do not cross the development/held-out boundary.
+7. Keep the held-out labels inaccessible to anyone tuning the prompt, model, or threshold.
+
+The case-level \`annotation\` object must contain:
+- \`status\`: \`adjudicated\`;
+- \`reviewer_ids\`: exactly the two independent reviewer IDs;
+- \`adjudicator_id\`: the distinct final adjudicator ID;
+- \`blinding_attested\`: \`true\`, confirming neither reviewer saw model predictions or the other reviewer's labels;
+- \`independent_reviews\`: exactly two objects, each containing \`reviewer_id\` and a complete \`labels\` array.
+
+Each independent review's \`labels\` array must have exactly one entry for every aspect and use the same reference-label schema as the final \`labels\` array:
+
+\`\`\`json
+{
+  "status": "adjudicated",
+  "reviewer_ids": ["annotator-A", "annotator-B"],
+  "adjudicator_id": "annotator-C",
+  "blinding_attested": true,
+  "independent_reviews": [
+    {
+      "reviewer_id": "annotator-A",
+      "labels": [
+        {
+          "aspect_id": "cause",
+          "expected_status": "supported",
+          "supporting_passage_ids": ["p1"],
+          "contradicting_passage_ids": []
+        }
+      ]
+    },
+    {
+      "reviewer_id": "annotator-B",
+      "labels": [
+        {
+          "aspect_id": "cause",
+          "expected_status": "partial",
+          "supporting_passage_ids": ["p1"],
+          "contradicting_passage_ids": []
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+The example above intentionally shows a disagreement: the adjudicator must determine the final case label and retain both initial reviews. It is a schema illustration, not a real annotation.
 
 Reference-label semantics must match the Phase 11.0A/11.0B contracts:
-- supported: clear substantive support;
-- partial: relevant but incomplete support;
-- missing: supplied passages do not address the aspect;
-- contradicted: supplied evidence directly refutes the aspect;
-- conflicted: material evidence supports and contradicts the aspect;
-- unknown: the excerpt is too ambiguous or incomplete to assess reliably.
+- \`supported\`: clear substantive support;
+- \`partial\`: relevant but incomplete support;
+- \`missing\`: supplied passages do not address the aspect;
+- \`contradicted\`: supplied evidence directly refutes the aspect;
+- \`conflicted\`: material evidence supports and contradicts the aspect;
+- \`unknown\`: the excerpt is too ambiguous or incomplete to assess reliably.
 
 Do not label a same-topic passage as supported merely because it shares keywords. Preserve negation, direction, quantities, dates, attribution, causality, and temporal context. For unknown, record why the excerpt is genuinely indeterminate rather than merely difficult.
 
-A final dataset must set the manifest and every case annotation status to adjudicated, provide at least two unique reviewer_ids, a distinct adjudicator_id, and source metadata including source_url and transcript_track. Synthetic fixtures cannot be marked adjudicated.
+The validator rejects incomplete reviewer labels, duplicated reviewer IDs, reviewer-ID mismatches, missing blinding attestation, and an adjudicator who is also one of the reviewers. A final dataset must set the manifest and every case annotation status to \`adjudicated\`, use real source metadata including \`source_url\` and \`transcript_track\`, and retain the individual review records. Synthetic fixtures cannot be marked adjudicated.
+
+### Inter-annotator agreement
+
+Before adjudication, the harness computes nominal two-rater Cohen's kappa from the independent status labels:
+- overall across all reviewed aspects;
+- separately by question language;
+- separately by transcript language.
+
+The report also includes observed agreement and expected agreement. Kappa is undefined when chance agreement is 1.0; in that case the value is recorded as unavailable rather than fabricated. Agreement statistics measure consistency, not truth. A high kappa does not prove that labels are correct; review disagreements and final adjudications still require human scrutiny. No automatic kappa cut-off is imposed by this phase.
+
 
 ## 5. Metrics and interpretation
 
 The report computes:
 - six-class confusion matrix, per-class precision/recall/F1, overall accuracy and macro F1;
+- pre-adjudication inter-annotator observed agreement, expected agreement, and Cohen's kappa overall and by question/transcript language;
 - binary supported precision/recall/F1, false-positive supported rate on all non-supported labels, and specificity;
 - Wilson 95% intervals for supported precision and recall;
 - per-question-language and per-transcript-language confusion matrices and classification metrics;
