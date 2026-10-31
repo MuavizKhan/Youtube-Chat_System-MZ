@@ -38,14 +38,22 @@ uses the same 8,000-character ceiling and the accepted retrieval configuration
 is unchanged. The generation trace reports which gold evidence groups were
 available and which survived context packing.
 
-When a registered case has insufficient required evidence in the packed
+When initial retrieval misses a required curated evidence group, the pipeline
+runs bounded phrase-targeted retrieval for that exact registered
+video/question pair. A candidate is added only when its reconstructed
+transcript passage matches an alternative phrase in the missing group. These
+verified passages become prompt-visible evidence and citation-eligible
+anchors; ordinary retrieval thresholds and shortlist sizes are unchanged.
+
+When a registered case still has insufficient required evidence in the packed
 context, the answer path abstains rather than asking the model to infer missing
 causes. When required evidence is present but omitted or misattributed in the
-draft, one grounded repair is attempted. If that repair remains incomplete,
-the draft is suppressed rather than returned as a passing answer. These
-benchmark-specific requirements apply only to the exact registered
-video/question pairs; unregistered videos and questions continue through the
-general RAG path.
+draft, one grounded repair is attempted. The generation trace records which
+curated evidence groups appear in the first answer and repaired answer. If that
+repair remains incomplete, the draft is suppressed rather than returned as a
+passing answer. These benchmark-specific requirements apply only to the exact
+registered video/question pairs; unregistered videos and questions continue
+through the general RAG path.
 
 The live audit runner automatically retries HTTP 429 responses up to two
 additional times, honoring the backend's `Retry-After` header plus a one-second
