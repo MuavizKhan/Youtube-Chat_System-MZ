@@ -35,19 +35,25 @@ Every case contains:
 - one reference label per aspect, including expected status and expected supporting/contradicting passage IDs;
 - source metadata and annotation metadata.
 
-The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, question-language and transcript-language coverage, and cross-split leakage. Every passage in a case must match that case's declared transcript-language group.
+The validator checks the contract types, status/reference consistency, duplicate passage IDs and source references, question-language and transcript-language coverage, and split consistency. Every passage in a case must match that case's declared transcript-language group.
 
-**Leakage rule:** the same video, source group, or independence group may not occur in both development and held-out. Split by source video and scenario family, not by randomly scattering paraphrases of one underlying example.
+**Real development and held-out data must be stored in separate manifests.** Each human-adjudicated manifest must declare exactly one top-level \`split\` value (\`development\` or \`held_out\`). Use unique dataset IDs and separate files:
+- \`evaluation_data/private/phase11_0C_development.json\`
+- \`evaluation_data/private/phase11_0C_held_out.json\`
+
+The repository's \`.gitignore\` excludes \`evaluation_data/private/\`. Do not commit real held-out labels or place them in the same manifest as development labels. The combined seed fixture is provisional synthetic data only.
+
+**Leakage rule:** the same video, source group, or independence group may not occur in both development and held-out. The development report records SHA-256 fingerprints of those identities; the held-out runner compares its own fingerprints against them before any provider call. A collision blocks the held-out run. Split by source video and scenario family, not by randomly scattering paraphrases of one underlying example.
 
 Supported question and transcript languages in this phase are English (en), Hindi (hi), and Arabic (ar). They are measured separately: an English question over a Hindi or Arabic transcript is a cross-lingual case, not an English-transcript case. The seed includes one provisional cross-lingual case in each split. Urdu is intentionally excluded until a verified publisher-uploaded Urdu-script caption source is available.
 
 ### Seed fixture warning
 
-evaluation_data/phase11_0C_semantic_assessment_seed.json contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
+\`evaluation_data/phase11_0C_semantic_assessment_seed.json\` contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
 
 These examples exist only to validate the runner, split checks, metrics, and reporting pipeline. They are not real YouTube transcripts, have not been independently reviewed, and must not be used to claim live-model accuracy or select a production threshold.
 
-The CLI refuses provisional datasets by default. The --allow-provisional-labels flag is an explicit smoke-test override; reports generated from provisional labels remain ineligible for a quality gate.
+The CLI refuses provisional datasets by default. The \`--allow-provisional-labels\` flag is an explicit smoke-test override; reports generated from provisional labels remain ineligible for a quality gate.
 
 ## 4. Human annotation protocol for the real dataset
 
@@ -148,25 +154,27 @@ A report never emits an automatic quality_passed decision. It reports whether th
 
 ## 6. Threshold calibration protocol
 
-The development set is the only place to choose minimum_support_score.
+The development dataset is the only place to choose \`minimum_support_score\`.
 
-1. Run the complete development split at a documented candidate threshold.
+1. Run the complete, independently adjudicated development manifest at a documented candidate threshold.
 2. Repeat development runs at other predeclared thresholds only when needed; retain every report.
-3. Compare supported precision/recall, false-supported rate, per-status errors, language metrics, operational errors, and the underlying false-positive examples.
-4. Record the selected threshold and rationale in a threshold-lock JSON file that references the exact dataset SHA-256 and the SHA-256 of a completed development report.
-5. Run the held-out split using --threshold-lock. The runner verifies the lock and rejects a threshold, provider, model, reasoning-effort, output-token configuration, assessor-code, or evaluation-runner mismatch.
+3. Compare supported precision/recall, false-supported rate, per-status errors, language and language-pair metrics, inter-annotator agreement, operational errors, and the underlying false-positive examples.
+4. Record the selected threshold and rationale in a threshold-lock JSON file. It must reference the development dataset ID/SHA-256, the separate held-out dataset ID/SHA-256, and the SHA-256 of the completed development report.
+5. Run the held-out manifest using \`--threshold-lock\`. Before any provider call, the runner verifies both dataset revisions, checks hashed video/source/independence identities for overlap, and rejects any threshold, provider, model, SDK/Python version, reasoning-effort, token-budget, assessor-code, contracts/config/client-factory, or evaluation-runner mismatch.
 
 Do not run multiple candidate thresholds on held-out data and do not use held-out results to revise the threshold, prompt, examples, or model. Any such change requires a new untouched held-out cohort.
 
-Example lock file (replace the placeholders with actual values):
+Example lock file (replace placeholders with the exact values from your manifests and completed development report):
 
-evaluation_data/phase11_0C_threshold_lock.json
+\`evaluation_data/private/phase11_0C_threshold_lock.json\`
 
 \`\`\`json
 {
   "schema_version": "1.0.0",
-  "dataset_id": "your-adjudicated-dataset-id",
-  "dataset_sha256": "64-character-dataset-sha256",
+  "development_dataset_id": "phase11_0C_development_v1",
+  "development_dataset_sha256": "64-character-development-dataset-sha256",
+  "heldout_dataset_id": "phase11_0C_held_out_v1",
+  "heldout_dataset_sha256": "64-character-held-out-dataset-sha256",
   "annotation_status": "adjudicated",
   "assessor_protocol": {
     "provider": "groq",
@@ -189,14 +197,14 @@ evaluation_data/phase11_0C_threshold_lock.json
     "evaluation_runner_sha256": "64-character-evaluation-runner-sha256"
   },
   "minimum_support_score": 0.75,
-  "development_report_path": "../evaluation_reports/phase11_0C_development.json",
-  "development_report_sha256": "64-character-report-sha256",
+  "development_report_path": "../../evaluation_reports/phase11_0C_development_075.json",
+  "development_report_sha256": "64-character-development-report-sha256",
   "selected_by": "reviewer-or-owner-id",
   "selection_rationale": "Describe development-only precision/recall and error review."
 }
 \`\`\`
 
-The lock is bound to an exact human-adjudicated dataset revision, complete development case set, completed development report, provider/model settings, and hashes of the assessor, evidence contracts, configuration, provider-client factory, and evaluation runner. Provisional/synthetic development data cannot create a threshold lock. The development and held-out runs must use the same provider/model and non-secret inference configuration. It is not a substitute for preserving all development reports and annotator records.
+The development report records the exact expected development case/aspect IDs and hashed source identities. The held-out manifest is supplied separately at execution time; its exact dataset hash is bound by the lock. The lock cannot be used with the development file as the held-out file, and overlapping hashed video/source/independence identities block the run. Provisional/synthetic data cannot create a threshold lock. Preserve all development reports and blinded annotator records.
 
 ## 7. Commands
 
@@ -221,13 +229,13 @@ The smoke run is partial by design. It cannot generate a threshold-lockable deve
 A full human-adjudicated development run:
 
 \`\`\`powershell
-& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment.json --split development --minimum-support-score 0.75 --sleep-seconds 2 --output evaluation_reports/phase11_0C_development_075.json
+& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_development.json --split development --minimum-support-score 0.75 --sleep-seconds 2 --output evaluation_reports/phase11_0C_development_075.json
 \`\`\`
 
 The held-out run requires a completed development report and its threshold lock:
 
 \`\`\`powershell
-& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/phase11_0C_semantic_assessment.json --split held_out --threshold-lock evaluation_data/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
+& $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_held_out.json --split held_out --threshold-lock evaluation_data/private/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
 \`\`\`
 
 Each case receives at most one application-level assessment invocation. The runner does not retry an assessment and stops issuing further cases after a classified rate-limit response. The reported call count is the number of application-level assessor invocations; it does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
