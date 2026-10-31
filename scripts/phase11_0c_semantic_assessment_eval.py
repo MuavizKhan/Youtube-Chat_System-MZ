@@ -1601,6 +1601,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     manifest, dataset_sha256 = load_manifest(args.dataset)
+    if manifest.get("split") is not None and manifest["split"] != args.split:
+        raise DatasetValidationError(
+            f"Dataset manifest is scoped to {manifest['split']!r}, not {args.split!r}."
+        )
     selected_cases = [
         case for case in manifest["cases"] if case["split"] == args.split
     ]
@@ -1629,17 +1633,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         threshold, threshold_lock_metadata = load_threshold_lock(
             args.threshold_lock,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id=manifest["dataset_id"],
+            heldout_dataset_sha256=dataset_sha256,
             annotation_status=manifest["annotation_status"],
-            expected_development_aspects={
-                case["case_id"]: {
-                    aspect["aspect_id"]
-                    for aspect in case["question_analysis"]["aspects"]
-                }
-                for case in manifest["cases"]
-                if case["split"] == "development"
-            },
+            heldout_identity_fingerprints=_source_identity_fingerprints(
+                manifest, "held_out"
+            ),
             provider=provider,
             model=model,
         )
