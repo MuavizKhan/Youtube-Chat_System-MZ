@@ -984,13 +984,39 @@ def _quality_gate_eligibility(
     if run_status != "completed":
         reasons.append("held_out_run_is_incomplete_or_interrupted")
 
-    expected_case_ids = {
-        case["case_id"] for case in manifest.get("cases", [])
+    heldout_cases = [
+        case for case in manifest.get("cases", [])
         if case.get("split") == "held_out"
+    ]
+    expected_aspects_by_case = {
+        case["case_id"]: {
+            aspect["aspect_id"]
+            for aspect in case["question_analysis"]["aspects"]
+        }
+        for case in heldout_cases
     }
-    actual_case_ids = {record.get("case_id") for record in case_records}
-    if actual_case_ids != expected_case_ids:
+    actual_case_ids = [record.get("case_id") for record in case_records]
+    if (
+        len(actual_case_ids) != len(set(actual_case_ids))
+        or set(actual_case_ids) != set(expected_aspects_by_case)
+    ):
         reasons.append("held_out_case_coverage_is_incomplete_or_inconsistent")
+    for record in case_records:
+        case_id = record.get("case_id")
+        expected_aspect_ids = expected_aspects_by_case.get(case_id, set())
+        assessments = record.get("assessments", [])
+        actual_aspect_ids = [
+            item.get("aspect_id") for item in assessments
+            if isinstance(item, dict)
+        ]
+        if (
+            len(actual_aspect_ids) != len(set(actual_aspect_ids))
+            or set(actual_aspect_ids) != expected_aspect_ids
+        ):
+            reasons.append(
+                "one_or_more_held_out_cases_has_missing_duplicate_or_unexpected_aspects"
+            )
+            break
     if any(
         record.get("assessment_run_status") != AssessmentRunStatus.COMPLETED.value
         for record in case_records
