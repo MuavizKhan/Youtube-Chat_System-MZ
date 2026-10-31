@@ -66,10 +66,10 @@ Replace or extend the seed fixture with transcript excerpts from verified source
 3. Each reviewer uses a distinct reviewer ID. The adjudicator uses a third, distinct ID.
 4. A separate adjudicator reviews disagreements, records the final adjudicated label in `labels`, and resolves the source-reference decision. Do not overwrite or discard the two original review records.
 5. Preserve source video ID, caption language/track, source URL, chunk identity, and timestamp interval for each passage.
-6. Use an HTTPS YouTube watch, share, Shorts, live, or embed URL whose video ID exactly matches the case's `question_analysis.video_id`.
-7. Every reference in a human-adjudicated case must include both `start_seconds` and `end_seconds`; timestamp-less references are accepted only in provisional harness fixtures.
 6. Use source videos and scenario families that do not cross the development/held-out boundary.
 7. Keep the held-out labels inaccessible to anyone tuning the prompt, model, or threshold.
+8. Use an HTTPS YouTube watch, share, Shorts, live, or embed URL whose video ID exactly matches the case's `question_analysis.video_id`.
+9. Every reference in a human-adjudicated case must include both `start_seconds` and `end_seconds`; timestamp-less references are accepted only in provisional harness fixtures.
 
 The case-level `annotation` object must contain:
 - `status`: `adjudicated`;
