@@ -15,7 +15,7 @@ from typing import Sequence
 
 
 CONTRACT_SCHEMA_VERSION = "1.0"
-_LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
+_LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
 
 class QuestionIntent(StrEnum):
