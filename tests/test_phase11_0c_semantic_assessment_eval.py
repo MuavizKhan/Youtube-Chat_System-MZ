@@ -1129,6 +1129,17 @@ def test_provisional_report_can_use_evaluation_reports_directory():
     assert path == (Path(__file__).resolve().parents[1] / "evaluation_reports" / "synthetic.json")
 
 
+def test_sleep_seconds_cli_rejects_negative_and_non_finite_values():
+    from scripts.phase11_0c_semantic_assessment_eval import build_parser
+
+    for value in ("-1", "nan", "inf", "-inf"):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args([
+                "--split", "development",
+                "--sleep-seconds", value,
+            ])
+
+
 def test_runner_script_supports_documented_direct_help_invocation():
     project_root = Path(__file__).resolve().parents[1]
     script = project_root / "scripts" / "phase11_0c_semantic_assessment_eval.py"
