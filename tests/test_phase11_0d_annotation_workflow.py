@@ -36,6 +36,13 @@ def _source_fixture() -> tuple[dict, dict[str, list[dict]]]:
             "source_group": video_id,
             "source_url": f"https://www.youtube.com/watch?v={video_id}",
             "transcript_track": case["transcript_language_group"],
+            "caption_track_kind": "auto_generated",
+            "verification": {
+                "video_id_confirmed": True,
+                "caption_track_confirmed": True,
+                "timestamps_confirmed": True,
+                "verified_by": "CURATOR-01",
+            },
         }
         timestamp = 10.0 + case_index * 100.0
         for passage_index, passage in enumerate(case["passages"]):
@@ -113,6 +120,9 @@ def test_source_manifest_validates_and_reports_language_pair_coverage(tmp_path, 
     assert set(summary["question_language_case_counts"]) == {"en", "hi", "ar"}
     assert set(summary["transcript_language_case_counts"]) == {"en", "hi", "ar"}
     assert len(summary["question_to_transcript_pair_case_counts"]) >= 3
+    assert summary["all_cases_within_assessor_input_budget"] is True
+    assert summary["phase11_0c_input_character_limit"] == 8000
+    assert summary["aspect_observations"] >= 16
 
 
 @pytest.mark.parametrize(
@@ -126,6 +136,18 @@ def test_source_manifest_validates_and_reports_language_pair_coverage(tmp_path, 
                 source_url="https://example.com/not-youtube"
             ),
             "HTTPS URL",
+        ),
+        (
+            lambda data: data["cases"][0]["source"]["verification"].update(
+                timestamps_confirmed=False
+            ),
+            "timestamps_confirmed=true",
+        ),
+        (
+            lambda data: data["cases"][0]["source"].update(
+                caption_track_kind="unknown"
+            ),
+            "caption_track_kind",
         ),
         (
             lambda data: data["cases"][0]["passages"][0]["references"][0].update(
@@ -180,12 +202,45 @@ def test_exported_review_packets_are_separate_and_do_not_expose_split_or_labels(
     assert "dataset_id" not in first
     assert "independence_group" not in first["cases"][0]
     assert "source_group" not in first["cases"][0]["source"]
+    assert "verified_by" not in json.dumps(first)
     assert "retrieval_hints" not in json.dumps(first)
     assert "confidence" not in json.dumps(first)
     assert "labels" in first["cases"][0]
     assert first["cases"][0]["labels"][0]["expected_status"] == ""
     assert "predicted_status" not in json.dumps(first)
     assert "support_score" not in json.dumps(first)
+
+
+def test_source_manifest_rejects_passages_over_the_phase11_0b_input_budget(tmp_path, monkeypatch):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    candidate["cases"][0]["passages"][0]["text"] = "x" * 9000
+
+    with pytest.raises(workflow.DatasetValidationError, match="hard limit of 8000"):
+        workflow.validate_source_manifest(candidate)
+
+
+def test_source_manifest_requires_at_least_one_required_aspect(tmp_path, monkeypatch):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    for aspect in candidate["cases"][0]["question_analysis"]["aspects"]:
+        aspect["required"] = False
+
+    with pytest.raises(workflow.DatasetValidationError, match="at least one evidence aspect"):
+        workflow.validate_source_manifest(candidate)
+
+
+def test_held_out_source_preflight_rejects_underfilled_cohorts_before_annotation(
+    tmp_path, monkeypatch
+):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    candidate["split"] = "held_out"
+    for case in candidate["cases"]:
+        case["split"] = "held_out"
+
+    with pytest.raises(workflow.DatasetValidationError, match="held-out source manifest has"):
+        workflow.validate_source_manifest(candidate)
 
 
 def test_review_packet_requires_blinding_and_complete_labels(tmp_path, monkeypatch):
