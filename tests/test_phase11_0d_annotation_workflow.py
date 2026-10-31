@@ -345,6 +345,39 @@ def test_source_manifest_requires_at_least_one_required_aspect(tmp_path, monkeyp
         workflow.validate_source_manifest(candidate)
 
 
+@pytest.mark.parametrize("identity", ["video_id", "source_group", "independence_group"])
+def test_development_and_held_out_source_manifests_must_be_disjoint(identity):
+    development = workflow.validate_source_manifest(_source_fixture()[0])
+    held_out_raw = _held_out_source_fixture(unique_sources=True)
+    development_case = development["cases"][0]
+    held_out_case = held_out_raw["cases"][0]
+
+    if identity == "video_id":
+        shared_video_id = development_case["question_analysis"]["video_id"]
+        held_out_case["question_analysis"]["video_id"] = shared_video_id
+        held_out_case["source"]["source_url"] = (
+            f"https://www.youtube.com/watch?v={shared_video_id}"
+        )
+        for passage in held_out_case["passages"]:
+            for reference in passage["references"]:
+                reference["video_id"] = shared_video_id
+    elif identity == "source_group":
+        held_out_case["source"]["source_group"] = development_case["source"]["source_group"]
+    else:
+        held_out_case["independence_group"] = development_case["independence_group"]
+
+    held_out = workflow.validate_source_manifest(held_out_raw)
+    with pytest.raises(workflow.DatasetValidationError, match="source leakage detected"):
+        workflow.validate_split_isolation(development, held_out)
+
+
+def test_development_and_held_out_source_manifests_pass_when_disjoint():
+    development = workflow.validate_source_manifest(_source_fixture()[0])
+    held_out = workflow.validate_source_manifest(_held_out_source_fixture(unique_sources=True))
+
+    workflow.validate_split_isolation(development, held_out)
+
+
 def test_held_out_source_preflight_accepts_all_phase11_0c_source_floors():
     manifest = _held_out_source_fixture(unique_sources=True)
 
