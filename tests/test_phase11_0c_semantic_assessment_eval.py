@@ -521,7 +521,7 @@ def test_runner_checkpoints_sanitized_partial_report_without_transcript_text(tmp
     serialized = output_path.read_text(encoding="utf-8")
     assert report["run_status"] == "partial"
     assert report["stop_reason"] == "max_cases_limit_reached_partial_run"
-    assert len(report["skipped_case_ids"]) == 11
+    assert len(report["skipped_case_ids"]) == 12
     assert report["metrics"]["semantic"]["observations"] == 1
     assert passage["text"] not in serialized
     assert "Transcript text" not in serialized
