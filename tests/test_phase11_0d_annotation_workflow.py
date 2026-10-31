@@ -449,6 +449,24 @@ def test_development_and_held_out_source_manifests_must_be_disjoint(identity):
         workflow.validate_split_isolation(development, held_out)
 
 
+def test_development_and_held_out_source_manifests_require_distinct_dataset_ids():
+    development = workflow.validate_source_manifest(_source_fixture()[0])
+    held_out = workflow.validate_source_manifest(_held_out_source_fixture(unique_sources=True))
+    held_out["dataset_id"] = development["dataset_id"]
+
+    with pytest.raises(workflow.DatasetValidationError, match="different dataset IDs"):
+        workflow.validate_split_isolation(development, held_out)
+
+
+def test_development_and_held_out_source_manifests_require_disjoint_case_ids():
+    development = workflow.validate_source_manifest(_source_fixture()[0])
+    held_out = workflow.validate_source_manifest(_held_out_source_fixture(unique_sources=True))
+    held_out["cases"][0]["case_id"] = development["cases"][0]["case_id"]
+
+    with pytest.raises(workflow.DatasetValidationError, match="reused case IDs"):
+        workflow.validate_split_isolation(development, held_out)
+
+
 def test_development_and_held_out_source_manifests_pass_when_disjoint():
     development = workflow.validate_source_manifest(_source_fixture()[0])
     held_out = workflow.validate_source_manifest(_held_out_source_fixture(unique_sources=True))
