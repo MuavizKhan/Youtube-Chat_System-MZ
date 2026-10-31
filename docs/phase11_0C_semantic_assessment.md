@@ -145,7 +145,7 @@ The report computes:
 - Wilson 95% intervals for supported precision and recall;
 - per-question-language, per-transcript-language, and question→transcript language-pair confusion matrices and classification metrics;
 - alignment of predicted supporting/contradicting passage IDs with reference passage IDs;
-- provider call count, result/failure categories, input/output token usage when available, and latency p50/p95/mean.
+- assessor invocation count versus confirmed application-level provider call count, result/failure categories, input/output token usage when available, and latency p50/p95/mean.
 
 The most safety-critical error is a false-positive supported result: the assessor accepts a passage that does not actually establish the requested aspect. Review these examples individually, especially same-topic irrelevance, reversed relationships, negation, speaker attribution, and cross-lingual cases.
 
@@ -239,7 +239,7 @@ The held-out run requires a completed development report and its threshold lock:
 & $python scripts/phase11_0c_semantic_assessment_eval.py --dataset evaluation_data/private/phase11_0C_held_out.json --split held_out --threshold-lock evaluation_data/private/phase11_0C_threshold_lock.json --sleep-seconds 2 --output evaluation_reports/phase11_0C_held_out_final.json
 \`\`\`
 
-Each case receives at most one application-level assessment invocation. The runner does not retry an assessment and stops issuing further cases after a classified rate-limit response. The reported call count is the number of application-level assessor invocations; it does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
+Each case receives at most one application-level assessment invocation. The runner does not retry an assessment, checkpoints a sanitized `runner_error` record and stops after an unexpected exception, and stops issuing further cases after a classified rate-limit response. The report distinguishes application-level assessor invocations from provider calls confirmed by assessor diagnostics. An unexpected exception may occur before the provider call is made; such a case increments the invocation count but not the confirmed provider-call count. It does not claim to count lower-level HTTP retries that may be performed internally by the provider SDK. The threshold lock fingerprints the active provider SDK version and Python version so development and held-out runs use the same client runtime. Check provider quota before a full live run.
 
 ## 8. Acceptance and non-goals
 
