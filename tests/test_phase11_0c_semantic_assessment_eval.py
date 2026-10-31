@@ -381,6 +381,12 @@ def _valid_development_report(manifest, dataset_sha256):
         },
         "case_count_in_split": 1,
         "selected_case_count": 1,
+        "expected_case_aspect_ids": {"DEV01": ["aspect-1"]},
+        "source_identity_fingerprints": {
+            "video_ids": ["a" * 64],
+            "source_groups": ["b" * 64],
+            "independence_groups": ["c" * 64],
+        },
         "case_results": [{
             "case_id": "DEV01",
             "assessment_run_status": "completed",
@@ -392,8 +398,10 @@ def _valid_development_report(manifest, dataset_sha256):
 def _valid_threshold_lock(manifest, dataset_sha256, report_sha):
     return {
         "schema_version": "1.0.0",
-        "dataset_id": manifest["dataset_id"],
-        "dataset_sha256": dataset_sha256,
+        "development_dataset_id": manifest["dataset_id"],
+        "development_dataset_sha256": dataset_sha256,
+        "heldout_dataset_id": "heldout-dataset",
+        "heldout_dataset_sha256": "d" * 64,
         "minimum_support_score": 0.75,
         "annotation_status": "adjudicated",
         "assessor_protocol": _effective_assessor_protocol("groq", "test-model"),
@@ -401,6 +409,14 @@ def _valid_threshold_lock(manifest, dataset_sha256, report_sha):
         "development_report_sha256": report_sha,
         "selected_by": "reviewer-1",
         "selection_rationale": "Selected after reviewing development-only metrics.",
+    }
+
+
+def _non_overlapping_heldout_identities():
+    return {
+        "video_ids": ["e" * 64],
+        "source_groups": ["f" * 64],
+        "independence_groups": ["0" * 64],
     }
 
 
@@ -449,10 +465,10 @@ def test_threshold_lock_rejects_development_report_hash_drift(tmp_path):
     with pytest.raises(ThresholdLockError, match="hash"):
         load_threshold_lock(
             lock_path,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
             annotation_status="adjudicated",
-            expected_development_aspects={"DEV01": {"aspect-1"}},
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
             provider="groq",
             model="test-model",
         )
@@ -474,10 +490,10 @@ def test_threshold_lock_rejects_missing_independent_annotation_agreement(tmp_pat
     with pytest.raises(ThresholdLockError, match="complete, successful"):
         load_threshold_lock(
             lock_path,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
             annotation_status="adjudicated",
-            expected_development_aspects={"DEV01": {"aspect-1"}},
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
             provider="groq",
             model="test-model",
         )
@@ -500,10 +516,10 @@ def test_threshold_lock_rejects_assessor_protocol_drift(tmp_path):
     with pytest.raises(ThresholdLockError, match="protocol"):
         load_threshold_lock(
             lock_path,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
             annotation_status="adjudicated",
-            expected_development_aspects={"DEV01": {"aspect-1"}},
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
             provider="huggingface",
             model="test-model",
         )
@@ -514,8 +530,8 @@ def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
     lock_path = tmp_path / "lock.json"
     lock_path.write_text(json.dumps({
         "schema_version": "1.0.0",
-        "dataset_id": manifest["dataset_id"],
-        "dataset_sha256": dataset_sha256,
+        "heldout_dataset_id": "heldout-dataset",
+        "heldout_dataset_sha256": "d" * 64,
         "annotation_status": "provisional_synthetic",
         "minimum_support_score": 0.75,
     }), encoding="utf-8")
@@ -523,10 +539,10 @@ def test_threshold_lock_rejects_provisional_annotation_status(tmp_path):
     with pytest.raises(ThresholdLockError, match="human labels"):
         load_threshold_lock(
             lock_path,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
             annotation_status="provisional_synthetic",
-            expected_development_aspects={"DEV01": {"aspect-1"}},
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
             provider="groq",
             model="test-model",
         )
@@ -548,10 +564,10 @@ def test_threshold_lock_rejects_failed_assessment_in_development_report(tmp_path
     with pytest.raises(ThresholdLockError, match="complete, successful"):
         load_threshold_lock(
             lock_path,
-            dataset_id=manifest["dataset_id"],
-            dataset_sha256=dataset_sha256,
+            heldout_dataset_id="heldout-dataset",
+            heldout_dataset_sha256="d" * 64,
             annotation_status="adjudicated",
-            expected_development_aspects={"DEV01": {"aspect-1"}},
+            heldout_identity_fingerprints=_non_overlapping_heldout_identities(),
             provider="groq",
             model="test-model",
         )
