@@ -358,7 +358,12 @@ def load_source_manifest(path: Path | str) -> tuple[dict[str, Any], str]:
 
 
 def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
-    # Intentionally omit split, independence_group, source_group and any labels.
+    # Do not disclose split, dataset ID, or source/independence grouping metadata.
+    # The source-manifest digest binds the packet to the original curator file.
+    public_source = {
+        key: value for key, value in case["source"].items()
+        if key != "source_group"
+    }
     return {
         "case_id": case["case_id"],
         "question_text": case["question_text"],
@@ -366,7 +371,7 @@ def _case_packet_projection(case: dict[str, Any]) -> dict[str, Any]:
         "transcript_language_group": case["transcript_language_group"],
         "question_analysis": case["question_analysis"],
         "passages": case["passages"],
-        "source": case["source"],
+        "source": public_source,
     }
 
 
@@ -394,7 +399,6 @@ def export_review_packet(
         "packet_schema_version": PACKET_SCHEMA_VERSION,
         "packet_type": "independent_review",
         "packet_id": hashlib.sha256(binding.encode("utf-8")).hexdigest(),
-        "dataset_id": manifest["dataset_id"],
         "source_manifest_sha256": source_sha256,
         "reviewer_id": reviewer_id,
         "blinding_attested": False,
@@ -412,8 +416,6 @@ def _validate_packet_binding(
         raise DatasetValidationError("Unsupported annotation packet schema version.")
     if packet.get("packet_type") != packet_type:
         raise DatasetValidationError(f"Expected packet_type {packet_type!r}.")
-    if packet.get("dataset_id") != manifest["dataset_id"]:
-        raise DatasetValidationError("Annotation packet dataset_id mismatch.")
     if packet.get("source_manifest_sha256") != source_sha256:
         raise DatasetValidationError("Annotation packet source manifest hash mismatch.")
 
@@ -529,7 +531,6 @@ def build_adjudication_packet(
         "packet_schema_version": PACKET_SCHEMA_VERSION,
         "packet_type": "adjudication",
         "packet_id": hashlib.sha256(binding.encode("utf-8")).hexdigest(),
-        "dataset_id": manifest["dataset_id"],
         "source_manifest_sha256": source_sha256,
         "reviewer_ids": [reviewer_a, reviewer_b],
         "adjudicator_id": adjudicator_id,
