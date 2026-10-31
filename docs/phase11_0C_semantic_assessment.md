@@ -96,7 +96,7 @@ The development set is the only place to choose minimum_support_score.
 2. Repeat development runs at other predeclared thresholds only when needed; retain every report.
 3. Compare supported precision/recall, false-supported rate, per-status errors, language metrics, operational errors, and the underlying false-positive examples.
 4. Record the selected threshold and rationale in a threshold-lock JSON file that references the exact dataset SHA-256 and the SHA-256 of a completed development report.
-5. Run the held-out split using --threshold-lock. The runner verifies the lock and rejects a threshold mismatch.
+5. Run the held-out split using --threshold-lock. The runner verifies the lock and rejects a threshold, provider, model, reasoning-effort, output-token configuration, assessor-code, or evaluation-runner mismatch.
 
 Do not run multiple candidate thresholds on held-out data and do not use held-out results to revise the threshold, prompt, examples, or model. Any such change requires a new untouched held-out cohort.
 
@@ -110,6 +110,15 @@ evaluation_data/phase11_0C_threshold_lock.json
   "dataset_id": "your-adjudicated-dataset-id",
   "dataset_sha256": "64-character-dataset-sha256",
   "annotation_status": "adjudicated",
+  "assessor_protocol": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-20b",
+    "temperature": 0.0,
+    "reasoning_effort": "low",
+    "configured_max_output_tokens": 1200,
+    "assessor_module_sha256": "64-character-assessor-module-sha256",
+    "evaluation_runner_sha256": "64-character-evaluation-runner-sha256"
+  },
   "minimum_support_score": 0.75,
   "development_report_path": "../evaluation_reports/phase11_0C_development.json",
   "development_report_sha256": "64-character-report-sha256",
@@ -118,7 +127,7 @@ evaluation_data/phase11_0C_threshold_lock.json
 }
 \`\`\`
 
-The lock is bound to an exact human-adjudicated dataset revision and a completed development report. Provisional/synthetic development data cannot create a threshold lock. It is not a substitute for preserving all development reports and annotator records.
+The lock is bound to an exact human-adjudicated dataset revision, complete development case set, completed development report, provider/model settings, and hashes of the assessor and evaluation runner. Provisional/synthetic development data cannot create a threshold lock. The development and held-out runs must use the same provider/model and non-secret inference configuration. It is not a substitute for preserving all development reports and annotator records.
 
 ## 7. Commands
 
