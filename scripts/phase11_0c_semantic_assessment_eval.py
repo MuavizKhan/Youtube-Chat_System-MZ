@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from Backend.rag_system import evidence_assessment as evidence_assessment_module  # noqa: E402
+from Backend.rag_system import evidence_contracts as evidence_contracts_module  # noqa: E402
 from Backend.rag_system.evidence_assessment import (  # noqa: E402
     AssessmentRunStatus,
     EvidencePassage,
@@ -914,6 +915,13 @@ def _effective_assessor_protocol(provider: str, model: str) -> dict[str, Any]:
         "assessor_module_sha256": _sha256_file(
             Path(evidence_assessment_module.__file__)
         ),
+        "contracts_module_sha256": _sha256_file(
+            Path(evidence_contracts_module.__file__)
+        ),
+        "config_module_sha256": _sha256_file(Path(config.__file__)),
+        "client_factory_module_sha256": _sha256_file(
+            PROJECT_ROOT / "Backend" / "rag_system" / "chain.py"
+        ),
         "evaluation_runner_sha256": _sha256_file(Path(__file__)),
     }
 
@@ -999,6 +1007,8 @@ def load_threshold_lock(
         or dev_report.get("dataset_sha256") != dataset_sha256
         or dev_report.get("minimum_support_score") != float(threshold)
         or dev_report.get("assessor_protocol") != current_assessor_protocol
+        or dev_report.get("provider") != provider
+        or dev_report.get("model") != model
         or dev_report.get("selected_case_count") != split_case_count
         or len(dev_cases) != split_case_count
         or len(dev_case_ids) != len(set(dev_case_ids))
