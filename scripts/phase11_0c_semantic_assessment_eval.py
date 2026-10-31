@@ -791,6 +791,18 @@ def _case_prediction_record(
             "Completed assessor output does not contain exactly one result for every "
             "expected aspect."
         )
+    if len(predictions_raw) != len(predicted_by_id):
+        raise ValueError("Assessor output contains duplicate or invalid aspect entries.")
+
+    requests = getattr(diagnostics, "request_count", None)
+    if (
+        isinstance(requests, bool)
+        or not isinstance(requests, int)
+        or requests < 0
+        or (is_semantic_result and requests < 1)
+    ):
+        raise ValueError("Assessor diagnostics contain an invalid provider request count.")
+
     assessments = []
     for aspect_id in sorted(expected_by_id):
         expected = expected_by_id[aspect_id]
