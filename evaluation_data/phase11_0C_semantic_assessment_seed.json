@@ -29,7 +29,6 @@
       "case_id": "D-EN-SUP-01",
       "split": "development",
       "independence_group": "development-d-en-sup-01",
-      "language_group": "en",
       "challenge_tags": [
         "direct_entailment",
         "causal_relation"
@@ -82,13 +81,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "D-HI-SUP-01",
       "split": "development",
       "independence_group": "development-d-hi-sup-01",
-      "language_group": "hi",
       "challenge_tags": [
         "direct_entailment",
         "native_hindi"
@@ -141,13 +141,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "D-AR-PAR-01",
       "split": "development",
       "independence_group": "development-d-ar-par-01",
-      "language_group": "ar",
       "challenge_tags": [
         "incomplete_multi_part",
         "native_arabic"
@@ -200,13 +201,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "D-EN-PAR-01",
       "split": "development",
       "independence_group": "development-d-en-par-01",
-      "language_group": "en",
       "challenge_tags": [
         "incomplete_detail",
         "same_topic"
@@ -259,13 +261,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "D-HI-MIS-01",
       "split": "development",
       "independence_group": "development-d-hi-mis-01",
-      "language_group": "hi",
       "challenge_tags": [
         "same_topic_but_unrelated_detail",
         "missing"
@@ -316,13 +319,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "D-AR-MIS-01",
       "split": "development",
       "independence_group": "development-d-ar-mis-01",
-      "language_group": "ar",
       "challenge_tags": [
         "same_topic_but_unrelated_detail",
         "missing"
@@ -373,13 +377,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "D-EN-CON-01",
       "split": "development",
       "independence_group": "development-d-en-con-01",
-      "language_group": "en",
       "challenge_tags": [
         "negation",
         "direct_contradiction"
@@ -432,13 +437,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "D-HI-CON-01",
       "split": "development",
       "independence_group": "development-d-hi-con-01",
-      "language_group": "hi",
       "challenge_tags": [
         "negation",
         "direct_contradiction",
@@ -492,13 +498,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "D-AR-CFL-01",
       "split": "development",
       "independence_group": "development-d-ar-cfl-01",
-      "language_group": "ar",
       "challenge_tags": [
         "opposing_statements",
         "conflict"
@@ -566,13 +573,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "D-EN-CFL-01",
       "split": "development",
       "independence_group": "development-d-en-cfl-01",
-      "language_group": "en",
       "challenge_tags": [
         "opposing_statements",
         "conflict"
@@ -640,13 +648,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "D-HI-UNK-01",
       "split": "development",
       "independence_group": "development-d-hi-unk-01",
-      "language_group": "hi",
       "challenge_tags": [
         "fragmented_caption",
         "ambiguous_reference"
@@ -697,13 +706,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "D-AR-UNK-01",
       "split": "development",
       "independence_group": "development-d-ar-unk-01",
-      "language_group": "ar",
       "challenge_tags": [
         "fragmented_caption",
         "ambiguous_reference"
@@ -754,13 +764,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "H-EN-SUP-01",
       "split": "held_out",
       "independence_group": "held_out-h-en-sup-01",
-      "language_group": "en",
       "challenge_tags": [
         "direct_entailment",
         "causal_relation"
@@ -813,13 +824,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "H-AR-SUP-01",
       "split": "held_out",
       "independence_group": "held_out-h-ar-sup-01",
-      "language_group": "ar",
       "challenge_tags": [
         "direct_entailment",
         "native_arabic"
@@ -872,13 +884,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "H-HI-PAR-01",
       "split": "held_out",
       "independence_group": "held_out-h-hi-par-01",
-      "language_group": "hi",
       "challenge_tags": [
         "incomplete_multi_part",
         "native_hindi"
@@ -931,13 +944,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "H-EN-PAR-01",
       "split": "held_out",
       "independence_group": "held_out-h-en-par-01",
-      "language_group": "en",
       "challenge_tags": [
         "incomplete_sequence",
         "partial_evidence"
@@ -990,13 +1004,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "H-AR-MIS-01",
       "split": "held_out",
       "independence_group": "held_out-h-ar-mis-01",
-      "language_group": "ar",
       "challenge_tags": [
         "same_topic_but_unrelated_detail",
         "missing"
@@ -1047,13 +1062,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "H-HI-MIS-01",
       "split": "held_out",
       "independence_group": "held_out-h-hi-mis-01",
-      "language_group": "hi",
       "challenge_tags": [
         "same_topic_but_unrelated_detail",
         "missing"
@@ -1104,13 +1120,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "H-EN-CON-01",
       "split": "held_out",
       "independence_group": "held_out-h-en-con-01",
-      "language_group": "en",
       "challenge_tags": [
         "negation",
         "direct_contradiction"
@@ -1163,13 +1180,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "H-AR-CON-01",
       "split": "held_out",
       "independence_group": "held_out-h-ar-con-01",
-      "language_group": "ar",
       "challenge_tags": [
         "negation",
         "direct_contradiction"
@@ -1222,13 +1240,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "H-HI-CFL-01",
       "split": "held_out",
       "independence_group": "held_out-h-hi-cfl-01",
-      "language_group": "hi",
       "challenge_tags": [
         "opposing_statements",
         "temporal_conflict"
@@ -1296,13 +1315,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
     },
     {
       "case_id": "H-EN-CFL-01",
       "split": "held_out",
       "independence_group": "held_out-h-en-cfl-01",
-      "language_group": "en",
       "challenge_tags": [
         "opposing_statements",
         "negation",
@@ -1371,13 +1391,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "en",
+      "transcript_language_group": "en"
     },
     {
       "case_id": "H-AR-UNK-01",
       "split": "held_out",
       "independence_group": "held_out-h-ar-unk-01",
-      "language_group": "ar",
       "challenge_tags": [
         "fragmented_caption",
         "ambiguous_reference"
@@ -1428,13 +1449,14 @@
         "status": "provisional_synthetic",
         "reviewer_ids": [],
         "adjudicator_id": null
-      }
+      },
+      "question_language_group": "ar",
+      "transcript_language_group": "ar"
     },
     {
       "case_id": "H-HI-UNK-01",
       "split": "held_out",
       "independence_group": "held_out-h-hi-unk-01",
-      "language_group": "hi",
       "challenge_tags": [
         "fragmented_caption",
         "ambiguous_reference"
@@ -1479,6 +1501,130 @@
       "source": {
         "kind": "synthetic_fixture",
         "source_group": "synthetic-held_out-24",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      },
+      "question_language_group": "hi",
+      "transcript_language_group": "hi"
+    },
+    {
+      "case_id": "D-EN-HI-XL01",
+      "split": "development",
+      "independence_group": "development-d-en-hi-xl01",
+      "question_language_group": "en",
+      "transcript_language_group": "hi",
+      "challenge_tags": [
+        "cross_lingual",
+        "semantic_entailment",
+        "native_transcript_script"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "en",
+        "video_id": "synthetic-development-d-en-hi-xl01",
+        "subject": "backup power outage",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The technician says the damaged battery cell caused the backup system to shut down.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "तकनीशियन कहता है कि खराब बैटरी सेल के कारण बैकअप सिस्टम बंद हो गया।",
+          "transcript_language": "hi",
+          "references": [
+            {
+              "video_id": "synthetic-development-d-en-hi-xl01",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 20
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-development-d-en-hi-xl01",
+        "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
+      },
+      "annotation": {
+        "status": "provisional_synthetic",
+        "reviewer_ids": [],
+        "adjudicator_id": null
+      }
+    },
+    {
+      "case_id": "H-EN-AR-XL01",
+      "split": "held_out",
+      "independence_group": "held_out-h-en-ar-xl01",
+      "question_language_group": "en",
+      "transcript_language_group": "ar",
+      "challenge_tags": [
+        "cross_lingual",
+        "semantic_entailment",
+        "native_transcript_script"
+      ],
+      "question_analysis": {
+        "intent": "explanation",
+        "language": "en",
+        "video_id": "synthetic-held_out-h-en-ar-xl01",
+        "subject": "backup power outage",
+        "aspects": [
+          {
+            "aspect_id": "aspect-1",
+            "description": "The technician says the damaged battery cell caused the backup power system to shut down.",
+            "required": true,
+            "weight": 1
+          }
+        ]
+      },
+      "passages": [
+        {
+          "passage_id": "p1",
+          "text": "يقول الفني إن الخلية التالفة في البطارية تسببت في إيقاف نظام الطاقة الاحتياطي.",
+          "transcript_language": "ar",
+          "references": [
+            {
+              "video_id": "synthetic-held_out-h-en-ar-xl01",
+              "chunk_id": "chunk-1",
+              "start_seconds": 10,
+              "end_seconds": 20
+            }
+          ]
+        }
+      ],
+      "labels": [
+        {
+          "aspect_id": "aspect-1",
+          "expected_status": "supported",
+          "supporting_passage_ids": [
+            "p1"
+          ],
+          "contradicting_passage_ids": []
+        }
+      ],
+      "source": {
+        "kind": "synthetic_fixture",
+        "source_group": "synthetic-held_out-h-en-ar-xl01",
         "description": "Assistant-authored synthetic text; not a real YouTube transcript or factual source."
       },
       "annotation": {
