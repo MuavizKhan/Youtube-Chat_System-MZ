@@ -261,6 +261,10 @@ def _validate_case(
     except (KeyError, TypeError, ValueError) as error:
         raise DatasetValidationError(f"{case_id}: invalid question analysis: {error}") from error
 
+    aspect_ids = [aspect.aspect_id for aspect in aspects]
+    if len(aspect_ids) != len(set(aspect_ids)):
+        raise DatasetValidationError(f"{case_id}: question aspect IDs must be unique.")
+
     if parsed_analysis.language != question_language:
         raise DatasetValidationError(
             f"{case_id}: question_analysis.language must match question_language_group."
@@ -304,6 +308,15 @@ def _validate_case(
                 start_seconds=ref.get("start_seconds"),
                 end_seconds=ref.get("end_seconds"),
             )
+            if (
+                reference.start_seconds is not None
+                and reference.end_seconds is not None
+                and reference.end_seconds <= reference.start_seconds
+            ):
+                raise DatasetValidationError(
+                    f"{case_id}/{passage_id}: reference end_seconds must be "
+                    "strictly greater than start_seconds."
+                )
             if reference.video_id != video_id:
                 raise DatasetValidationError(
                     f"{case_id}/{passage_id}: every reference must match the case video."
