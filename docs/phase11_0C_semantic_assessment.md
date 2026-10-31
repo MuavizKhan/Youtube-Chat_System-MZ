@@ -49,7 +49,7 @@ Supported question and transcript languages in this phase are English (en), Hind
 
 ### Seed fixture warning
 
-`evaluation_data/phase11_0C_semantic_assessment_seed.json` contains 26 assistant-authored synthetic cases: 13 development and 13 held-out. Each split contains all six labels and all three question languages and transcript languages.
+`evaluation_data/phase11_0C_semantic_assessment_seed.json` contains 32 assistant-authored synthetic cases: 16 development and 16 held-out. Each split contains all six labels and all three question languages and transcript languages. Challenge fixtures explicitly include correlation-versus-causation, speaker attribution, reversed relationship direction, incomplete sequences, fragmented captions, same-topic irrelevance, and transcript prompt-injection text.
 
 These examples exist only to validate the runner, split checks, metrics, and reporting pipeline. They are not real YouTube transcripts, have not been independently reviewed, and must not be used to claim live-model accuracy or select a production threshold.
 
