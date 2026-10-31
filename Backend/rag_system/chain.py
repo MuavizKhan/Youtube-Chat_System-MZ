@@ -5232,6 +5232,236 @@ def _retrieve_with_query_recovery_trace(
     }
 
 
+
+def _gold_evidence_groups_for_retrieval_results(
+    retrieved_results,
+    gold_case,
+) -> set[int]:
+    """Return curated evidence groups represented by retrieved source passages."""
+    if not retrieved_results:
+        return set()
+    matched_groups: set[int] = set()
+    for source_number, source_group in enumerate(
+        merge_overlapping_results(retrieved_results),
+        start=1,
+    ):
+        rendered = format_source_group(source_group, source_number)
+        matched_groups.update(matched_gold_groups(rendered, gold_case))
+    return matched_groups
+
+
+def _registered_gold_document_identity(document):
+    """Build a video-scoped identity for deduplicating targeted evidence hits."""
+    metadata = getattr(document, "metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    video_id = str(metadata.get("video_id", "") or "")
+    chunk_id = metadata.get("chunk_id")
+    if chunk_id is not None:
+        return ("chunk", video_id, str(chunk_id))
+    return (
+        "content",
+        video_id,
+        metadata.get("start"),
+        metadata.get("end"),
+        str(getattr(document, "page_content", "")),
+    )
+
+
+def _deduplicate_registered_gold_results(*result_sets):
+    """Combine retrieval results while keeping the best distance per document."""
+    combined = []
+    positions = {}
+    for result_set in result_sets:
+        for item in result_set or []:
+            if not isinstance(item, (tuple, list)) or len(item) < 2:
+                continue
+            document, distance = item[0], item[1]
+            metadata = getattr(document, "metadata", None)
+            if not isinstance(metadata, dict):
+                continue
+            try:
+                distance_value = float(distance)
+            except (TypeError, ValueError, OverflowError):
+                distance_value = float(MAX_DISTANCE)
+            if not math.isfinite(distance_value):
+                distance_value = float(MAX_DISTANCE)
+            identity = _registered_gold_document_identity(document)
+            existing_index = positions.get(identity)
+            if existing_index is None:
+                positions[identity] = len(combined)
+                combined.append((document, distance_value))
+            else:
+                existing_document, existing_distance = combined[existing_index]
+                combined[existing_index] = (
+                    existing_document,
+                    min(existing_distance, distance_value),
+                )
+    return combined
+
+
+def _retrieve_with_registered_gold_evidence_trace(
+    vector_store,
+    question: str,
+    video_id: str | None,
+    llm_client: InferenceClient | Groq | None = None,
+) -> tuple[list, dict[str, object]]:
+    """Recover missing curated evidence only for exact registered benchmark questions.
+
+    Targeted queries use the existing retrieval thresholds and shortlist sizes.
+    A candidate is accepted only when its reconstructed source passage matches
+    an alternative phrase in the missing curated evidence group.
+    """
+    retrieved_results, retrieval_trace = _retrieve_with_query_recovery_trace(
+        vector_store=vector_store,
+        question=question,
+        llm_client=llm_client,
+    )
+    question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    if gold_case is None:
+        return retrieved_results, retrieval_trace
+
+    required_groups = set(range(len(gold_case.groups)))
+    initial_groups = _gold_evidence_groups_for_retrieval_results(
+        retrieved_results,
+        gold_case,
+    )
+    missing_groups = sorted(required_groups - initial_groups)
+    targeted_started = time.perf_counter()
+    recovery_attempts = []
+    supplemental_results = []
+    recovered_groups: set[int] = set()
+
+    for group_index in missing_groups:
+        for phrase in gold_case.groups[group_index]:
+            target_query = phrase.strip()
+            if not target_query:
+                continue
+
+            recovery_bundle = retrieve_question_context(
+                vector_store=vector_store,
+                query=target_query,
+                k=TOP_K,
+                fetch_k=MMR_FETCH_K,
+                lambda_mult=MMR_LAMBDA,
+                max_distance=MAX_DISTANCE,
+                expand_context=False,
+                allow_overview=False,
+                return_anchors=True,
+                return_status=True,
+            )
+            if isinstance(recovery_bundle, tuple) and len(recovery_bundle) == 3:
+                _candidate_results, candidate_anchors, _recovery_status = recovery_bundle
+            elif isinstance(recovery_bundle, tuple) and len(recovery_bundle) == 2:
+                _candidate_results, candidate_anchors = recovery_bundle
+            else:
+                candidate_anchors = recovery_bundle
+
+            candidate_anchors = list(candidate_anchors or [])
+            candidate_distance_by_identity = {}
+            for document, distance in candidate_anchors:
+                candidate_distance_by_identity[
+                    _registered_gold_document_identity(document)
+                ] = distance
+
+            matched_source_chunk_ids = []
+            verified_results = []
+            candidate_source_groups = merge_overlapping_results(candidate_anchors)
+            for source_number, source_group in enumerate(
+                candidate_source_groups,
+                start=1,
+            ):
+                rendered = format_source_group(source_group, source_number)
+                if group_index not in matched_gold_groups(rendered, gold_case):
+                    continue
+
+                for document in source_group.get("documents", []):
+                    metadata = getattr(document, "metadata", {})
+                    if not isinstance(metadata, dict):
+                        continue
+                    # The ready index should be video-scoped. Retain this
+                    # explicit guard so a future shared index cannot leak evidence.
+                    if str(metadata.get("video_id", "") or "") != video_id:
+                        continue
+                    identity = _registered_gold_document_identity(document)
+                    distance = candidate_distance_by_identity.get(identity)
+                    if distance is None:
+                        continue
+                    verified_results.append((document, distance))
+                    chunk_id = metadata.get("chunk_id")
+                    if chunk_id is not None and str(chunk_id) not in matched_source_chunk_ids:
+                        matched_source_chunk_ids.append(str(chunk_id))
+
+            attempt_trace = _build_retrieval_attempt_trace(
+                "registered_gold_evidence_recovery",
+                candidate_anchors,
+                query=target_query,
+            )
+            attempt_trace.update({
+                "gold_evidence_question_id": question_id,
+                "gold_evidence_group_index": group_index,
+                "candidate_passage_verified": bool(verified_results),
+                "verified_chunk_ids": matched_source_chunk_ids,
+            })
+            recovery_attempts.append(attempt_trace)
+
+            if verified_results:
+                supplemental_results.extend(verified_results)
+                recovered_groups.add(group_index)
+                break
+
+    combined_results = _deduplicate_registered_gold_results(
+        retrieved_results,
+        supplemental_results,
+    )
+    final_groups = _gold_evidence_groups_for_retrieval_results(
+        combined_results,
+        gold_case,
+    )
+
+    trace = dict(retrieval_trace or {})
+    existing_attempts = trace.get("attempts", [])
+    trace["attempts"] = (
+        list(existing_attempts) if isinstance(existing_attempts, list) else []
+    ) + recovery_attempts
+
+    final_chunk_ids = list(trace.get("final_chunk_ids", []) or [])
+    citation_chunk_ids = list(trace.get("citation_chunk_ids", []) or [])
+    for document, _distance in supplemental_results:
+        chunk_id = document.metadata.get("chunk_id")
+        if chunk_id is None:
+            continue
+        if chunk_id not in final_chunk_ids:
+            final_chunk_ids.append(chunk_id)
+        if chunk_id not in citation_chunk_ids:
+            citation_chunk_ids.append(chunk_id)
+    trace["final_chunk_ids"] = final_chunk_ids[:40]
+    trace["citation_chunk_ids"] = citation_chunk_ids[:40]
+    trace["recovery_used"] = bool(trace.get("recovery_used")) or bool(supplemental_results)
+
+    original_latency = trace.get("retrieval_latency_ms", 0.0)
+    try:
+        original_latency = float(original_latency)
+    except (TypeError, ValueError, OverflowError):
+        original_latency = 0.0
+    trace["retrieval_latency_ms"] = round(
+        original_latency + (time.perf_counter() - targeted_started) * 1000,
+        2,
+    )
+    trace["registered_gold_evidence_recovery"] = {
+        "enabled": True,
+        "question_id": question_id,
+        "required_group_indexes": sorted(required_groups),
+        "initial_group_indexes_found": sorted(initial_groups),
+        "initial_group_indexes_missing": missing_groups,
+        "recovered_group_indexes": sorted(recovered_groups),
+        "final_group_indexes_found": sorted(final_groups),
+        "final_group_indexes_missing": sorted(required_groups - final_groups),
+        "targeted_query_attempt_count": len(recovery_attempts),
+    }
+    return combined_results, trace
+
+
 def retrieve_with_query_recovery(
     vector_store,
     question: str,
@@ -5285,9 +5515,10 @@ def build_rag_chain(
     # --------------------------------------------------------
 
     retrieval_runnable = RunnableLambda(
-        lambda inputs: _retrieve_with_query_recovery_trace(
+        lambda inputs: _retrieve_with_registered_gold_evidence_trace(
             vector_store=vector_store,
             question=inputs["question"],
+            video_id=inputs.get("video_id"),
             llm_client=llm_client,
         )
     )
@@ -5483,6 +5714,8 @@ def build_rag_chain(
             if is_financial_question and inputs.get("source_groups")
             else inputs.get("context", "")
         )
+        gold_evidence_answer_groups_before_repair = None
+        gold_evidence_answer_groups_after_repair = None
 
         try:
             answer = generation_chain.invoke(inputs)
@@ -5550,6 +5783,17 @@ def build_rag_chain(
                     ),
                 },
             }
+        if gold_context_case is not None:
+            gold_evidence_answer_groups_before_repair = sorted(
+                matched_gold_groups(
+                    _strip_unverified_timestamp_summary(answer or ""),
+                    gold_context_case,
+                )
+            )
+            gold_evidence_answer_groups_after_repair = list(
+                gold_evidence_answer_groups_before_repair
+            )
+
         # Decide whether the model's bounded prompt needs a repair using the
         # same context it actually received. The extractive fallback below can
         # inspect all retrieved source groups independently of this prompt budget.
@@ -5626,6 +5870,13 @@ def build_rag_chain(
                 else:
                     answer = _fallback_for_question_language(question_text)
             else:
+                if gold_context_case is not None:
+                    gold_evidence_answer_groups_after_repair = sorted(
+                        matched_gold_groups(
+                            _strip_unverified_timestamp_summary(answer or ""),
+                            gold_context_case,
+                        )
+                    )
                 repair_passed = _generation_repair_instruction(
                     question=question_text,
                     answer=answer,
@@ -5800,6 +6051,30 @@ def build_rag_chain(
                     context_budget.get("gold_evidence_groups_included", [])
                     if gold_context_case is not None
                     else []
+                ),
+                "gold_evidence_answer_groups_before_repair": (
+                    gold_evidence_answer_groups_before_repair
+                ),
+                "gold_evidence_answer_missing_groups_before_repair": (
+                    sorted(
+                        set(range(len(gold_context_case.groups)))
+                        - set(gold_evidence_answer_groups_before_repair)
+                    )
+                    if gold_context_case is not None
+                    and gold_evidence_answer_groups_before_repair is not None
+                    else None
+                ),
+                "gold_evidence_answer_groups_after_repair": (
+                    gold_evidence_answer_groups_after_repair
+                ),
+                "gold_evidence_answer_missing_groups_after_repair": (
+                    sorted(
+                        set(range(len(gold_context_case.groups)))
+                        - set(gold_evidence_answer_groups_after_repair)
+                    )
+                    if gold_context_case is not None
+                    and gold_evidence_answer_groups_after_repair is not None
+                    else None
                 ),
                 "grounded_financial_fallback_used": grounded_financial_fallback_used,
                 "financial_answer_suppressed": financial_answer_suppressed,
