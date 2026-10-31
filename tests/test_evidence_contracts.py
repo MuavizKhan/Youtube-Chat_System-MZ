@@ -136,7 +136,7 @@ def test_question_analysis_is_immutable_and_normalizes_text_fields():
     "kwargs",
     [
         {"intent": "unsupported", "language": "en", "aspects": ()},
-        {"intent": QuestionIntent.DIRECT_FACT, "language": "english-language", "aspects": ()},
+        {"intent": QuestionIntent.DIRECT_FACT, "language": "en--US", "aspects": ()},
         {"intent": QuestionIntent.DIRECT_FACT, "language": "en", "aspects": ("not-an-aspect",)},
         {"intent": QuestionIntent.DIRECT_FACT, "language": "en", "aspects": (
             EvidenceAspect("duplicate", "first"),
