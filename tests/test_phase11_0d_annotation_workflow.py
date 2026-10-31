@@ -407,6 +407,29 @@ def test_supported_pseudonymous_annotator_roles_are_accepted():
     assert workflow._annotator_id("CURATOR-01", "curator_id") == "CURATOR-01"
 
 
+@pytest.mark.parametrize(
+    "field, value, message",
+    [
+        ("aspects", [], "between one and eight evidence aspects"),
+        ("aspects", [{}] * 9, "between one and eight evidence aspects"),
+        ("passages", [], "between one and twelve evidence passages"),
+        ("passages", [{}] * 13, "between one and twelve evidence passages"),
+    ],
+)
+def test_source_manifest_enforces_nonempty_phase11_0b_collection_bounds(
+    field, value, message, tmp_path, monkeypatch
+):
+    _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
+    candidate = deepcopy(manifest)
+    if field == "aspects":
+        candidate["cases"][0]["question_analysis"]["aspects"] = value
+    else:
+        candidate["cases"][0]["passages"] = value
+
+    with pytest.raises(workflow.DatasetValidationError, match=message):
+        workflow.validate_source_manifest(candidate)
+
+
 def test_source_manifest_rejects_passages_over_the_phase11_0b_input_budget(tmp_path, monkeypatch):
     _, _, manifest, _, _ = _write_private_source(tmp_path, monkeypatch)
     candidate = deepcopy(manifest)
