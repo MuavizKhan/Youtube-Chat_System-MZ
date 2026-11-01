@@ -340,17 +340,17 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI06", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "named_movement", "pattern": r"बिजोलिया|पहला बड़ा किसान आंदोलन"},),
+        answer_requirements=({"name": "named_movement", "pattern": r"\b(?:Bijolia|first major farmers'? movement)\b"},),
     ),
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "movement_location", "pattern": r"बिजोलिया"},),
+        answer_requirements=({"name": "movement_location", "pattern": r"\bBijolia\b"},),
     ),
     _make_audit_case(
         "HI08", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "tax_count", "pattern": r"84|८४"},),
+        answer_requirements=({"name": "tax_count", "pattern": r"\b84\b"},),
     ),
     _make_audit_case(
         "AR01", "fAd2nKfrDB8",
@@ -365,12 +365,12 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "AR06", "fAd2nKfrDB8",
         expected_behavior="answerable", answer_language="ar",
-        answer_requirements=({"name": "silence_and_rest", "pattern": r"الهدوء|الصمت|راحة"},),
+        answer_requirements=({"name": "silence_and_rest", "pattern": r"\b(?:quiet|silence|rest|comfort)\b"},),
     ),
     _make_audit_case(
         "AR07", "fAd2nKfrDB8",
         expected_behavior="answerable", answer_language="ar",
-        answer_requirements=({"name": "room_cost", "pattern": r"600|٦٠٠|دولار"},),
+        answer_requirements=({"name": "room_cost", "pattern": r"\b600\b|six hundred|\bdollars?\b"},),
     ),
 )
 
