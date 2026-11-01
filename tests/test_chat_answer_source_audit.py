@@ -99,7 +99,12 @@ def test_arabic_evidence_can_be_context_only_and_absent_from_citations():
 
 def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     response = {
-        "answer": "الإجابة صحيحة.\n\nRelevant timestamps: 02:28–04:21",
+        "answer": (
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs and stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض القلب.\n\n"
+            "Relevant timestamps: 02:28–04:21"
+        ),
         "retrieval_config": {
             "citation_policy": "prompt_included_chunks",
         },
@@ -145,7 +150,9 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
         ),
         (
             "AR08",
-            "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش.",
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs or stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض القلب.",
         ),
     ],
 )
@@ -597,8 +604,9 @@ def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
 def test_audit_separates_verified_context_evidence_from_retrieved_only_chunks():
     response = {
         "answer": (
-            "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
-            "وأصوات الرئتين والمعدة، ورمش الجفون.\n\n"
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs and stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض القلب.\n\n"
             "Relevant timestamps: 02:33–03:37"
         ),
         "retrieval_config": {
