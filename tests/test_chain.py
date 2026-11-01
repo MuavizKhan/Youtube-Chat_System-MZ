@@ -1884,6 +1884,110 @@ def test_query_recovery_keeps_fast_path_when_initial_retrieval_succeeds(monkeypa
 
 
 @pytest.mark.unit
+def test_query_recovery_rewrites_lexical_only_initial_candidates(monkeypatch):
+    lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
+    semantic = (doc(2, 1705, 1715, "computers use zeros and ones in binary"), 0.2)
+    expanded = [semantic, (doc(3, 1710, 1715, "a bit is zero or one"), chain.MAX_DISTANCE)]
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs.copy())
+        if len(calls) == 1:
+            return [lexical], [lexical], {"weak_native_query_rejected": False}
+        return [semantic], [semantic], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="binary system zeros and ones",
+            search_queries=["binary digits and bit representation"],
+        ),
+    )
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or expanded
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "How does the lecturer explain binary representation?",
+        object(),
+    )
+
+    assert results == expanded
+    assert trace["lexical_only_recovery_attempted"] is True
+    assert trace["lexical_only_recovery_accepted"] is True
+    assert trace["planner_used"] is True
+    assert trace["final_stage"] == "lexical_only_rewrite"
+    assert trace["recovery_used"] is True
+    assert trace["citation_chunk_ids"] == [2]
+    assert calls[0]["query"] == "How does the lecturer explain binary representation?"
+    assert calls[1]["query"] == "binary system zeros and ones"
+    assert calls[1]["expand_context"] is False
+    assert calls[1]["allow_overview"] is False
+    assert expansion_calls == [("binary system zeros and ones", [semantic])]
+
+
+@pytest.mark.unit
+def test_query_recovery_preserves_lexical_candidates_when_rewrite_is_not_semantic(monkeypatch):
+    lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
+    weak_rewrite = (doc(2, 1705, 1715, "unrelated passage"), chain.MAX_DISTANCE)
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs.copy())
+        if len(calls) == 1:
+            return [lexical], [lexical], {"weak_native_query_rejected": False}
+        return [weak_rewrite], [weak_rewrite], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="binary system zeros and ones",
+            search_queries=["binary digits and bit representation"],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "A rewritten lexical-only candidate must not pass the semantic gate."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "How does the lecturer explain binary representation?",
+        object(),
+    )
+
+    assert results == [lexical]
+    assert trace["lexical_only_recovery_attempted"] is True
+    assert trace["lexical_only_recovery_accepted"] is False
+    assert trace["final_stage"] == "initial_strict"
+    assert trace["recovery_used"] is False
+    assert trace["final_chunk_ids"] == [1]
+    assert all(
+        attempt.get("accepted_for_generation") is False
+        for attempt in trace["attempts"][1:]
+    )
+
+
+@pytest.mark.unit
 def test_query_recovery_retries_with_reformulated_queries(monkeypatch):
     empty = []
     recovered = [(doc(7, 70, 80, "recovered evidence"), 0.4)]
