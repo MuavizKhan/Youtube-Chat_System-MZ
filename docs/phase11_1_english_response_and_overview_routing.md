@@ -15,6 +15,8 @@ The review also found that natural short overview requests such as "What is in t
 ### 1. Fixed English response contract
 
 - System and human generation instructions now require English for every main answer.
+- The specialized bodily-sound, multi-item, and sound/perception repair paths also use English rather than inferring response language from the question.
+- Hindi- and Arabic-transcript live benchmark cases now use English question text, and the live answer/source audit checks English for both substantive answers and abstentions.
 - Transcript language and question language are explicitly not response-language selectors.
 - Hindi, Arabic, and Urdu excerpts are allowed only as short exact quotations copied from supplied context, followed immediately by an English meaning.
 - The answer-language validator now checks for English as the fixed required language, while allowing short source-script quotations inside an otherwise English answer.
