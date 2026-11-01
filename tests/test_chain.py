@@ -3596,6 +3596,123 @@ def test_all_abstention_fallbacks_are_english(question):
 
 
 @pytest.mark.unit
+def test_generation_repair_instruction_rechecks_abstention_against_supplied_passages():
+    question = "How does the lecturer explain binary representation?"
+    context = (
+        "[SOURCE 1]\\n"
+        "Transcript: Computers use zeros and ones in the binary system. "
+        "A single bit is a zero or one."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        chain.FALLBACK_ANSWER,
+        context,
+    )
+
+    assert instruction is not None
+    assert "EVIDENCE RECHECK" in instruction
+    assert "answer those parts in English" in instruction
+    assert "return the exact English fallback" in instruction
+    assert chain._generation_repair_instruction(
+        question,
+        chain.FALLBACK_ANSWER,
+        "",
+    ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "second_answer, expected_recheck_passed",
+    [
+        (
+            "The lecturer explains that binary represents information using "
+            "zeros and ones. A bit is one binary digit and can be either 0 or 1.",
+            True,
+        ),
+        (chain.FALLBACK_ANSWER, False),
+    ],
+)
+def test_rag_chain_rechecks_abstention_once_without_weakening_grounding(
+    monkeypatch, second_answer, expected_recheck_passed
+):
+    question = "How does the lecturer explain binary representation?"
+    context = (
+        "Computers use zeros and ones in the binary system. "
+        "A single bit is a zero or one."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 1705, 1710, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    outputs = iter([chain.FALLBACK_ANSWER, second_answer])
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "unregistered-video",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert trace["abstention_recheck_attempted"] is True
+    assert trace["abstention_recheck_passed"] is expected_recheck_passed
+    if expected_recheck_passed:
+        assert "zeros and ones" in result["answer"].lower()
+    else:
+        assert result["answer"] == chain.FALLBACK_ANSWER
+
+
+@pytest.mark.unit
+def test_language_repair_fails_closed_if_provider_repeats_non_english_draft(monkeypatch):
+    context = "- [02:28–03:34] الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 148, 214, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        return "الصوت يتحول في الدماغ إلى تجربة حسية تشكل الإدراك."
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What does the speaker say about sound and perception?",
+        "video_id": "unregistered-video",
+    })
+
+    assert len(calls) == 2
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["generation_trace"]["question_language_repair_passed"] is False
+
+
+@pytest.mark.unit
 def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch):
     question = (
         "What does the episode say sound contributes to perception, "
