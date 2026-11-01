@@ -4848,7 +4848,14 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
         return False
     if is_evidence_dense_question(question):
         return False
-    return is_overview_question(question) or bool(question.strip())
+    if is_overview_question(question):
+        return True
+    normalized = " ".join(question.casefold().split())
+    return bool(re.search(
+        r"\\b(?:main|overall|general)\\s+(?:subject|topic|theme|idea)\\b|"
+        r"\\b(?:overall|general)\\s+(?:summary|overview)\\b",
+        normalized,
+    ))
 
 
 def _planner_failure_original_query_fallback(
