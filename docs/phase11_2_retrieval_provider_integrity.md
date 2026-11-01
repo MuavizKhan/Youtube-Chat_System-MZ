@@ -110,3 +110,44 @@ The following should be separate, evidence-driven changes after Phase 11.2's fir
 - Answer completeness and duplicate-section detection using observed failure cases and explicit tests.
 - Token-budget optimisation based on provider usage telemetry rather than arbitrary prompt truncation.
 - Broader provider resilience or failover only after provider-specific compatibility, privacy, cost, and quota policies are defined.
+
+## Focused live validation runner
+
+The repository includes `scripts/phase11_2_live_validation.py` for a small
+sequential live check of the exact Phase 11.2 routing scenarios. It uses only
+the standard library and sends requests to an already-running backend.
+
+Run the default five-case diagnostic after confirming that the existing
+pilot indexes are ready:
+
+```powershell
+$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
+
+.\.venv\Scripts\python.exe -m scripts.phase11_2_live_validation
+```
+
+The runner:
+- checks index readiness using GET only; it never requests index creation or reindexing;
+- sends cases sequentially with a 20-second default pause to reduce provider TPM pressure;
+- records retrieval stage, planner intent/failure recovery fields, source intervals,
+  generation context-budget diagnostics, request status and effective configuration;
+- rejects overview sampling for cases marked as specific/analytical;
+- checks abstention plus source/timestamp suppression for the unrelated control;
+- writes a new timestamped JSON report and refuses to overwrite an existing file.
+
+To run only the historical routing regression case:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.phase11_2_live_validation --case-ids HI_ANALYTICAL_01
+```
+
+The report deliberately sets `live_answer_quality_status` to
+`manual_transcript_review_required`. Automated routing/source contracts are
+not proof that each generated claim is faithful. Review every answer against
+its returned transcript source passages and timestamps. Groq
+`finish_reason` and token usage remain available in the backend log; this
+runner does not infer completion from response length.
+
+The runner's automated tests are in
+`tests/test_phase11_2_live_validation.py`.
