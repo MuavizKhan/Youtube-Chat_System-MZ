@@ -4456,37 +4456,6 @@ def generate_with_huggingface(
             ) from error
 
         # --------------------------------------------------------
-        # Record provider completion metadata without logging prompt or answer.
-        # --------------------------------------------------------
-
-        first_choice = (
-            response.choices[0]
-            if getattr(response, "choices", None)
-            else None
-        )
-        finish_reason = getattr(first_choice, "finish_reason", None)
-        usage = getattr(response, "usage", None)
-        prompt_tokens = getattr(usage, "prompt_tokens", None)
-        completion_tokens = getattr(usage, "completion_tokens", None)
-        total_tokens = getattr(usage, "total_tokens", None)
-        logger.info(
-            "Groq generation metadata finish_reason=%s prompt_tokens=%s "
-            "completion_tokens=%s total_tokens=%s completion_token_limit=%s",
-            finish_reason,
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-            GROQ_MAX_TOKENS,
-        )
-        if finish_reason in {"length", "max_tokens"}:
-            logger.warning(
-                "Groq generation may be truncated by completion limit "
-                "completion_tokens=%s completion_token_limit=%s",
-                completion_tokens,
-                GROQ_MAX_TOKENS,
-            )
-
-        # --------------------------------------------------------
         # Extract visible model answer
         # --------------------------------------------------------
 
@@ -4649,6 +4618,37 @@ def generate_with_groq(
             raise RuntimeError(
                 f"Groq generation failed: {error}"
             ) from error
+
+        # --------------------------------------------------------
+        # Record provider completion metadata without logging prompt or answer.
+        # --------------------------------------------------------
+
+        first_choice = (
+            response.choices[0]
+            if getattr(response, "choices", None)
+            else None
+        )
+        finish_reason = getattr(first_choice, "finish_reason", None)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        logger.info(
+            "Groq generation metadata finish_reason=%s prompt_tokens=%s "
+            "completion_tokens=%s total_tokens=%s completion_token_limit=%s",
+            finish_reason,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            GROQ_MAX_TOKENS,
+        )
+        if finish_reason in {"length", "max_tokens"}:
+            logger.warning(
+                "Groq generation may be truncated by completion limit "
+                "completion_tokens=%s completion_token_limit=%s",
+                completion_tokens,
+                GROQ_MAX_TOKENS,
+            )
 
         answer = extract_chat_completion_answer(response)
 
