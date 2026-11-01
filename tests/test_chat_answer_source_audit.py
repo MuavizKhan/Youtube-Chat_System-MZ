@@ -472,6 +472,32 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
     assert failed == []
 
 
+def test_answer_requirement_normalizer_converts_smart_apostrophes():
+    normalized = audit_module._normalize_answer_requirement_text(
+        "The farmers’ movement was discussed."
+    )
+
+    assert normalized == "The farmers' movement was discussed."
+
+
+@pytest.mark.parametrize("case_id", ["HI01", "HI06"])
+def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
+    case = _case(case_id)
+
+    grounded_checks = _answer_quality_checks(
+        case,
+        "The first major farmers' movement was the Bijolia movement.",
+    )
+    assert all(check["passed"] for check in grounded_checks)
+
+    generic_checks = _answer_quality_checks(
+        case,
+        "The first major farmers’ movement was a large-scale farmers' protest.",
+    )
+    failed = [check["name"] for check in generic_checks if not check["passed"]]
+    assert failed == ["answer_requirement_named_movement"]
+
+
 def test_answer_timestamp_parser_finds_inline_hindi_ranges_without_footer():
     answer = (
         "पहला उल्लेख 00:02–00:06 के आसपास है और दूसरा "
