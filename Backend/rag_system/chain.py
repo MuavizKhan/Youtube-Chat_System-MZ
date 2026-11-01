@@ -4841,6 +4841,8 @@ def _retrieve_with_query_recovery_trace(
     planner_intent = None
     planner_latency_ms = 0.0
     weak_recovery_candidates_rejected = False
+    lexical_only_recovery_attempted = False
+    lexical_only_recovery_accepted = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -4946,6 +4948,126 @@ def _retrieve_with_query_recovery_trace(
     if initial_results:
         final_results = initial_results
         final_stage = "initial_strict"
+
+        # A lexical-only initial result can contain overlapping words without
+        # providing a strong semantic match. Previously any non-empty initial
+        # result ended the recovery ladder, so query understanding never got a
+        # chance to repair this class of weakly matched question. Keep the
+        # existing lexical candidates as a safe fallback, but try one bounded
+        # model rewrite and accept it only when a rewritten query earns the
+        # normal strong semantic gate.
+        lexical_only_initial = bool(citation_results) and all(
+            float(distance) >= float(MAX_DISTANCE) - 1e-6
+            for _document, distance in citation_results
+        )
+        if lexical_only_initial and len(_generation_context_query_terms(question)) >= 3:
+            lexical_only_recovery_attempted = True
+            if llm_client is None:
+                llm_client = create_llm_client()
+            planner_started = time.perf_counter()
+            try:
+                plan = understand_query(
+                    client=llm_client,
+                    question=question,
+                )
+                planner_used = True
+                planner_intent = plan.intent
+                planner_latency_ms = (
+                    time.perf_counter() - planner_started
+                ) * 1000
+
+                if plan.intent == "overview":
+                    overview_results = retrieve_overview(vector_store)
+                    attempts.append(
+                        _build_retrieval_attempt_trace(
+                            "lexical_only_overview",
+                            overview_results,
+                        )
+                    )
+                    if overview_results:
+                        final_results = overview_results
+                        citation_results = overview_results
+                        final_stage = "lexical_only_overview"
+                        lexical_only_recovery_accepted = True
+
+                if not lexical_only_recovery_accepted:
+                    query_candidates = [
+                        plan.standalone_question,
+                        *plan.search_queries[:1],
+                    ]
+                    seen_queries = {question.strip().casefold()}
+                    for rewritten_query in query_candidates:
+                        rewritten_query = (rewritten_query or "").strip()
+                        key = rewritten_query.casefold()
+                        if not rewritten_query or key in seen_queries:
+                            continue
+                        seen_queries.add(key)
+
+                        rewritten_bundle = retrieve_question_context(
+                            vector_store=vector_store,
+                            query=rewritten_query,
+                            k=TOP_K,
+                            fetch_k=MMR_FETCH_K,
+                            lambda_mult=MMR_LAMBDA,
+                            max_distance=MAX_DISTANCE,
+                            expand_context=False,
+                            allow_overview=False,
+                            return_anchors=True,
+                            return_status=True,
+                        )
+                        if (
+                            isinstance(rewritten_bundle, tuple)
+                            and len(rewritten_bundle) == 3
+                        ):
+                            _rewritten_context, rewritten_anchors, rewritten_status = rewritten_bundle
+                        elif (
+                            isinstance(rewritten_bundle, tuple)
+                            and len(rewritten_bundle) == 2
+                        ):
+                            _rewritten_context, rewritten_anchors = rewritten_bundle
+                            rewritten_status = {}
+                        else:
+                            rewritten_anchors = rewritten_bundle
+                            rewritten_status = {}
+
+                        semantic_gate_passed = passes_strong_semantic_gate(
+                            rewritten_anchors,
+                            MAX_DISTANCE,
+                        )
+                        attempt_trace = _build_retrieval_attempt_trace(
+                            "lexical_only_rewrite",
+                            rewritten_anchors,
+                            query=rewritten_query,
+                        )
+                        attempt_trace["semantic_gate_passed"] = semantic_gate_passed
+                        attempt_trace["accepted_for_generation"] = bool(
+                            rewritten_anchors and semantic_gate_passed
+                        )
+                        if rewritten_status.get("weak_native_query_rejected"):
+                            attempt_trace["rejection_reason"] = "weak_native_semantic_match"
+                        elif rewritten_anchors and not semantic_gate_passed:
+                            attempt_trace["rejection_reason"] = "weak_semantic_support"
+                        attempts.append(attempt_trace)
+
+                        if rewritten_anchors and semantic_gate_passed:
+                            citation_results = rewritten_anchors
+                            final_results = expand_question_context(
+                                vector_store,
+                                rewritten_query,
+                                rewritten_anchors,
+                            )
+                            final_stage = "lexical_only_rewrite"
+                            lexical_only_recovery_accepted = True
+                            break
+            except QueryUnderstandingError as error:
+                logger.warning(
+                    "Lexical-only query recovery planner failed; preserving initial candidates: %s",
+                    error,
+                )
+            except Exception:
+                logger.exception(
+                    "Unexpected lexical-only query recovery failure; preserving initial candidates"
+                )
     else:
         if initial_retrieval_status.get("weak_native_query_rejected"):
             attempts[-1]["weak_native_query_rejected"] = True
@@ -5230,6 +5352,8 @@ def _retrieve_with_query_recovery_trace(
         "planner_used": planner_used,
         "planner_intent": planner_intent,
         "planner_latency_ms": round(planner_latency_ms, 2),
+        "lexical_only_recovery_attempted": lexical_only_recovery_attempted,
+        "lexical_only_recovery_accepted": lexical_only_recovery_accepted,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,
