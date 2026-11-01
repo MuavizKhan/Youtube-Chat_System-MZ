@@ -387,18 +387,32 @@ def test_query_variants_do_not_add_facets_to_simple_questions():
 
 @pytest.mark.unit
 @pytest.mark.parametrize("query",[
-    "What is this video about?","Give me an overview",
-    "Summarise the video","What are the main topics?",
+    "What is this video about?",
+    "What is in this video?",
+    "What's inside this video?",
+    "What is he talking about?",
+    "What is the speaker discussing?",
+    "What does this video cover?",
+    "What is covered in this video?",
+    "Tell me about this video.",
+    "Give me an overview",
+    "Summarise the video",
+    "What are the main topics?",
     "What is the main topic of this video?",
     "What is the primary topic of the video?",
 ])
-def test_overview_detection(query):
+def test_overview_detection_includes_natural_short_requests(query):
     assert retrieval.is_overview_question(query)
 
 
 @pytest.mark.unit
-def test_overview_detection_rejects_specific_question():
-    assert not retrieval.is_overview_question("Who is Vijay Mallya?")
+@pytest.mark.parametrize("query",[
+    "Who is Vijay Mallya?",
+    "What does the speaker say about asteroid mining?",
+    "How does binary representation work?",
+])
+def test_overview_detection_rejects_specific_questions(query):
+    assert not retrieval.is_overview_question(query)
 
 
 @pytest.mark.unit
