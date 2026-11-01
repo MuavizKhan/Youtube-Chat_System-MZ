@@ -3325,7 +3325,7 @@ def test_named_tax_fallback_uses_full_source_groups_when_prompt_context_omits_as
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["extracted_tax_name"] == "चवरी कर"
 
@@ -3527,7 +3527,7 @@ def test_named_tax_evidence_answer_requires_explicit_evidence_and_returns_englis
     english_answer = chain._build_hindi_named_tax_evidence_fallback(
         "Which new tax was imposed and what was it called?", context
     )
-    assert english_answer == "The transcript identifies the new tax as “चवरी कर”."
+    assert english_answer == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
 
     # General tax mentions are not enough without the explicit naming clause.
     assert chain._build_hindi_named_tax_evidence_fallback(
@@ -3563,7 +3563,7 @@ def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(m
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
     assert result["generation_trace"]["fallback_used"] is False
@@ -3601,7 +3601,7 @@ def test_rag_chain_corrects_cross_lingual_tax_spelling_from_explicit_caption_evi
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
 
