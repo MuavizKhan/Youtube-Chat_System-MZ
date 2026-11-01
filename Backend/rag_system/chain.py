@@ -4841,8 +4841,8 @@ def _retrieve_with_query_recovery_trace(
     planner_intent = None
     planner_latency_ms = 0.0
     weak_recovery_candidates_rejected = False
-    lexical_only_recovery_attempted = False
-    lexical_only_recovery_accepted = False
+    weak_initial_recovery_attempted = False
+    weak_initial_recovery_accepted = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -4949,19 +4949,18 @@ def _retrieve_with_query_recovery_trace(
         final_results = initial_results
         final_stage = "initial_strict"
 
-        # A lexical-only initial result can contain overlapping words without
-        # providing a strong semantic match. Previously any non-empty initial
-        # result ended the recovery ladder, so query understanding never got a
-        # chance to repair this class of weakly matched question. Keep the
-        # existing lexical candidates as a safe fallback, but try one bounded
-        # model rewrite and accept it only when a rewritten query earns the
-        # normal strong semantic gate.
-        lexical_only_initial = bool(citation_results) and all(
-            float(distance) >= float(MAX_DISTANCE) - 1e-6
-            for _document, distance in citation_results
+        # Initial candidates can be lexical-only or semantically weak. A
+        # non-empty result used to end the recovery ladder even when no anchor
+        # passed the same strong semantic gate required for rewritten queries.
+        # Preserve the initial candidates as a safe fallback, but try one bounded
+        # query rewrite and accept it only when rewritten evidence passes that
+        # normal gate.
+        weak_initial_candidates = bool(citation_results) and not passes_strong_semantic_gate(
+            citation_results,
+            MAX_DISTANCE,
         )
-        if lexical_only_initial and len(_generation_context_query_terms(question)) >= 3:
-            lexical_only_recovery_attempted = True
+        if weak_initial_candidates and len(_generation_context_query_terms(question)) >= 3:
+            weak_initial_recovery_attempted = True
             planner_started = time.perf_counter()
             try:
                 if llm_client is None:
@@ -4980,17 +4979,17 @@ def _retrieve_with_query_recovery_trace(
                     overview_results = retrieve_overview(vector_store)
                     attempts.append(
                         _build_retrieval_attempt_trace(
-                            "lexical_only_overview",
+                            "weak_initial_overview",
                             overview_results,
                         )
                     )
                     if overview_results:
                         final_results = overview_results
                         citation_results = overview_results
-                        final_stage = "lexical_only_overview"
-                        lexical_only_recovery_accepted = True
+                        final_stage = "weak_initial_overview"
+                        weak_initial_recovery_accepted = True
 
-                if not lexical_only_recovery_accepted:
+                if not weak_initial_recovery_accepted:
                     query_candidates = [
                         plan.standalone_question,
                         *plan.search_queries[:1],
@@ -5035,7 +5034,7 @@ def _retrieve_with_query_recovery_trace(
                             MAX_DISTANCE,
                         )
                         attempt_trace = _build_retrieval_attempt_trace(
-                            "lexical_only_rewrite",
+                            "weak_initial_rewrite",
                             rewritten_anchors,
                             query=rewritten_query,
                         )
@@ -5056,8 +5055,8 @@ def _retrieve_with_query_recovery_trace(
                                 rewritten_query,
                                 rewritten_anchors,
                             )
-                            final_stage = "lexical_only_rewrite"
-                            lexical_only_recovery_accepted = True
+                            final_stage = "weak_initial_rewrite"
+                            weak_initial_recovery_accepted = True
                             break
             except QueryUnderstandingError as error:
                 logger.warning(
@@ -5352,8 +5351,8 @@ def _retrieve_with_query_recovery_trace(
         "planner_used": planner_used,
         "planner_intent": planner_intent,
         "planner_latency_ms": round(planner_latency_ms, 2),
-        "lexical_only_recovery_attempted": lexical_only_recovery_attempted,
-        "lexical_only_recovery_accepted": lexical_only_recovery_accepted,
+        "weak_initial_recovery_attempted": weak_initial_recovery_attempted,
+        "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,
