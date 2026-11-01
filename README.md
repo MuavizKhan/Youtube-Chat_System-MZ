@@ -782,3 +782,10 @@ For the Phase 10.10 three-case closure audit, select `--suite phase10_10` explic
 7. The saved five-video retrieval acceptance remains a separate gate. Raw-anchor misses remain diagnostic and must not be “fixed” by relaxing thresholds.
 
 The live 16-case run is intentionally an explicit acceptance step; no inference calls are made by CI. If a case fails, classify the failure as answer quality, abstention, prompt/source provenance, timestamp mismatch, configuration drift, or retrieval/context evidence, and fix only the demonstrated cause.
+
+
+## Phase 11.1 — English response contract and overview routing
+
+The answer-generation contract now requires English for the main answer regardless of question or transcript language. Short exact Hindi, Arabic, or Urdu transcript excerpts may be included only as supporting evidence with an immediate English meaning. Abstention and provider-failure fallbacks remain English. Natural short overview questions (for example, "What is in this video?" and "What is he talking about?") route through representative transcript coverage instead of ordinary similarity retrieval. This phase does not change embeddings, indexes, retrieval ranking, MMR, thresholds, or citation provenance; no reindexing is required.
+
+See [Phase 11.1 design and validation notes](docs/phase11_1_english_response_and_overview_routing.md). CI and live multilingual answer/source validation remain release gates.
