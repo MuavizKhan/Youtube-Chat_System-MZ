@@ -5754,7 +5754,13 @@ def build_rag_chain(
                     video_id=inputs.get("video_id"),
                 ) is None
                 if abstention_recheck_attempted:
-                    abstention_recheck_passed = not _is_abstention_answer(answer)
+                    abstention_recheck_passed = (
+                        not _is_abstention_answer(answer)
+                        and _question_answer_language_mismatch(
+                            question_text,
+                            answer,
+                        ) is None
+                    )
                 if question_language_repair_attempted:
                     question_language_repair_passed = (
                         _question_answer_language_mismatch(question_text, answer) is None
