@@ -101,6 +101,8 @@ from .gold_evidence import (
 from .retrieval import (
     extract_video_id,
     expand_question_context,
+    is_evidence_dense_question,
+    is_overview_question,
     passes_strong_semantic_gate,
     retrieve_overview,
     retrieve_question_context,
@@ -4617,6 +4619,37 @@ def generate_with_groq(
                 f"Groq generation failed: {error}"
             ) from error
 
+        # --------------------------------------------------------
+        # Record provider completion metadata without logging prompt or answer.
+        # --------------------------------------------------------
+
+        first_choice = (
+            response.choices[0]
+            if getattr(response, "choices", None)
+            else None
+        )
+        finish_reason = getattr(first_choice, "finish_reason", None)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", None)
+        completion_tokens = getattr(usage, "completion_tokens", None)
+        total_tokens = getattr(usage, "total_tokens", None)
+        logger.info(
+            "Groq generation metadata finish_reason=%s prompt_tokens=%s "
+            "completion_tokens=%s total_tokens=%s completion_token_limit=%s",
+            finish_reason,
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            GROQ_MAX_TOKENS,
+        )
+        if finish_reason in {"length", "max_tokens"}:
+            logger.warning(
+                "Groq generation may be truncated by completion limit "
+                "completion_tokens=%s completion_token_limit=%s",
+                completion_tokens,
+                GROQ_MAX_TOKENS,
+            )
+
         answer = extract_chat_completion_answer(response)
 
         if answer:
@@ -4804,6 +4837,102 @@ def _split_retrieval_result_bundle(result_bundle):
     return result_bundle, result_bundle
 
 
+def _should_use_overview_route(question: str, planner_intent: str) -> bool:
+    """Allow representative sampling only for unambiguously broad overview requests.
+
+    Planner intent is advisory. A multi-facet analytical question must remain
+    on targeted retrieval even when the planner labels it as an overview.
+    """
+    if planner_intent != "overview":
+        return False
+
+    normalized = " ".join(question.casefold().split())
+    analytical_request = re.search(
+        r"\b(?:explain|describe|analyse|analyze|evaluate|assess|compare|"
+        r"contrast|discuss|trace|identify|outline)\b",
+        normalized,
+    )
+    multi_facet_request = re.search(
+        r"\b(?:and|or|both|versus|vs\.?|as well as)\b",
+        normalized,
+    )
+    consequence_or_history_request = re.search(
+        r"\b(?:consequence\w*|implication\w*|outcome\w*|"
+        r"development\w*|historical|cause\w*|effect\w*|impact\w*)\b",
+        normalized,
+    )
+    if is_evidence_dense_question(question) or (
+        analytical_request
+        and (multi_facet_request or consequence_or_history_request)
+    ):
+        return False
+
+    # Overview sampling is reserved for clearly broad subject/summary prompts.
+    if is_overview_question(question):
+        return True
+    return bool(re.search(
+        r"\b(?:main|overall|general)\s+(?:subject|topic|theme|idea)\b|"
+        r"\b(?:overall|general)\s+(?:summary|overview)\b",
+        normalized,
+    ))
+
+
+def _planner_failure_original_query_fallback(
+    vector_store,
+    question: str,
+) -> tuple[list, list, dict[str, object], bool]:
+    """Use bounded deterministic retrieval when query understanding is unavailable.
+
+    The original question is retained. The existing relaxed distance and
+    strong semantic gate still apply; overview sampling is never substituted
+    for a failed planner on a specific question.
+    """
+    try:
+        fallback_bundle = retrieve_question_context(
+            vector_store=vector_store,
+            query=question,
+            k=RECOVERY_TOP_K,
+            fetch_k=RECOVERY_FETCH_K,
+            lambda_mult=MMR_LAMBDA,
+            max_distance=RECOVERY_MAX_DISTANCE,
+            expand_context=False,
+            allow_overview=False,
+            return_anchors=True,
+        )
+        fallback_candidates, fallback_anchors = _split_retrieval_result_bundle(
+            fallback_bundle
+        )
+        accepted = bool(fallback_anchors) and passes_strong_semantic_gate(
+            fallback_anchors,
+            RECOVERY_MAX_DISTANCE,
+        )
+        attempt = _build_retrieval_attempt_trace(
+            "planner_failure_original_query_relaxed",
+            fallback_anchors or fallback_candidates,
+            query=question,
+        )
+        attempt["strong_semantic_gate_passed"] = bool(accepted)
+        if not accepted:
+            return [], [], attempt, False
+
+        expanded = expand_question_context(
+            vector_store,
+            question,
+            fallback_anchors,
+        )
+        attempt["expanded_context_chunks"] = len(expanded)
+        return expanded, fallback_anchors, attempt, True
+    except Exception:
+        logger.exception(
+            "Deterministic original-query retrieval fallback failed after planner error"
+        )
+        return [], [], {
+            "stage": "planner_failure_original_query_relaxed",
+            "retrieved_chunks": 0,
+            "strong_semantic_gate_passed": False,
+        }, False
+
+
 def _retrieve_with_query_recovery_trace(
     vector_store,
     question: str,
@@ -4820,6 +4949,7 @@ def _retrieve_with_query_recovery_trace(
     weak_recovery_candidates_rejected = False
     weak_initial_recovery_attempted = False
     weak_initial_recovery_accepted = False
+    planner_overview_rejected = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -4951,8 +5081,12 @@ def _retrieve_with_query_recovery_trace(
                 planner_latency_ms = (
                     time.perf_counter() - planner_started
                 ) * 1000
+                planner_overview_rejected = (
+                    plan.intent == "overview"
+                    and not _should_use_overview_route(question, plan.intent)
+                )
 
-                if plan.intent == "overview":
+                if _should_use_overview_route(question, plan.intent):
                     overview_results = retrieve_overview(vector_store)
                     attempts.append(
                         _build_retrieval_attempt_trace(
@@ -5081,49 +5215,79 @@ def _retrieve_with_query_recovery_trace(
             planner_latency_ms = (
                 time.perf_counter() - planner_started
             ) * 1000
+            planner_overview_rejected = (
+                plan.intent == "overview"
+                and not _should_use_overview_route(question, plan.intent)
+            )
         except QueryUnderstandingError as error:
             logger.warning(
-                "Query understanding failed during retrieval recovery: %s",
+                "Query understanding failed during retrieval recovery; "
+                "trying bounded original-query retrieval: %s",
                 error,
             )
-            return [], {
-                "recovery_used": True,
-                "final_stage": "planner_failed",
-                "planner_used": False,
-                "planner_intent": None,
-                "planner_latency_ms": round(
-                    (time.perf_counter() - planner_started) * 1000,
-                    2,
-                ),
-                "attempts": attempts,
-                "retrieval_latency_ms": round(
-                    (time.perf_counter() - started) * 1000,
-                    2,
-                ),
-                "final_chunk_ids": [],
-            }
-        except Exception:
+            planner_failure_reason = "query_understanding_error"
+        except Exception as error:
             logger.exception(
                 "Unexpected query-understanding failure during retrieval recovery"
             )
+            planner_failure_reason = type(error).__name__
+
+        if not planner_used:
+            fallback_results, fallback_anchors, fallback_attempt, fallback_accepted = (
+                _planner_failure_original_query_fallback(vector_store, question)
+            )
+            attempts.append(fallback_attempt)
+            elapsed_planner_ms = round(
+                (time.perf_counter() - planner_started) * 1000,
+                2,
+            )
+            if fallback_accepted:
+                final_chunk_ids = [
+                    document.metadata.get("chunk_id")
+                    for document, _distance in fallback_results
+                    if document.metadata.get("chunk_id") is not None
+                ]
+                citation_chunk_ids = [
+                    document.metadata.get("chunk_id")
+                    for document, _distance in fallback_anchors
+                    if document.metadata.get("chunk_id") is not None
+                ]
+                return fallback_results, {
+                    "recovery_used": True,
+                    "final_stage": "planner_failed_original_query_relaxed",
+                    "planner_used": False,
+                    "planner_intent": None,
+                    "planner_latency_ms": elapsed_planner_ms,
+                    "planner_failure_reason": planner_failure_reason,
+                    "planner_failure_fallback_attempted": True,
+                    "planner_failure_fallback_accepted": True,
+                    "attempts": attempts,
+                    "retrieval_latency_ms": round(
+                        (time.perf_counter() - started) * 1000,
+                        2,
+                    ),
+                    "final_chunk_ids": final_chunk_ids[:20],
+                    "citation_chunk_ids": citation_chunk_ids[:20],
+                }
             return [], {
                 "recovery_used": True,
-                "final_stage": "planner_failed",
+                "final_stage": "planner_failed_no_strong_evidence",
                 "planner_used": False,
                 "planner_intent": None,
-                "planner_latency_ms": round(
-                    (time.perf_counter() - planner_started) * 1000,
-                    2,
-                ),
+                "planner_latency_ms": elapsed_planner_ms,
+                "planner_failure_reason": planner_failure_reason,
+                "planner_failure_fallback_attempted": True,
+                "planner_failure_fallback_accepted": False,
                 "attempts": attempts,
                 "retrieval_latency_ms": round(
                     (time.perf_counter() - started) * 1000,
                     2,
                 ),
                 "final_chunk_ids": [],
+                "citation_chunk_ids": [],
             }
 
-        if plan.intent == "overview":
+        if _should_use_overview_route(question, plan.intent):
             overview_results = retrieve_overview(vector_store)
             attempts.append(
                 _build_retrieval_attempt_trace(
@@ -5330,6 +5494,7 @@ def _retrieve_with_query_recovery_trace(
         "planner_latency_ms": round(planner_latency_ms, 2),
         "weak_initial_recovery_attempted": weak_initial_recovery_attempted,
         "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
+        "planner_overview_rejected": planner_overview_rejected,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,

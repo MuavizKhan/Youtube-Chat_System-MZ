@@ -789,3 +789,13 @@ The live 16-case run is intentionally an explicit acceptance step; no inference 
 The answer-generation contract now requires English for the main answer regardless of question or transcript language. Specialized repair paths and the live answer/source audit enforce the same rule, and Hindi/Arabic transcript benchmark questions are now English. A single bounded evidence recheck is attempted when the model abstains despite receiving transcript context; it answers supported portions only and preserves abstention when evidence is still insufficient. Enumerated answers must keep distinct proposals separate and must not invent items to satisfy a requested count. If the provider ignores an English-language repair, the application fails closed to the English abstention. Short exact Hindi, Arabic, or Urdu transcript excerpts may be included only as supporting evidence with an immediate English meaning. Abstention and provider-failure fallbacks remain English. Natural short overview questions (for example, "What is in this video?" and "What is he talking about?") route through representative transcript coverage instead of ordinary similarity retrieval. When initial candidates do not pass the normal strong semantic evidence gate, the system makes one bounded query rewrite attempt and accepts it only if the rewritten evidence passes that same gate; otherwise the original candidates are retained. This phase does not change embeddings, indexes, retrieval ranking, MMR, thresholds, or citation provenance; no reindexing is required.
 
 See [Phase 11.1 design and validation notes](docs/phase11_1_english_response_and_overview_routing.md). CI and live multilingual answer/source validation remain release gates.
+
+## Phase 11.2 — Retrieval routing and provider resilience
+
+- Prevent planner-generated overview intent from downgrading evidence-dense analytical questions.
+- When query understanding is unavailable, retry the original question through bounded retrieval and the existing strong semantic evidence gate; never substitute overview samples for a specific question.
+- Record Groq finish reason and token usage to distinguish complete responses from output-limit truncation.
+- Preserve the production retrieval/index configuration; no reindexing or unvalidated token-limit increase.
+
+See [Phase 11.2 design and validation gates](docs/phase11_2_retrieval_provider_integrity.md).
+

@@ -1066,6 +1066,33 @@ def test_groq_generation_returns_clean_answer(monkeypatch):
 
 
 @pytest.mark.unit
+def test_groq_generation_logs_finish_reason_and_token_usage(caplog, monkeypatch):
+    caplog.set_level("INFO", logger=chain.logger.name)
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content="A deliberately truncated answer"),
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=7200,
+            completion_tokens=800,
+            total_tokens=8000,
+        ),
+    )
+    fake, _ = client(response=response)
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+
+    assert chain.generate_with_groq(fake, prompt) == "A deliberately truncated answer"
+    assert "finish_reason=length" in caplog.text
+    assert "prompt_tokens=7200" in caplog.text
+    assert "completion_tokens=800" in caplog.text
+    assert "Groq generation may be truncated" in caplog.text
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "error_text,expected",
     [
@@ -2105,6 +2132,173 @@ def test_query_recovery_routes_unrecognized_overview_question(monkeypatch):
     )
 
     assert result == overview
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        (
+            "Explain the major historical developments mentioned in the video "
+            "and their consequences."
+        ),
+        "Describe the causes and outcomes of the farmers' movements.",
+        "Compare the speaker's views and explain their implications.",
+        "Trace the historical developments and identify their effects.",
+    ],
+)
+def test_planner_overview_intent_cannot_override_specific_multi_part_question(question):
+    assert chain._should_use_overview_route(question, "overview") is False
+
+
+@pytest.mark.unit
+def test_analytical_single_facet_request_does_not_get_overview_sampling():
+    assert chain._should_use_overview_route(
+        "Explain the historical developments mentioned in the video.",
+        "overview",
+    ) is False
+
+@pytest.mark.unit
+def test_explicit_overview_question_keeps_overview_route():
+    for question in (
+        "What is this video about?",
+        "What is the main subject?",
+        "What is the main subject discussed here?",
+        "Give me an overall summary.",
+    ):
+        assert chain._should_use_overview_route(question, "overview") is True
+
+    assert chain._should_use_overview_route(
+        "What is this video about?",
+        "factual",
+    ) is False
+
+
+@pytest.mark.unit
+def test_planner_failure_uses_bounded_original_query_retrieval(monkeypatch):
+    anchor = (doc(51, 120, 180, "The transcript evidence directly supports this question."), 0.2)
+    expanded = [anchor]
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        return [anchor], [anchor]
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, max_distance: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, query, anchors: expanded,
+    )
+
+    results, anchors, attempt, accepted = chain._planner_failure_original_query_fallback(
+        object(),
+        "Which historical event does the speaker describe?",
+    )
+
+    assert accepted is True
+    assert results == expanded
+    assert anchors == [anchor]
+    assert attempt["stage"] == "planner_failure_original_query_relaxed"
+    assert attempt["strong_semantic_gate_passed"] is True
+    assert calls[0]["query"] == "Which historical event does the speaker describe?"
+    assert calls[0]["allow_overview"] is False
+    assert calls[0]["expand_context"] is False
+    assert calls[0]["max_distance"] == chain.RECOVERY_MAX_DISTANCE
+
+
+@pytest.mark.unit
+def test_planner_failure_fallback_rejects_weak_evidence(monkeypatch):
+    weak = (doc(52, 120, 180, "Unrelated transcript passage."), 1.9)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: [weak],
+    )
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "weak fallback evidence must not be expanded"
+        ),
+    )
+
+    results, anchors, attempt, accepted = chain._planner_failure_original_query_fallback(
+        object(),
+        "Which historical event does the speaker describe?",
+    )
+
+    assert accepted is False
+    assert results == []
+    assert anchors == []
+    assert attempt["strong_semantic_gate_passed"] is False
+
+
+@pytest.mark.regression
+def test_query_recovery_continues_with_original_query_when_planner_is_rate_limited(
+    monkeypatch,
+):
+    anchor = (doc(61, 420, 480, "A source passage relevant to the historical question."), 0.2)
+    expanded = [anchor]
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [], [], {"weak_native_query_rejected": False}
+        return [anchor], [anchor]
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: (_ for _ in ()).throw(
+            chain.QueryUnderstandingError("Groq 429 tokens-per-minute limit")
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, max_distance: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, question, anchors: expanded,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda *_args, **_kwargs: pytest.fail(
+            "planner failure must not replace a specific question with overview samples"
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "Explain the major historical developments and their consequences.",
+        object(),
+    )
+
+    assert results == expanded
+    assert trace["final_stage"] == "planner_failed_original_query_relaxed"
+    assert trace["planner_failure_fallback_attempted"] is True
+    assert trace["planner_failure_fallback_accepted"] is True
+    assert trace["planner_used"] is False
+    assert calls[1]["query"] == "Explain the major historical developments and their consequences."
+    assert calls[1]["allow_overview"] is False
 
 
 @pytest.mark.unit
