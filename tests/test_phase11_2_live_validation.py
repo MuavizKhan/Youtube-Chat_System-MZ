@@ -30,15 +30,19 @@ def _response(
         "answer": answer,
         "retrieved_chunks": 2,
         "source_segments": len(sources or []),
-        "sources": sources or [
-            {
-                "source_id": "source-1",
-                "start": 60,
-                "end": 90,
-                "chunk_ids": [1],
-                "url": "https://www.youtube.com/watch?v=INpnuL7qnzY&t=60s",
-            }
-        ],
+        "sources": (
+            sources
+            if sources is not None
+            else [
+                {
+                    "source_id": "source-1",
+                    "start": 60,
+                    "end": 90,
+                    "chunk_ids": [1],
+                    "url": "https://www.youtube.com/watch?v=INpnuL7qnzY&t=60s",
+                }
+            ]
+        ),
         "observability": {
             "retrieval": {
                 "final_stage": final_stage,
