@@ -4848,17 +4848,17 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
 
     normalized = " ".join(question.casefold().split())
     analytical_request = re.search(
-        r"\\b(?:explain|describe|analyse|analyze|evaluate|assess|compare|"
-        r"contrast|discuss|trace|identify|outline)\\b",
+        r"\b(?:explain|describe|analyse|analyze|evaluate|assess|compare|"
+        r"contrast|discuss|trace|identify|outline)\b",
         normalized,
     )
     multi_facet_request = re.search(
-        r"\\b(?:and|or|both|versus|vs\\.?|as well as)\\b",
+        r"\b(?:and|or|both|versus|vs\.?|as well as)\b",
         normalized,
     )
     consequence_or_history_request = re.search(
-        r"\\b(?:consequence\\w*|implication\\w*|outcome\\w*|"
-        r"development\\w*|historical|cause\\w*|effect\\w*|impact\\w*)\\b",
+        r"\b(?:consequence\w*|implication\w*|outcome\w*|"
+        r"development\w*|historical|cause\w*|effect\w*|impact\w*)\b",
         normalized,
     )
     if is_evidence_dense_question(question) or (
@@ -4871,8 +4871,8 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
     if is_overview_question(question):
         return True
     return bool(re.search(
-        r"\\b(?:main|overall|general)\\s+(?:subject|topic|theme|idea)\\b|"
-        r"\\b(?:overall|general)\\s+(?:summary|overview)\\b",
+        r"\b(?:main|overall|general)\s+(?:subject|topic|theme|idea)\b|"
+        r"\b(?:overall|general)\s+(?:summary|overview)\b",
         normalized,
     ))
 
