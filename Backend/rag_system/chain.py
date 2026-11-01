@@ -3411,7 +3411,6 @@ def _generation_repair_instruction(
                 "Relevant money-bearing context clauses:\n" + "\n".join(evidence_lines)
             )
 
-    is_arabic = bool(re.search(r"[\u0600-\u06ff]", question_text))
     is_bodily_sound_question = bool(re.search(
         r"\b(?:bodily|body|internal)\s+sounds?\b|"
         r"\bsounds?\b.{0,60}\b(?:hear|room)\b|"
@@ -3426,27 +3425,21 @@ def _generation_repair_instruction(
             if re.search(concept["source"], context_text, re.IGNORECASE)
         ]
         if len(required) >= 2:
-            pattern_key = "arabic" if is_arabic else "english"
             missing = [
                 concept for concept in required
-                if not re.search(concept[pattern_key], answer_text, re.IGNORECASE)
+                if not re.search(concept["english"], answer_text, re.IGNORECASE)
             ]
             if missing:
-                labels = [
-                    concept["label_ar"] if is_arabic else concept["label_en"]
-                    for concept in required
-                ]
+                labels = [concept["label_en"] for concept in required]
                 instructions.append(
-                    "MULTI-ITEM ANSWER REPAIR. Rewrite from scratch in "
-                    + ("Arabic" if is_arabic else "English")
-                    + " and include each source-supported item in this list: "
+                    "MULTI-ITEM ANSWER REPAIR. Rewrite from scratch in English "
+                    "and include each source-supported item in this list: "
                     + ", ".join(labels)
                     + ". Use only items supported by the supplied transcript. "
                     "Do not stop after the first item and do not include a timestamp line; "
-                    "the application adds verified timestamps separately."
+                    "the application adds verified timestamps."
                 )
 
-    question_language = _dominant_supported_script_language(question_text)
     is_sound_perception_question = bool(
         (
             re.search(r"\bsound\b", question_text, re.IGNORECASE)
@@ -3463,41 +3456,31 @@ def _generation_repair_instruction(
             and re.search(r"(?:دور|يساهم|يؤثر|توجيه|يوجه)", question_text)
         )
     )
-    if is_sound_perception_question and question_language in {"en", "ar"}:
-        if question_language == "ar":
-            missing_sound = not re.search(
-                r"(?:الصوت|صوت|أصوات|اصوات)", answer_text
-            )
-            missing_perception = not re.search(
-                r"(?:إدراك|ادراك|بوصلة|توجيه|يوجه|يوجّه)", answer_text
-            )
-        else:
-            missing_sound = not re.search(
-                r"\bsounds?\b", answer_text, re.IGNORECASE
-            )
-            missing_perception = not re.search(
-                r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b",
-                answer_text,
-                re.IGNORECASE,
-            )
+    if is_sound_perception_question:
+        missing_sound = not re.search(
+            r"\bsounds?\b", answer_text, re.IGNORECASE
+        )
+        missing_perception = not re.search(
+            r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b",
+            answer_text,
+            re.IGNORECASE,
+        )
         if missing_sound or missing_perception:
-            language_name = _SUPPORTED_SCRIPT_NAMES[question_language]
             missing_concepts = []
             if missing_sound:
                 missing_concepts.append("sound")
             if missing_perception:
                 missing_concepts.append("perception or its guiding/orienting role")
             instructions.append(
-                "SOUND/PERCEPTION ANSWER REPAIR. Rewrite from scratch in "
-                + language_name
-                + " and directly answer both parts of the question: what sound "
+                "SOUND/PERCEPTION ANSWER REPAIR. Rewrite from scratch in English "
+                "and directly answer both parts of the question: what sound "
                 "contributes to perception, and the role the episode assigns to "
                 "sound. The current draft is missing these concepts: "
                 + ", ".join(missing_concepts)
-                + ". Translate the transcript's meaning into the question's "
-                "language rather than copying sentences from the transcript. "
-                "Use only claims supported by the supplied context. Do not add "
-                "a timestamp line; the application appends verified timestamps."
+                + ". Translate the transcript's meaning into English rather "
+                "than copying sentences from the transcript. Use only claims "
+                "supported by the supplied context. Do not add a timestamp line; "
+                "the application appends verified timestamps."
             )
 
     if not instructions:
