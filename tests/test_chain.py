@@ -3393,7 +3393,7 @@ def test_generation_repair_instruction_detects_missing_and_unsupported_financial
 
 
 @pytest.mark.unit
-def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_question_language():
+def test_named_tax_evidence_answer_requires_explicit_evidence_and_returns_english():
     question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
     context = (
         "[SOURCE 1]\n"
