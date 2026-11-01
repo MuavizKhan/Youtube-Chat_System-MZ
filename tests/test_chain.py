@@ -3868,7 +3868,9 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
     assert len(calls) == 2
     assert trace["quality_repair_attempted"] is True
     assert trace["quality_repair_passed"] is True
-    assert trace["question_language_repair_attempted"] is True
+    assert trace["response_language_repair_attempted"] is True
+    assert trace["response_language_repair_passed"] is True
+    assert trace["question_language_repair_attempted"] is True  # legacy compatibility
     assert trace["question_language_repair_passed"] is True
     assert "sound" in result["answer"].lower()
     assert "perception" in result["answer"].lower()
