@@ -2135,15 +2135,28 @@ def test_query_recovery_routes_unrecognized_overview_question(monkeypatch):
 
 
 @pytest.mark.unit
-def test_planner_overview_intent_cannot_override_specific_multi_part_question():
-    question = (
-        "Explain the major historical developments mentioned in the video "
-        "and their consequences."
-    )
-
-    assert chain.is_evidence_dense_question(question)
+@pytest.mark.parametrize(
+    "question",
+    [
+        (
+            "Explain the major historical developments mentioned in the video "
+            "and their consequences."
+        ),
+        "Describe the causes and outcomes of the farmers' movements.",
+        "Compare the speaker's views and explain their implications.",
+        "Trace the historical developments and identify their effects.",
+    ],
+)
+def test_planner_overview_intent_cannot_override_specific_multi_part_question(question):
     assert chain._should_use_overview_route(question, "overview") is False
 
+
+@pytest.mark.unit
+def test_analytical_single_facet_request_does_not_get_overview_sampling():
+    assert chain._should_use_overview_route(
+        "Explain the historical developments mentioned in the video.",
+        "overview",
+    ) is False
 
 @pytest.mark.unit
 def test_explicit_overview_question_keeps_overview_route():
