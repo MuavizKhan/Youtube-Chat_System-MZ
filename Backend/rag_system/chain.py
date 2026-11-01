@@ -4846,9 +4846,9 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
     """
     if planner_intent != "overview":
         return False
-    if is_overview_question(question):
-        return True
-    return not is_evidence_dense_question(question)
+    if is_evidence_dense_question(question):
+        return False
+    return is_overview_question(question) or bool(question.strip())
 
 
 def _planner_failure_original_query_fallback(
