@@ -343,10 +343,11 @@ def test_q07_quality_gate_rejects_known_malformed_extra_amounts():
     assert "malformed_or_unsupported_financial_amounts_absent" in failed
 
 
-def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
+def test_bodily_sound_quality_gate_requires_english_for_arabic_transcript():
     english_answer = (
         "In the quiet room people may hear their heartbeat, blood rushing through "
-        "their veins, their lungs and breathing, stomach rumbling, and eyelids blinking."
+        "their veins, their lungs and breathing, stomach rumbling, and eyelids blinking. "
+        "Arabic transcript phrase: نبض القلب."
     )
     arabic_answer = (
         "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
@@ -354,12 +355,18 @@ def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
     )
 
     assert all(check["passed"] for check in _answer_quality_checks("AR03", english_answer))
-    assert all(check["passed"] for check in _answer_quality_checks("AR08", arabic_answer))
+    assert all(check["passed"] for check in _answer_quality_checks("AR08", english_answer))
 
-    incomplete_arabic = "الأصوات التي قد يبدأ الناس في سماعها من أجسامهم هي نبضات القلب."
+    arabic_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", arabic_answer)
+    }
+    assert arabic_checks["response_language_english"] is False
+
+    incomplete_english = "In the quiet room people may hear their heartbeat."
     failed = {
         check["name"]
-        for check in _answer_quality_checks("AR08", incomplete_arabic)
+        for check in _answer_quality_checks("AR08", incomplete_english)
         if not check["passed"]
     }
     assert "sound_blood_movement" in failed
@@ -981,7 +988,7 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
     assert {
         "substantive_answer",
         "answer_requirement_three_ways",
-        "question_language",
+        "response_language_english",
     } == {check["name"] for check in checks}
 
     formatted_answer = _answer_quality_checks(
@@ -1185,17 +1192,15 @@ def test_phase11_0_keeps_registry_unanswerable_q12_as_abstention_case():
     assert case.get("answer_language") is None
 
 
-def test_phase11_0_native_language_cases_require_the_question_language():
+def test_phase11_0_hindi_and_arabic_transcript_cases_use_english_questions_and_answers():
     cases = {
         item["id"]: item
         for item in PHASE11_0_AUDIT_CASES
     }
 
-    assert cases["HI06"]["answer_language"] == "hi"
-    assert cases["HI07"]["answer_language"] == "hi"
-    assert cases["HI08"]["answer_language"] == "hi"
-    assert cases["AR06"]["answer_language"] == "ar"
-    assert cases["AR07"]["answer_language"] == "ar"
+    for case_id in ("HI06", "HI07", "HI08", "AR06", "AR07"):
+        assert cases[case_id]["answer_language"] == "en"
+        assert cases[case_id]["question"].isascii()
 
 def test_phase11_0_full_registry_gate_requires_all_43_cases(monkeypatch, tmp_path):
     def successful_fake_chat(_base_url, case, _timeout_seconds):
