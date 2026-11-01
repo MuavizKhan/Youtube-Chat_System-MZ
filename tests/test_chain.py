@@ -2160,10 +2160,14 @@ def test_analytical_single_facet_request_does_not_get_overview_sampling():
 
 @pytest.mark.unit
 def test_explicit_overview_question_keeps_overview_route():
-    assert chain._should_use_overview_route(
+    for question in (
         "What is this video about?",
-        "overview",
-    ) is True
+        "What is the main subject?",
+        "What is the main subject discussed here?",
+        "Give me an overall summary.",
+    ):
+        assert chain._should_use_overview_route(question, "overview") is True
+
     assert chain._should_use_overview_route(
         "What is this video about?",
         "factual",
