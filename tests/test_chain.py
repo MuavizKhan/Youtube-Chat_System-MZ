@@ -3654,6 +3654,28 @@ def test_generation_repair_instruction_detects_question_answer_language_mismatch
 
 
 @pytest.mark.unit
+def test_specialized_sound_repair_uses_english_even_for_arabic_question():
+    question = "كيف يصف المقطع دور الصوت في توجيه الإدراك؟"
+    context = (
+        "الصوت ليس مجرد إشارة نسمعها، بل يتحول في الدماغ إلى تجربة حسية "
+        "تشكل إدراكنا، ويؤثر على المزاج والحالة النفسية."
+    )
+    arabic_answer = "الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا."
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        arabic_answer,
+        context,
+    )
+
+    assert instruction is not None
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "SOUND/PERCEPTION ANSWER REPAIR" in instruction
+    assert "Rewrite from scratch in English" in instruction
+    assert "question's language" not in instruction.lower()
+
+
+@pytest.mark.unit
 def test_response_language_mismatch_always_requires_english_but_allows_short_source_quotes():
     assert chain._question_answer_language_mismatch(
         "What does sound contribute to perception?",
