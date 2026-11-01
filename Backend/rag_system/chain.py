@@ -3281,7 +3281,7 @@ def _generation_repair_instruction(
         question_text, answer_text
     )
     if language_mismatch is not None:
-        _expected_language, previous_language = language_mismatch
+        _required_language, previous_language = language_mismatch
         previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
         instructions.append(
             "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
