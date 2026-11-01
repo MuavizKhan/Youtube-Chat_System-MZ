@@ -71,7 +71,9 @@ def _make_audit_case(
         "evidence_groups": list(evidence_groups),
     }
     if answer_language is not None:
-        case["answer_language"] = answer_language
+        # Historical cases may declare the language of their old native-language
+        # question. The product response contract is now English for every case.
+        case["answer_language"] = "en"
     return case
 
 
@@ -106,7 +108,7 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "AR08", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         evidence_groups=(
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
             {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
@@ -176,7 +178,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI09", "INpnuL7qnzY",
         expected_behavior="answerable",
-        answer_language="hi",
+        answer_language="en",
         answer_requirements=(
             {"name": "named_chavri_tax", "pattern": r"चवरी|चावरी|चवरी|\bchavri\b|\bchawri\b"},
             {"name": "tax_concept", "pattern": r"कर|टैक्स|\btax\b"},
@@ -208,13 +210,13 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "AR08", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         evidence_groups=AUDIT_CASES[2]["evidence_groups"],
     ),
     _make_audit_case(
         "AR09", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         answer_requirements=(
             {"name": "sound_subject", "pattern": r"الصوت|صوت"},
             {"name": "perception_role", "pattern": r"بوصلة|إدراك|ادراك|توجيه"},
@@ -337,18 +339,18 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     ),
     _make_audit_case(
         "HI06", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "named_movement", "pattern": r"बिजोलिया|पहला बड़ा किसान आंदोलन"},),
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "named_movement", "pattern": r"\b(?:Bijolia|first major farmers'? movement)\b"},),
     ),
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "movement_location", "pattern": r"बिजोलिया"},),
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "movement_location", "pattern": r"\bBijolia\b"},),
     ),
     _make_audit_case(
         "HI08", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
-        answer_requirements=({"name": "tax_count", "pattern": r"84|८४"},),
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "tax_count", "pattern": r"\b84\b"},),
     ),
     _make_audit_case(
         "AR01", "fAd2nKfrDB8",
@@ -362,13 +364,13 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     ),
     _make_audit_case(
         "AR06", "fAd2nKfrDB8",
-        expected_behavior="answerable", answer_language="ar",
-        answer_requirements=({"name": "silence_and_rest", "pattern": r"الهدوء|الصمت|راحة"},),
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "silence_and_rest", "pattern": r"\b(?:quiet|silence|rest|comfort)\b"},),
     ),
     _make_audit_case(
         "AR07", "fAd2nKfrDB8",
-        expected_behavior="answerable", answer_language="ar",
-        answer_requirements=({"name": "room_cost", "pattern": r"600|٦٠٠|دولار"},),
+        expected_behavior="answerable", answer_language="en",
+        answer_requirements=({"name": "room_cost", "pattern": r"\b600\b|six hundred|\bdollars?\b"},),
     ),
 )
 
@@ -675,53 +677,23 @@ def _q07_answer_checks(answer: str) -> list[dict[str, Any]]:
 
 
 def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
+    """Check source-supported bodily-sound coverage in the English response."""
     text = _substantive_answer(answer)
-    if case_id == "AR03":
-        requirements = [
-            ("heartbeat", r"heart\s*beat|heartbeat"),
-            ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
-            ("lungs_or_breathing", r"lung|breath"),
-            ("stomach", r"stomach|rumbl|belly"),
-            ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
-        ]
-        checks = [
-            _quality_check(
-                f"sound_{name}",
-                bool(re.search(pattern, text, re.IGNORECASE)),
-                f"The answer must mention the transcript-supported {name.replace('_', ' ')} sound.",
-            )
-            for name, pattern in requirements
-        ]
-        checks.append(_quality_check(
-            "question_language",
-            not bool(re.search(r"[\u0600-\u06ff]", text)),
-            "The English question must receive an English answer.",
-        ))
-        return checks
-
     requirements = [
-        ("heartbeat", r"نبض.{0,20}قلب|قلب.{0,20}نبض"),
-        ("blood_movement", r"(?:حركة|تدفق|جريان|سريان).{0,25}الدم|الدم.{0,30}(?:حركة|تدفق|جريان|سريان|عروق|شرايين|أوعية)"),
-        ("lungs_or_breathing", r"رئتين|الرئتين|الرئة|تنفس"),
-        ("stomach", r"المعدة|معدتك|صوت المعدة"),
-        ("eyelids_blinking", r"(?:عين|عيني|جفن|جفون|الجفون|الجفن).{0,30}(?:ترمش|تومض|ترف|رمش|تحرك)|(?:ترمش|تومض|ترف|رمش|تحرك).{0,30}(?:عين|جفن|جفون|الجفون)"),
+        ("heartbeat", r"heart\s*beat|heartbeat"),
+        ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
+        ("lungs_or_breathing", r"lung|breath"),
+        ("stomach", r"stomach|rumbl|belly"),
+        ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
     ]
-    checks = [
+    return [
         _quality_check(
             f"sound_{name}",
             bool(re.search(pattern, text, re.IGNORECASE)),
-            f"The Arabic answer must mention the transcript-supported {name.replace('_', ' ')} sound.",
+            f"The English answer must mention the transcript-supported {name.replace('_', ' ')} sound.",
         )
         for name, pattern in requirements
     ]
-    arabic_chars = len(re.findall(r"[\u0600-\u06ff]", text))
-    latin_chars = len(re.findall(r"[A-Za-z]", text))
-    checks.append(_quality_check(
-        "question_language",
-        arabic_chars >= 12 and arabic_chars > latin_chars,
-        "The Arabic question must receive a substantive Arabic answer, not an English response.",
-    ))
-    return checks
 
 
 _ABSTENTION_PATTERN = re.compile(
@@ -788,13 +760,20 @@ def _answer_quality_checks(
     expected_behavior = case.get("expected_behavior", "answerable")
     substantive = _substantive_answer(answer)
 
+    response_language_check = _quality_check(
+        "response_language_english",
+        _answer_language_matches(answer, "en"),
+        "The main answer and any abstention must be in English; short exact source-language quotations may appear as supporting evidence.",
+    )
+
     if expected_behavior == "unanswerable":
         return [
             _quality_check(
                 "unanswerable_case_abstained",
                 bool(_ABSTENTION_PATTERN.search(substantive)),
                 "The unrelated/unanswerable question must receive an explicit abstention, not a guessed factual answer.",
-            )
+            ),
+            response_language_check,
         ]
 
     checks = [
@@ -802,7 +781,8 @@ def _answer_quality_checks(
             "substantive_answer",
             bool(substantive) and not _is_abstention_only_answer(substantive),
             "The answer must contain a substantive response rather than the fallback.",
-        )
+        ),
+        response_language_check,
     ]
     if normalized_case_id == "Q07":
         checks.extend(_q07_answer_checks(answer))
@@ -828,18 +808,6 @@ def _answer_quality_checks(
             ),
         ))
 
-    answer_language = case.get("answer_language")
-    if isinstance(answer_language, str):
-        passed = _answer_language_matches(answer, answer_language)
-        checks.append(_quality_check(
-            "question_language",
-            passed,
-            (
-                f"The answer uses the expected {answer_language} script."
-                if passed
-                else f"The answer does not use the expected {answer_language} script."
-            ),
-        ))
     return checks
 
 

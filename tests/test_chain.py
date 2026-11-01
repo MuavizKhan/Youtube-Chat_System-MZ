@@ -956,21 +956,25 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
 
 
 @pytest.mark.unit
-def test_prompt_requires_answer_in_question_language_even_when_context_is_english():
-    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+def test_prompt_enforces_english_answer_for_non_english_question_and_transcript():
+    question = "इस वीडियो में किसान आंदोलनों के बारे में क्या बताया गया है?"
+    context = "किसानों पर कई प्रकार के कर लगाए गए थे।"
     prompt = chain.RAG_PROMPT.invoke({
-        "context": "The transcript is in English and discusses heartbeat and breathing.",
+        "context": context,
         "question": question,
     })
     messages = chain.prompt_to_messages(prompt)
     normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+    user_prompt = messages[1]["content"]
 
-    assert question in messages[1]["content"]
-    assert "answer in the same language as the user's question" in normalized_system_prompt
-    assert "do not switch to english merely because the transcript" in normalized_system_prompt
-    assert "do not switch to hindi or arabic merely because the transcript" in normalized_system_prompt
-    assert "an english question about a hindi or arabic transcript must be answered in english" in normalized_system_prompt
-    assert "an arabic question must be answered in arabic" in normalized_system_prompt
+    assert question in user_prompt
+    assert context in user_prompt
+    assert "main answer must always be written in english" in normalized_system_prompt
+    assert "regardless of the language of the question, transcript" in normalized_system_prompt
+    assert "translate supported meaning from the transcript" in normalized_system_prompt
+    assert "short, exact original-language excerpt" in normalized_system_prompt
+    assert "follow it immediately with its english meaning" in normalized_system_prompt
+    assert "do not use non-english text for the main answer or for an abstention" in normalized_system_prompt
 
 
 @pytest.mark.unit
@@ -1880,6 +1884,110 @@ def test_query_recovery_keeps_fast_path_when_initial_retrieval_succeeds(monkeypa
 
 
 @pytest.mark.unit
+def test_query_recovery_rewrites_initial_candidates_below_semantic_gate(monkeypatch):
+    lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
+    semantic = (doc(2, 1705, 1715, "computers use zeros and ones in binary"), 0.2)
+    expanded = [semantic, (doc(3, 1710, 1715, "a bit is zero or one"), chain.MAX_DISTANCE)]
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs.copy())
+        if len(calls) == 1:
+            return [lexical], [lexical], {"weak_native_query_rejected": False}
+        return [semantic], [semantic], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="binary system zeros and ones",
+            search_queries=["binary digits and bit representation"],
+        ),
+    )
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or expanded
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "How does the lecturer explain binary representation?",
+        object(),
+    )
+
+    assert results == expanded
+    assert trace["weak_initial_recovery_attempted"] is True
+    assert trace["weak_initial_recovery_accepted"] is True
+    assert trace["planner_used"] is True
+    assert trace["final_stage"] == "weak_initial_rewrite"
+    assert trace["recovery_used"] is True
+    assert trace["citation_chunk_ids"] == [2]
+    assert calls[0]["query"] == "How does the lecturer explain binary representation?"
+    assert calls[1]["query"] == "binary system zeros and ones"
+    assert calls[1]["expand_context"] is False
+    assert calls[1]["allow_overview"] is False
+    assert expansion_calls == [("binary system zeros and ones", [semantic])]
+
+
+@pytest.mark.unit
+def test_query_recovery_preserves_initial_candidates_when_rewrite_is_not_semantic(monkeypatch):
+    lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
+    weak_rewrite = (doc(2, 1705, 1715, "unrelated passage"), chain.MAX_DISTANCE)
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs.copy())
+        if len(calls) == 1:
+            return [lexical], [lexical], {"weak_native_query_rejected": False}
+        return [weak_rewrite], [weak_rewrite], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question="binary system zeros and ones",
+            search_queries=["binary digits and bit representation"],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "A rewritten lexical-only candidate must not pass the semantic gate."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "How does the lecturer explain binary representation?",
+        object(),
+    )
+
+    assert results == [lexical]
+    assert trace["weak_initial_recovery_attempted"] is True
+    assert trace["weak_initial_recovery_accepted"] is False
+    assert trace["final_stage"] == "initial_strict"
+    assert trace["recovery_used"] is False
+    assert trace["final_chunk_ids"] == [1]
+    assert all(
+        attempt.get("accepted_for_generation") is False
+        for attempt in trace["attempts"][1:]
+    )
+
+
+@pytest.mark.unit
 def test_query_recovery_retries_with_reformulated_queries(monkeypatch):
     empty = []
     recovered = [(doc(7, 70, 80, "recovered evidence"), 0.4)]
@@ -2022,7 +2130,7 @@ def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
 
 
 @pytest.mark.regression
-def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
+def test_query_recovery_rejects_weak_initial_rewrites_without_overview_fallback(
     monkeypatch,
 ):
     candidate = doc(173, 11595, 11675, "Australia capital city")
@@ -3166,7 +3274,7 @@ def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_c
         question,
         excerpt,
     )
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert answer == 'The transcript identifies the new tax as “चवरी कर” (the original Hindi term).'
 
 
 @pytest.mark.unit
@@ -3217,7 +3325,7 @@ def test_named_tax_fallback_uses_full_source_groups_when_prompt_context_omits_as
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["extracted_tax_name"] == "चवरी कर"
 
@@ -3389,7 +3497,7 @@ def test_generation_repair_instruction_detects_missing_and_unsupported_financial
 
 
 @pytest.mark.unit
-def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_question_language():
+def test_named_tax_evidence_answer_requires_explicit_evidence_and_returns_english():
     question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
     context = (
         "[SOURCE 1]\n"
@@ -3404,7 +3512,7 @@ def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_ques
         question, context, diagnostics=diagnostics
     )
 
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert answer == 'The transcript identifies the new tax as “चवरी कर” (the original Hindi term).'
     assert diagnostics["used"] is True
     assert diagnostics["extracted_tax_name"] == "चवरी कर"
     assert diagnostics["matched_evidence_phrase"] == "नया टैक्स लगाया गया था चवरी कर"
@@ -3419,7 +3527,7 @@ def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_ques
     english_answer = chain._build_hindi_named_tax_evidence_fallback(
         "Which new tax was imposed and what was it called?", context
     )
-    assert english_answer == "The transcript identifies the new tax as “चवरी कर”."
+    assert english_answer == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
 
     # General tax mentions are not enough without the explicit naming clause.
     assert chain._build_hindi_named_tax_evidence_fallback(
@@ -3455,7 +3563,7 @@ def test_rag_chain_uses_source_extractive_hindi_tax_answer_when_model_abstains(m
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
     assert result["generation_trace"]["fallback_used"] is False
@@ -3493,14 +3601,14 @@ def test_rag_chain_corrects_cross_lingual_tax_spelling_from_explicit_caption_evi
         "video_id": "INpnuL7qnzY",
     })
 
-    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर”."
+    assert result["answer"] == "The transcript identifies the new tax as “चवरी कर” (the original Hindi term)."
     assert result["generation_trace"]["grounded_hindi_tax_fallback_used"] is True
     assert result["generation_trace"]["hindi_tax_fallback_diagnostics"]["used"] is True
 
 
 @pytest.mark.unit
-def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
-    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+def test_generation_repair_instruction_detects_incomplete_bodily_sound_list_and_requires_english():
+    question = "What sounds might people begin to hear from their own bodies inside the room?"
     context = (
         "You may hear your heartbeat, the blood rushing through your veins, "
         "the sounds of your lungs and stomach, and even your eyelids blinking."
@@ -3513,11 +3621,13 @@ def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_li
     )
 
     assert instruction is not None
-    assert "Arabic" in instruction
-    assert "حركة أو جريان الدم في العروق" in instruction
-    assert "أصوات الرئتين أو التنفس" in instruction
-    assert "أصوات المعدة" in instruction
-    assert "رمش الجفون" in instruction
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "MULTI-ITEM ANSWER REPAIR" in instruction
+    assert "Rewrite from scratch in English" in instruction
+    assert "blood moving/rushing through veins" in instruction
+    assert "lungs or breathing" in instruction
+    assert "stomach sounds" in instruction
+    assert "eyelid blinking" in instruction
 
 
 @pytest.mark.unit
@@ -3539,39 +3649,195 @@ def test_generation_repair_instruction_detects_question_answer_language_mismatch
     )
 
     assert instruction is not None
-    assert "QUESTION-LANGUAGE REPAIR" in instruction
-    assert "rewrite the answer from scratch in english" in instruction.lower()
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "rewrite the complete main answer in english" in instruction.lower()
     assert "SOUND/PERCEPTION ANSWER REPAIR" in instruction
     assert "perception" in instruction.lower()
 
 
 @pytest.mark.unit
-def test_question_answer_language_mismatch_only_flags_clear_script_mismatches():
+def test_specialized_sound_repair_uses_english_even_for_arabic_question():
+    question = "كيف يصف المقطع دور الصوت في توجيه الإدراك؟"
+    context = (
+        "الصوت ليس مجرد إشارة نسمعها، بل يتحول في الدماغ إلى تجربة حسية "
+        "تشكل إدراكنا، ويؤثر على المزاج والحالة النفسية."
+    )
+    arabic_answer = "الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا."
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        arabic_answer,
+        context,
+    )
+
+    assert instruction is not None
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "SOUND/PERCEPTION ANSWER REPAIR" in instruction
+    assert "Rewrite from scratch in English" in instruction
+    assert "question's language" not in instruction.lower()
+
+
+@pytest.mark.unit
+def test_response_language_mismatch_always_requires_english_but_allows_short_source_quotes():
     assert chain._question_answer_language_mismatch(
         "What does sound contribute to perception?",
         "الصوت يؤثر في الإدراك ويغير المزاج."
     ) == ("en", "ar")
     assert chain._question_answer_language_mismatch(
         "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        "الصوت يؤثر في الإدراك ويغير المزاج."
+    ) == ("en", "ar")
+    assert chain._question_answer_language_mismatch(
+        "इस वीडियो में क्या बताया गया है?",
+        "वीडियो में किसानों पर कर लगाए जाने की चर्चा है।"
+    ) == ("en", "hi")
+    assert chain._question_answer_language_mismatch(
+        "كيف يصف المقطع دور الصوت؟",
         "The episode says sound shapes perception."
-    ) == ("ar", "en")
+    ) is None
     assert chain._question_answer_language_mismatch(
         "What does sound contribute to perception?",
-        "The episode explains how sound shapes perception."
-    ) is None
-    assert chain._question_answer_language_mismatch(
-        "What is the Arabic term الصوت for sound?",
         "The answer is sound, with the Arabic term الصوت."
     ) is None
-    # Latin script alone must not let a Turkish answer pass as English.
     assert chain._question_answer_language_mismatch(
-        "How many ways does the speaker promise to express himself in meetings?",
+        "What is discussed?",
+        "The speaker explains the idea. Hindi phrase: किसान आंदोलन."
+    ) is None
+    assert chain._question_answer_language_mismatch(
+        "How many ways?",
         "Üç yöntem."
     ) == ("en", "tr")
     assert chain._question_answer_language_mismatch(
-        "How many ways does the speaker promise to express himself in meetings?",
+        "How many ways?",
         "The speaker offers three ways."
     ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("question", [
+    "What is discussed in the video?",
+    "इस वीडियो में क्या बताया गया है?",
+    "ما موضوع هذا الفيديو؟",
+])
+def test_all_abstention_fallbacks_are_english(question):
+    assert chain._fallback_for_question_language(question) == chain.FALLBACK_ANSWER
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_rechecks_abstention_against_supplied_passages():
+    question = "How does the lecturer explain binary representation?"
+    context = (
+        "[SOURCE 1]\\n"
+        "Transcript: Computers use zeros and ones in the binary system. "
+        "A single bit is a zero or one."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        chain.FALLBACK_ANSWER,
+        context,
+    )
+
+    assert instruction is not None
+    assert "EVIDENCE RECHECK" in instruction
+    assert "answer those parts in English" in instruction
+    assert "return the exact English fallback" in instruction
+    assert chain._generation_repair_instruction(
+        question,
+        chain.FALLBACK_ANSWER,
+        "",
+    ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "second_answer, expected_recheck_passed",
+    [
+        (
+            "The lecturer explains that binary represents information using "
+            "zeros and ones. A bit is one binary digit and can be either 0 or 1.",
+            True,
+        ),
+        (chain.FALLBACK_ANSWER, False),
+    ],
+)
+def test_rag_chain_rechecks_abstention_once_without_weakening_grounding(
+    monkeypatch, second_answer, expected_recheck_passed
+):
+    question = "How does the lecturer explain binary representation?"
+    context = (
+        "Computers use zeros and ones in the binary system. "
+        "A single bit is a zero or one."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 1705, 1710, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    outputs = iter([chain.FALLBACK_ANSWER, second_answer])
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "unregistered-video",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert trace["abstention_recheck_attempted"] is True
+    assert trace["abstention_recheck_passed"] is expected_recheck_passed
+    if expected_recheck_passed:
+        assert "zeros and ones" in result["answer"].lower()
+    else:
+        assert result["answer"] == chain.FALLBACK_ANSWER
+
+
+@pytest.mark.unit
+def test_language_repair_fails_closed_if_provider_repeats_non_english_draft(monkeypatch):
+    context = "- [02:28–03:34] الصوت يتحول في الدماغ إلى تجربة حسية تشكل إدراكنا."
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(2, 148, 214, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [2],
+                "citation_chunk_ids": [2],
+            },
+        ),
+    )
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs["prompt_value"])
+        return "الصوت يتحول في الدماغ إلى تجربة حسية تشكل الإدراك."
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What does the speaker say about sound and perception?",
+        "video_id": "unregistered-video",
+    })
+
+    assert len(calls) == 2
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert result["generation_trace"]["question_language_repair_passed"] is False
 
 
 @pytest.mark.unit
@@ -3626,7 +3892,9 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
     assert len(calls) == 2
     assert trace["quality_repair_attempted"] is True
     assert trace["quality_repair_passed"] is True
-    assert trace["question_language_repair_attempted"] is True
+    assert trace["response_language_repair_attempted"] is True
+    assert trace["response_language_repair_passed"] is True
+    assert trace["question_language_repair_attempted"] is True  # legacy compatibility
     assert trace["question_language_repair_passed"] is True
     assert "sound" in result["answer"].lower()
     assert "perception" in result["answer"].lower()
@@ -3644,7 +3912,7 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
         ),
         (
             "यह वीडियो विषय के बारे में क्या बताता है?",
-            "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+            chain.FALLBACK_ANSWER,
             False,
         ),
         (
@@ -5186,8 +5454,10 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
     prompt = chain.SYSTEM_INSTRUCTIONS
     assert len(prompt) < 5000
     for required_rule in (
-        "language of the user's main question",
+        "main answer MUST ALWAYS be written in English",
         "only the supplied transcript context",
+        "short, exact original-language excerpt",
+        "count distinct concepts or teams separately",
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",

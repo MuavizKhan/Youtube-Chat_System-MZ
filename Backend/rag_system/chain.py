@@ -170,37 +170,34 @@ FINANCIAL_VERIFICATION_FALLBACK = (
 # 1. SYSTEM INSTRUCTIONS
 # ============================================================
 
-SYSTEM_INSTRUCTIONS = """
-You answer questions about a YouTube video using only the supplied transcript context.
+SYSTEM_INSTRUCTIONS = """You answer questions about a YouTube video using only the supplied transcript context.
 
 LANGUAGE
-- Answer in the same language as the user's question (the language of the user's main question), unless they request another language. Translate supported facts as needed; transcript language does not determine answer language.
-- Do not switch to English merely because the transcript, retrieved context, or video captions are in English. Do not switch to Hindi or Arabic merely because the transcript or captions are in those languages. An English question about a Hindi or Arabic transcript must be answered in English; a Hindi question must be answered in Hindi, and an Arabic question must be answered in Arabic.
-- Preserve names, product names, numbers, currencies, and source-grounded spellings. For multilingual questions, use the language of the main question. For English questions, write natural English; Latin script alone does not mean English.
+- The main answer MUST ALWAYS be written in English, regardless of the language of the question, transcript, captions, retrieved passages, or conversation history. Translate supported meaning from the transcript into clear English; preserve source-grounded names, spellings, dates, numbers, units, and uncertainty.
+- When key evidence comes from a Hindi, Arabic, or Urdu transcript, include one short, exact original-language excerpt whenever a suitable passage is supplied and can be quoted faithfully. Follow it immediately with its English meaning. Quote only supplied text; never reconstruct or invent an excerpt. Do not use non-English text for the main answer or for an abstention. A short source-language quotation is the only permitted exception.
 
 EVIDENCE AND ATTRIBUTION
-- Answer directly and concisely using only supplied evidence. Do not use outside knowledge or invent facts, relationships, or interpretations.
-- Source blocks are timestamped evidence segments containing caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove the speaker changed; the timestamps do not establish who spoke.
-- When asked what a named person says, attribute a claim only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into a statement made by the guest or an established finding. Distinguish the guest's statements from an interviewer's questions. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. A speaker's account of what an authority found is an account; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify it when supported, or omit it. Do not guess.
-- Caption errors, fragments, and repetitions may occur. Do not silently repair facts using outside knowledge.
+- Answer directly and concisely from supplied evidence only. Do not use outside knowledge or invent facts, relationships, or interpretations.
+- Source blocks are timestamped evidence segments containing caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove a speaker changed; the timestamps do not establish who spoke.
+- Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. Distinguish the guest's statements from an interviewer's questions. An account of what an authority found is only an account; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify it when supported, or omit it. Do not guess.
+- Captions may contain errors, fragments, and repetitions. Do not silently repair facts using outside knowledge.
 
 TEMPORAL AND MULTI-PART QUESTIONS
-- Answer time-scoped questions only from the relevant supplied passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say that it is not stated in that passage.
-- For multi-part questions, include every supported part and every distinct supported item; omit unsupported parts. Prefer a concise paragraph; use bullets only for genuinely multi-part answers. Do not repeat information.
+- Answer time-scoped questions only from the relevant supplied passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage.
+- Include every supported part and distinct item; omit unsupported parts. Use bullets only for genuinely multi-part answers.
+- When a specific count or complete list is requested, count distinct concepts or teams separately when the transcript distinguishes them. Do not merge separate proposals merely because they share a category. Do not invent items to reach a count; disclose when fewer items or an uncertain count are supported.
 
 NUMBERS AND FINANCIAL CLAIMS
-- Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker. Retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
+- Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker; retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
 - Keep investment, debt, debt-certificate, alleged transaction, and recovery figures separate. For broad money/debt questions, include each materially relevant monetary claim. If the transcript does not explain how figures relate, report both separately and state that the relationship is unclear.
-- Do not silently repair a number or call one a "misreading" unless the transcript explicitly supports that relationship. Never describe a recovery figure as a company debt total merely because both figures occur in the same interview. If captions garble a number or speakers disagree, do not silently correct it or reconcile the figures.
+- Do not silently repair a number or call one a "misreading" unless the transcript explicitly supports that relationship. Never describe a recovery figure as a company debt total. If captions garble a number or speakers disagree, state the uncertainty.
 
 ABSTENTION
 - If context is empty, unrelated, or genuinely insufficient, answer exactly: "I couldn't find enough information about that in the video. It may not be covered by this video."
-- Do not use this fallback solely because a named event is absent from an otherwise relevant passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage.
 
 SOURCES AND OUTPUT
-- Return only the substantive answer. Do not output source labels, citations, references, or metadata, and do not invent timestamps. The application appends a separate "Relevant timestamps" line to substantive answers using verified source metadata; timestamp ranges remain part of the answer. Clickable video sources are displayed separately.
-- Do not mention retrieval, embeddings, prompts, vector databases, or internal implementation.
-"""
+- Return only the substantive answer. Do not output source labels, citations, references, metadata, or invented timestamps. The application appends a separate "Relevant timestamps" line from verified source metadata; timestamp ranges remain part of the answer. Clickable video sources are displayed separately.
+- Do not mention retrieval, embeddings, prompts, vector databases, or internal implementation."""
 
 # ============================================================
 # 2. PROMPT
@@ -221,7 +218,7 @@ Transcript context:
 
 Question: {question}
 
-Answer only from the context, in the question's language. Be concise but include all supported parts and preserve claim attribution and distinct figures. If the context is genuinely insufficient, use the specified fallback. Return answer text only; the application adds verified sources and timestamps.
+Answer only from the supplied context and ALWAYS write the main answer in English. Translate supported facts from any transcript language. If useful, include one short exact Hindi, Arabic, or Urdu excerpt from the supplied context followed by its English meaning. Be concise but include all supported parts and preserve claim attribution, dates, numbers, and uncertainty. If the context is genuinely insufficient, use the exact English fallback in the system instructions. Return answer text only; the application adds verified sources and timestamps.
 """,
         ),
     ]
@@ -3194,12 +3191,7 @@ def _looks_like_turkish_answer(text: str) -> bool:
 
 
 def _fallback_for_question_language(question: str) -> str:
-    """Return a conservative abstention in the question's supported language."""
-    language = _dominant_supported_script_language(question)
-    if language == "hi":
-        return "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।"
-    if language == "ar":
-        return "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال."
+    """Return the fixed English abstention required by the response contract."""
     return FALLBACK_ANSWER
 
 
@@ -3230,29 +3222,31 @@ def _question_answer_language_mismatch(
     question: str,
     answer: str,
 ) -> tuple[str, str] | None:
-    """Return (expected, actual) for a clear supported-script mismatch only."""
-    expected = _dominant_supported_script_language(question)
-    if expected is None:
-        return None
+    """Return (required, detected) when the main answer is not English.
 
-    # Detect known non-English Latin-script drafts before script-only checks;
-    # otherwise a short answer such as "Üç yöntem" looks like English letters.
-    if _looks_like_turkish_answer(_strip_unverified_timestamp_summary(answer or "")):
+    The question argument remains for call-site compatibility. Response language
+    is a product contract, not a property inferred from the question. Short
+    original-script quotations are allowed when the English explanation remains
+    dominant.
+    """
+    expected = "en"
+    normalized_answer = _strip_unverified_timestamp_summary(answer or "")
+
+    if _looks_like_turkish_answer(normalized_answer):
         return expected, "tr"
 
-    counts = _supported_script_letter_counts(_strip_unverified_timestamp_summary(answer or ""))
+    counts = _supported_script_letter_counts(normalized_answer)
     total = sum(counts.values())
     if total < 8:
         return None
+
     actual, actual_count = max(counts.items(), key=lambda item: item[1])
     if actual == expected:
         return None
 
-    expected_share = counts[expected] / total
+    english_share = counts["en"] / total
     actual_share = actual_count / total
-    # Only repair strong mismatches. Small quoted names or source terms in another
-    # script should not cause a rewrite of an otherwise correctly-languaged answer.
-    if expected_share <= 0.35 and actual_share >= 0.55:
+    if english_share < 0.35 and actual_share >= 0.55:
         return expected, actual
     return None
 
@@ -3282,23 +3276,30 @@ def _generation_repair_instruction(
         question_text, answer_text
     )
     if language_mismatch is not None:
-        expected_language, previous_language = language_mismatch
-        expected_name = _SUPPORTED_SCRIPT_NAMES[expected_language]
+        _required_language, previous_language = language_mismatch
         previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
         instructions.append(
-            "QUESTION-LANGUAGE REPAIR. The user's question is predominantly in "
-            + expected_name
-            + ", but the previous draft is predominantly in "
+            "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
             + previous_name
-            + ". Rewrite the answer from scratch in "
-            + expected_name
-            + ". Translate the source-supported meaning into "
-            + expected_name
-            + " instead of copying the transcript's language or script. "
-            "Use only facts supported by the supplied transcript context. "
-            "Keep any original-script proper name only when it is necessary, "
-            "and explain it in the requested language. Do not include a timestamp "
-            "line; the application adds verified timestamps separately."
+            + ". Rewrite the complete main answer in English, regardless of the "
+            + "question or transcript language. Translate only meaning supported by "
+            + "the supplied transcript context. You may retain one short, exact "
+            + "original-language excerpt when it helps verify a key point, but "
+            + "immediately explain it in English. Do not invent quotations, facts, "
+            + "names, dates, numbers, or timestamps. Do not include a timestamp "
+            + "line; the application adds verified timestamps separately."
+        )
+
+    if _is_abstention_answer(answer_text) and context_text.strip():
+        instructions.append(
+            "EVIDENCE RECHECK. The previous draft abstained even though transcript "
+            "passages were supplied. Re-read every supplied source block and check "
+            "whether any part of the question is directly answered, including "
+            "paraphrased or translated wording. If one or more parts are supported, "
+            "answer those parts in English and clearly state what remains unstated. "
+            "Use only the supplied passages; do not infer missing dates, numbers, "
+            "names, causes, or conclusions. If no passage supports any part of the "
+            "question, return the exact English fallback from the system instructions."
         )
 
     is_financial_question = bool(re.search(
@@ -3410,7 +3411,6 @@ def _generation_repair_instruction(
                 "Relevant money-bearing context clauses:\n" + "\n".join(evidence_lines)
             )
 
-    is_arabic = bool(re.search(r"[\u0600-\u06ff]", question_text))
     is_bodily_sound_question = bool(re.search(
         r"\b(?:bodily|body|internal)\s+sounds?\b|"
         r"\bsounds?\b.{0,60}\b(?:hear|room)\b|"
@@ -3425,27 +3425,21 @@ def _generation_repair_instruction(
             if re.search(concept["source"], context_text, re.IGNORECASE)
         ]
         if len(required) >= 2:
-            pattern_key = "arabic" if is_arabic else "english"
             missing = [
                 concept for concept in required
-                if not re.search(concept[pattern_key], answer_text, re.IGNORECASE)
+                if not re.search(concept["english"], answer_text, re.IGNORECASE)
             ]
             if missing:
-                labels = [
-                    concept["label_ar"] if is_arabic else concept["label_en"]
-                    for concept in required
-                ]
+                labels = [concept["label_en"] for concept in required]
                 instructions.append(
-                    "MULTI-ITEM ANSWER REPAIR. Rewrite from scratch in "
-                    + ("Arabic" if is_arabic else "English")
-                    + " and include each source-supported item in this list: "
+                    "MULTI-ITEM ANSWER REPAIR. Rewrite from scratch in English "
+                    "and include each source-supported item in this list: "
                     + ", ".join(labels)
                     + ". Use only items supported by the supplied transcript. "
                     "Do not stop after the first item and do not include a timestamp line; "
-                    "the application adds verified timestamps separately."
+                    "the application adds verified timestamps."
                 )
 
-    question_language = _dominant_supported_script_language(question_text)
     is_sound_perception_question = bool(
         (
             re.search(r"\bsound\b", question_text, re.IGNORECASE)
@@ -3462,41 +3456,31 @@ def _generation_repair_instruction(
             and re.search(r"(?:دور|يساهم|يؤثر|توجيه|يوجه)", question_text)
         )
     )
-    if is_sound_perception_question and question_language in {"en", "ar"}:
-        if question_language == "ar":
-            missing_sound = not re.search(
-                r"(?:الصوت|صوت|أصوات|اصوات)", answer_text
-            )
-            missing_perception = not re.search(
-                r"(?:إدراك|ادراك|بوصلة|توجيه|يوجه|يوجّه)", answer_text
-            )
-        else:
-            missing_sound = not re.search(
-                r"\bsounds?\b", answer_text, re.IGNORECASE
-            )
-            missing_perception = not re.search(
-                r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b",
-                answer_text,
-                re.IGNORECASE,
-            )
+    if is_sound_perception_question:
+        missing_sound = not re.search(
+            r"\bsounds?\b", answer_text, re.IGNORECASE
+        )
+        missing_perception = not re.search(
+            r"\b(?:compass|percept\w*|perceiv\w*|guide|orient\w*|direction|navigat\w*)\b",
+            answer_text,
+            re.IGNORECASE,
+        )
         if missing_sound or missing_perception:
-            language_name = _SUPPORTED_SCRIPT_NAMES[question_language]
             missing_concepts = []
             if missing_sound:
                 missing_concepts.append("sound")
             if missing_perception:
                 missing_concepts.append("perception or its guiding/orienting role")
             instructions.append(
-                "SOUND/PERCEPTION ANSWER REPAIR. Rewrite from scratch in "
-                + language_name
-                + " and directly answer both parts of the question: what sound "
+                "SOUND/PERCEPTION ANSWER REPAIR. Rewrite from scratch in English "
+                "and directly answer both parts of the question: what sound "
                 "contributes to perception, and the role the episode assigns to "
                 "sound. The current draft is missing these concepts: "
                 + ", ".join(missing_concepts)
-                + ". Translate the transcript's meaning into the question's "
-                "language rather than copying sentences from the transcript. "
-                "Use only claims supported by the supplied context. Do not add "
-                "a timestamp line; the application appends verified timestamps."
+                + ". Translate the transcript's meaning into English rather "
+                "than copying sentences from the transcript. Use only claims "
+                "supported by the supplied context. Do not add a timestamp line; "
+                "the application appends verified timestamps."
             )
 
     if not instructions:
@@ -3513,12 +3497,12 @@ def _build_hindi_named_tax_evidence_fallback(
     context: str,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Build a tax-name answer only from an explicit transcript assertion.
+    """Build an English tax-name answer from an explicit transcript assertion.
 
     The assertion can span adjacent timestamped caption snippets. Timestamp
     labels are removed within each source block only, so snippets may join
     naturally without accidentally combining evidence from different sources.
-    The answer language follows the question language (Hindi or English).
+    The extracted Hindi tax name is preserved as a source-language term.
     """
     normalized_question = unicodedata.normalize("NFKC", question or "")
     normalized_context = unicodedata.normalize("NFKC", context or "")
@@ -3590,9 +3574,10 @@ def _build_hindi_named_tax_evidence_fallback(
             "extracted_tax_name": tax_name,
         })
 
-    if is_native_hindi:
-        return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
-    return f"The transcript identifies the new tax as “{tax_name}”."
+    return (
+        f'The transcript identifies the new tax as “{tax_name}” '
+        "(the original Hindi term)."
+    )
 
 
 def _build_financial_evidence_fallback(
@@ -4833,6 +4818,8 @@ def _retrieve_with_query_recovery_trace(
     planner_intent = None
     planner_latency_ms = 0.0
     weak_recovery_candidates_rejected = False
+    weak_initial_recovery_attempted = False
+    weak_initial_recovery_accepted = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -4938,6 +4925,125 @@ def _retrieve_with_query_recovery_trace(
     if initial_results:
         final_results = initial_results
         final_stage = "initial_strict"
+
+        # Initial candidates can be lexical-only or semantically weak. A
+        # non-empty result used to end the recovery ladder even when no anchor
+        # passed the same strong semantic gate required for rewritten queries.
+        # Preserve the initial candidates as a safe fallback, but try one bounded
+        # query rewrite and accept it only when rewritten evidence passes that
+        # normal gate.
+        weak_initial_candidates = bool(citation_results) and not passes_strong_semantic_gate(
+            citation_results,
+            MAX_DISTANCE,
+        )
+        if weak_initial_candidates and len(_generation_context_query_terms(question)) >= 3:
+            weak_initial_recovery_attempted = True
+            planner_started = time.perf_counter()
+            try:
+                if llm_client is None:
+                    llm_client = create_llm_client()
+                plan = understand_query(
+                    client=llm_client,
+                    question=question,
+                )
+                planner_used = True
+                planner_intent = plan.intent
+                planner_latency_ms = (
+                    time.perf_counter() - planner_started
+                ) * 1000
+
+                if plan.intent == "overview":
+                    overview_results = retrieve_overview(vector_store)
+                    attempts.append(
+                        _build_retrieval_attempt_trace(
+                            "weak_initial_overview",
+                            overview_results,
+                        )
+                    )
+                    if overview_results:
+                        final_results = overview_results
+                        citation_results = overview_results
+                        final_stage = "weak_initial_overview"
+                        weak_initial_recovery_accepted = True
+
+                if not weak_initial_recovery_accepted:
+                    query_candidates = [
+                        plan.standalone_question,
+                        *plan.search_queries[:1],
+                    ]
+                    seen_queries = {question.strip().casefold()}
+                    for rewritten_query in query_candidates:
+                        rewritten_query = (rewritten_query or "").strip()
+                        key = rewritten_query.casefold()
+                        if not rewritten_query or key in seen_queries:
+                            continue
+                        seen_queries.add(key)
+
+                        rewritten_bundle = retrieve_question_context(
+                            vector_store=vector_store,
+                            query=rewritten_query,
+                            k=TOP_K,
+                            fetch_k=MMR_FETCH_K,
+                            lambda_mult=MMR_LAMBDA,
+                            max_distance=MAX_DISTANCE,
+                            expand_context=False,
+                            allow_overview=False,
+                            return_anchors=True,
+                            return_status=True,
+                        )
+                        if (
+                            isinstance(rewritten_bundle, tuple)
+                            and len(rewritten_bundle) == 3
+                        ):
+                            _rewritten_context, rewritten_anchors, rewritten_status = rewritten_bundle
+                        elif (
+                            isinstance(rewritten_bundle, tuple)
+                            and len(rewritten_bundle) == 2
+                        ):
+                            _rewritten_context, rewritten_anchors = rewritten_bundle
+                            rewritten_status = {}
+                        else:
+                            rewritten_anchors = rewritten_bundle
+                            rewritten_status = {}
+
+                        semantic_gate_passed = passes_strong_semantic_gate(
+                            rewritten_anchors,
+                            MAX_DISTANCE,
+                        )
+                        attempt_trace = _build_retrieval_attempt_trace(
+                            "weak_initial_rewrite",
+                            rewritten_anchors,
+                            query=rewritten_query,
+                        )
+                        attempt_trace["semantic_gate_passed"] = semantic_gate_passed
+                        attempt_trace["accepted_for_generation"] = bool(
+                            rewritten_anchors and semantic_gate_passed
+                        )
+                        if rewritten_status.get("weak_native_query_rejected"):
+                            attempt_trace["rejection_reason"] = "weak_native_semantic_match"
+                        elif rewritten_anchors and not semantic_gate_passed:
+                            attempt_trace["rejection_reason"] = "weak_semantic_support"
+                        attempts.append(attempt_trace)
+
+                        if rewritten_anchors and semantic_gate_passed:
+                            citation_results = rewritten_anchors
+                            final_results = expand_question_context(
+                                vector_store,
+                                rewritten_query,
+                                rewritten_anchors,
+                            )
+                            final_stage = "weak_initial_rewrite"
+                            weak_initial_recovery_accepted = True
+                            break
+            except QueryUnderstandingError as error:
+                logger.warning(
+                    "Lexical-only query recovery planner failed; preserving initial candidates: %s",
+                    error,
+                )
+            except Exception:
+                logger.exception(
+                    "Unexpected lexical-only query recovery failure; preserving initial candidates"
+                )
     else:
         if initial_retrieval_status.get("weak_native_query_rejected"):
             attempts[-1]["weak_native_query_rejected"] = True
@@ -5222,6 +5328,8 @@ def _retrieve_with_query_recovery_trace(
         "planner_used": planner_used,
         "planner_intent": planner_intent,
         "planner_latency_ms": round(planner_latency_ms, 2),
+        "weak_initial_recovery_attempted": weak_initial_recovery_attempted,
+        "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,
@@ -5450,6 +5558,8 @@ def build_rag_chain(
                         "quality_repair_attempted": False,
                         "quality_repair_passed": None,
                         "repair_aborted_due_quota": False,
+                        "response_language_repair_attempted": False,
+                        "response_language_repair_passed": None,
                         "question_language_repair_attempted": False,
                         "question_language_repair_passed": None,
                         "gold_evidence_context_complete": False,
@@ -5531,6 +5641,8 @@ def build_rag_chain(
                     "quality_repair_attempted": False,
                     "quality_repair_passed": False,
                     "repair_aborted_due_quota": daily_quota_exhausted,
+                    "response_language_repair_attempted": False,
+                    "response_language_repair_passed": None,
                     "question_language_repair_attempted": False,
                     "question_language_repair_passed": None,
                     "grounded_financial_fallback_used": grounded_financial_fallback_used,
@@ -5567,6 +5679,13 @@ def build_rag_chain(
             is not None
         )
         gold_evidence_answer_suppressed = False
+        abstention_recheck_attempted = bool(
+            not is_financial_question
+            and not gold_evidence_repair_attempted
+            and _is_abstention_answer(answer)
+            and str(inputs.get("context", "")).strip()
+        )
+        abstention_recheck_passed = None
         repair_instruction = _generation_repair_instruction(
             question=question_text,
             answer=answer,
@@ -5603,6 +5722,8 @@ def build_rag_chain(
                     raise
                 repair_aborted_due_quota = True
                 repair_passed = False
+                if abstention_recheck_attempted:
+                    abstention_recheck_passed = False
                 if gold_evidence_repair_attempted:
                     gold_evidence_answer_suppressed = True
                 if question_language_repair_attempted:
@@ -5632,6 +5753,14 @@ def build_rag_chain(
                     context=inputs.get("context", ""),
                     video_id=inputs.get("video_id"),
                 ) is None
+                if abstention_recheck_attempted:
+                    abstention_recheck_passed = (
+                        not _is_abstention_answer(answer)
+                        and _question_answer_language_mismatch(
+                            question_text,
+                            answer,
+                        ) is None
+                    )
                 if question_language_repair_attempted:
                     question_language_repair_passed = (
                         _question_answer_language_mismatch(question_text, answer) is None
@@ -5671,6 +5800,13 @@ def build_rag_chain(
                         "Suppressing financial draft after failed repair because "
                         "no source-bound extractive fallback was available"
                     )
+
+        # A failed language repair must never leak a non-English main answer.
+        # Preserve the fixed response contract even when the provider ignores the
+        # one bounded rewrite instruction.
+        if _question_answer_language_mismatch(question_text, answer) is not None:
+            answer = FALLBACK_ANSWER
+            question_language_repair_passed = False
 
         # Some models abstain immediately when their bounded prompt omits one of
         # the required financial claim families. If no repair path already tried
@@ -5780,6 +5916,10 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "repair_aborted_due_quota": repair_aborted_due_quota,
+                "abstention_recheck_attempted": abstention_recheck_attempted,
+                "abstention_recheck_passed": abstention_recheck_passed,
+                "response_language_repair_attempted": question_language_repair_attempted,
+                "response_language_repair_passed": question_language_repair_passed,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
                 "gold_evidence_context_complete": gold_evidence_context_complete,

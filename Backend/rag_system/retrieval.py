@@ -1572,12 +1572,29 @@ def build_retrieval_query_variants(
 
 
 OVERVIEW_PATTERNS = (
-    r"\bwhat is this video about\b",
-    r"\bwhat's this video about\b",
+    # Natural short-form overview requests. These must route to representative
+    # transcript coverage before ordinary similarity retrieval, because phrases
+    # such as "what is in this video?" contain almost no topical search terms.
+    r"\bwhat is (?:in|inside) (?:this|the) video\b",
+    r"\bwhat's (?:in|inside) (?:this|the) video\b",
+    r"\bwhat is (?:this|the) video about\b",
+    r"\bwhat's (?:this|the) video about\b",
+    r"\bwhat is (?:he|she|the speaker|the presenter) talking about(?: in (?:this|the) video)?\b",
+    r"\bwhat is (?:he|she|the speaker|the presenter) discussing(?: in (?:this|the) video)?\b",
+    r"\bwhat (?:is|happens) in (?:this|the) video\b",
+    r"\bwhat's going on in (?:this|the) video\b",
+    r"\bwhat is happening in (?:this|the) video\b",
+    r"\bwhat does this video discuss\b",
+    r"\bwhat topics does this video cover\b",
+    r"\btell me what happens in this video\b",
     r"\bwhat are they talking about\b",
     r"\bwhat are they discussing\b",
     r"\bwhat is being discussed\b",
     r"\bwhat is discussed in this video\b",
+    r"\bwhat does this video cover\b",
+    r"\bwhat is covered in this video\b",
+    r"\bwhat is this video discussing\b",
+    r"\btell me about this video\b",
     r"\bgive me an overview\b",
     r"\boverview of this video\b",
     r"\bsummarize this video\b",

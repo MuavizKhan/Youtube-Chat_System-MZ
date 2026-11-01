@@ -99,7 +99,12 @@ def test_arabic_evidence_can_be_context_only_and_absent_from_citations():
 
 def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
     response = {
-        "answer": "الإجابة صحيحة.\n\nRelevant timestamps: 02:28–04:21",
+        "answer": (
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs and stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض قلبك.\n\n"
+            "Relevant timestamps: 02:28–04:21"
+        ),
         "retrieval_config": {
             "citation_policy": "prompt_included_chunks",
         },
@@ -145,7 +150,9 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
         ),
         (
             "AR08",
-            "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، حركة الدم في عروقك، صوت الرئتين أو المعدة، وحتى صوت عينيك وهي بترمش.",
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs or stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض قلبك.",
         ),
     ],
 )
@@ -343,10 +350,11 @@ def test_q07_quality_gate_rejects_known_malformed_extra_amounts():
     assert "malformed_or_unsupported_financial_amounts_absent" in failed
 
 
-def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
+def test_bodily_sound_quality_gate_requires_english_for_arabic_transcript():
     english_answer = (
         "In the quiet room people may hear their heartbeat, blood rushing through "
-        "their veins, their lungs and breathing, stomach rumbling, and eyelids blinking."
+        "their veins, their lungs and breathing, stomach rumbling, and eyelids blinking. "
+        "Arabic transcript phrase: نبض قلبك."
     )
     arabic_answer = (
         "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
@@ -354,12 +362,18 @@ def test_bodily_sound_quality_gate_checks_coverage_and_question_language():
     )
 
     assert all(check["passed"] for check in _answer_quality_checks("AR03", english_answer))
-    assert all(check["passed"] for check in _answer_quality_checks("AR08", arabic_answer))
+    assert all(check["passed"] for check in _answer_quality_checks("AR08", english_answer))
 
-    incomplete_arabic = "الأصوات التي قد يبدأ الناس في سماعها من أجسامهم هي نبضات القلب."
+    arabic_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", arabic_answer)
+    }
+    assert arabic_checks["response_language_english"] is False
+
+    incomplete_english = "In the quiet room people may hear their heartbeat."
     failed = {
         check["name"]
-        for check in _answer_quality_checks("AR08", incomplete_arabic)
+        for check in _answer_quality_checks("AR08", incomplete_english)
         if not check["passed"]
     }
     assert "sound_blood_movement" in failed
@@ -590,8 +604,9 @@ def test_mojibake_is_flagged_without_silently_rewriting_the_answer():
 def test_audit_separates_verified_context_evidence_from_retrieved_only_chunks():
     response = {
         "answer": (
-            "في الغرفة قد يسمع الناس نبض القلب، وحركة الدم في العروق، "
-            "وأصوات الرئتين والمعدة، ورمش الجفون.\n\n"
+            "In the quiet room, people may hear their heartbeat, blood moving "
+            "through their veins, sounds from their lungs and stomach, and even "
+            "their eyelids blinking. Arabic phrase: نبض قلبك.\n\n"
             "Relevant timestamps: 02:33–03:37"
         ),
         "retrieval_config": {
@@ -928,14 +943,14 @@ def test_unanswerable_phase10_11_case_requires_abstention_and_no_sources():
         "قد لا يكون موضوع العاصمة أستراليا مغطى في هذا الفيديو.",
     ],
 )
-def test_ar10_recognizes_arabic_abstention_variants(answer):
+def test_ar10_recognizes_but_rejects_non_english_abstention_variants(answer):
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "AR10")
 
     checks = _answer_quality_checks(case, answer)
 
-    assert len(checks) == 1
-    assert checks[0]["name"] == "unanswerable_case_abstained"
-    assert checks[0]["passed"] is True, checks
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["unanswerable_case_abstained"] is True, checks
+    assert by_name["response_language_english"] is False, checks
 
 
 def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
@@ -943,14 +958,17 @@ def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
 
     checks = _answer_quality_checks(case, "عاصمة أستراليا هي كانبيرا.")
 
-    assert len(checks) == 1
-    assert checks[0]["name"] == "unanswerable_case_abstained"
-    assert checks[0]["passed"] is False
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["unanswerable_case_abstained"] is False
+    assert by_name["response_language_english"] is False
 
 
-def test_phase10_11_registered_answer_requirements_and_language_are_checked():
+def test_phase10_11_registered_answer_requirements_and_english_response_are_checked():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
-    checks = _answer_quality_checks(case, "नया टैक्स चवरी कर के नाम से था।")
+    checks = _answer_quality_checks(
+        case,
+        'The speaker identifies the new tax as “चवरी कर” (the original Hindi term).',
+    )
 
     assert all(check["passed"] for check in checks), checks
 
@@ -981,7 +999,7 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
     assert {
         "substantive_answer",
         "answer_requirement_three_ways",
-        "question_language",
+        "response_language_english",
     } == {check["name"] for check in checks}
 
     formatted_answer = _answer_quality_checks(
@@ -1185,17 +1203,15 @@ def test_phase11_0_keeps_registry_unanswerable_q12_as_abstention_case():
     assert case.get("answer_language") is None
 
 
-def test_phase11_0_native_language_cases_require_the_question_language():
+def test_phase11_0_hindi_and_arabic_transcript_cases_use_english_questions_and_answers():
     cases = {
         item["id"]: item
         for item in PHASE11_0_AUDIT_CASES
     }
 
-    assert cases["HI06"]["answer_language"] == "hi"
-    assert cases["HI07"]["answer_language"] == "hi"
-    assert cases["HI08"]["answer_language"] == "hi"
-    assert cases["AR06"]["answer_language"] == "ar"
-    assert cases["AR07"]["answer_language"] == "ar"
+    for case_id in ("HI06", "HI07", "HI08", "AR06", "AR07"):
+        assert cases[case_id]["answer_language"] == "en"
+        assert cases[case_id]["question"].isascii()
 
 def test_phase11_0_full_registry_gate_requires_all_43_cases(monkeypatch, tmp_path):
     def successful_fake_chat(_base_url, case, _timeout_seconds):
