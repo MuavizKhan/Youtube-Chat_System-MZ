@@ -3281,8 +3281,7 @@ def _generation_repair_instruction(
         question_text, answer_text
     )
     if language_mismatch is not None:
-        expected_language, previous_language = language_mismatch
-        expected_name = _SUPPORTED_SCRIPT_NAMES[expected_language]
+        _expected_language, previous_language = language_mismatch
         previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
         instructions.append(
             "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
@@ -3294,6 +3293,18 @@ def _generation_repair_instruction(
             + "immediately explain it in English. Do not invent quotations, facts, "
             + "names, dates, numbers, or timestamps. Do not include a timestamp "
             + "line; the application adds verified timestamps separately."
+        )
+
+    if _is_abstention_answer(answer_text) and context_text.strip():
+        instructions.append(
+            "EVIDENCE RECHECK. The previous draft abstained even though transcript "
+            "passages were supplied. Re-read every supplied source block and check "
+            "whether any part of the question is directly answered, including "
+            "paraphrased or translated wording. If one or more parts are supported, "
+            "answer those parts in English and clearly state what remains unstated. "
+            "Use only the supplied passages; do not infer missing dates, numbers, "
+            "names, causes, or conclusions. If no passage supports any part of the "
+            "question, return the exact English fallback from the system instructions."
         )
 
     is_financial_question = bool(re.search(
@@ -5563,6 +5574,13 @@ def build_rag_chain(
             is not None
         )
         gold_evidence_answer_suppressed = False
+        abstention_recheck_attempted = bool(
+            not is_financial_question
+            and not gold_evidence_repair_attempted
+            and _is_abstention_answer(answer)
+            and str(inputs.get("context", "")).strip()
+        )
+        abstention_recheck_passed = None
         repair_instruction = _generation_repair_instruction(
             question=question_text,
             answer=answer,
@@ -5599,6 +5617,8 @@ def build_rag_chain(
                     raise
                 repair_aborted_due_quota = True
                 repair_passed = False
+                if abstention_recheck_attempted:
+                    abstention_recheck_passed = False
                 if gold_evidence_repair_attempted:
                     gold_evidence_answer_suppressed = True
                 if question_language_repair_attempted:
@@ -5628,6 +5648,8 @@ def build_rag_chain(
                     context=inputs.get("context", ""),
                     video_id=inputs.get("video_id"),
                 ) is None
+                if abstention_recheck_attempted:
+                    abstention_recheck_passed = not _is_abstention_answer(answer)
                 if question_language_repair_attempted:
                     question_language_repair_passed = (
                         _question_answer_language_mismatch(question_text, answer) is None
@@ -5667,6 +5689,13 @@ def build_rag_chain(
                         "Suppressing financial draft after failed repair because "
                         "no source-bound extractive fallback was available"
                     )
+
+        # A failed language repair must never leak a non-English main answer.
+        # Preserve the fixed response contract even when the provider ignores the
+        # one bounded rewrite instruction.
+        if _question_answer_language_mismatch(question_text, answer) is not None:
+            answer = FALLBACK_ANSWER
+            question_language_repair_passed = False
 
         # Some models abstain immediately when their bounded prompt omits one of
         # the required financial claim families. If no repair path already tried
@@ -5776,6 +5805,8 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "repair_aborted_due_quota": repair_aborted_due_quota,
+                "abstention_recheck_attempted": abstention_recheck_attempted,
+                "abstention_recheck_passed": abstention_recheck_passed,
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
                 "gold_evidence_context_complete": gold_evidence_context_complete,
