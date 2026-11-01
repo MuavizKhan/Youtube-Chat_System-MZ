@@ -4852,8 +4852,8 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
         return True
     normalized = " ".join(question.casefold().split())
     return bool(re.search(
-        r"\\b(?:main|overall|general)\\s+(?:subject|topic|theme|idea)\\b|"
-        r"\\b(?:overall|general)\\s+(?:summary|overview)\\b",
+        r"\b(?:main|overall|general)\s+(?:subject|topic|theme|idea)\b|"
+        r"\b(?:overall|general)\s+(?:summary|overview)\b",
         normalized,
     ))
 
