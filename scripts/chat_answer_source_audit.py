@@ -108,7 +108,7 @@ AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "AR08", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         evidence_groups=(
             {"label": "heartbeat, blood movement, lungs and stomach phrase", "candidate_chunk_ids": [2]},
             {"label": "eyelid-blinking phrase", "candidate_chunk_ids": [2]},
@@ -178,7 +178,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI09", "INpnuL7qnzY",
         expected_behavior="answerable",
-        answer_language="hi",
+        answer_language="en",
         answer_requirements=(
             {"name": "named_chavri_tax", "pattern": r"चवरी|चावरी|चवरी|\bchavri\b|\bchawri\b"},
             {"name": "tax_concept", "pattern": r"कर|टैक्स|\btax\b"},
@@ -210,13 +210,13 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "AR08", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         evidence_groups=AUDIT_CASES[2]["evidence_groups"],
     ),
     _make_audit_case(
         "AR09", "fAd2nKfrDB8",
         expected_behavior="answerable",
-        answer_language="ar",
+        answer_language="en",
         answer_requirements=(
             {"name": "sound_subject", "pattern": r"الصوت|صوت"},
             {"name": "perception_role", "pattern": r"بوصلة|إدراك|ادراك|توجيه"},
@@ -339,17 +339,17 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     ),
     _make_audit_case(
         "HI06", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
+        expected_behavior="answerable", answer_language="en",
         answer_requirements=({"name": "named_movement", "pattern": r"\b(?:Bijolia|first major farmers'? movement)\b"},),
     ),
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
+        expected_behavior="answerable", answer_language="en",
         answer_requirements=({"name": "movement_location", "pattern": r"\bBijolia\b"},),
     ),
     _make_audit_case(
         "HI08", "INpnuL7qnzY",
-        expected_behavior="answerable", answer_language="hi",
+        expected_behavior="answerable", answer_language="en",
         answer_requirements=({"name": "tax_count", "pattern": r"\b84\b"},),
     ),
     _make_audit_case(
@@ -364,12 +364,12 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     ),
     _make_audit_case(
         "AR06", "fAd2nKfrDB8",
-        expected_behavior="answerable", answer_language="ar",
+        expected_behavior="answerable", answer_language="en",
         answer_requirements=({"name": "silence_and_rest", "pattern": r"\b(?:quiet|silence|rest|comfort)\b"},),
     ),
     _make_audit_case(
         "AR07", "fAd2nKfrDB8",
-        expected_behavior="answerable", answer_language="ar",
+        expected_behavior="answerable", answer_language="en",
         answer_requirements=({"name": "room_cost", "pattern": r"\b600\b|six hundred|\bdollars?\b"},),
     ),
 )
