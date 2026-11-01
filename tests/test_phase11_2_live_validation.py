@@ -127,7 +127,7 @@ def test_unanswerable_case_fails_when_sources_or_timestamp_summary_are_returned(
     case = _case(expected_answerable=False)
     response = _response(
         answer=(
-            "I couldn't find enough information about that in the video. "
+            "I couldn't find enough information about that in the video.\n"
             "Relevant timestamps: 00:01–00:15"
         ),
     )
@@ -186,3 +186,48 @@ def test_select_cases_preserves_requested_order():
         "AR_MULTIPART_01",
         "HI_ANALYTICAL_01",
     ]
+
+@pytest.mark.unit
+def test_configuration_matches_expected_rejects_default_namespace():
+    from scripts.phase11_2_live_validation import (
+        EXPECTED_RETRIEVAL_CONFIGURATION,
+        _configuration_matches_expected,
+    )
+
+    default_config = dict(EXPECTED_RETRIEVAL_CONFIGURATION)
+    default_config["index_namespace"] = "default"
+
+    assert _configuration_matches_expected(
+        [default_config],
+        successful_case_count=1,
+        expected_configuration=EXPECTED_RETRIEVAL_CONFIGURATION,
+    ) is False
+
+
+@pytest.mark.unit
+def test_configuration_matches_expected_accepts_frozen_pilot_namespace():
+    from scripts.phase11_2_live_validation import (
+        EXPECTED_RETRIEVAL_CONFIGURATION,
+        _configuration_matches_expected,
+    )
+
+    assert _configuration_matches_expected(
+        [dict(EXPECTED_RETRIEVAL_CONFIGURATION)],
+        successful_case_count=1,
+        expected_configuration=EXPECTED_RETRIEVAL_CONFIGURATION,
+    ) is True
+
+
+@pytest.mark.unit
+def test_configuration_matches_expected_rejects_missing_case_configuration():
+    from scripts.phase11_2_live_validation import (
+        EXPECTED_RETRIEVAL_CONFIGURATION,
+        _configuration_matches_expected,
+    )
+
+    assert _configuration_matches_expected(
+        [],
+        successful_case_count=1,
+        expected_configuration=EXPECTED_RETRIEVAL_CONFIGURATION,
+    ) is False
+
