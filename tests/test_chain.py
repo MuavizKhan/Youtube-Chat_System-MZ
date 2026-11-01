@@ -5327,6 +5327,7 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
         "main answer MUST ALWAYS be written in English",
         "only the supplied transcript context",
         "short, exact original-language excerpt",
+        "count distinct concepts or teams separately",
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
