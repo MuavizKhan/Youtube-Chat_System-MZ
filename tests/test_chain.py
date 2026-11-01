@@ -1067,6 +1067,7 @@ def test_groq_generation_returns_clean_answer(monkeypatch):
 
 @pytest.mark.unit
 def test_groq_generation_logs_finish_reason_and_token_usage(caplog, monkeypatch):
+    caplog.set_level("INFO", logger=chain.logger.name)
     monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
     response = SimpleNamespace(
         choices=[
