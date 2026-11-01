@@ -935,14 +935,14 @@ def test_unanswerable_phase10_11_case_requires_abstention_and_no_sources():
         "قد لا يكون موضوع العاصمة أستراليا مغطى في هذا الفيديو.",
     ],
 )
-def test_ar10_recognizes_arabic_abstention_variants(answer):
+def test_ar10_recognizes_but_rejects_non_english_abstention_variants(answer):
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "AR10")
 
     checks = _answer_quality_checks(case, answer)
 
-    assert len(checks) == 1
-    assert checks[0]["name"] == "unanswerable_case_abstained"
-    assert checks[0]["passed"] is True, checks
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["unanswerable_case_abstained"] is True, checks
+    assert by_name["response_language_english"] is False, checks
 
 
 def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
@@ -950,14 +950,17 @@ def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
 
     checks = _answer_quality_checks(case, "عاصمة أستراليا هي كانبيرا.")
 
-    assert len(checks) == 1
-    assert checks[0]["name"] == "unanswerable_case_abstained"
-    assert checks[0]["passed"] is False
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["unanswerable_case_abstained"] is False
+    assert by_name["response_language_english"] is False
 
 
-def test_phase10_11_registered_answer_requirements_and_language_are_checked():
+def test_phase10_11_registered_answer_requirements_and_english_response_are_checked():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
-    checks = _answer_quality_checks(case, "नया टैक्स चवरी कर के नाम से था।")
+    checks = _answer_quality_checks(
+        case,
+        'The speaker identifies the new tax as “चवरी कर” (the original Hindi term).',
+    )
 
     assert all(check["passed"] for check in checks), checks
 
