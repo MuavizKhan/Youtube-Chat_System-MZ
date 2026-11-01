@@ -2226,6 +2226,63 @@ def test_planner_failure_fallback_rejects_weak_evidence(monkeypatch):
     assert attempt["strong_semantic_gate_passed"] is False
 
 
+@pytest.mark.regression
+def test_query_recovery_continues_with_original_query_when_planner_is_rate_limited(
+    monkeypatch,
+):
+    anchor = (doc(61, 420, 480, "A source passage relevant to the historical question."), 0.2)
+    expanded = [anchor]
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **kwargs: None)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [], [], {"weak_native_query_rejected": False}
+        return [anchor], [anchor]
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: (_ for _ in ()).throw(
+            chain.QueryUnderstandingError("Groq 429 tokens-per-minute limit")
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, max_distance: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, question, anchors: expanded,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda *_args, **_kwargs: pytest.fail(
+            "planner failure must not replace a specific question with overview samples"
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        "Explain the major historical developments and their consequences.",
+        object(),
+    )
+
+    assert results == expanded
+    assert trace["final_stage"] == "planner_failed_original_query_relaxed"
+    assert trace["planner_failure_fallback_attempted"] is True
+    assert trace["planner_failure_fallback_accepted"] is True
+    assert trace["planner_used"] is False
+    assert calls[1]["query"] == "Explain the major historical developments and their consequences."
+    assert calls[1]["allow_overview"] is False
+
+
 @pytest.mark.unit
 def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
     monkeypatch.setattr(
