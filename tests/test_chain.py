@@ -956,21 +956,25 @@ def test_prompt_does_not_reconcile_garbled_or_disputed_financial_figures():
 
 
 @pytest.mark.unit
-def test_prompt_requires_answer_in_question_language_even_when_context_is_english():
-    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+def test_prompt_enforces_english_answer_for_non_english_question_and_transcript():
+    question = "इस वीडियो में किसान आंदोलनों के बारे में क्या बताया गया है?"
+    context = "किसानों पर कई प्रकार के कर लगाए गए थे।"
     prompt = chain.RAG_PROMPT.invoke({
-        "context": "The transcript is in English and discusses heartbeat and breathing.",
+        "context": context,
         "question": question,
     })
     messages = chain.prompt_to_messages(prompt)
     normalized_system_prompt = " ".join(messages[0]["content"].split()).lower()
+    user_prompt = messages[1]["content"]
 
-    assert question in messages[1]["content"]
-    assert "answer in the same language as the user's question" in normalized_system_prompt
-    assert "do not switch to english merely because the transcript" in normalized_system_prompt
-    assert "do not switch to hindi or arabic merely because the transcript" in normalized_system_prompt
-    assert "an english question about a hindi or arabic transcript must be answered in english" in normalized_system_prompt
-    assert "an arabic question must be answered in arabic" in normalized_system_prompt
+    assert question in user_prompt
+    assert context in user_prompt
+    assert "main answer must always be written in english" in normalized_system_prompt
+    assert "regardless of the language of the question, transcript" in normalized_system_prompt
+    assert "translate supported meaning from the transcript" in normalized_system_prompt
+    assert "short, exact original-language excerpt" in normalized_system_prompt
+    assert "follow it immediately with its english meaning" in normalized_system_prompt
+    assert "do not use non-english text for the main answer or for an abstention" in normalized_system_prompt
 
 
 @pytest.mark.unit
@@ -3166,7 +3170,7 @@ def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_c
         question,
         excerpt,
     )
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert answer == 'The transcript identifies the new tax as “चवरी कर” (the original Hindi term).'
 
 
 @pytest.mark.unit
@@ -3404,7 +3408,7 @@ def test_named_tax_evidence_answer_requires_explicit_evidence_and_preserves_ques
         question, context, diagnostics=diagnostics
     )
 
-    assert answer == "वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “चवरी कर” बताया गया है।"
+    assert answer == 'The transcript identifies the new tax as “चवरी कर” (the original Hindi term).'
     assert diagnostics["used"] is True
     assert diagnostics["extracted_tax_name"] == "चवरी कर"
     assert diagnostics["matched_evidence_phrase"] == "नया टैक्स लगाया गया था चवरी कर"
@@ -3539,39 +3543,56 @@ def test_generation_repair_instruction_detects_question_answer_language_mismatch
     )
 
     assert instruction is not None
-    assert "QUESTION-LANGUAGE REPAIR" in instruction
-    assert "rewrite the answer from scratch in english" in instruction.lower()
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "rewrite the complete main answer in english" in instruction.lower()
     assert "SOUND/PERCEPTION ANSWER REPAIR" in instruction
     assert "perception" in instruction.lower()
 
 
 @pytest.mark.unit
-def test_question_answer_language_mismatch_only_flags_clear_script_mismatches():
+def test_response_language_mismatch_always_requires_english_but_allows_short_source_quotes():
     assert chain._question_answer_language_mismatch(
         "What does sound contribute to perception?",
         "الصوت يؤثر في الإدراك ويغير المزاج."
     ) == ("en", "ar")
     assert chain._question_answer_language_mismatch(
         "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        "الصوت يؤثر في الإدراك ويغير المزاج."
+    ) == ("en", "ar")
+    assert chain._question_answer_language_mismatch(
+        "इस वीडियो में क्या बताया गया है?",
+        "वीडियो में किसानों पर कर लगाए जाने की चर्चा है।"
+    ) == ("en", "hi")
+    assert chain._question_answer_language_mismatch(
+        "كيف يصف المقطع دور الصوت؟",
         "The episode says sound shapes perception."
-    ) == ("ar", "en")
+    ) is None
     assert chain._question_answer_language_mismatch(
         "What does sound contribute to perception?",
-        "The episode explains how sound shapes perception."
-    ) is None
-    assert chain._question_answer_language_mismatch(
-        "What is the Arabic term الصوت for sound?",
         "The answer is sound, with the Arabic term الصوت."
     ) is None
-    # Latin script alone must not let a Turkish answer pass as English.
     assert chain._question_answer_language_mismatch(
-        "How many ways does the speaker promise to express himself in meetings?",
+        "What is discussed?",
+        "The speaker explains the idea. Hindi phrase: किसान आंदोलन."
+    ) is None
+    assert chain._question_answer_language_mismatch(
+        "How many ways?",
         "Üç yöntem."
     ) == ("en", "tr")
     assert chain._question_answer_language_mismatch(
-        "How many ways does the speaker promise to express himself in meetings?",
+        "How many ways?",
         "The speaker offers three ways."
     ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("question", [
+    "What is discussed in the video?",
+    "इस वीडियो में क्या बताया गया है?",
+    "ما موضوع هذا الفيديو؟",
+])
+def test_all_abstention_fallbacks_are_english(question):
+    assert chain._fallback_for_question_language(question) == chain.FALLBACK_ANSWER
 
 
 @pytest.mark.unit
@@ -3644,7 +3665,7 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
         ),
         (
             "यह वीडियो विषय के बारे में क्या बताता है?",
-            "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।",
+            chain.FALLBACK_ANSWER,
             False,
         ),
         (
@@ -5186,8 +5207,9 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
     prompt = chain.SYSTEM_INSTRUCTIONS
     assert len(prompt) < 5000
     for required_rule in (
-        "language of the user's main question",
+        "main answer MUST ALWAYS be written in English",
         "only the supplied transcript context",
+        "short, exact original-language excerpt",
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
