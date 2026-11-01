@@ -174,9 +174,11 @@ SYSTEM_INSTRUCTIONS = """
 You answer questions about a YouTube video using only the supplied transcript context.
 
 LANGUAGE
-- Answer in the same language as the user's question (the language of the user's main question), unless they request another language. Translate supported facts as needed; transcript language does not determine answer language.
-- Do not switch to English merely because the transcript, retrieved context, or video captions are in English. Do not switch to Hindi or Arabic merely because the transcript or captions are in those languages. An English question about a Hindi or Arabic transcript must be answered in English; a Hindi question must be answered in Hindi, and an Arabic question must be answered in Arabic.
-- Preserve names, product names, numbers, currencies, and source-grounded spellings. For multilingual questions, use the language of the main question. For English questions, write natural English; Latin script alone does not mean English.
+- The main answer MUST ALWAYS be written in English, regardless of the language of the question, transcript, captions, retrieved passages, or conversation history.
+- Never switch the main answer to Hindi, Arabic, Urdu, or another language. Do not infer the response language from the transcript or the most recent assistant message.
+- Translate supported meaning from the transcript into clear, natural English. Preserve names, source-grounded spellings, dates, numbers, units, and uncertainty exactly as supported.
+- When the transcript is in Hindi, Arabic, or Urdu, include at most one short, exact original-language excerpt when it materially helps the user verify or understand a key point. Follow it immediately with its English meaning. Quote only text present in the supplied context; never reconstruct or invent an excerpt. The English explanation remains the main answer.
+- Do not use non-English text for the main answer or for an abstention. A short source-language quotation is the only permitted exception.
 
 EVIDENCE AND ATTRIBUTION
 - Answer directly and concisely using only supplied evidence. Do not use outside knowledge or invent facts, relationships, or interpretations.
@@ -221,7 +223,7 @@ Transcript context:
 
 Question: {question}
 
-Answer only from the context, in the question's language. Be concise but include all supported parts and preserve claim attribution and distinct figures. If the context is genuinely insufficient, use the specified fallback. Return answer text only; the application adds verified sources and timestamps.
+Answer only from the supplied context and ALWAYS write the main answer in English. Translate supported facts from any transcript language. If useful, include one short exact Hindi, Arabic, or Urdu excerpt from the supplied context followed by its English meaning. Be concise but include all supported parts and preserve claim attribution, dates, numbers, and uncertainty. If the context is genuinely insufficient, use the exact English fallback in the system instructions. Return answer text only; the application adds verified sources and timestamps.
 """,
         ),
     ]
@@ -3194,12 +3196,7 @@ def _looks_like_turkish_answer(text: str) -> bool:
 
 
 def _fallback_for_question_language(question: str) -> str:
-    """Return a conservative abstention in the question's supported language."""
-    language = _dominant_supported_script_language(question)
-    if language == "hi":
-        return "वीडियो में इस प्रश्न का उत्तर देने के लिए पर्याप्त जानकारी नहीं मिली।"
-    if language == "ar":
-        return "لم أجد في الفيديو معلومات كافية للإجابة عن هذا السؤال."
+    """Return the fixed English abstention required by the response contract."""
     return FALLBACK_ANSWER
 
 
@@ -3230,29 +3227,31 @@ def _question_answer_language_mismatch(
     question: str,
     answer: str,
 ) -> tuple[str, str] | None:
-    """Return (expected, actual) for a clear supported-script mismatch only."""
-    expected = _dominant_supported_script_language(question)
-    if expected is None:
-        return None
+    """Return (required, detected) when the main answer is not English.
 
-    # Detect known non-English Latin-script drafts before script-only checks;
-    # otherwise a short answer such as "Üç yöntem" looks like English letters.
-    if _looks_like_turkish_answer(_strip_unverified_timestamp_summary(answer or "")):
+    The question argument remains for call-site compatibility. Response language
+    is a product contract, not a property inferred from the question. Short
+    original-script quotations are allowed when the English explanation remains
+    dominant.
+    """
+    expected = "en"
+    normalized_answer = _strip_unverified_timestamp_summary(answer or "")
+
+    if _looks_like_turkish_answer(normalized_answer):
         return expected, "tr"
 
-    counts = _supported_script_letter_counts(_strip_unverified_timestamp_summary(answer or ""))
+    counts = _supported_script_letter_counts(normalized_answer)
     total = sum(counts.values())
     if total < 8:
         return None
+
     actual, actual_count = max(counts.items(), key=lambda item: item[1])
     if actual == expected:
         return None
 
-    expected_share = counts[expected] / total
+    english_share = counts["en"] / total
     actual_share = actual_count / total
-    # Only repair strong mismatches. Small quoted names or source terms in another
-    # script should not cause a rewrite of an otherwise correctly-languaged answer.
-    if expected_share <= 0.35 and actual_share >= 0.55:
+    if english_share < 0.35 and actual_share >= 0.55:
         return expected, actual
     return None
 
@@ -3286,19 +3285,15 @@ def _generation_repair_instruction(
         expected_name = _SUPPORTED_SCRIPT_NAMES[expected_language]
         previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
         instructions.append(
-            "QUESTION-LANGUAGE REPAIR. The user's question is predominantly in "
-            + expected_name
-            + ", but the previous draft is predominantly in "
+            "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
             + previous_name
-            + ". Rewrite the answer from scratch in "
-            + expected_name
-            + ". Translate the source-supported meaning into "
-            + expected_name
-            + " instead of copying the transcript's language or script. "
-            "Use only facts supported by the supplied transcript context. "
-            "Keep any original-script proper name only when it is necessary, "
-            "and explain it in the requested language. Do not include a timestamp "
-            "line; the application adds verified timestamps separately."
+            + ". Rewrite the complete main answer in English, regardless of the "
+            + "question or transcript language. Translate only meaning supported by "
+            + "the supplied transcript context. You may retain one short, exact "
+            + "original-language excerpt when it helps verify a key point, but "
+            + "immediately explain it in English. Do not invent quotations, facts, "
+            + "names, dates, numbers, or timestamps. Do not include a timestamp "
+            + "line; the application adds verified timestamps separately."
         )
 
     is_financial_question = bool(re.search(
@@ -3513,12 +3508,12 @@ def _build_hindi_named_tax_evidence_fallback(
     context: str,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Build a tax-name answer only from an explicit transcript assertion.
+    """Build an English tax-name answer from an explicit transcript assertion.
 
     The assertion can span adjacent timestamped caption snippets. Timestamp
     labels are removed within each source block only, so snippets may join
     naturally without accidentally combining evidence from different sources.
-    The answer language follows the question language (Hindi or English).
+    The extracted Hindi tax name is preserved as a source-language term.
     """
     normalized_question = unicodedata.normalize("NFKC", question or "")
     normalized_context = unicodedata.normalize("NFKC", context or "")
@@ -3590,9 +3585,10 @@ def _build_hindi_named_tax_evidence_fallback(
             "extracted_tax_name": tax_name,
         })
 
-    if is_native_hindi:
-        return f"वीडियो के उपलब्ध अंश के अनुसार, नया टैक्स “{tax_name}” बताया गया है।"
-    return f"The transcript identifies the new tax as “{tax_name}”."
+    return (
+        f'The transcript identifies the new tax as “{tax_name}” '
+        "(the original Hindi term)."
+    )
 
 
 def _build_financial_evidence_fallback(
