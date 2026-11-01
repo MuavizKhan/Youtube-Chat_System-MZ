@@ -24,6 +24,8 @@ These are independent failure modes. A provider quota failure is not evidence th
 - Permit overview sampling only when the user's original question is recognised as an overview request or explicitly asks for the main/overall/general subject, topic, theme, or summary.
 - Never allow a question identified by the existing evidence-dense detector to be downgraded to overview sampling.
 - Apply the same guard to both weak-initial-candidate recovery and empty-initial-result recovery.
+- Guard the final best-effort fallback as well: after targeted rewrites fail, representative sampling is allowed only when the original user question explicitly requests a broad overview.
+- Record when best-effort overview was suppressed for a specific question.
 - Preserve the existing overview route for normal overview questions.
 
 Real-world cases:
@@ -38,7 +40,7 @@ Real-world cases:
 - Disable overview retrieval for this fallback.
 - Apply the existing strong semantic evidence gate before accepting any candidate.
 - Expand context only after an anchor passes that gate.
-- If no anchor passes, return no evidence rather than fabricate support or substitute arbitrary overview passages.
+- If no anchor passes, return no evidence rather than fabricate support or substitute arbitrary overview passages for a specific question. The final best-effort overview fallback is independently guarded by the original question wording.
 - Record whether the fallback was attempted and accepted, and preserve the planner failure reason in the retrieval trace.
 
 Real-world cases:
@@ -95,7 +97,7 @@ For every answer, compare each claim to the retrieved transcript passages and ti
 
 ### Acceptance criteria
 
-1. No evidence-dense question is routed to overview solely because of planner intent.
+1. No evidence-dense or otherwise specific question is routed to overview through either planner intent or the final best-effort fallback.
 2. Planner failure no longer short-circuits retrieval without one bounded original-query attempt.
 3. The fallback cannot bypass the existing strong semantic gate.
 4. Provider completion metadata distinguishes normal completion from token-limit termination.
