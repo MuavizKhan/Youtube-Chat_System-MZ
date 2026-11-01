@@ -132,6 +132,9 @@ The runner:
 - sends cases sequentially with a 20-second default pause to reduce provider TPM pressure;
 - records retrieval stage, planner intent/failure recovery fields, source intervals,
   generation context-budget diagnostics, request status and effective configuration;
+- verifies every successful response uses the frozen Phase 10.11 acceptance namespace
+  and retrieval settings; a backend running with the `default` namespace fails the
+  configuration contract even when that namespace is consistent across requests;
 - rejects overview sampling for cases marked as specific/analytical;
 - checks abstention plus source/timestamp suppression for the unrelated control;
 - writes a new timestamped JSON report and refuses to overwrite an existing file.
@@ -150,4 +153,6 @@ its returned transcript source passages and timestamps. Groq
 runner does not infer completion from response length.
 
 The runner's automated tests are in
-`tests/test_phase11_2_live_validation.py`.
+`tests/test_phase11_2_live_validation.py`. The expected namespace and embedding
+model may be overridden explicitly with `--expected-namespace` and
+`--expected-embedding-model`; keep the defaults for Phase 11.2 acceptance.
