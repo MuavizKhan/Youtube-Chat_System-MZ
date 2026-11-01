@@ -350,38 +350,40 @@ HINDI_HISTORY_QUESTIONS = (
         "question": "What is the capital of Australia?",
     },
 )
-HINDI_HISTORY_NATIVE_QUESTIONS = (
+HINDI_HISTORY_ENGLISH_ADDITIONAL_QUESTIONS = (
     {
         "id": "HI06",
         "type": "direct_fact",
-        "query_language": "hi",
-        "question": "किस किसान आंदोलन को पहला बड़ा आंदोलन बताया गया है?",
+        "query_language": "en",
+        "question": "Which farmers' movement is described as the first major movement?",
     },
     {
         "id": "HI07",
         "type": "explanation",
-        "query_language": "hi",
-        "question": "पहले बड़े किसान आंदोलन को बिजोलिया के संदर्भ में कहाँ बताया गया है?",
+        "query_language": "en",
+        "question": "Where does the speaker locate the first major farmers' movement in relation to Bijolia?",
     },
     {
         "id": "HI08",
         "type": "specific_detail",
-        "query_language": "hi",
-        "question": "वक्ता कितने प्रकार के करों का उल्लेख करते हैं?",
+        "query_language": "en",
+        "question": "How many types of taxes does the speaker mention?",
     },
     {
         "id": "HI09",
         "type": "multi_part",
-        "query_language": "hi",
-        "question": "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया गया?",
+        "query_language": "en",
+        "question": "Which new tax was introduced, and what name does the speaker give it?",
     },
     {
         "id": "HI10",
         "type": "unrelated",
-        "query_language": "hi",
-        "question": "ऑस्ट्रेलिया की राजधानी क्या है?",
+        "query_language": "en",
+        "question": "What is the capital of Australia?",
     },
 )
+# Backward-compatible alias: these are now English questions about Hindi captions.
+HINDI_HISTORY_NATIVE_QUESTIONS = HINDI_HISTORY_ENGLISH_ADDITIONAL_QUESTIONS
 HINDI_HISTORY_QUESTIONS = HINDI_HISTORY_QUESTIONS + HINDI_HISTORY_NATIVE_QUESTIONS
 HINDI_HISTORY_EXPECTED = {
     "HI01": "must_retrieve",
@@ -469,38 +471,40 @@ ARABIC_SILENCE_QUESTIONS = (
         "question": "What is the capital of Australia?",
     },
 )
-ARABIC_SILENCE_NATIVE_QUESTIONS = (
+ARABIC_SILENCE_ENGLISH_ADDITIONAL_QUESTIONS = (
     {
         "id": "AR06",
         "type": "explanation",
-        "query_language": "ar",
-        "question": "هل يمنح الصمت التام الناس الراحة التي يتوقعونها؟",
+        "query_language": "en",
+        "question": "Does complete silence give people the comfort they expect?",
     },
     {
         "id": "AR07",
         "type": "specific_detail",
-        "query_language": "ar",
-        "question": "كم قد تصل تكلفة الجلوس لمدة ساعة داخل غرفة أورفيلد؟",
+        "query_language": "en",
+        "question": "How much might one hour inside the Orfield room cost?",
     },
     {
         "id": "AR08",
         "type": "direct_fact",
-        "query_language": "ar",
-        "question": "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟",
+        "query_language": "en",
+        "question": "What sounds might people begin to hear from their own bodies inside the room?",
     },
     {
         "id": "AR09",
         "type": "multi_part",
-        "query_language": "ar",
-        "question": "كيف يصف المقطع دور الصوت في توجيه الإدراك؟",
+        "query_language": "en",
+        "question": "How does the speaker describe the role of sound in guiding perception?",
     },
     {
         "id": "AR10",
         "type": "unrelated",
-        "query_language": "ar",
-        "question": "ما عاصمة أستراليا؟",
+        "query_language": "en",
+        "question": "What is the capital of Australia?",
     },
 )
+# Backward-compatible alias: these are now English questions about Arabic captions.
+ARABIC_SILENCE_NATIVE_QUESTIONS = ARABIC_SILENCE_ENGLISH_ADDITIONAL_QUESTIONS
 ARABIC_SILENCE_QUESTIONS = ARABIC_SILENCE_QUESTIONS + ARABIC_SILENCE_NATIVE_QUESTIONS
 ARABIC_SILENCE_EXPECTED = {
     "AR01": "must_retrieve",
