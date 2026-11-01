@@ -420,17 +420,15 @@ def test_runner_retains_per_video_errors_instead_of_skipping_them():
     assert reports[1]["status"] == "evaluated"
 
 
-def test_non_english_benchmarks_keep_crosslingual_cases_and_add_native_queries():
-    for benchmark, language, native_ids, english_ids in (
+def test_non_english_transcript_benchmarks_use_english_questions_only():
+    for benchmark, additional_ids, original_ids in (
         (
             HINDI_HISTORY_BENCHMARK,
-            "hi",
             ("HI06", "HI07", "HI08", "HI09", "HI10"),
             ("HI01", "HI02", "HI03", "HI04", "HI05"),
         ),
         (
             ARABIC_SILENCE_BENCHMARK,
-            "ar",
             ("AR06", "AR07", "AR08", "AR09", "AR10"),
             ("AR01", "AR02", "AR03", "AR04", "AR05"),
         ),
@@ -440,16 +438,19 @@ def test_non_english_benchmarks_keep_crosslingual_cases_and_add_native_queries()
             for case in benchmark.question_cases_for_evaluation()
         }
 
-        assert set(native_ids).issubset(cases)
-        assert set(english_ids).issubset(cases)
-        assert all(cases[item]["query_language"] == language for item in native_ids)
-        assert all(cases[item]["query_language"] == "en" for item in english_ids)
-        assert set(native_ids[:-1]).issubset(benchmark.gold_evidence_by_question)
+        assert set(additional_ids).issubset(cases)
+        assert set(original_ids).issubset(cases)
+        assert all(
+            cases[item]["query_language"] == "en"
+            and cases[item]["question"].isascii()
+            for item in (*additional_ids, *original_ids)
+        )
+        assert set(additional_ids[:-1]).issubset(benchmark.gold_evidence_by_question)
         assert all(
             benchmark.expected_retrieval[item] == "must_retrieve"
-            for item in native_ids[:-1]
+            for item in additional_ids[:-1]
         )
-        assert benchmark.expected_retrieval[native_ids[-1]] == "must_not_retrieve"
+        assert benchmark.expected_retrieval[additional_ids[-1]] == "must_not_retrieve"
 
 
 def test_multi_video_report_breaks_stage_metrics_out_by_query_language():
