@@ -26,7 +26,15 @@ The review also found that natural short overview requests such as "What is in t
 
 Legacy observability keys named question_language_repair_* are retained for compatibility; their behaviour now enforces the fixed English response contract rather than matching the question language.
 
-### 2. Natural overview routing
+### 2. Recovery when initial retrieval is weak
+
+The query-understanding recovery ladder previously ran only when the initial retriever returned no candidates. A non-empty lexical-only or semantically weak candidate set could therefore bypass query reformulation even though none of its evidence anchors passed the normal strong semantic gate.
+
+The chain now detects this specific condition and makes one bounded query-understanding attempt. It tries the standalone rewrite and at most one alternative, using the existing strict retrieval settings. A rewritten candidate is accepted only if it passes the same strong semantic gate used by recovery today. If the planner fails or no rewritten candidate passes, the original initial candidates are preserved unchanged. This does not relax distance thresholds, change ranking, or replace evidence with arbitrary overview chunks.
+
+The retrieval trace records whether weak-initial recovery was attempted and accepted. Strong initial retrieval retains its original fast path and does not call the planner.
+
+### 3. Natural overview routing
 
 The deterministic overview detector now recognises additional common requests, including:
 
@@ -39,7 +47,7 @@ The deterministic overview detector now recognises additional common requests, i
 
 These questions route to the existing representative transcript overview mechanism before ordinary similarity retrieval. This does not weaken relevance thresholds or change retrieval ranking for specific factual questions.
 
-### 3. Preserved safeguards
+### 4. Preserved safeguards
 
 This phase does not change:
 
@@ -62,6 +70,7 @@ Tests cover:
 - One bounded evidence recheck for model abstentions, with a retained abstention when the supplied passages remain insufficient.
 - Natural short overview phrasings routing to overview retrieval.
 - Specific factual questions remaining outside overview routing.
+- Weak initial candidates receiving at most one query-understanding recovery, with strict semantic gating and preservation of the original candidates when recovery is weak.
 
 ## Validation and release boundary
 
