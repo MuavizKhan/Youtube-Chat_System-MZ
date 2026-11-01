@@ -22,6 +22,7 @@ The review also found that natural short overview requests such as "What is in t
 - When a model abstains despite non-empty retrieved context, the chain performs one bounded evidence recheck. It can recover supported partial answers, but must retain the exact English abstention when the supplied passages do not answer the question. It does not run a second repair loop or add new retrieval calls.
 - Provider-quota and no-evidence fallbacks are English regardless of question language.
 - The source-extractive Hindi tax-name fallback now explains the finding in English while preserving the exact Hindi term.
+- Enumeration guidance now requires distinct proposals/teams to remain separate, forbids padding a requested count with invented items, and requires the model to disclose when the transcript supports fewer or an uncertain number.
 
 Legacy observability keys named question_language_repair_* are retained for compatibility; their behaviour now enforces the fixed English response contract rather than matching the question language.
 
