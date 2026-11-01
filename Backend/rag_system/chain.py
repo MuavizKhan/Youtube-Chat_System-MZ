@@ -4838,22 +4838,41 @@ def _split_retrieval_result_bundle(result_bundle):
 
 
 def _should_use_overview_route(question: str, planner_intent: str) -> bool:
-    """Allow overview sampling only for genuine overview-style questions.
+    """Allow representative sampling only for unambiguously broad overview requests.
 
-    A planner label is advisory: it must not downgrade an explicitly
-    explanatory, causal, comparative, or multi-part question to six
-    representative transcript samples.
+    Planner intent is advisory. A multi-facet analytical question must remain
+    on targeted retrieval even when the planner labels it as an overview.
     """
     if planner_intent != "overview":
         return False
-    if is_evidence_dense_question(question):
+
+    normalized = " ".join(question.casefold().split())
+    analytical_request = re.search(
+        r"\\b(?:explain|describe|analyse|analyze|evaluate|assess|compare|"
+        r"contrast|discuss|trace|identify|outline)\\b",
+        normalized,
+    )
+    multi_facet_request = re.search(
+        r"\\b(?:and|or|both|versus|vs\\.?|as well as)\\b",
+        normalized,
+    )
+    consequence_or_history_request = re.search(
+        r"\\b(?:consequence\\w*|implication\\w*|outcome\\w*|"
+        r"development\\w*|historical|cause\\w*|effect\\w*|impact\\w*)\\b",
+        normalized,
+    )
+    if is_evidence_dense_question(question) or (
+        analytical_request
+        and (multi_facet_request or consequence_or_history_request)
+    ):
         return False
+
+    # Overview sampling is reserved for clearly broad subject/summary prompts.
     if is_overview_question(question):
         return True
-    normalized = " ".join(question.casefold().split())
     return bool(re.search(
-        r"\b(?:main|overall|general)\s+(?:subject|topic|theme|idea)\b|"
-        r"\b(?:overall|general)\s+(?:summary|overview)\b",
+        r"\\b(?:main|overall|general)\\s+(?:subject|topic|theme|idea)\\b|"
+        r"\\b(?:overall|general)\\s+(?:summary|overview)\\b",
         normalized,
     ))
 
