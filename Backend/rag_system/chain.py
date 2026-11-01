@@ -4962,10 +4962,10 @@ def _retrieve_with_query_recovery_trace(
         )
         if lexical_only_initial and len(_generation_context_query_terms(question)) >= 3:
             lexical_only_recovery_attempted = True
-            if llm_client is None:
-                llm_client = create_llm_client()
             planner_started = time.perf_counter()
             try:
+                if llm_client is None:
+                    llm_client = create_llm_client()
                 plan = understand_query(
                     client=llm_client,
                     question=question,
