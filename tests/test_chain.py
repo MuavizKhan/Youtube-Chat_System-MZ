@@ -1884,7 +1884,7 @@ def test_query_recovery_keeps_fast_path_when_initial_retrieval_succeeds(monkeypa
 
 
 @pytest.mark.unit
-def test_query_recovery_rewrites_lexical_only_initial_candidates(monkeypatch):
+def test_query_recovery_rewrites_initial_candidates_below_semantic_gate(monkeypatch):
     lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
     semantic = (doc(2, 1705, 1715, "computers use zeros and ones in binary"), 0.2)
     expanded = [semantic, (doc(3, 1710, 1715, "a bit is zero or one"), chain.MAX_DISTANCE)]
@@ -1924,10 +1924,10 @@ def test_query_recovery_rewrites_lexical_only_initial_candidates(monkeypatch):
     )
 
     assert results == expanded
-    assert trace["lexical_only_recovery_attempted"] is True
-    assert trace["lexical_only_recovery_accepted"] is True
+    assert trace["weak_initial_recovery_attempted"] is True
+    assert trace["weak_initial_recovery_accepted"] is True
     assert trace["planner_used"] is True
-    assert trace["final_stage"] == "lexical_only_rewrite"
+    assert trace["final_stage"] == "weak_initial_rewrite"
     assert trace["recovery_used"] is True
     assert trace["citation_chunk_ids"] == [2]
     assert calls[0]["query"] == "How does the lecturer explain binary representation?"
@@ -1938,7 +1938,7 @@ def test_query_recovery_rewrites_lexical_only_initial_candidates(monkeypatch):
 
 
 @pytest.mark.unit
-def test_query_recovery_preserves_lexical_candidates_when_rewrite_is_not_semantic(monkeypatch):
+def test_query_recovery_preserves_initial_candidates_when_rewrite_is_not_semantic(monkeypatch):
     lexical = (doc(1, 1700, 1710, "binary"), chain.MAX_DISTANCE)
     weak_rewrite = (doc(2, 1705, 1715, "unrelated passage"), chain.MAX_DISTANCE)
     calls = []
@@ -1976,8 +1976,8 @@ def test_query_recovery_preserves_lexical_candidates_when_rewrite_is_not_semanti
     )
 
     assert results == [lexical]
-    assert trace["lexical_only_recovery_attempted"] is True
-    assert trace["lexical_only_recovery_accepted"] is False
+    assert trace["weak_initial_recovery_attempted"] is True
+    assert trace["weak_initial_recovery_accepted"] is False
     assert trace["final_stage"] == "initial_strict"
     assert trace["recovery_used"] is False
     assert trace["final_chunk_ids"] == [1]
@@ -2130,7 +2130,7 @@ def test_query_recovery_fails_open_when_understanding_fails(monkeypatch):
 
 
 @pytest.mark.regression
-def test_query_recovery_rejects_lexical_only_rewrites_without_overview_fallback(
+def test_query_recovery_rejects_weak_initial_rewrites_without_overview_fallback(
     monkeypatch,
 ):
     candidate = doc(173, 11595, 11675, "Australia capital city")
