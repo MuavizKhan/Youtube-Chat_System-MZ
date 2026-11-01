@@ -3607,8 +3607,8 @@ def test_rag_chain_corrects_cross_lingual_tax_spelling_from_explicit_caption_evi
 
 
 @pytest.mark.unit
-def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_list():
-    question = "ما الأصوات التي قد يبدأ الناس بسماعها من أجسامهم داخل الغرفة؟"
+def test_generation_repair_instruction_detects_incomplete_bodily_sound_list_and_requires_english():
+    question = "What sounds might people begin to hear from their own bodies inside the room?"
     context = (
         "You may hear your heartbeat, the blood rushing through your veins, "
         "the sounds of your lungs and stomach, and even your eyelids blinking."
@@ -3621,11 +3621,13 @@ def test_generation_repair_instruction_detects_incomplete_arabic_bodily_sound_li
     )
 
     assert instruction is not None
-    assert "Arabic" in instruction
-    assert "حركة أو جريان الدم في العروق" in instruction
-    assert "أصوات الرئتين أو التنفس" in instruction
-    assert "أصوات المعدة" in instruction
-    assert "رمش الجفون" in instruction
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "MULTI-ITEM ANSWER REPAIR" in instruction
+    assert "Rewrite from scratch in English" in instruction
+    assert "blood moving/rushing through veins" in instruction
+    assert "lungs or breathing" in instruction
+    assert "stomach sounds" in instruction
+    assert "eyelid blinking" in instruction
 
 
 @pytest.mark.unit
