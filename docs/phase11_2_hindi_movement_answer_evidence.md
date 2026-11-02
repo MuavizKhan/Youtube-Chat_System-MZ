@@ -49,3 +49,10 @@ The live recheck must continue to use the frozen Phase 10.11 acceptance configur
 3. The audit passes only when the answer names Bijolia in English or Hindi.
 4. The two live cases return HTTP success, report the expected frozen retrieval configuration, include source/timestamp provenance, and pass answer quality.
 5. Full-registry coverage remains a separate requirement; a two-case diagnostic is not claimed to validate all 43 registered cases.
+
+
+## Follow-up integration correction
+
+CI on the first PR revision exposed that `chain.py` still looked up generation-time gold evidence through the legacy global `gold_evidence.py` registry. That registry contains the original Kingfisher benchmark only. Later per-video annotations (including the Hindi pilot) live on `VideoBenchmark.gold_evidence_by_question`.
+
+The chain now obtains gold evidence from the matched video's own benchmark. This is required for the Hindi context reservation, repair, and fail-closed behavior to activate. Regression tests verify that HI01 and HI06 resolve to their video-scoped evidence records. Audit tests also select HI cases from the Phase 11.0 registry rather than the older general audit subset.
