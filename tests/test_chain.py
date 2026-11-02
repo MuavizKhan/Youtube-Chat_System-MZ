@@ -608,6 +608,34 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    "question,expected_id",
+    [
+        (
+            "Which peasant movement is named as the first major movement?",
+            "HI01",
+        ),
+        (
+            "Which farmers' movement is described as the first major movement?",
+            "HI06",
+        ),
+    ],
+)
+def test_registered_generation_gold_case_reads_video_scoped_annotations(
+    question, expected_id
+):
+    question_id, gold_case = chain._registered_generation_gold_case(
+        "INpnuL7qnzY",
+        question,
+    )
+
+    assert question_id == expected_id
+    assert gold_case is not None
+    assert gold_case.groups == (("बिजोलिया", "Bijolia"),)
+    assert gold_case.min_generation_context_group_coverage == 1.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     "question",
     [
         "Which peasant movement is named as the first major movement?",
