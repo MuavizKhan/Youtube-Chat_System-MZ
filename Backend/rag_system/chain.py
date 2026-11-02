@@ -2204,17 +2204,38 @@ def _gold_evidence_repair_instruction(
                 if normalize_evidence_text(phrase) in normalized_context
             ]
             if supported_phrases:
-                evidence_lines.append(
-                    f"- Evidence group {group_index + 1}: "
+                evidence_line = (
+                    f"- Evidence group {group_index + 1} "
+                    "(exact transcript wording): "
                     + " / ".join(supported_phrases[:3])
                 )
+                # A registered English alias can be a curated transliteration
+                # rather than literal caption text. Keep that distinction clear
+                # so an English answer does not have to infer a proper-name
+                # transliteration from a non-Latin source spelling.
+                registered_english_aliases = [
+                    phrase
+                    for phrase in gold_case.groups[group_index]
+                    if phrase not in supported_phrases
+                    and re.search(r"[A-Za-z]", phrase)
+                ]
+                if registered_english_aliases:
+                    evidence_line += (
+                        "\n  Registered English answer spelling(s) for the "
+                        "same source term: "
+                        + " / ".join(registered_english_aliases[:3])
+                    )
+                evidence_lines.append(evidence_line)
         if evidence_lines:
             instructions.append(
                 "CURATED EVIDENCE COMPLETENESS REPAIR. Rewrite the answer from "
                 "scratch and include each distinct source-supported point listed "
-                "below. These points are present in the transcript context already "
-                "supplied to you but are missing from the draft. Use only that "
-                "context, preserve the speaker's attribution, and do not replace "
+                "below. The exact source wording is quoted separately from any "
+                "registered English answer spelling, which is an annotation alias "
+                "for that same source term rather than a separate fact. These points "
+                "are present in the transcript context already supplied to you but "
+                "are missing from the draft. Use only that context, preserve the "
+                "speaker's attribution, and do not replace "
                 "a specific cause with a vague phrase such as 'financial problems'. "
                 "Do not add a timestamp line.\n"
                 + "\n".join(evidence_lines)
