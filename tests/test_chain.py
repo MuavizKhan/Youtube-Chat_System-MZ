@@ -695,7 +695,11 @@ def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
 
     assert instruction is not None
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
+    assert "exact transcript wording" in instruction
     assert "बिजोलिया" in instruction
+    assert "Registered English answer spelling(s)" in instruction
+    assert "Bijolia" in instruction
+    assert "annotation alias" in instruction
 
     grounded_answer = "The first major farmers' movement was the Bijolia movement."
     assert chain._gold_evidence_repair_instruction(
