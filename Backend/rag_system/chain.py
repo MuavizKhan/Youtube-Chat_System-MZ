@@ -93,7 +93,6 @@ from .query_understanding import (
 
 from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
-    get_gold_evidence_case,
     matched_gold_groups,
     normalize_evidence_text,
 )
@@ -2149,11 +2148,18 @@ def _registered_generation_gold_case(
             continue
 
         question_id = question_case.get("id")
-        try:
-            gold_case = get_gold_evidence_case(question_id)
-        except (TypeError, ValueError):
+        if not isinstance(question_id, str) or not question_id:
             return None, None
-        if gold_case.min_generation_context_group_coverage is None:
+
+        # Gold annotations are video-scoped. Looking them up in the legacy
+        # global evidence registry only works for the original Kingfisher
+        # benchmark and silently disables generation-time evidence contracts
+        # for later videos such as the Hindi and Arabic pilots.
+        gold_case = benchmark.gold_evidence_by_question.get(question_id)
+        if (
+            gold_case is None
+            or gold_case.min_generation_context_group_coverage is None
+        ):
             return None, None
         return question_id, gold_case
 
