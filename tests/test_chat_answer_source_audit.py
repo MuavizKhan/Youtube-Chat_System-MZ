@@ -482,7 +482,9 @@ def test_answer_requirement_normalizer_converts_smart_apostrophes():
 
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
 def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
-    case = _case(case_id)
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == case_id
+    )
 
     grounded_checks = _answer_quality_checks(
         case,
