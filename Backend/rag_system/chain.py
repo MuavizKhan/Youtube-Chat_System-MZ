@@ -4938,16 +4938,17 @@ def _planner_failure_query_candidates(question: str) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate.strip()))[:2]
 
 
-def _planner_failure_original_query_fallback(
+def _deterministic_query_evidence_fallback(
     vector_store,
     question: str,
     video_id: str | None = None,
 ) -> tuple[list, list, dict[str, object], bool]:
-    """Use bounded deterministic retrieval when query understanding is unavailable.
+    """Run bounded original/alias retrieval with semantic and gold-evidence gates.
 
     The original wording is attempted first. A narrowly defined alias may be
-    tried next. For registered questions with generation-time gold evidence,
-    an anchor is accepted only when its expanded context actually contains the
+    tried next. Every accepted anchor must pass the same absolute semantic
+    distance ceiling as ordinary relaxed recovery. For registered questions
+    with generation-time gold evidence, expanded context must also contain the
     required evidence; a generic semantic match alone is insufficient.
     """
     gold_question_id, gold_case = _registered_generation_gold_case(
@@ -4984,13 +4985,15 @@ def _planner_failure_original_query_fallback(
             strong_gate_passed = bool(fallback_anchors) and passes_strong_semantic_gate(
                 fallback_anchors,
                 RECOVERY_MAX_DISTANCE,
+                absolute_distance_ceiling=MAX_DISTANCE,
             )
             attempt = _build_retrieval_attempt_trace(
-                "planner_failure_original_query_relaxed",
+                "deterministic_query_evidence_fallback",
                 fallback_anchors or fallback_candidates,
                 query=query,
             )
             attempt["strong_semantic_gate_passed"] = bool(strong_gate_passed)
+            attempt["semantic_gate_distance_ceiling"] = MAX_DISTANCE
             attempt["query_alias_used"] = query != question
             if not strong_gate_passed:
                 attempt_history.append(attempt)
@@ -5041,13 +5044,13 @@ def _planner_failure_original_query_fallback(
             return expanded, fallback_anchors, attempt, True
         except Exception as error:
             logger.warning(
-                "Planner-failure deterministic retrieval candidate failed "
+                "Deterministic query-evidence fallback candidate failed "
                 "query=%r error=%s",
                 query,
                 type(error).__name__,
             )
             attempt_history.append({
-                "stage": "planner_failure_original_query_relaxed",
+                "stage": "deterministic_query_evidence_fallback",
                 "query": query,
                 "query_alias_used": query != question,
                 "retrieved_chunks": 0,
@@ -5056,7 +5059,7 @@ def _planner_failure_original_query_fallback(
             })
 
     summary_attempt: dict[str, object] = {
-        "stage": "planner_failure_original_query_relaxed",
+        "stage": "deterministic_query_evidence_fallback",
         "retrieved_chunks": 0,
         "query_candidates_tried": [
             str(item.get("query", "")) for item in attempt_history
@@ -5096,6 +5099,12 @@ def _retrieve_with_query_recovery_trace(
     weak_initial_recovery_accepted = False
     planner_overview_rejected = False
     best_effort_overview_suppressed = False
+    deterministic_fallback_attempted = False
+    deterministic_fallback_accepted = False
+    deterministic_fallback_query = None
+    deterministic_fallback_query_alias_used = False
+    deterministic_fallback_evidence_gate_passed = None
+    deterministic_fallback_rejection_reason = None
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -5380,7 +5389,7 @@ def _retrieve_with_query_recovery_trace(
 
         if not planner_used:
             fallback_results, fallback_anchors, fallback_attempt, fallback_accepted = (
-                _planner_failure_original_query_fallback(
+                _deterministic_query_evidence_fallback(
                     vector_store,
                     question,
                     video_id=video_id,
@@ -5617,6 +5626,43 @@ def _retrieve_with_query_recovery_trace(
                         final_stage = "rewritten_relaxed"
                         break
 
+            if not final_results:
+                gold_question_id, gold_case = _registered_generation_gold_case(
+                    video_id,
+                    question,
+                )
+                has_bounded_alias = (
+                    len(_planner_failure_query_candidates(question)) > 1
+                )
+                if gold_case is not None and has_bounded_alias:
+                    deterministic_fallback_attempted = True
+                    (
+                        alias_results,
+                        alias_anchors,
+                        alias_attempt,
+                        alias_accepted,
+                    ) = _deterministic_query_evidence_fallback(
+                        vector_store,
+                        question,
+                        video_id=video_id,
+                    )
+                    attempts.append(alias_attempt)
+                    deterministic_fallback_accepted = alias_accepted
+                    deterministic_fallback_query = alias_attempt.get("query")
+                    deterministic_fallback_query_alias_used = bool(
+                        alias_attempt.get("query_alias_used")
+                    )
+                    deterministic_fallback_evidence_gate_passed = (
+                        alias_attempt.get("gold_evidence_gate_passed")
+                    )
+                    deterministic_fallback_rejection_reason = (
+                        alias_attempt.get("gold_evidence_rejection_reason")
+                    )
+                    if alias_accepted:
+                        final_results = alias_results
+                        citation_results = alias_anchors
+                        final_stage = "deterministic_alias_evidence_recovery"
+
             if not final_results and weak_recovery_candidates_rejected:
                 # Do not replace candidates rejected for weak relevance with
                 # arbitrary overview chunks; doing so would bypass the gate.
@@ -5671,6 +5717,12 @@ def _retrieve_with_query_recovery_trace(
         "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
         "planner_overview_rejected": planner_overview_rejected,
         "best_effort_overview_suppressed": best_effort_overview_suppressed,
+        "deterministic_fallback_attempted": deterministic_fallback_attempted,
+        "deterministic_fallback_accepted": deterministic_fallback_accepted,
+        "deterministic_fallback_query": deterministic_fallback_query,
+        "deterministic_fallback_query_alias_used": deterministic_fallback_query_alias_used,
+        "deterministic_fallback_evidence_gate_passed": deterministic_fallback_evidence_gate_passed,
+        "deterministic_fallback_rejection_reason": deterministic_fallback_rejection_reason,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,
