@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 import subprocess
 import time
 from pathlib import Path
@@ -325,7 +326,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI01", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "named_movement", "pattern": r"\bbijoli?ya\b|\bbijolia\b|बिजोलिया"},),
+        answer_requirements=({"name": "named_movement", "pattern": r"\bBijolia\b|बिजोलिया"},),
     ),
     _make_audit_case(
         "HI02", "INpnuL7qnzY",
@@ -340,7 +341,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI06", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "named_movement", "pattern": r"\b(?:Bijolia|first major farmers'? movement)\b"},),
+        answer_requirements=({"name": "named_movement", "pattern": r"\bBijolia\b|बिजोलिया"},),
     ),
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
@@ -528,7 +529,12 @@ def _substantive_answer(answer: str) -> str:
 
 def _normalize_answer_requirement_text(answer: str) -> str:
     """Remove inline Markdown wrappers before matching answer requirements."""
-    text = _substantive_answer(answer)
+    text = unicodedata.normalize("NFKC", _substantive_answer(answer))
+    # Smart apostrophes are common in model output. Normalize them before
+    # applying registered answer requirements so punctuation does not change
+    # whether an otherwise identical phrase matches.
+    text = text.replace("’", "'").replace("‘", "'")
+    text = text.replace("“", '"').replace("”", '"')
     # Do not let presentation markup split otherwise valid phrases such as
     # "**three** ways" and cause a false negative in the acceptance gate.
     text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text, flags=re.DOTALL)

@@ -93,7 +93,6 @@ from .query_understanding import (
 
 from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
-    get_gold_evidence_case,
     matched_gold_groups,
     normalize_evidence_text,
 )
@@ -2149,11 +2148,18 @@ def _registered_generation_gold_case(
             continue
 
         question_id = question_case.get("id")
-        try:
-            gold_case = get_gold_evidence_case(question_id)
-        except (TypeError, ValueError):
+        if not isinstance(question_id, str) or not question_id:
             return None, None
-        if gold_case.min_generation_context_group_coverage is None:
+
+        # Gold annotations are video-scoped. Looking them up in the legacy
+        # global evidence registry only works for the original Kingfisher
+        # benchmark and silently disables generation-time evidence contracts
+        # for later videos such as the Hindi and Arabic pilots.
+        gold_case = benchmark.gold_evidence_by_question.get(question_id)
+        if (
+            gold_case is None
+            or gold_case.min_generation_context_group_coverage is None
+        ):
             return None, None
         return question_id, gold_case
 
@@ -2198,17 +2204,38 @@ def _gold_evidence_repair_instruction(
                 if normalize_evidence_text(phrase) in normalized_context
             ]
             if supported_phrases:
-                evidence_lines.append(
-                    f"- Evidence group {group_index + 1}: "
+                evidence_line = (
+                    f"- Evidence group {group_index + 1} "
+                    "(exact transcript wording): "
                     + " / ".join(supported_phrases[:3])
                 )
+                # A registered English alias can be a curated transliteration
+                # rather than literal caption text. Keep that distinction clear
+                # so an English answer does not have to infer a proper-name
+                # transliteration from a non-Latin source spelling.
+                registered_english_aliases = [
+                    phrase
+                    for phrase in gold_case.groups[group_index]
+                    if phrase not in supported_phrases
+                    and re.search(r"[A-Za-z]", phrase)
+                ]
+                if registered_english_aliases:
+                    evidence_line += (
+                        "\n  Registered English answer spelling(s) for the "
+                        "same source term: "
+                        + " / ".join(registered_english_aliases[:3])
+                    )
+                evidence_lines.append(evidence_line)
         if evidence_lines:
             instructions.append(
                 "CURATED EVIDENCE COMPLETENESS REPAIR. Rewrite the answer from "
                 "scratch and include each distinct source-supported point listed "
-                "below. These points are present in the transcript context already "
-                "supplied to you but are missing from the draft. Use only that "
-                "context, preserve the speaker's attribution, and do not replace "
+                "below. The exact source wording is quoted separately from any "
+                "registered English answer spelling, which is an annotation alias "
+                "for that same source term rather than a separate fact. These points "
+                "are present in the transcript context already supplied to you but "
+                "are missing from the draft. Use only that context, preserve the "
+                "speaker's attribution, and do not replace "
                 "a specific cause with a vague phrase such as 'financial problems'. "
                 "Do not add a timestamp line.\n"
                 + "\n".join(evidence_lines)

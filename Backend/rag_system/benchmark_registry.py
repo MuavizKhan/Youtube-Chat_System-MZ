@@ -400,8 +400,12 @@ HINDI_HISTORY_EXPECTED = {
 HINDI_HISTORY_GOLD = (
     GoldEvidenceCase(
         question_id="HI01",
-        groups=(("पहला बड़ा किसान आंदोलन",),),
+        # The question asks for the movement's name. The opening caption pairs
+        # the first-major-movement prompt with "बिजोलिया"; protect the answer name
+        # in the generation context, not only the generic question phrase.
+        groups=(("बिजोलिया", "Bijolia"),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="HI02",
@@ -420,8 +424,11 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI06",
-        groups=(("पहला बड़ा किसान आंदोलन",),),
+        # English question over Hindi captions: require the named movement
+        # itself to reach the prompt before generation is allowed.
+        groups=(("बिजोलिया", "Bijolia"),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="HI07",

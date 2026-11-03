@@ -607,6 +607,161 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,expected_id",
+    [
+        (
+            "Which peasant movement is named as the first major movement?",
+            "HI01",
+        ),
+        (
+            "Which farmers' movement is described as the first major movement?",
+            "HI06",
+        ),
+    ],
+)
+def test_registered_generation_gold_case_reads_video_scoped_annotations(
+    question, expected_id
+):
+    question_id, gold_case = chain._registered_generation_gold_case(
+        "INpnuL7qnzY",
+        question,
+    )
+
+    assert question_id == expected_id
+    assert gold_case is not None
+    assert gold_case.groups == (("बिजोलिया", "Bijolia"),)
+    assert gold_case.min_generation_context_group_coverage == 1.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which peasant movement is named as the first major movement?",
+        "Which farmers' movement is described as the first major movement?",
+    ],
+)
+def test_hindi_movement_context_reserves_bijolia_caption_under_budget(question):
+    filler = [
+        "राजस्थान के इतिहास में अन्य सामान्य घटनाओं का भी उल्लेख किया गया।"
+        for _ in range(42)
+    ]
+    answer_bearing_caption = (
+        "आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया"
+    )
+    group = _caption_group(701, 0, [*filler, answer_bearing_caption], 0.78)
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=1200,
+        video_id="INpnuL7qnzY",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert diagnostics["reduced"] is True
+    assert len(result["context"]) <= 1200
+    assert "बिजोलिया" in result["context"]
+    assert diagnostics["gold_evidence_groups_required"] == 1
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which peasant movement is named as the first major movement?",
+        "Which farmers' movement is described as the first major movement?",
+    ],
+)
+def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
+    context = (
+        "[SOURCE 1]\nTranscript caption segments:\n"
+        "- [00:02–00:08] आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन "
+        "कौन सा हुआ था अपने बिजोलिया"
+    )
+    generic_answer = (
+        "The first major farmers' movement was a large-scale farmers' protest."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=generic_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+
+    assert instruction is not None
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
+    assert "exact transcript wording" in instruction
+    assert "बिजोलिया" in instruction
+    assert "Registered English answer spelling(s)" in instruction
+    assert "Bijolia" in instruction
+    assert "annotation alias" in instruction
+
+    grounded_answer = "The first major farmers' movement was the Bijolia movement."
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=grounded_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    ) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which peasant movement is named as the first major movement?",
+        "Which farmers' movement is described as the first major movement?",
+    ],
+)
+def test_hindi_movement_generation_is_suppressed_without_bijolia_evidence(
+    monkeypatch, question
+):
+    missing_evidence = doc(
+        702,
+        20,
+        80,
+        "राजस्थान के किसानों के अन्य मुद्दों पर सामान्य चर्चा की गई।",
+    )
+    missing_evidence.metadata["video_id"] = "INpnuL7qnzY"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(missing_evidence, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [702],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: pytest.fail(
+            "generation must not run when the named movement is absent from context"
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "INpnuL7qnzY"}
+    )
+
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["gold_evidence_context_complete"] is False
+    assert trace["gold_evidence_required_groups"] == 1
+    assert trace["gold_evidence_included_groups"] == []
+
+
+@pytest.mark.unit
 def test_generation_repair_includes_missing_policy_evidence_from_registered_q09_context():
     question = (
         "What does Vijay Mallya say about the role of Indian government policy "
