@@ -6165,7 +6165,8 @@ def test_ar07_uses_grounded_price_fallback_when_model_repair_omits_gold_quote(
     assert trace["gold_evidence_fallback_diagnostics"]["used"] is True
     assert "600 دولار" in result["answer"]
     assert "$600" in result["answer"]
-    assert result["sources"]
+    assert result["retrieved_results"]
+    assert result["source_groups"]
 
 
 @pytest.mark.regression
