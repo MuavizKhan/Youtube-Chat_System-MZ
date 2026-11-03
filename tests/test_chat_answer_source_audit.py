@@ -427,7 +427,7 @@ def test_english_response_language_rejects_quote_without_english_main_answer():
 
 
 def test_system_instruction_places_source_excerpt_before_english_meaning():
-    language_rules = chain.SYSTEM_INSTRUCTIONS.split("EVIDENCE AND ATTRIBUTION", 1)[0]
+    language_rules = chain.SYSTEM_INSTRUCTIONS.split("EVIDENCE AND ATTRIBUTION", 1)[0].lower()
 
     assert "put the original-language excerpt first" in language_rules
     assert "follow it immediately with its english meaning" in language_rules
