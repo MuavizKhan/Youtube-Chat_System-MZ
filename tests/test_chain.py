@@ -6014,3 +6014,59 @@ def test_ar07_generation_is_suppressed_when_price_evidence_is_absent(monkeypatch
     assert trace["gold_evidence_context_complete"] is False
     assert trace["gold_evidence_required_groups"] == 1
     assert trace["gold_evidence_included_groups"] == []
+
+
+@pytest.mark.regression
+def test_ar07_retrieval_trace_distinguishes_missing_price_evidence_from_weak_semantics(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    wrong_anchor = (
+        doc(708, 120, 180, "The room is unusual and visitors may hear their breathing."),
+        1.243,
+    )
+    calls = []
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: (
+            ([], [], {"weak_native_query_rejected": False})
+            if kwargs.get("k") == chain.TOP_K
+            else (calls.append(kwargs) or ([wrong_anchor], [wrong_anchor]))
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            chain.QueryUnderstandingError("simulated planner failure")
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, _max_distance: bool(results),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _vector_store, _query, anchors: list(anchors),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        question,
+        object(),
+        video_id="fAd2nKfrDB8",
+    )
+
+    assert results == []
+    assert trace["planner_failure_fallback_accepted"] is False
+    assert trace["final_stage"] == "planner_failed_required_evidence_missing"
+    assert trace["planner_failure_fallback_rejection_reason"] == (
+        "required_generation_evidence_not_retrieved"
+    )
+    assert trace["planner_failure_fallback_evidence_gate_passed"] is False
+    assert len(calls) == 2
