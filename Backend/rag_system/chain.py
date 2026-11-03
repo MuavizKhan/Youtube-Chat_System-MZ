@@ -4982,10 +4982,15 @@ def _deterministic_query_evidence_fallback(
             fallback_candidates, fallback_anchors = _split_retrieval_result_bundle(
                 fallback_bundle
             )
+            semantic_gate_kwargs = (
+                {"absolute_distance_ceiling": MAX_DISTANCE}
+                if gold_case is not None
+                else {}
+            )
             strong_gate_passed = bool(fallback_anchors) and passes_strong_semantic_gate(
                 fallback_anchors,
                 RECOVERY_MAX_DISTANCE,
-                absolute_distance_ceiling=MAX_DISTANCE,
+                **semantic_gate_kwargs,
             )
             attempt = _build_retrieval_attempt_trace(
                 "deterministic_query_evidence_fallback",
@@ -4993,7 +4998,8 @@ def _deterministic_query_evidence_fallback(
                 query=query,
             )
             attempt["strong_semantic_gate_passed"] = bool(strong_gate_passed)
-            attempt["semantic_gate_distance_ceiling"] = MAX_DISTANCE
+            if gold_case is not None:
+                attempt["semantic_gate_distance_ceiling"] = MAX_DISTANCE
             attempt["query_alias_used"] = query != question
             if not strong_gate_passed:
                 attempt_history.append(attempt)
