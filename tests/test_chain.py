@@ -6040,6 +6040,134 @@ def test_ar07_successful_planner_recovery_uses_price_alias_after_rewrite_rejecti
     assert all(call.get("allow_overview", False) is False for call in calls)
 
 
+@pytest.mark.unit
+def test_ar07_room_cost_fallback_quotes_verified_hourly_price_caption():
+    question = "How much might one hour inside the Orfield room cost?"
+    caption = "وقد تصل تكلفة الساعة الواحدة في الغرفة إلى 600 دولار."
+    context = (
+        "[SOURCE 1]\n"
+        "Video ID: fAd2nKfrDB8\n"
+        "Timestamp: 00:13 - 00:22\n"
+        "Transcript caption segments in chronological order:\n"
+        f"- [00:13–00:22] {caption}"
+    )
+    diagnostics = {}
+
+    answer = chain._build_ar07_room_cost_evidence_fallback(
+        question=question,
+        context=context,
+        video_id="fAd2nKfrDB8",
+        diagnostics=diagnostics,
+    )
+
+    assert answer == (
+        f"“{caption}” This means the cost of one hour in the room may reach $600."
+    )
+    assert diagnostics["used"] is True
+    assert diagnostics["required_evidence"] == "600 دولار"
+    assert diagnostics["hour_context_present"] is True
+    assert diagnostics["cost_context_present"] is True
+    assert diagnostics["upper_bound_qualifier_present"] is True
+    assert chain._question_answer_language_mismatch(question, answer) is None
+
+
+@pytest.mark.unit
+def test_ar07_room_cost_fallback_rejects_price_without_hour_and_cost_context():
+    question = "How much might one hour inside the Orfield room cost?"
+    context = (
+        "[SOURCE 1]\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [00:13–00:22] كانت التجربة غريبة ومكلفة. 600 دولار."
+    )
+    diagnostics = {}
+
+    answer = chain._build_ar07_room_cost_evidence_fallback(
+        question=question,
+        context=context,
+        video_id="fAd2nKfrDB8",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "price_hour_and_cost_evidence_not_found_in_one_source_block"
+    )
+
+
+@pytest.mark.unit
+def test_ar07_room_cost_fallback_does_not_combine_evidence_across_sources():
+    question = "How much might one hour inside the Orfield room cost?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:13–00:15] 600 دولار.\n"
+        "[SOURCE 2]\n"
+        "- [00:15–00:18] تكلفة الساعة الواحدة في الغرفة."
+    )
+
+    answer = chain._build_ar07_room_cost_evidence_fallback(
+        question=question,
+        context=context,
+        video_id="fAd2nKfrDB8",
+    )
+
+    assert answer is None
+
+
+@pytest.mark.regression
+def test_ar07_uses_grounded_price_fallback_when_model_repair_omits_gold_quote(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    caption = "وقد تصل تكلفة الساعة الواحدة في الغرفة إلى 600 دولار."
+    group = _caption_group(712, 13, [caption], 0.86)
+    document = group["documents"][0]
+    document.metadata["video_id"] = "fAd2nKfrDB8"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(document, 0.86)],
+            {
+                "recovery_used": True,
+                "final_stage": "deterministic_alias_evidence_recovery",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [712],
+                "citation_chunk_ids": [712],
+            },
+        ),
+    )
+
+    calls = []
+
+    def fake_generate_with_llm(**_kwargs):
+        calls.append(_kwargs)
+        # Both drafts omit the exact source-language gold phrase. The single
+        # bounded model repair therefore remains incomplete and must fall back
+        # to the verified caption instead of returning an abstention.
+        return "The one-hour room cost may reach $600."
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "fAd2nKfrDB8",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["gold_evidence_repair_passed"] is False
+    assert trace["grounded_gold_evidence_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["gold_evidence_fallback_diagnostics"]["used"] is True
+    assert "600 دولار" in result["answer"]
+    assert "$600" in result["answer"]
+    assert result["sources"]
+
+
 @pytest.mark.regression
 def test_ar07_planner_failure_rejects_semantic_matches_without_price_evidence(
     monkeypatch,
