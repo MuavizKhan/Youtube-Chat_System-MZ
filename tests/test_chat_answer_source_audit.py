@@ -382,6 +382,57 @@ def test_bodily_sound_quality_gate_requires_english_for_arabic_transcript():
     assert "sound_eyelids_blinking" in failed
 
 
+def test_ar08_accepts_pulse_as_a_heartbeat_synonym():
+    pulse_answer = (
+        "In the quiet room, people may become aware of their pulse, "
+        "blood moving through their veins, their lungs, stomach, and blinking."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", pulse_answer)
+    }
+
+    assert checks["sound_heartbeat"] is True
+
+    unrelated_answer = (
+        "In the room, people discuss heart health, breathing, and the quiet."
+    )
+    unrelated_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", unrelated_answer)
+    }
+    assert unrelated_checks["sound_heartbeat"] is False
+
+
+def test_ar09_accepts_english_sound_and_perception_role_requirements():
+    answer = (
+        "Sound carries signals about the world and can shape what we see. "
+        "The sound-induced flash illusion shows that auditory input can bias "
+        "visual perception."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR09", answer)
+    }
+
+    assert checks["answer_requirement_sound_subject"] is True
+    assert checks["answer_requirement_perception_role"] is True
+
+
+def test_ar09_does_not_pass_perception_requirement_from_sound_alone():
+    answer = (
+        "Sound is present in the room, and the speaker discusses the "
+        "experience of sitting in silence."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR09", answer)
+    }
+
+    assert checks["answer_requirement_sound_subject"] is True
+    assert checks["answer_requirement_perception_role"] is False
+
+
 def test_post_chat_retries_rate_limit_after_retry_after_and_records_wait(monkeypatch):
     case = {
         "id": "Q13",

@@ -555,6 +555,9 @@ ARABIC_SILENCE_GOLD = (
         question_id="AR07",
         groups=(("600 دولار",),),
         min_group_coverage=1.0,
+        # The Orfield wording must retrieve the price-bearing caption and keep
+        # that evidence in the final generation prompt before an answer is allowed.
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="AR08",
