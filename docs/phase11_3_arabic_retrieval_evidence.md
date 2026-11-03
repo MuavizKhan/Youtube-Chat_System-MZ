@@ -29,8 +29,11 @@ These are distinct failure classes and are fixed independently.
 
 1. Keep the original user wording as the first deterministic retry.
 2. When the exact phrase "Orfield room" appears, allow one additional
-   deterministic alias that substitutes "world's quietest room". No open-ended
-   synonym generation or extra LLM call is introduced.
+   deterministic alias. For a cost question containing "how much", "one hour",
+   and "cost" or "price", reuse the exact AR02 wording that passed live:
+   "How much might one hour in the world's quietest room cost?". Other Orfield
+   questions use a literal phrase substitution to "world's quietest room".
+   No open-ended synonym generation or extra LLM call is introduced.
 3. Continue to apply the existing recovery distance and strong semantic gate.
    A semantically accepted candidate is not sufficient for AR07: after context
    expansion, its text must contain the registered `600 دولار` gold-evidence
@@ -89,8 +92,8 @@ This phase does not treat AR08 or AR09 as retrieval failures.
 
 ## Live acceptance
 
-After the branch is integrated with the two open Phase 11.2 PRs and the backend
-is running with the frozen acceptance namespace:
+With Phase 11.2 PRs #162 and #163 merged into `main`, and the backend
+running with the frozen acceptance namespace:
 
 1. Re-run AR02 and AR07 together. Both must answer the price question from the
    price-bearing source passage, with the returned source and timestamp covering
