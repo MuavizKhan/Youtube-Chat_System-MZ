@@ -405,6 +405,9 @@ def test_ar08_accepts_pulse_as_a_heartbeat_synonym():
 
 
 def test_ar09_accepts_english_sound_and_perception_role_requirements():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR09"
+    )
     answer = (
         "Sound carries signals about the world and can shape what we see. "
         "The sound-induced flash illusion shows that auditory input can bias "
@@ -412,7 +415,7 @@ def test_ar09_accepts_english_sound_and_perception_role_requirements():
     )
     checks = {
         check["name"]: check["passed"]
-        for check in _answer_quality_checks("AR09", answer)
+        for check in _answer_quality_checks(case, answer)
     }
 
     assert checks["answer_requirement_sound_subject"] is True
@@ -420,13 +423,16 @@ def test_ar09_accepts_english_sound_and_perception_role_requirements():
 
 
 def test_ar09_does_not_pass_perception_requirement_from_sound_alone():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR09"
+    )
     answer = (
         "Sound is present in the room, and the speaker discusses the "
         "experience of sitting in silence."
     )
     checks = {
         check["name"]: check["passed"]
-        for check in _answer_quality_checks("AR09", answer)
+        for check in _answer_quality_checks(case, answer)
     }
 
     assert checks["answer_requirement_sound_subject"] is True
