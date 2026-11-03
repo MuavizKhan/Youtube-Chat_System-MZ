@@ -5397,6 +5397,13 @@ def _retrieve_with_query_recovery_trace(
                     "planner_failure_reason": planner_failure_reason,
                     "planner_failure_fallback_attempted": True,
                     "planner_failure_fallback_accepted": True,
+                    "planner_failure_fallback_query": fallback_attempt.get("query"),
+                    "planner_failure_fallback_query_alias_used": bool(
+                        fallback_attempt.get("query_alias_used")
+                    ),
+                    "planner_failure_fallback_evidence_gate_passed": (
+                        fallback_attempt.get("gold_evidence_gate_passed")
+                    ),
                     "attempts": attempts,
                     "retrieval_latency_ms": round(
                         (time.perf_counter() - started) * 1000,
@@ -5405,15 +5412,26 @@ def _retrieve_with_query_recovery_trace(
                     "final_chunk_ids": final_chunk_ids[:20],
                     "citation_chunk_ids": citation_chunk_ids[:20],
                 }
+            evidence_rejection_reason = fallback_attempt.get(
+                "gold_evidence_rejection_reason"
+            )
             return [], {
                 "recovery_used": True,
-                "final_stage": "planner_failed_no_strong_evidence",
+                "final_stage": (
+                    "planner_failed_required_evidence_missing"
+                    if evidence_rejection_reason
+                    else "planner_failed_no_strong_evidence"
+                ),
                 "planner_used": False,
                 "planner_intent": None,
                 "planner_latency_ms": elapsed_planner_ms,
                 "planner_failure_reason": planner_failure_reason,
                 "planner_failure_fallback_attempted": True,
                 "planner_failure_fallback_accepted": False,
+                "planner_failure_fallback_rejection_reason": evidence_rejection_reason,
+                "planner_failure_fallback_evidence_gate_passed": (
+                    fallback_attempt.get("gold_evidence_gate_passed")
+                ),
                 "attempts": attempts,
                 "retrieval_latency_ms": round(
                     (time.perf_counter() - started) * 1000,
