@@ -4864,15 +4864,12 @@ def _split_retrieval_result_bundle(result_bundle):
     return result_bundle, result_bundle
 
 
-def _should_use_overview_route(question: str, planner_intent: str) -> bool:
-    """Allow representative sampling only for unambiguously broad overview requests.
+def _is_explicit_overview_request(question: str) -> bool:
+    """Return whether the user's original wording clearly asks for a broad overview.
 
-    Planner intent is advisory. A multi-facet analytical question must remain
-    on targeted retrieval even when the planner labels it as an overview.
+    This check is independent of the planner so it can also guard the final
+    fallback after targeted retrieval/reformulation has been exhausted.
     """
-    if planner_intent != "overview":
-        return False
-
     normalized = " ".join(question.casefold().split())
     analytical_request = re.search(
         r"\b(?:explain|describe|analyse|analyze|evaluate|assess|compare|"
@@ -4894,7 +4891,6 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
     ):
         return False
 
-    # Overview sampling is reserved for clearly broad subject/summary prompts.
     if is_overview_question(question):
         return True
     return bool(re.search(
@@ -4902,6 +4898,14 @@ def _should_use_overview_route(question: str, planner_intent: str) -> bool:
         r"\b(?:overall|general)\s+(?:summary|overview)\b",
         normalized,
     ))
+
+
+def _should_use_overview_route(question: str, planner_intent: str) -> bool:
+    """Accept planner overview intent only when the original question is broad."""
+    return (
+        planner_intent == "overview"
+        and _is_explicit_overview_request(question)
+    )
 
 
 def _planner_failure_query_candidates(question: str) -> list[str]:
@@ -5091,6 +5095,7 @@ def _retrieve_with_query_recovery_trace(
     weak_initial_recovery_attempted = False
     weak_initial_recovery_accepted = False
     planner_overview_rejected = False
+    best_effort_overview_suppressed = False
 
     # Timestamp-specific requests use bounded temporal retrieval. Do not let
     # the generic rewrite/overview recovery ladder bypass the requested time.
@@ -5615,8 +5620,12 @@ def _retrieve_with_query_recovery_trace(
             if not final_results and weak_recovery_candidates_rejected:
                 # Do not replace candidates rejected for weak relevance with
                 # arbitrary overview chunks; doing so would bypass the gate.
+                best_effort_overview_suppressed = True
                 final_stage = "no_evidence_weak_recovery_rejected"
-            elif not final_results:
+            elif not final_results and _is_explicit_overview_request(question):
+                # Representative sampling is valid only when the original user
+                # question clearly asks for a broad overview. A specific or
+                # analytical question must abstain after targeted retrieval fails.
                 best_effort_results = retrieve_overview(vector_store)
                 attempts.append(
                     _build_retrieval_attempt_trace(
@@ -5628,13 +5637,16 @@ def _retrieve_with_query_recovery_trace(
                 if best_effort_results:
                     logger.info(
                         "Query recovery used representative transcript context "
-                        "as a best-effort fallback"
+                        "for an explicit overview request"
                     )
                     final_results = best_effort_results
                     citation_results = best_effort_results
                     final_stage = "best_effort_overview"
                 else:
                     final_stage = "no_evidence"
+            elif not final_results:
+                best_effort_overview_suppressed = True
+                final_stage = "no_evidence_non_overview_fallback_suppressed"
 
 
     final_chunk_ids = []
@@ -5658,6 +5670,7 @@ def _retrieve_with_query_recovery_trace(
         "weak_initial_recovery_attempted": weak_initial_recovery_attempted,
         "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
         "planner_overview_rejected": planner_overview_rejected,
+        "best_effort_overview_suppressed": best_effort_overview_suppressed,
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,
