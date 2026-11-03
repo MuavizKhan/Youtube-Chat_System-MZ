@@ -24,6 +24,8 @@ These are independent failure modes. A provider quota failure is not evidence th
 - Permit overview sampling only when the user's original question is recognised as an overview request or explicitly asks for the main/overall/general subject, topic, theme, or summary.
 - Never allow a question identified by the existing evidence-dense detector to be downgraded to overview sampling.
 - Apply the same guard to both weak-initial-candidate recovery and empty-initial-result recovery.
+- Guard the final best-effort fallback as well: after targeted rewrites fail, representative sampling is allowed only when the original user question explicitly requests a broad overview.
+- Record when best-effort overview was suppressed for a specific question.
 - Preserve the existing overview route for normal overview questions.
 
 Real-world cases:
@@ -38,7 +40,7 @@ Real-world cases:
 - Disable overview retrieval for this fallback.
 - Apply the existing strong semantic evidence gate before accepting any candidate.
 - Expand context only after an anchor passes that gate.
-- If no anchor passes, return no evidence rather than fabricate support or substitute arbitrary overview passages.
+- If no anchor passes, return no evidence rather than fabricate support or substitute arbitrary overview passages for a specific question. The final best-effort overview fallback is independently guarded by the original question wording.
 - Record whether the fallback was attempted and accepted, and preserve the planner failure reason in the retrieval trace.
 
 Real-world cases:
@@ -95,7 +97,7 @@ For every answer, compare each claim to the retrieved transcript passages and ti
 
 ### Acceptance criteria
 
-1. No evidence-dense question is routed to overview solely because of planner intent.
+1. No evidence-dense or otherwise specific question is routed to overview through either planner intent or the final best-effort fallback.
 2. Planner failure no longer short-circuits retrieval without one bounded original-query attempt.
 3. The fallback cannot bypass the existing strong semantic gate.
 4. Provider completion metadata distinguishes normal completion from token-limit termination.
@@ -108,3 +110,49 @@ The following should be separate, evidence-driven changes after Phase 11.2's fir
 - Answer completeness and duplicate-section detection using observed failure cases and explicit tests.
 - Token-budget optimisation based on provider usage telemetry rather than arbitrary prompt truncation.
 - Broader provider resilience or failover only after provider-specific compatibility, privacy, cost, and quota policies are defined.
+
+## Focused live validation runner
+
+The repository includes `scripts/phase11_2_live_validation.py` for a small
+sequential live check of the exact Phase 11.2 routing scenarios. It uses only
+the standard library and sends requests to an already-running backend.
+
+Run the default five-case diagnostic after confirming that the existing
+pilot indexes are ready:
+
+```powershell
+$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
+
+.\.venv\Scripts\python.exe -m scripts.phase11_2_live_validation
+```
+
+The runner:
+- checks index readiness using GET only; it never requests index creation or reindexing;
+- sends cases sequentially with a 20-second default pause to reduce provider TPM pressure;
+- records retrieval stage, planner intent/failure recovery fields, source intervals,
+  generation context-budget diagnostics, request status and effective configuration;
+- verifies every successful response uses the frozen Phase 10.11 acceptance namespace
+  and retrieval settings; a backend running with the `default` namespace fails the
+  configuration contract even when that namespace is consistent across requests;
+- rejects overview sampling for cases marked as specific/analytical;
+- checks abstention plus source/timestamp suppression for the unrelated control;
+- writes a new timestamped JSON report and refuses to overwrite an existing file.
+
+To run only the historical routing regression case:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.phase11_2_live_validation --case-ids HI_ANALYTICAL_01
+```
+
+The report deliberately sets `live_answer_quality_status` to
+`manual_transcript_review_required`. Automated routing/source contracts are
+not proof that each generated claim is faithful. Review every answer against
+its returned transcript source passages and timestamps. Groq
+`finish_reason` and token usage remain available in the backend log; this
+runner does not infer completion from response length.
+
+The runner's automated tests are in
+`tests/test_phase11_2_live_validation.py`. The expected namespace and embedding
+model may be overridden explicitly with `--expected-namespace` and
+`--expected-embedding-model`; keep the defaults for Phase 11.2 acceptance.

@@ -2568,7 +2568,7 @@ def test_query_recovery_uses_relaxed_retrieval_after_strict_recovery_fails(
 
 
 @pytest.mark.unit
-def test_query_recovery_uses_representative_context_as_final_fallback(
+def test_query_recovery_uses_final_overview_fallback_only_for_explicit_overview(
     monkeypatch,
 ):
     overview = [
@@ -2576,6 +2576,11 @@ def test_query_recovery_uses_representative_context_as_final_fallback(
         (doc(2, 20, 30, "representative context"), chain.MAX_DISTANCE),
     ]
 
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: None,
+    )
     monkeypatch.setattr(
         chain,
         "retrieve_question_context",
@@ -2586,11 +2591,8 @@ def test_query_recovery_uses_representative_context_as_final_fallback(
         "understand_query",
         lambda **kwargs: SimpleNamespace(
             intent="opinion",
-            standalone_question="which side is good and which is bad",
-            search_queries=[
-                "arguments for each side",
-                "positions of opposing sides",
-            ],
+            standalone_question="overall subject and key themes",
+            search_queries=["overall subject", "key themes"],
         ),
     )
     monkeypatch.setattr(
@@ -2599,11 +2601,68 @@ def test_query_recovery_uses_representative_context_as_final_fallback(
         lambda vector_store: overview,
     )
 
-    assert chain.retrieve_with_query_recovery(
+    results, trace = chain._retrieve_with_query_recovery_trace(
         object(),
-        "Which side is good and which is bad?",
+        "Give me an overall summary of this video.",
         object(),
-    ) == overview
+    )
+
+    assert results == overview
+    assert trace["final_stage"] == "best_effort_overview"
+    assert trace["best_effort_overview_suppressed"] is False
+
+
+@pytest.mark.regression
+def test_analytical_question_never_uses_final_best_effort_overview_fallback(
+    monkeypatch,
+):
+    question = (
+        "Explain the major historical developments mentioned in the video "
+        "and their consequences."
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_temporal_context",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_question_context",
+        lambda **kwargs: [],
+    )
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **kwargs: SimpleNamespace(
+            intent="overview",
+            standalone_question="historical events and their consequences",
+            search_queries=[
+                "major historical developments",
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "retrieve_overview",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Analytical questions must not fall back to representative overview samples."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        question,
+        object(),
+    )
+
+    assert results == []
+    assert trace["planner_overview_rejected"] is True
+    assert trace["final_stage"] == "no_evidence_non_overview_fallback_suppressed"
+    assert trace["best_effort_overview_suppressed"] is True
+    assert all(
+        attempt["stage"] != "best_effort_overview"
+        for attempt in trace["attempts"]
+    )
 
 
 @pytest.mark.unit
