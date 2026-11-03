@@ -219,8 +219,11 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
         expected_behavior="answerable",
         answer_language="en",
         answer_requirements=(
-            {"name": "sound_subject", "pattern": r"الصوت|صوت"},
-            {"name": "perception_role", "pattern": r"بوصلة|إدراك|ادراك|توجيه"},
+            {"name": "sound_subject", "pattern": r"\bsound\b"},
+            {
+                "name": "perception_role",
+                "pattern": r"\b(?:compass|percept\w*|perceiv\w*|guid\w*|orient\w*|direction|navigat\w*)\b",
+            },
         ),
     ),
     _make_audit_case(
@@ -686,7 +689,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     """Check source-supported bodily-sound coverage in the English response."""
     text = _substantive_answer(answer)
     requirements = [
-        ("heartbeat", r"heart\s*beat|heartbeat"),
+        ("heartbeat", r"heart\s*beat|heartbeat|\bpulse\b"),
         ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
         ("lungs_or_breathing", r"lung|breath"),
         ("stomach", r"stomach|rumbl|belly"),
