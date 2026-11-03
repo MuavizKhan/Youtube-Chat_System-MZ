@@ -102,7 +102,7 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
         "answer": (
             "In the quiet room, people may hear their heartbeat, blood moving "
             "through their veins, sounds from their lungs and stomach, and even "
-            "their eyelids blinking. Arabic phrase: نبض قلبك.\n\n"
+            "their eyelids blinking. Arabic phrase: “نبض قلبك.”\n\n"
             "Relevant timestamps: 02:28–04:21"
         ),
         "retrieval_config": {
@@ -152,7 +152,7 @@ def test_expanded_context_citation_policy_makes_neighbor_evidence_citable():
             "AR08",
             "In the quiet room, people may hear their heartbeat, blood moving "
             "through their veins, sounds from their lungs or stomach, and even "
-            "their eyelids blinking. Arabic phrase: نبض قلبك.",
+            "their eyelids blinking. Arabic phrase: “نبض قلبك.”",
         ),
     ],
 )
@@ -354,7 +354,7 @@ def test_bodily_sound_quality_gate_requires_english_for_arabic_transcript():
     english_answer = (
         "In the quiet room people may hear their heartbeat, blood rushing through "
         "their veins, their lungs and breathing, stomach rumbling, and eyelids blinking. "
-        "Arabic transcript phrase: نبض قلبك."
+        "Arabic transcript phrase: “نبض قلبك.”"
     )
     arabic_answer = (
         "في الغرفة الهادئة قد يبدأ الناس في سماع أصوات أجسامهم: نبض قلبك، "
@@ -380,6 +380,114 @@ def test_bodily_sound_quality_gate_requires_english_for_arabic_transcript():
     assert "sound_lungs_or_breathing" in failed
     assert "sound_stomach" in failed
     assert "sound_eyelids_blinking" in failed
+
+
+def test_english_response_language_allows_one_short_quoted_arabic_excerpt():
+    answer = (
+        "“...حسـدك في أوضة ممكن يا عزيزي تدفع فيها ما يصل إلي 600 دولار.” "
+        "In English, this means a one-hour stay in the Orfield room can cost up to $600."
+    )
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR07"
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, answer)
+    }
+
+    assert checks["response_language_english"] is True
+    assert checks["answer_requirement_room_cost"] is True
+
+
+def test_english_response_language_rejects_unquoted_source_language_text():
+    answer = (
+        "A one-hour stay can cost up to $600. "
+        "هذا هو السعر المذكور في الفيديو. هذا هو السعر المذكور في الفيديو. "
+        "هذا هو السعر المذكور في الفيديو."
+    )
+
+    assert audit_module._answer_language_matches(answer, "en") is False
+
+
+def test_english_response_language_rejects_multiple_source_language_quotes():
+    answer = "“نبض قلبك” is followed by “حركة الدم في عروقك” in the passage."
+
+    assert audit_module._answer_language_matches(answer, "en") is False
+
+
+def test_english_response_language_rejects_overlong_source_language_quotes():
+    long_excerpt = " ".join(["نبض قلبك"] * 40)
+    answer = f'The passage describes internal sounds: “{long_excerpt}”.'
+
+    assert audit_module._answer_language_matches(answer, "en") is False
+
+
+def test_english_response_language_rejects_quote_without_english_main_answer():
+    assert audit_module._answer_language_matches("“نبض قلبك”", "en") is False
+
+
+def test_system_instruction_places_source_excerpt_before_english_meaning():
+    language_rules = chain.SYSTEM_INSTRUCTIONS.split("EVIDENCE AND ATTRIBUTION", 1)[0].lower()
+
+    assert "put the original-language excerpt first" in language_rules
+    assert "follow it immediately with its english meaning" in language_rules
+
+
+def test_ar08_accepts_pulse_as_a_heartbeat_synonym():
+    pulse_answer = (
+        "In the quiet room, people may become aware of their pulse, "
+        "blood moving through their veins, their lungs, stomach, and blinking."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", pulse_answer)
+    }
+
+    assert checks["sound_heartbeat"] is True
+
+    unrelated_answer = (
+        "In the room, people discuss heart health, breathing, and the quiet."
+    )
+    unrelated_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("AR08", unrelated_answer)
+    }
+    assert unrelated_checks["sound_heartbeat"] is False
+
+
+def test_ar09_accepts_english_sound_and_perception_role_requirements():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR09"
+    )
+    answer = (
+        "Sound carries signals about the world and can shape what we see. "
+        "The sound-induced flash illusion shows that auditory input can bias "
+        "visual perception."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, answer)
+    }
+
+    assert checks["answer_requirement_sound_subject"] is True
+    assert checks["answer_requirement_perception_role"] is True
+
+
+def test_ar09_does_not_pass_perception_requirement_from_sound_alone():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR09"
+    )
+    answer = (
+        "Sound is present in the room, and the speaker discusses the "
+        "experience of sitting in silence."
+    )
+    checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, answer)
+    }
+
+    assert checks["answer_requirement_sound_subject"] is True
+    assert checks["answer_requirement_perception_role"] is False
 
 
 def test_post_chat_retries_rate_limit_after_retry_after_and_records_wait(monkeypatch):
@@ -634,7 +742,7 @@ def test_audit_separates_verified_context_evidence_from_retrieved_only_chunks():
         "answer": (
             "In the quiet room, people may hear their heartbeat, blood moving "
             "through their veins, sounds from their lungs and stomach, and even "
-            "their eyelids blinking. Arabic phrase: نبض قلبك.\n\n"
+            "their eyelids blinking. Arabic phrase: “نبض قلبك.”\n\n"
             "Relevant timestamps: 02:33–03:37"
         ),
         "retrieval_config": {
