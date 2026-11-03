@@ -387,9 +387,12 @@ def test_english_response_language_allows_one_short_quoted_arabic_excerpt():
         "“...حسـدك في أوضة ممكن يا عزيزي تدفع فيها ما يصل إلي 600 دولار.” "
         "In English, this means a one-hour stay in the Orfield room can cost up to $600."
     )
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "AR07"
+    )
     checks = {
         check["name"]: check["passed"]
-        for check in _answer_quality_checks("AR07", answer)
+        for check in _answer_quality_checks(case, answer)
     }
 
     assert checks["response_language_english"] is True
@@ -427,7 +430,7 @@ def test_system_instruction_places_source_excerpt_before_english_meaning():
     language_rules = chain.SYSTEM_INSTRUCTIONS.split("EVIDENCE AND ATTRIBUTION", 1)[0]
 
     assert "put the original-language excerpt first" in language_rules
-    assert "its English meaning immediately after it" in language_rules
+    assert "follow it immediately with its english meaning" in language_rules
 
 
 def test_ar08_accepts_pulse_as_a_heartbeat_synonym():
