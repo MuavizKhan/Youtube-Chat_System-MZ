@@ -5813,3 +5813,204 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
         "application appends a separate",
     ):
         assert required_rule in prompt
+
+
+@pytest.mark.unit
+def test_planner_failure_query_candidates_map_orfield_room_to_quietest_room_alias():
+    orfield_question = "How much might one hour inside the Orfield room cost?"
+    quietest_room_question = (
+        "How much might one hour in the world's quietest room cost?"
+    )
+
+    assert chain._planner_failure_query_candidates(orfield_question) == [
+        orfield_question,
+        "How much might one hour inside the world's quietest room cost?",
+    ]
+    # AR02 already uses the wording that retrieves the price passage. Do not
+    # add another alias or alter that passing control query.
+    assert chain._planner_failure_query_candidates(quietest_room_question) == [
+        quietest_room_question
+    ]
+
+
+@pytest.mark.regression
+def test_ar07_planner_failure_rejects_wrong_original_context_then_accepts_price_alias(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    wrong_anchor = (
+        doc(703, 120, 180, "The room is unusual and can make visitors uncomfortable."),
+        1.243,
+    )
+    price_anchor = (
+        doc(704, 13, 121, "قد تصل تكلفة الساعة الواحدة إلى 600 دولار."),
+        1.20,
+    )
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if "Orfield room" in kwargs["query"]:
+            return [wrong_anchor], [wrong_anchor]
+        if "world's quietest room" in kwargs["query"]:
+            return [price_anchor], [price_anchor]
+        pytest.fail("unexpected AR07 retrieval query: " + kwargs["query"])
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, max_distance: bool(results)
+        and max_distance == chain.RECOVERY_MAX_DISTANCE,
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, query, anchors: list(anchors),
+    )
+
+    results, anchors, attempt, accepted = (
+        chain._planner_failure_original_query_fallback(
+            object(),
+            question,
+            video_id="fAd2nKfrDB8",
+        )
+    )
+
+    assert accepted is True
+    assert results == [price_anchor]
+    assert anchors == [price_anchor]
+    assert [call["query"] for call in calls] == [
+        question,
+        "How much might one hour inside the world's quietest room cost?",
+    ]
+    assert all(call["allow_overview"] is False for call in calls)
+    assert all(
+        call["max_distance"] == chain.RECOVERY_MAX_DISTANCE for call in calls
+    )
+    assert attempt["query_alias_used"] is True
+    assert attempt["gold_evidence_question_id"] == "AR07"
+    assert attempt["gold_evidence_required_groups"] == 1
+    assert attempt["gold_evidence_groups_present"] == [0]
+    assert attempt["gold_evidence_groups_missing"] == []
+    assert attempt["gold_evidence_gate_passed"] is True
+    assert len(attempt["query_attempts"]) == 2
+    assert attempt["query_attempts"][0]["gold_evidence_gate_passed"] is False
+
+
+@pytest.mark.regression
+def test_ar07_planner_failure_rejects_semantic_matches_without_price_evidence(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    wrong_anchor = (
+        doc(705, 120, 180, "The room is unusual and can make visitors uncomfortable."),
+        1.243,
+    )
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        return [wrong_anchor], [wrong_anchor]
+
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "passes_strong_semantic_gate",
+        lambda results, max_distance: bool(results),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda vector_store, query, anchors: list(anchors),
+    )
+
+    results, anchors, attempt, accepted = (
+        chain._planner_failure_original_query_fallback(
+            object(),
+            question,
+            video_id="fAd2nKfrDB8",
+        )
+    )
+
+    assert accepted is False
+    assert results == []
+    assert anchors == []
+    assert len(calls) == 2
+    assert attempt["gold_evidence_question_id"] == "AR07"
+    assert attempt["gold_evidence_gate_passed"] is False
+    assert attempt["gold_evidence_rejection_reason"] == (
+        "required_generation_evidence_not_retrieved"
+    )
+
+
+@pytest.mark.unit
+def test_ar07_generation_context_reserves_price_evidence_under_budget():
+    question = "How much might one hour inside the Orfield room cost?"
+    filler = [
+        "يتحدث المقطع عن الغرفة الهادئة وتجربة الزائر بصورة عامة."
+        for _ in range(42)
+    ]
+    price_caption = "وقد تصل تكلفة الساعة الواحدة في الغرفة إلى 600 دولار."
+    group = _caption_group(706, 0, [*filler, price_caption], 0.78)
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=1200,
+        video_id="fAd2nKfrDB8",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert diagnostics["reduced"] is True
+    assert len(result["context"]) <= 1200
+    assert "600 دولار" in result["context"]
+    assert diagnostics["gold_evidence_question_id"] == "AR07"
+    assert diagnostics["gold_evidence_groups_required"] == 1
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+
+
+@pytest.mark.regression
+def test_ar07_generation_is_suppressed_when_price_evidence_is_absent(monkeypatch):
+    question = "How much might one hour inside the Orfield room cost?"
+    missing_evidence = doc(
+        707,
+        120,
+        180,
+        "The room is unusual and visitors may hear their own breathing.",
+    )
+    missing_evidence.metadata["video_id"] = "fAd2nKfrDB8"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(missing_evidence, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [707],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: pytest.fail(
+            "generation must not run without the registered AR07 price evidence"
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "fAd2nKfrDB8"}
+    )
+
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["gold_evidence_question_id"] == "AR07"
+    assert trace["gold_evidence_context_complete"] is False
+    assert trace["gold_evidence_required_groups"] == 1
+    assert trace["gold_evidence_included_groups"] == []
