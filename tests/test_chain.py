@@ -5824,7 +5824,7 @@ def test_planner_failure_query_candidates_map_orfield_room_to_quietest_room_alia
 
     assert chain._planner_failure_query_candidates(orfield_question) == [
         orfield_question,
-        "How much might one hour inside the world's quietest room cost?",
+        "How much might one hour in the world's quietest room cost?",
     ]
     # AR02 already uses the wording that retrieves the price passage. Do not
     # add another alias or alter that passing control query.
@@ -5882,7 +5882,7 @@ def test_ar07_planner_failure_rejects_wrong_original_context_then_accepts_price_
     assert anchors == [price_anchor]
     assert [call["query"] for call in calls] == [
         question,
-        "How much might one hour inside the world's quietest room cost?",
+        "How much might one hour in the world's quietest room cost?",
     ]
     assert all(call["allow_overview"] is False for call in calls)
     assert all(
