@@ -409,6 +409,20 @@ _TIMESTAMP_RANGE_PATTERN = re.compile(
 )
 
 
+
+_SOURCE_LANGUAGE_SCRIPT_PATTERN = re.compile(
+    r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\u0900-\u097f]"
+)
+_SOURCE_LANGUAGE_QUOTE_PATTERN = re.compile(
+    r"“(?P<curly_double>[^”\r\n]*)”|"
+    r"«(?P<guillemet>[^»\r\n]*)»|"
+    r"‘(?P<curly_single>[^’\r\n]*)’|"
+    r'"(?P<straight_double>[^"\r\n]*)"'
+)
+_MAX_SOURCE_LANGUAGE_QUOTE_CHARS = 180
+_MAX_SOURCE_LANGUAGE_QUOTE_WORDS = 32
+
+
 def decode_json_response(body: bytes) -> dict[str, Any]:
     """Decode a JSON HTTP body as UTF-8 and require an object payload."""
     text = body.decode("utf-8", errors="strict")
@@ -745,12 +759,52 @@ def _is_abstention_only_answer(answer: str) -> bool:
     return any(pattern.fullmatch(text) for pattern in _ABSTENTION_ONLY_PATTERNS)
 
 
+def _remove_permitted_source_language_quote(text: str) -> str | None:
+    """Remove one short, delimited Arabic/Urdu/Hindi excerpt for English scoring.
+
+    This is only a language-scoring exception. It does not independently verify
+    that the quotation is verbatim; generation is instructed to quote supplied
+    transcript text only, and source/evidence checks remain separate.
+    """
+    source_quotes = []
+    for match in _SOURCE_LANGUAGE_QUOTE_PATTERN.finditer(text):
+        excerpt = next(
+            value for value in match.groupdict().values() if value is not None
+        )
+        if _SOURCE_LANGUAGE_SCRIPT_PATTERN.search(excerpt):
+            source_quotes.append((match, excerpt))
+
+    if not source_quotes:
+        return text
+
+    # The product contract permits one short source-language excerpt, not a
+    # sequence of foreign-language passages embedded in an English response.
+    if len(source_quotes) != 1:
+        return None
+
+    match, excerpt = source_quotes[0]
+    if (
+        len(excerpt) > _MAX_SOURCE_LANGUAGE_QUOTE_CHARS
+        or len(re.findall(r"\S+", excerpt)) > _MAX_SOURCE_LANGUAGE_QUOTE_WORDS
+    ):
+        return None
+
+    # Leave any other source-script text visible to the normal language score.
+    return text[:match.start()] + " " + text[match.end():]
+
+
 def _answer_language_matches(answer: str, language: str) -> bool:
-    """Use script proportions as a conservative language guard for live answers."""
+    """Check the answer's main language while allowing one short native quote."""
     text = _substantive_answer(answer)
+    if language == "en":
+        text_without_quote = _remove_permitted_source_language_quote(text)
+        if text_without_quote is None:
+            return False
+        text = text_without_quote
+
     latin = len(re.findall(r"[A-Za-z]", text))
     devanagari = len(re.findall(r"[\u0900-\u097f]", text))
-    arabic = len(re.findall(r"[\u0600-\u06ff]", text))
+    arabic = len(re.findall(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]", text))
     if language == "en":
         return latin >= 8 and latin > devanagari and latin > arabic
     if language == "hi":
