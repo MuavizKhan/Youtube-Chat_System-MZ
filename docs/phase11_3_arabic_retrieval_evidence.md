@@ -86,6 +86,22 @@ The branch adds tests for:
 - AR09 accepting English sound/perception wording while rejecting sound-only
   wording.
 
+## English response language and source-language quotations
+
+The English response contract permits one short, clearly delimited Hindi, Arabic,
+or Urdu transcript excerpt when it is useful to verify a key point. The excerpt
+must appear first and be followed immediately by its English meaning. All
+surrounding prose remains English.
+
+The live answer-language checker exempts at most one quoted source-script
+excerpt, capped at 180 characters and 32 whitespace-delimited words. Multiple
+or oversized source-language quotations fail the language check. Any additional
+unquoted source-script text remains part of the ordinary script-proportion
+check. The same bounded exception applies to Arabic/Urdu and Devanagari script.
+The checker verifies language shape, not quotation verbatimness; exactness
+remains a generation requirement and must be assessed against the supplied
+transcript evidence.
+
 ## Preserved configuration and non-goals
 
 No change is made to:
