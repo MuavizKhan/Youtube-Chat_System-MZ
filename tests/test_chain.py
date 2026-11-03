@@ -6031,7 +6031,7 @@ def test_ar07_successful_planner_recovery_uses_price_alias_after_rewrite_rejecti
     assert trace["deterministic_fallback_evidence_gate_passed"] is True
     assert trace["final_chunk_ids"] == [711]
     assert trace["citation_chunk_ids"] == [711]
-    assert [call["query"] for call in calls if call.get("return_anchors")] == [
+    assert [call["query"] for call in calls if call.get("return_anchors") and not call.get("return_status")] == [
         question,
         alias_question,
     ]
