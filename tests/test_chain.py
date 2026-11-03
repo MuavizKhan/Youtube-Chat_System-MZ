@@ -5919,7 +5919,7 @@ def test_ar07_planner_failure_rejects_wrong_original_context_then_accepts_price_
     monkeypatch.setattr(
         chain,
         "passes_strong_semantic_gate",
-        lambda results, max_distance: bool(results)
+        lambda results, max_distance, **_kwargs: bool(results)
         and max_distance == chain.RECOVERY_MAX_DISTANCE,
     )
     monkeypatch.setattr(
