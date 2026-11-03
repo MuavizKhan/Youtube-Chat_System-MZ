@@ -41,10 +41,19 @@ These are distinct failure classes and are fixed independently.
 4. Reject candidates that pass the semantic gate but omit the required price
    evidence. Try the one bounded alias; if neither query retrieves the price
    passage, return no evidence and preserve fail-closed abstention.
-5. Require 100% AR07 gold-evidence coverage in the generation context. This
-   uses the video-scoped evidence reservation and generation-suppression path
-   already introduced for the Hindi cases in Phase 11.2.
-6. Pass the active video ID into query recovery so the evidence contract is
+5. Run this bounded evidence-aware alias fallback in both planner states:
+   after a query-understanding exception, and after a successful factual planner
+   has exhausted its strict and relaxed rewritten-query candidates. The live
+   AR07 rerun exposed that the first implementation covered only the exception
+   path; the planner can succeed while producing a weak rewrite (the observed
+   AR07 relaxed candidate was chunk 3 at distance 1.42682).
+6. Keep the same strong semantic gate and explicit absolute distance ceiling
+   used by ordinary relaxed recovery. The alias is a better query, not
+   permission to accept a weaker match or raise any distance threshold.
+7. Require 100% AR07 gold-evidence coverage in the expanded retrieval context
+   and final generation context. A semantically accepted non-price passage
+   must be rejected; missing evidence preserves fail-closed abstention.
+8. Pass the active video ID into query recovery so the evidence contract is
    resolved against the exact registered video/question, not a global alias.
 
 The retrieval trace records the candidate queries, whether an alias was used,
