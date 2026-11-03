@@ -2359,7 +2359,7 @@ def test_planner_failure_uses_bounded_original_query_retrieval(monkeypatch):
     assert accepted is True
     assert results == expanded
     assert anchors == [anchor]
-    assert attempt["stage"] == "planner_failure_original_query_relaxed"
+    assert attempt["stage"] == "deterministic_query_evidence_fallback"
     assert attempt["strong_semantic_gate_passed"] is True
     assert calls[0]["query"] == "Which historical event does the speaker describe?"
     assert calls[0]["allow_overview"] is False
