@@ -4912,9 +4912,9 @@ def _planner_failure_query_candidates(question: str) -> list[str]:
     # "Orfield room" and "world's quietest room" refer to the same room in the
     # Arabic episode. The latter wording has already demonstrated successful
     # retrieval for the price passage; keep this alias narrowly scoped.
-    if re.search(r"\\borfield\\s+room\\b", normalized):
+    if re.search(r"\borfield\s+room\b", normalized):
         alias = re.sub(
-            r"\\borfield\\s+room\\b",
+            r"\borfield\s+room\b",
             "world's quietest room",
             question,
             flags=re.IGNORECASE,
@@ -4991,7 +4991,7 @@ def _planner_failure_original_query_fallback(
             attempt["expanded_context_chunks"] = len(expanded)
 
             if gold_case is not None:
-                expanded_text = "\\n".join(
+                expanded_text = "\n".join(
                     str(getattr(document, "page_content", "") or "")
                     for document, _distance in expanded
                 )
