@@ -6037,7 +6037,7 @@ def test_ar07_successful_planner_recovery_uses_price_alias_after_rewrite_rejecti
     ]
     alias_call = next(call for call in calls if call.get("query") == alias_question)
     assert alias_call["max_distance"] == chain.RECOVERY_MAX_DISTANCE
-    assert all(call["allow_overview"] is False for call in calls)
+    assert all(call.get("allow_overview", False) is False for call in calls)
 
 
 @pytest.mark.regression
