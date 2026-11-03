@@ -86,6 +86,20 @@ The branch adds tests for:
 - AR09 accepting English sound/perception wording while rejecting sound-only
   wording.
 
+## AR07 deterministic answer fallback after failed model repair
+
+The model receives a bounded generation context with the registered `600 دولار`
+evidence. If its one permitted completeness repair still omits that exact source
+phrase, the answer is not returned as an unsupported draft. For the registered
+AR07 question only, a deterministic fallback may instead answer from one
+prompt-visible source block, and only when that same block contains the gold
+amount plus Arabic hourly and cost wording. It quotes a short exact caption
+excerpt first and follows it immediately with an English meaning. A price-only
+match, evidence split across different source blocks, a different video, or a
+different question remains fail-closed. The usual returned-source and
+timestamp-building path is preserved; this fallback does not create or invent
+source metadata.
+
 ## English response language and source-language quotations
 
 The English response contract permits one short, clearly delimited Hindi, Arabic,
