@@ -6069,7 +6069,7 @@ def test_ar07_generation_is_suppressed_when_price_evidence_is_absent(monkeypatch
     assert result["answer"] == chain.FALLBACK_ANSWER
     trace = result["generation_trace"]
     assert trace["generated"] is False
-    assert trace["gold_evidence_question_id"] == "AR07"
+    assert trace["gold_evidence_answer_suppressed"] is True
     assert trace["gold_evidence_context_complete"] is False
     assert trace["gold_evidence_required_groups"] == 1
     assert trace["gold_evidence_included_groups"] == []
