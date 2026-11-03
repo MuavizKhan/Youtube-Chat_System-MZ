@@ -2343,7 +2343,7 @@ def test_planner_failure_uses_bounded_original_query_retrieval(monkeypatch):
     monkeypatch.setattr(
         chain,
         "passes_strong_semantic_gate",
-        lambda results, max_distance: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
+        lambda results, max_distance, **_kwargs: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
     )
     monkeypatch.setattr(
         chain,
@@ -2351,7 +2351,7 @@ def test_planner_failure_uses_bounded_original_query_retrieval(monkeypatch):
         lambda vector_store, query, anchors: expanded,
     )
 
-    results, anchors, attempt, accepted = chain._planner_failure_original_query_fallback(
+    results, anchors, attempt, accepted = chain._deterministic_query_evidence_fallback(
         object(),
         "Which historical event does the speaker describe?",
     )
@@ -2388,7 +2388,7 @@ def test_planner_failure_fallback_rejects_weak_evidence(monkeypatch):
         ),
     )
 
-    results, anchors, attempt, accepted = chain._planner_failure_original_query_fallback(
+    results, anchors, attempt, accepted = chain._deterministic_query_evidence_fallback(
         object(),
         "Which historical event does the speaker describe?",
     )
@@ -2426,7 +2426,7 @@ def test_query_recovery_continues_with_original_query_when_planner_is_rate_limit
     monkeypatch.setattr(
         chain,
         "passes_strong_semantic_gate",
-        lambda results, max_distance: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
+        lambda results, max_distance, **_kwargs: bool(results) and max_distance == chain.RECOVERY_MAX_DISTANCE,
     )
     monkeypatch.setattr(
         chain,
@@ -5929,7 +5929,7 @@ def test_ar07_planner_failure_rejects_wrong_original_context_then_accepts_price_
     )
 
     results, anchors, attempt, accepted = (
-        chain._planner_failure_original_query_fallback(
+        chain._deterministic_query_evidence_fallback(
             object(),
             question,
             video_id="fAd2nKfrDB8",
@@ -5958,6 +5958,89 @@ def test_ar07_planner_failure_rejects_wrong_original_context_then_accepts_price_
 
 
 @pytest.mark.regression
+def test_ar07_successful_planner_recovery_uses_price_alias_after_rewrite_rejection(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    rewritten_question = "What is the hourly cost for using the Orfield room?"
+    alias_question = "How much might one hour in the world's quietest room cost?"
+    unrelated_orfield_anchor = (
+        doc(709, 120, 180, "The room is unusual and can make visitors uncomfortable."),
+        1.243,
+    )
+    weak_rewrite_anchor = (
+        doc(710, 150, 220, "Visitors may hear themselves breathing."),
+        1.42682,
+    )
+    price_anchor = (
+        doc(711, 13, 121, "قد تصل تكلفة الساعة الواحدة إلى 600 دولار."),
+        0.86,
+    )
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        query = kwargs["query"]
+        if kwargs.get("return_status"):
+            assert query == question
+            return [], [], {"weak_native_query_rejected": False}
+        if kwargs.get("return_anchors"):
+            if query == question:
+                return [unrelated_orfield_anchor], [unrelated_orfield_anchor]
+            if query == alias_question:
+                return [price_anchor], [price_anchor]
+            pytest.fail("unexpected deterministic alias query: " + query)
+        if query == rewritten_question and kwargs["k"] == chain.TOP_K:
+            return []
+        if query == rewritten_question and kwargs["k"] == chain.RECOVERY_TOP_K:
+            return [weak_rewrite_anchor]
+        pytest.fail("unexpected planner retrieval query: " + query)
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "understand_query",
+        lambda **_kwargs: SimpleNamespace(
+            intent="factual",
+            standalone_question=rewritten_question,
+            search_queries=[],
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _vector_store, _query, anchors: list(anchors),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        object(),
+        question,
+        object(),
+        video_id="fAd2nKfrDB8",
+    )
+
+    assert results == [price_anchor]
+    assert trace["planner_used"] is True
+    assert trace["planner_intent"] == "factual"
+    assert trace["final_stage"] == "deterministic_alias_evidence_recovery"
+    assert trace["deterministic_fallback_attempted"] is True
+    assert trace["deterministic_fallback_accepted"] is True
+    assert trace["deterministic_fallback_query"] == alias_question
+    assert trace["deterministic_fallback_query_alias_used"] is True
+    assert trace["deterministic_fallback_evidence_gate_passed"] is True
+    assert trace["final_chunk_ids"] == [711]
+    assert trace["citation_chunk_ids"] == [711]
+    assert [call["query"] for call in calls if call.get("return_anchors")] == [
+        question,
+        alias_question,
+    ]
+    alias_call = next(call for call in calls if call.get("query") == alias_question)
+    assert alias_call["max_distance"] == chain.RECOVERY_MAX_DISTANCE
+    assert all(call["allow_overview"] is False for call in calls)
+
+
+@pytest.mark.regression
 def test_ar07_planner_failure_rejects_semantic_matches_without_price_evidence(
     monkeypatch,
 ):
@@ -5976,7 +6059,7 @@ def test_ar07_planner_failure_rejects_semantic_matches_without_price_evidence(
     monkeypatch.setattr(
         chain,
         "passes_strong_semantic_gate",
-        lambda results, max_distance: bool(results),
+        lambda results, max_distance, **_kwargs: bool(results),
     )
     monkeypatch.setattr(
         chain,
@@ -5985,7 +6068,7 @@ def test_ar07_planner_failure_rejects_semantic_matches_without_price_evidence(
     )
 
     results, anchors, attempt, accepted = (
-        chain._planner_failure_original_query_fallback(
+        chain._deterministic_query_evidence_fallback(
             object(),
             question,
             video_id="fAd2nKfrDB8",
@@ -6106,7 +6189,7 @@ def test_ar07_retrieval_trace_distinguishes_missing_price_evidence_from_weak_sem
     monkeypatch.setattr(
         chain,
         "passes_strong_semantic_gate",
-        lambda results, _max_distance: bool(results),
+        lambda results, _max_distance, **_kwargs: bool(results),
     )
     monkeypatch.setattr(
         chain,
