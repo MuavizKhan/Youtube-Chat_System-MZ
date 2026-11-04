@@ -11,6 +11,7 @@ and remains covered by the existing retrieval regression contract; a
 separate timestamp-grounded annotation set is intentionally deferred.
 """
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -127,6 +128,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="Q06",
@@ -270,20 +272,118 @@ def normalize_evidence_text(text: str) -> str:
     return " ".join("".join(characters).split())
 
 
+def _source_scoped_evidence_texts(text: str) -> list[str]:
+    """Return transcript text per source block, joining adjacent caption rows."""
+    if not isinstance(text, str) or not text:
+        return []
+
+    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
+    caption_pattern = re.compile(
+        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
+        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
+    )
+    blocks = source_pattern.split(text)
+    evidence_texts = []
+    for block in blocks:
+        if not block.strip():
+            continue
+        caption_texts = []
+        for line in block.splitlines():
+            match = caption_pattern.match(line)
+            if match and match.group("text").strip():
+                caption_texts.append(match.group("text").strip())
+        evidence_texts.append(" ".join(caption_texts) if caption_texts else block)
+    return evidence_texts
+
+
+def matched_gold_group_caption_spans(
+    text: str,
+    case: GoldEvidenceCase,
+) -> dict[int, set[int]]:
+    """Map matched gold groups to the caption rows that contain their wording."""
+    if not isinstance(text, str) or not text:
+        return {}
+
+    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
+    caption_pattern = re.compile(
+        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
+        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
+    )
+    lines = text.splitlines()
+    marker_indices = [
+        index for index, line in enumerate(lines)
+        if source_pattern.match(line.strip())
+    ]
+    source_ranges = (
+        [
+            (
+                marker + 1,
+                marker_indices[index + 1]
+                if index + 1 < len(marker_indices)
+                else len(lines),
+            )
+            for index, marker in enumerate(marker_indices)
+        ]
+        if marker_indices
+        else [(0, len(lines))]
+    )
+
+    matched_spans: dict[int, set[int]] = {}
+    for range_start, range_end in source_ranges:
+        captions = []
+        for line_index in range(range_start, range_end):
+            match = caption_pattern.match(lines[line_index])
+            if match and match.group("text").strip():
+                captions.append((line_index, match.group("text").strip()))
+        if not captions:
+            continue
+
+        for group_index, alternatives in enumerate(case.groups):
+            for alternative in alternatives:
+                phrase = normalize_evidence_text(alternative)
+                if not phrase:
+                    continue
+                max_window = min(
+                    len(captions),
+                    max(2, min(12, len(phrase.split()) + 3)),
+                )
+                for start_index in range(len(captions)):
+                    for window_size in range(1, max_window + 1):
+                        end_index = start_index + window_size
+                        if end_index > len(captions):
+                            break
+                        window_text = " ".join(
+                            caption_text
+                            for _, caption_text in captions[start_index:end_index]
+                        )
+                        if phrase in normalize_evidence_text(window_text):
+                            matched_spans.setdefault(group_index, set()).update(
+                                line_index
+                                for line_index, _ in captions[start_index:end_index]
+                            )
+                            break
+    return matched_spans
+
+
 def matched_gold_groups(
     text: str,
     case: GoldEvidenceCase,
 ) -> set[int]:
-    """Return group indexes whose evidence phrase occurs in text."""
+    """Return evidence groups present in transcript text.
 
-    normalized = normalize_evidence_text(text)
-    matched = set()
-
-    for group_index, alternatives in enumerate(case.groups):
+    Timestamped caption rows are joined within each source block. Distinct
+    source blocks are never concatenated to manufacture a phrase.
+    """
+    normalized_blocks = [
+        normalize_evidence_text(block)
+        for block in _source_scoped_evidence_texts(text)
+    ]
+    return {
+        group_index
+        for group_index, alternatives in enumerate(case.groups)
         if any(
-            normalize_evidence_text(phrase) in normalized
+            normalize_evidence_text(phrase) in normalized_block
             for phrase in alternatives
-        ):
-            matched.add(group_index)
-
-    return matched
+            for normalized_block in normalized_blocks
+        )
+    }
