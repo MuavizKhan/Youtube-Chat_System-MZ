@@ -1743,10 +1743,18 @@ def _truncate_formatted_source(
         gold_evidence_caption_indices: set[int] = set()
 
         if gold_case is not None:
-            gold_caption_spans = matched_gold_group_caption_spans(
+            absolute_gold_caption_spans = matched_gold_group_caption_spans(
                 source_text,
                 gold_case,
             )
+            gold_caption_spans = {
+                group_index: {
+                    line_index - caption_start
+                    for line_index in line_indices
+                    if line_index >= caption_start
+                }
+                for group_index, line_indices in absolute_gold_caption_spans.items()
+            }
 
             # Reserve complete evidence groups before ordinary relevance fill.
             # If a source is unusually dense, prefer whole evidence groups over
