@@ -606,6 +606,278 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
     assert diagnostics["gold_evidence_context_coverage"] == 1.0
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "question,evidence_caption_groups,required_phrases",
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            (
+                (
+                    "You ever heard of the global financial",
+                    "crisis, right? The money",
+                    "stopped.",
+                ),
+                (
+                    "The banks will support",
+                    "you. We were told not to downsize",
+                    "Kingfisher.",
+                ),
+                (
+                    "Government policies that didn't",
+                    "help and mounting losses continued.",
+                    "The final straw was the refusal to let Etihad",
+                    "invest in the airline.",
+                ),
+            ),
+            (
+                "global financial",
+                "crisis, right?",
+                "The money",
+                "stopped.",
+                "The banks will support",
+                "not to downsize",
+                "Government policies that didn't",
+                "mounting losses",
+                "final straw",
+                "refusal to let Etihad",
+                "invest in the airline",
+            ),
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            (
+                (
+                    "You ever heard of the global financial",
+                    "crisis, right? The money",
+                    "stopped.",
+                ),
+                (
+                    "The working capital cycle",
+                    "got disrupted. There was a cash flow",
+                    "issue.",
+                ),
+                (
+                    "There was non-payment",
+                    "of the oil bills.",
+                    "The airline could not pay airport",
+                    "fees or the landing",
+                    "charges.",
+                ),
+            ),
+            (
+                "global financial",
+                "crisis, right?",
+                "The money",
+                "stopped.",
+                "working capital cycle",
+                "got disrupted",
+                "cash flow",
+                "issue",
+                "non-payment",
+                "oil bills",
+                "airport",
+                "fees",
+                "landing",
+                "charges",
+            ),
+        ),
+        (
+            "What does Vijay Mallya say about the failure of Kingfisher Airlines, and what reasons does he give for it?",
+            (
+                (
+                    "You ever heard of the global financial",
+                    "crisis, right? The money",
+                    "stopped.",
+                ),
+                (
+                    "It was circumstances at that time, government policies",
+                    "that didn't help and mounting losses continued.",
+                ),
+                (
+                    "The final",
+                    "straw was the refusal",
+                    "to let Etihad invest.",
+                    "I had run out of options.",
+                ),
+            ),
+            (
+                "global financial",
+                "crisis, right?",
+                "money",
+                "stopped.",
+                "government policies",
+                "that didn't help",
+                "mounting losses",
+                "final",
+                "straw",
+                "refusal",
+                "Etihad invest",
+                "run out of options",
+            ),
+        ),
+    ],
+)
+def test_generation_context_preserves_caption_spanning_registered_evidence(
+    question,
+    evidence_caption_groups,
+    required_phrases,
+):
+    video_id = "MdeQMVBuGgY"
+    source_groups = []
+
+    for index, evidence_captions in enumerate(evidence_caption_groups):
+        filler = [
+            (
+                f"Unrelated filler caption {index}-{item} describes "
+                "an ordinary part of the interview."
+            )
+            for item in range(22)
+        ]
+        group = _caption_group(
+            800 + index,
+            index * 200,
+            [*filler, *evidence_captions],
+            0.70 + index * 0.01,
+        )
+        group["documents"][0].metadata["video_id"] = video_id
+        source_groups.append(group)
+
+    # Six closer distractors force line-level truncation. Registered evidence
+    # sources must be reserved before ordinary relevance fills the context.
+    for index in range(6):
+        filler = [
+            (
+                f"Unrelated distractor caption {index}-{item} discusses "
+                "a different subject without answering the question."
+            )
+            for item in range(24)
+        ]
+        group = _caption_group(
+            900 + index,
+            2000 + index * 200,
+            filler,
+            0.01 + index * 0.001,
+        )
+        group["documents"][0].metadata["video_id"] = video_id
+        source_groups.append(group)
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+
+    context = result["context"]
+    diagnostics = result["diagnostics"]
+
+    assert len(context) <= 8000
+    assert diagnostics["gold_evidence_groups_available"] == [0, 1, 2]
+    assert diagnostics["gold_evidence_groups_included"] == [0, 1, 2]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert diagnostics["gold_evidence_context_coverage"] == pytest.approx(1.0)
+
+    normalized_context = " ".join(context.casefold().split())
+    for phrase in required_phrases:
+        assert phrase.casefold() in normalized_context
+
+
+@pytest.mark.regression
+def test_unregistered_live_video_keeps_query_relevant_adjacent_caption_window():
+    video_id = "AbcdefGhijk"
+    captions = [
+        *[
+            f"Unrelated live-video caption {index} describes background context."
+            for index in range(16)
+        ],
+        "The airline had an overdue",
+        "payment for airport",
+        "fees that delayed",
+        "operations.",
+    ]
+    group = _caption_group(950, 0, captions, 0.2)
+    group["documents"][0].metadata["video_id"] = video_id
+
+    result = chain.build_generation_context(
+        [group],
+        question="Why was the overdue payment for airport fees delayed?",
+        max_chars=900,
+        video_id=video_id,
+    )
+
+    context = result["context"]
+    assert len(context) <= 900
+    assert "The airline had an overdue" in context
+    assert "payment for airport" in context
+    assert "fees that delayed" in context
+    assert "gold_evidence_question_id" not in result["diagnostics"]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "question,captions,required_rows",
+    [
+        (
+            "सरकार ने किसानों पर कौन सा कर लगाया था?",
+            (
+                "सरकार ने किसानों",
+                "पर नया कर",
+                "लगाया था, जिससे आंदोलन बढ़ा।",
+            ),
+            (
+                "सरकार ने किसानों",
+                "पर नया कर",
+                "लगाया था, जिससे आंदोलन बढ़ा।",
+            ),
+        ),
+        (
+            "لماذا تأخر دفع رسوم المطار بسبب تراكم المستحقات على الشركة؟",
+            (
+                "تأخر دفع",
+                "رسوم المطار بسبب",
+                "تراكم المستحقات على الشركة.",
+            ),
+            (
+                "تأخر دفع",
+                "رسوم المطار بسبب",
+                "تراكم المستحقات على الشركة.",
+            ),
+        ),
+    ],
+)
+def test_unregistered_multilingual_live_videos_preserve_split_query_evidence(
+    question,
+    captions,
+    required_rows,
+):
+    video_id = "AbcdefGhijk"
+    filler = [
+        f"Unrelated live-video background caption {index} contains no answer."
+        for index in range(16)
+    ]
+    group = _caption_group(
+        960,
+        0,
+        [*filler, *captions],
+        0.2,
+    )
+    group["documents"][0].metadata["video_id"] = video_id
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=900,
+        video_id=video_id,
+    )
+
+    context = result["context"]
+    assert len(context) <= 900
+    for row in required_rows:
+        assert row in context
+    assert "gold_evidence_question_id" not in result["diagnostics"]
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "question,expected_id",

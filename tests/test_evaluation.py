@@ -235,11 +235,67 @@ def test_gold_evidence_annotations_cover_content_cases():
     assert get_gold_evidence_case("Q03").min_context_group_coverage == 1.0
     assert get_gold_evidence_case("Q09").min_group_coverage == pytest.approx(2 / 3)
     assert get_gold_evidence_case("Q09").min_context_group_coverage == 1.0
-    for question_id in ("Q04", "Q09", "Q10"):
+    for question_id in ("Q04", "Q05", "Q09", "Q10"):
         assert (
             get_gold_evidence_case(question_id).min_generation_context_group_coverage
             == 1.0
         )
+
+
+@pytest.mark.regression
+def test_gold_phrase_matching_joins_adjacent_timestamped_caption_rows():
+    case = GoldEvidenceCase(
+        question_id="LIVE01",
+        groups=(("global financial crisis",), ("airport fees",)),
+        min_group_coverage=1.0,
+    )
+    transcript = (
+        "[SOURCE 1]\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [01:17:46–01:17:49] You ever heard of the global financial\n"
+        "- [01:17:48–01:17:53] crisis, right? Did it not impact India?\n"
+        "[SOURCE 2]\n"
+        "- [01:18:00–01:18:04] the airline could not pay airport\n"
+        "- [01:18:04–01:18:08] fees or landing charges."
+    )
+
+    assert matched_gold_groups(transcript, case) == {0, 1}
+
+
+@pytest.mark.regression
+def test_gold_phrase_matching_never_joins_caption_rows_across_sources():
+    case = GoldEvidenceCase(
+        question_id="LIVE02",
+        groups=(("global financial crisis",),),
+        min_group_coverage=1.0,
+    )
+    transcript = (
+        "[SOURCE 1]\n"
+        "- [01:17:46–01:17:49] global financial\n"
+        "[SOURCE 2]\n"
+        "- [01:17:48–01:17:53] crisis."
+    )
+
+    assert matched_gold_groups(transcript, case) == set()
+
+
+@pytest.mark.regression
+def test_gold_phrase_matching_joins_adjacent_non_latin_caption_rows():
+    case = GoldEvidenceCase(
+        question_id="LIVE03",
+        groups=(("किसान आंदोलन",), ("نبض القلب",)),
+        min_group_coverage=1.0,
+    )
+    transcript = (
+        "[SOURCE 1]\n"
+        "- [00:10–00:12] किसान\n"
+        "- [00:12–00:14] आंदोलन का उल्लेख है।\n"
+        "[SOURCE 2]\n"
+        "- [00:20–00:22] نبض\n"
+        "- [00:22–00:24] القلب واضح."
+    )
+
+    assert matched_gold_groups(transcript, case) == {0, 1}
 
 
 @pytest.mark.regression

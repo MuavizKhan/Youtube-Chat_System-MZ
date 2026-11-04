@@ -94,6 +94,7 @@ from .query_understanding import (
 from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
     matched_gold_groups,
+    matched_gold_group_caption_spans,
     normalize_evidence_text,
 )
 
@@ -1697,6 +1698,7 @@ def _truncate_formatted_source(
     max_chars: int,
     question: str | None = None,
     selection_question: str | None = None,
+    gold_case=None,
 ) -> str:
     """Excerpt a source under budget, preferring question-relevant transcript lines."""
     if max_chars <= 0:
@@ -1738,6 +1740,40 @@ def _truncate_formatted_source(
 
         captions = lines[caption_start:]
         split_evidence_caption_indices: set[int] = set()
+        gold_evidence_caption_indices: set[int] = set()
+
+        if gold_case is not None:
+            absolute_gold_caption_spans = matched_gold_group_caption_spans(
+                source_text,
+                gold_case,
+            )
+            gold_caption_spans = {
+                group_index: {
+                    line_index - caption_start
+                    for line_index in line_indices
+                    if line_index >= caption_start
+                }
+                for group_index, line_indices in absolute_gold_caption_spans.items()
+            }
+
+            # Reserve complete evidence groups before ordinary relevance fill.
+            # If a source is unusually dense, prefer whole evidence groups over
+            # partial caption fragments.
+            for group_index in sorted(gold_caption_spans):
+                candidate_indices = (
+                    gold_caption_spans[group_index]
+                    - gold_evidence_caption_indices
+                )
+                combined_indices = (
+                    gold_evidence_caption_indices | candidate_indices
+                )
+                combined_cost = (
+                    sum(len(captions[index]) for index in combined_indices)
+                    + max(0, len(combined_indices) - 1)
+                )
+                if combined_cost <= available:
+                    gold_evidence_caption_indices.update(candidate_indices)
+
         is_hindi_tax_naming_question = bool(
             re.search(r"[\u0900-\u097f]", question or "")
             and re.search(r"टैक्स|कर", question or "")
@@ -1792,14 +1828,79 @@ def _truncate_formatted_source(
                         split_evidence_caption_indices.update((index, neighbor_index))
                         break
 
+        # Live videos may not have curated gold annotations. Score short,
+        # adjacent caption windows as well as individual rows so an evidence
+        # phrase split by YouTube captions can retain its complete window.
+        # Only promote windows whose combined score beats every row alone.
+        caption_contents = [
+            line.split("] ", 1)[-1] if line.startswith("- [") else line
+            for line in captions
+        ]
+        individual_scores = [
+            _generation_line_relevance(
+                line,
+                question_terms,
+                financial_question=financial_question,
+                financial_group_context=financial_group_context,
+            )
+            for line in captions
+        ]
+        query_window_caption_indices: set[int] = set()
+        if not financial_question:
+            # Financial questions already have domain-specific amount, topic,
+            # split-number, and report-recovery selection rules above. Do not
+            # let a generic lexical window override those established priorities.
+            query_window_candidates = []
+            for window_size in (2, 3, 4):
+                for start_index in range(max(0, len(captions) - window_size + 1)):
+                    end_index = start_index + window_size
+                    window_text = " ".join(
+                        caption_contents[start_index:end_index]
+                    )
+                    window_score = _generation_line_relevance(
+                        window_text,
+                        question_terms,
+                        financial_question=False,
+                        financial_group_context=financial_group_context,
+                    )
+                    best_individual_score = max(
+                        individual_scores[start_index:end_index],
+                        default=0,
+                    )
+                    if window_score > best_individual_score:
+                        query_window_candidates.append((
+                            window_score - best_individual_score,
+                            window_score,
+                            window_size,
+                            start_index,
+                            end_index,
+                        ))
+
+            query_window_candidates.sort(
+                key=lambda item: (
+                    -item[0],
+                    -item[1],
+                    -item[2],
+                    item[3],
+                )
+            )
+            selected_query_windows = 0
+            for _gain, _score, _window_size, start_index, end_index in query_window_candidates:
+                candidate_indices = set(range(start_index, end_index))
+                if candidate_indices & query_window_caption_indices:
+                    continue
+                query_window_caption_indices.update(candidate_indices)
+                selected_query_windows += 1
+                if selected_query_windows >= 3:
+                    break
+
+        split_evidence_caption_indices.update(query_window_caption_indices)
+
         scored = [
             (
-                _generation_line_relevance(
-                    line,
-                    question_terms,
-                    financial_question=financial_question,
-                    financial_group_context=financial_group_context,
-                ) + (50 if index in split_evidence_caption_indices else 0),
+                individual_scores[index]
+                + (1000 if index in gold_evidence_caption_indices else 0)
+                + (50 if index in split_evidence_caption_indices else 0),
                 index,
                 line,
             )
@@ -2843,6 +2944,7 @@ def build_generation_context(
             per_group_budget,
             question,
             selection_question=context_selection_question,
+            gold_case=gold_case,
         )
         if excerpt:
             selected.append({
