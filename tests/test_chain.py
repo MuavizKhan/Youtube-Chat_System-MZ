@@ -832,7 +832,7 @@ def test_unregistered_live_video_keeps_query_relevant_adjacent_caption_window():
             ),
         ),
         (
-            "لماذا تأخر دفع رسوم المطار؟",
+            "لماذا تأخر دفع رسوم المطار بسبب تراكم المستحقات على الشركة؟",
             (
                 "تأخر دفع",
                 "رسوم المطار بسبب",
