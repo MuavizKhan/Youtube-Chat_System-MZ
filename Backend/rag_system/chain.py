@@ -1845,50 +1845,54 @@ def _truncate_formatted_source(
             )
             for line in captions
         ]
-        query_window_candidates = []
-        for window_size in (2, 3, 4):
-            for start_index in range(max(0, len(captions) - window_size + 1)):
-                end_index = start_index + window_size
-                window_text = " ".join(
-                    caption_contents[start_index:end_index]
-                )
-                window_score = _generation_line_relevance(
-                    window_text,
-                    question_terms,
-                    financial_question=financial_question,
-                    financial_group_context=financial_group_context,
-                )
-                best_individual_score = max(
-                    individual_scores[start_index:end_index],
-                    default=0,
-                )
-                if window_score > best_individual_score:
-                    query_window_candidates.append((
-                        window_score - best_individual_score,
-                        window_score,
-                        window_size,
-                        start_index,
-                        end_index,
-                    ))
-
-        query_window_candidates.sort(
-            key=lambda item: (
-                -item[0],
-                -item[1],
-                -item[2],
-                item[3],
-            )
-        )
         query_window_caption_indices: set[int] = set()
-        selected_query_windows = 0
-        for _gain, _score, _window_size, start_index, end_index in query_window_candidates:
-            candidate_indices = set(range(start_index, end_index))
-            if candidate_indices & query_window_caption_indices:
-                continue
-            query_window_caption_indices.update(candidate_indices)
-            selected_query_windows += 1
-            if selected_query_windows >= 3:
-                break
+        if not financial_question:
+            # Financial questions already have domain-specific amount, topic,
+            # split-number, and report-recovery selection rules above. Do not
+            # let a generic lexical window override those established priorities.
+            query_window_candidates = []
+            for window_size in (2, 3, 4):
+                for start_index in range(max(0, len(captions) - window_size + 1)):
+                    end_index = start_index + window_size
+                    window_text = " ".join(
+                        caption_contents[start_index:end_index]
+                    )
+                    window_score = _generation_line_relevance(
+                        window_text,
+                        question_terms,
+                        financial_question=False,
+                        financial_group_context=financial_group_context,
+                    )
+                    best_individual_score = max(
+                        individual_scores[start_index:end_index],
+                        default=0,
+                    )
+                    if window_score > best_individual_score:
+                        query_window_candidates.append((
+                            window_score - best_individual_score,
+                            window_score,
+                            window_size,
+                            start_index,
+                            end_index,
+                        ))
+
+            query_window_candidates.sort(
+                key=lambda item: (
+                    -item[0],
+                    -item[1],
+                    -item[2],
+                    item[3],
+                )
+            )
+            selected_query_windows = 0
+            for _gain, _score, _window_size, start_index, end_index in query_window_candidates:
+                candidate_indices = set(range(start_index, end_index))
+                if candidate_indices & query_window_caption_indices:
+                    continue
+                query_window_caption_indices.update(candidate_indices)
+                selected_query_windows += 1
+                if selected_query_windows >= 3:
+                    break
 
         split_evidence_caption_indices.update(query_window_caption_indices)
 
