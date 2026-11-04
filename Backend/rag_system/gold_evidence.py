@@ -309,10 +309,10 @@ def matched_gold_group_caption_spans(
     if not isinstance(text, str) or not text:
         return {}
 
-    source_pattern = re.compile(r"(?m)^\\s*\\[SOURCE\\s+\\d+\\]\\s*$")
+    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
     caption_pattern = re.compile(
-        r"^\\s*-\\s*\\[(?:\\d{1,2}:)?\\d{2}:\\d{2}\\s*[–—-]\\s*"
-        r"(?:\\d{1,2}:)?\\d{2}:\\d{2}\\]\\s*(?P<text>.*)$"
+        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
+        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
     )
     lines = text.splitlines()
     marker_indices = [
