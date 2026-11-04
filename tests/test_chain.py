@@ -814,6 +814,70 @@ def test_unregistered_live_video_keeps_query_relevant_adjacent_caption_window():
     assert "gold_evidence_question_id" not in result["diagnostics"]
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "question,captions,required_rows",
+    [
+        (
+            "सरकार ने किसानों पर कौन सा कर लगाया था?",
+            (
+                "सरकार ने किसानों",
+                "पर नया कर",
+                "लगाया था, जिससे आंदोलन बढ़ा।",
+            ),
+            (
+                "सरकार ने किसानों",
+                "पर नया कर",
+                "लगाया था, जिससे आंदोलन बढ़ा।",
+            ),
+        ),
+        (
+            "لماذا تأخر دفع رسوم المطار؟",
+            (
+                "تأخر دفع",
+                "رسوم المطار بسبب",
+                "تراكم المستحقات على الشركة.",
+            ),
+            (
+                "تأخر دفع",
+                "رسوم المطار بسبب",
+                "تراكم المستحقات على الشركة.",
+            ),
+        ),
+    ],
+)
+def test_unregistered_multilingual_live_videos_preserve_split_query_evidence(
+    question,
+    captions,
+    required_rows,
+):
+    video_id = "AbcdefGhijk"
+    filler = [
+        f"Unrelated live-video background caption {index} contains no answer."
+        for index in range(16)
+    ]
+    group = _caption_group(
+        960,
+        0,
+        [*filler, *captions],
+        0.2,
+    )
+    group["documents"][0].metadata["video_id"] = video_id
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=900,
+        video_id=video_id,
+    )
+
+    context = result["context"]
+    assert len(context) <= 900
+    for row in required_rows:
+        assert row in context
+    assert "gold_evidence_question_id" not in result["diagnostics"]
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "question,expected_id",
