@@ -300,14 +300,19 @@ def matched_gold_group_caption_spans(
     text: str,
     case: GoldEvidenceCase,
 ) -> dict[int, set[int]]:
-    """Map matched gold groups to the caption rows that contain their wording."""
+    """Map matched gold groups to the exact caption rows containing their words.
+
+    Returned indexes refer to text.splitlines(). Matching is restricted to
+    one source block at a time, and normalized-caption character offsets
+    identify only the rows actually touched by each matched phrase.
+    """
     if not isinstance(text, str) or not text:
         return {}
 
-    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
+    source_pattern = re.compile(r"(?m)^\\s*\\[SOURCE\\s+\\d+\\]\\s*$")
     caption_pattern = re.compile(
-        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
-        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
+        r"^\\s*-\\s*\\[(?:\\d{1,2}:)?\\d{2}:\\d{2}\\s*[–—-]\\s*"
+        r"(?:\\d{1,2}:)?\\d{2}:\\d{2}\\]\\s*(?P<text>.*)$"
     )
     lines = text.splitlines()
     marker_indices = [
@@ -334,34 +339,45 @@ def matched_gold_group_caption_spans(
         for line_index in range(range_start, range_end):
             match = caption_pattern.match(lines[line_index])
             if match and match.group("text").strip():
-                captions.append((line_index, match.group("text").strip()))
+                normalized_caption = normalize_evidence_text(
+                    match.group("text").strip()
+                )
+                if normalized_caption:
+                    captions.append((line_index, normalized_caption))
+
         if not captions:
             continue
+
+        joined_parts = []
+        caption_offsets = []
+        cursor = 0
+        for line_index, normalized_caption in captions:
+            start_offset = cursor
+            end_offset = start_offset + len(normalized_caption)
+            caption_offsets.append((line_index, start_offset, end_offset))
+            joined_parts.append(normalized_caption)
+            cursor = end_offset + 1
+        joined_captions = " ".join(joined_parts)
 
         for group_index, alternatives in enumerate(case.groups):
             for alternative in alternatives:
                 phrase = normalize_evidence_text(alternative)
                 if not phrase:
                     continue
-                max_window = min(
-                    len(captions),
-                    max(2, min(12, len(phrase.split()) + 3)),
-                )
-                for start_index in range(len(captions)):
-                    for window_size in range(1, max_window + 1):
-                        end_index = start_index + window_size
-                        if end_index > len(captions):
-                            break
-                        window_text = " ".join(
-                            caption_text
-                            for _, caption_text in captions[start_index:end_index]
-                        )
-                        if phrase in normalize_evidence_text(window_text):
-                            matched_spans.setdefault(group_index, set()).update(
-                                line_index
-                                for line_index, _ in captions[start_index:end_index]
-                            )
-                            break
+
+                search_start = 0
+                while True:
+                    match_start = joined_captions.find(phrase, search_start)
+                    if match_start < 0:
+                        break
+                    match_end = match_start + len(phrase)
+                    matched_spans.setdefault(group_index, set()).update(
+                        line_index
+                        for line_index, caption_start, caption_end in caption_offsets
+                        if caption_start < match_end and caption_end > match_start
+                    )
+                    search_start = match_start + 1
+
     return matched_spans
 
 
