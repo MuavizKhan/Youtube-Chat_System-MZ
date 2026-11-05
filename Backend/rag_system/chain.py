@@ -6846,7 +6846,11 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "repair_aborted_due_quota": repair_aborted_due_quota,
-                "provider_failure_reason": None,
+                "provider_failure_reason": (
+                    "daily_token_quota_exhausted"
+                    if repair_aborted_due_quota
+                    else None
+                ),
                 "abstention_recheck_attempted": abstention_recheck_attempted,
                 "abstention_recheck_passed": abstention_recheck_passed,
                 "response_language_repair_attempted": question_language_repair_attempted,
