@@ -3929,6 +3929,16 @@ def _extract_bank_recovery_statement_evidence(
             cleaned = re.sub(r"\s+", " ", statement or "").strip()
             if not cleaned:
                 continue
+            # An interviewer question is not proof that the asserted payment
+            # status or account statement exists. Keep only declarative caption
+            # fragments in this deterministic fallback.
+            if "?" in cleaned or re.match(
+                r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
+                r"has|have|had|can|could|would|will|should)\b",
+                cleaned,
+                re.IGNORECASE,
+            ):
+                continue
             normalized = cleaned.casefold()
             matches = []
             if bank_payment_pattern.search(cleaned):
@@ -3951,19 +3961,22 @@ def _build_financial_evidence_fallback(
     context: str,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Build a conservative extractive answer when financial generation repair fails.
+    """Build a conservative, question-scoped extractive financial fallback.
 
-    This is intentionally narrow: it activates only when the supplied context
-    contains separately attributable investment, DRT, certificate, and recovery
-    report claims. It copies source clauses rather than asking the model to
-    reconstruct numerals, and it does not infer a unit for a bare caption figure.
+    Broad financial questions retain the comprehensive four-topic contract.
+    Bank/recovery questions use their narrower source-backed evidence contract.
+    The helper copies source clauses rather than reconstructing numerals and
+    does not infer a unit for a bare caption figure.
     """
     question_scope = _financial_fallback_question_scope(question)
-    if not re.search(
-        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?|bank)\b",
-        question or "",
-        re.IGNORECASE,
+    if (
+        question_scope != "bank_recovery"
+        and not re.search(
+            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+            question or "",
+            re.IGNORECASE,
+        )
     ):
         if diagnostics is not None:
             diagnostics.clear()
@@ -6468,12 +6481,15 @@ def build_rag_chain(
                     },
                 }
 
-        is_financial_question = bool(re.search(
-            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?|bank)\b",
-            question_text,
-            re.IGNORECASE,
-        ))
+        is_financial_question = bool(
+            _financial_fallback_question_scope(question_text) == "bank_recovery"
+            or re.search(
+                r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+                question_text,
+                re.IGNORECASE,
+            )
+        )
         # Keep the model's prompt bounded, but do not let context truncation hide
         # already-retrieved evidence from deterministic financial validation or
         # the extractive fallback. This context is built only from retrieved source
