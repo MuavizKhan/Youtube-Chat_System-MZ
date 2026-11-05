@@ -5659,6 +5659,32 @@ Transcript caption segments in chronological order:
     }
 
 
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_preserves_report_label_split_across_caption_rows():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:12–10:15] India ministry of finance has published
+- [10:15–10:20] a report their annual report in which they have acknowledged
+- [10:20–10:25] 14,100 crores recovered from me.
+- [10:25–10:35] The government and banks have not rendered a statement of account."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and recovery?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is not None
+    assert "14,100 crore" in fallback
+    assert "Ministry of Finance report" in fallback
+    assert diagnostics["recognized_topics"]["recovery_report"]["source_id"] == 1
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+
+
 @pytest.mark.unit
 def test_bank_recovery_fallback_abstains_with_only_one_evidence_family():
     context = """[SOURCE 1]
