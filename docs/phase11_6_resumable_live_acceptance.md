@@ -109,9 +109,77 @@ Suggested batch plan (all 43 IDs exactly once):
 | 08 | AR03, AR04, AR05, AR06, AR07 |
 | 09 | AR08, AR09, AR10 |
 
-Each subset command uses the Phase 11.0 suite, the listed case IDs, the frozen
-namespace, the expected embedding model, and a unique report path. The report
-must record the same clean runner commit for every batch.
+Use this complete PowerShell block from the audit terminal after syncing to main
+and restarting the backend on the same clean commit. It checks the working tree,
+captures the runner commit, verifies the accepted index, and saves a separate
+JSON report after each batch. It stops if any batch returns a non-zero result,
+so inspect that batch report before deciding whether to retry or continue.
+
+    $ErrorActionPreference = "Stop"
+    Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
+
+    $python = ".\.venv\Scripts\python.exe"
+    $env:RAG_INDEX_NAMESPACE = "phase10-10-acceptance-minilm-20261023"
+
+    $gitStatus = @(git status --porcelain)
+    if ($LASTEXITCODE -ne 0 -or $gitStatus.Count -ne 0) {
+        throw "The working tree must be clean before the live audit."
+    }
+    $runnerCommit = (git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $runnerCommit.Length -ne 40) {
+        throw "Could not verify the current Git commit."
+    }
+
+    $status = Invoke-RestMethod "http://127.0.0.1:8000/index/MdeQMVBuGgY"
+    if ($status.state -ne "ready" -or -not $status.ready) {
+        $status | Format-List
+        throw "The accepted Kingfisher index is not ready."
+    }
+
+    $batches = @(
+        @{ Name = "01"; CaseIds = "Q01,Q02,Q03,Q04,Q05" }
+        @{ Name = "02"; CaseIds = "Q06,Q07,Q08,Q09,Q10" }
+        @{ Name = "03"; CaseIds = "Q11,Q12,Q13,EW01,EW02" }
+        @{ Name = "04"; CaseIds = "EW03,EW04,EW05,AI01,AI02" }
+        @{ Name = "05"; CaseIds = "AI03,AI04,AI05,HI01,HI02" }
+        @{ Name = "06"; CaseIds = "HI03,HI04,HI05,HI06,HI07" }
+        @{ Name = "07"; CaseIds = "HI08,HI09,HI10,AR01,AR02" }
+        @{ Name = "08"; CaseIds = "AR03,AR04,AR05,AR06,AR07" }
+        @{ Name = "09"; CaseIds = "AR08,AR09,AR10" }
+    )
+
+    foreach ($batch in $batches) {
+        $output = "evaluation_reports/phase11_6_batch_$($batch.Name).json"
+        Write-Host "Running batch $($batch.Name): $($batch.CaseIds)"
+        & $python -m scripts.chat_answer_source_audit --suite phase11_0 --case-ids $batch.CaseIds --output $output --expected-namespace "phase10-10-acceptance-minilm-20261023" --expected-embedding-model "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Batch $($batch.Name) did not pass. Saved report: $output"
+            throw "Stop here; inspect the saved batch report before continuing."
+        }
+        Write-Host "Saved: $output"
+    }
+
+A batch can fail because of a transport/quota problem or because an HTTP-success
+answer failed its quality checks. These are different recovery paths.
+
+For transport failures, identify only the cases whose result status is not
+success, then rerun those IDs with a new report path. Example:
+
+    $retryCaseIds = "Q03,Q04"
+    $retryOutput = "evaluation_reports/phase11_6_batch_02_retry_01.json"
+    & $python -m scripts.chat_answer_source_audit --suite phase11_0 --case-ids $retryCaseIds --output $retryOutput --expected-namespace "phase10-10-acceptance-minilm-20261023" --expected-embedding-model "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+The example case IDs above are placeholders; use only the actual transport-failed
+IDs in your saved report. Include both the original report and every retry report
+in the final consolidation. The consolidator permits a later success to replace
+an earlier transport failure, but will reject two HTTP-success attempts for the
+same case.
+
+For an HTTP-success answer-quality failure, do not simply rerun the same case
+and choose whichever model answer passes. Review the failed checks and trace,
+make a targeted code/annotation correction only if justified, then restart from
+a clean commit. Reports produced by different commits cannot be consolidated.
+
 
 If a batch has transport failures from provider quota, wait until provider
 quota is available and rerun only those failed case IDs into a new report.
