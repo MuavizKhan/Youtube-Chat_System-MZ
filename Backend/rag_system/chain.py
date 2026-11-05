@@ -3861,27 +3861,127 @@ def _build_hindi_named_tax_evidence_fallback(
     )
 
 
+def _financial_fallback_question_scope(question: str) -> str:
+    """Select a conservative financial fallback scope from the question wording.
+
+    This is a runtime intent classifier, not a benchmark lookup. Broad financial
+    questions retain the comprehensive four-claim contract. Questions explicitly
+    about banks plus recovery/payment/account statements use the narrower
+    bank-recovery evidence contract.
+    """
+    normalized = unicodedata.normalize("NFKC", question or "").casefold()
+    has_bank_reference = bool(re.search(
+        r"\b(?:banks?|banking)\b",
+        normalized,
+    ))
+    has_recovery_or_account_focus = bool(re.search(
+        r"\b(?:recover\w*|recovery|repaid|repayment|fully\s+paid|"
+        r"paid\s+in\s+full|paid\s+off)\b|"
+        r"\bstatement\s+(?:of\s+account|in\s+(?:the\s+)?parliament)\b",
+        normalized,
+    ))
+    if has_bank_reference and has_recovery_or_account_focus:
+        return "bank_recovery"
+    return "comprehensive_financial"
+
+
+def _extract_bank_recovery_statement_evidence(
+    source_blocks: dict[int, str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Extract bank-payment and account/Parliament statements source by source.
+
+    Captions are evaluated independently. A nearby source block cannot supply
+    missing bank wording or payment status for another block.
+    """
+    evidence: dict[str, list[dict[str, Any]]] = {
+        "bank_payment": [],
+        "account_statement": [],
+    }
+    seen: dict[str, set[str]] = {
+        "bank_payment": set(),
+        "account_statement": set(),
+    }
+    bank_payment_pattern = re.compile(
+        r"\bbanks?\b.{0,100}\b(?:fully\s+paid|paid\s+in\s+full|"
+        r"paid\s+off|repaid|settled)\b|"
+        r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|"
+        r"repaid|settled)\b.{0,100}\bbanks?\b",
+        re.IGNORECASE,
+    )
+    account_statement_pattern = re.compile(
+        r"\bstatement\s+of\s+account\b|"
+        r"\bstatement\s+in\s+(?:the\s+)?parliament\b|"
+        r"\bparliamentary\s+statement\b",
+        re.IGNORECASE,
+    )
+
+    for source_id, source_text in source_blocks.items():
+        caption_matches = list(re.finditer(
+            r"(?m)^\s*-\s*\[[^\]]+\]\s*(.+)$",
+            source_text or "",
+        ))
+        if caption_matches:
+            statements = [match.group(1) for match in caption_matches]
+        else:
+            statements = re.split(r"(?<=[.!?])\s+|\n+", source_text or "")
+
+        for statement in statements:
+            cleaned = re.sub(r"\s+", " ", statement or "").strip()
+            if not cleaned:
+                continue
+            # An interviewer question is not proof that the asserted payment
+            # status or account statement exists. Keep only declarative caption
+            # fragments in this deterministic fallback.
+            if "?" in cleaned or re.match(
+                r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
+                r"has|have|had|can|could|would|will|should)\b",
+                cleaned,
+                re.IGNORECASE,
+            ):
+                continue
+            normalized = cleaned.casefold()
+            matches = []
+            if bank_payment_pattern.search(cleaned):
+                matches.append("bank_payment")
+            if account_statement_pattern.search(cleaned):
+                matches.append("account_statement")
+            for group_name in matches:
+                if normalized in seen[group_name]:
+                    continue
+                seen[group_name].add(normalized)
+                evidence[group_name].append({
+                    "source_id": source_id,
+                    "text": cleaned[:240],
+                })
+    return evidence
+
+
 def _build_financial_evidence_fallback(
     question: str,
     context: str,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Build a conservative extractive answer when financial generation repair fails.
+    """Build a conservative, question-scoped extractive financial fallback.
 
-    This is intentionally narrow: it activates only when the supplied context
-    contains separately attributable investment, DRT, certificate, and recovery
-    report claims. It copies source clauses rather than asking the model to
-    reconstruct numerals, and it does not infer a unit for a bare caption figure.
+    Broad financial questions retain the comprehensive four-topic contract.
+    Bank/recovery questions use their narrower source-backed evidence contract.
+    The helper copies source clauses rather than reconstructing numerals and
+    does not infer a unit for a bare caption figure.
     """
-    if not re.search(
-        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
-        question or "",
-        re.IGNORECASE,
+    question_scope = _financial_fallback_question_scope(question)
+    if (
+        question_scope != "bank_recovery"
+        and not re.search(
+            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+            question or "",
+            re.IGNORECASE,
+        )
     ):
         if diagnostics is not None:
             diagnostics.clear()
             diagnostics.update({
+                "scope": None,
                 "rejection_reason": "question_not_recognized_as_financial",
                 "required_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
                 "missing_topics": ["investment", "drt_debt", "certificate", "recovery_report"],
@@ -3890,7 +3990,11 @@ def _build_financial_evidence_fallback(
             })
         return None
 
-    required_topics = ("investment", "drt_debt", "certificate", "recovery_report")
+    required_topics = (
+        ("recovery", "recovery_report")
+        if question_scope == "bank_recovery"
+        else ("investment", "drt_debt", "certificate", "recovery_report")
+    )
     source_blocks: dict[int, str] = {}
     source_markers = list(re.finditer(r"(?m)^\[SOURCE\s+(\d+)\]\s*$", context or ""))
     for index, marker in enumerate(source_markers):
@@ -4091,6 +4195,154 @@ def _build_financial_evidence_fallback(
             if same_source:
                 existing_claim["amount_unit_context"] = unit_context
 
+    if question_scope == "bank_recovery":
+        bank_evidence = _extract_bank_recovery_statement_evidence(source_blocks)
+        recovery_claim = (
+            claims_by_topic.get("recovery_report")
+            or claims_by_topic.get("recovery")
+        )
+        supported_evidence_groups = []
+        if recovery_claim is not None:
+            supported_evidence_groups.append("recovery_amount")
+        if bank_evidence["bank_payment"]:
+            supported_evidence_groups.append("bank_payment")
+        if bank_evidence["account_statement"]:
+            supported_evidence_groups.append("account_statement")
+        required_evidence_groups = [
+            "recovery_amount",
+            "bank_payment",
+            "account_statement",
+        ]
+        missing_evidence_groups = [
+            group for group in required_evidence_groups
+            if group not in supported_evidence_groups
+        ]
+        minimum_supported_groups = 2
+
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({
+                "scope": "bank_recovery",
+                "rejection_reason": (
+                    None
+                    if len(supported_evidence_groups) >= minimum_supported_groups
+                    else "insufficient_bank_recovery_evidence"
+                ),
+                "required_topics": [],
+                "missing_topics": [],
+                "required_evidence_groups": required_evidence_groups,
+                "minimum_supported_evidence_groups": minimum_supported_groups,
+                "supported_evidence_groups": supported_evidence_groups,
+                "missing_evidence_groups": missing_evidence_groups,
+                "recognized_topics": {
+                    topic: {
+                        "amount": claim.get("amount"),
+                        "excerpt": str(claim.get("text", ""))[:240],
+                        "source_id": claim.get("source_id"),
+                        "amount_caption": str(
+                            claim.get("amount_caption") or ""
+                        )[:180],
+                    }
+                    for topic, claim in claims_by_topic.items()
+                },
+                "bank_recovery_statement_evidence": {
+                    group: entries[:3]
+                    for group, entries in bank_evidence.items()
+                },
+                "source_block_count": len(source_blocks),
+                "candidate_claims": candidate_claim_diagnostics[:30],
+                "source_financial_excerpts": {
+                    str(source_id): [
+                        re.sub(r"\s+", " ", line).strip()[:180]
+                        for line in block.splitlines()
+                        if re.search(
+                            r"\b(?:drt|tribunal|judg\w*ment|certificate|debt|"
+                            r"recover\w*|ministry|finance|report|invest\w*|"
+                            r"crores?|rupees?|banks?|statement)\b",
+                            line,
+                            re.IGNORECASE,
+                        )
+                    ][:3]
+                    for source_id, block in source_blocks.items()
+                },
+            })
+        if len(supported_evidence_groups) < minimum_supported_groups:
+            return None
+
+        lines = ["The transcript discusses these bank/recovery points:"]
+        if recovery_claim is not None:
+            amount = recovery_claim.get("amount")
+            if not isinstance(amount, (int, float)) or not math.isfinite(float(amount)):
+                raise ValueError(
+                    "Bank/recovery fallback requires a finite extracted amount."
+                )
+            value = (
+                f"{int(amount):,}"
+                if float(amount).is_integer()
+                else f"{amount:g}"
+            )
+            amount_text = " ".join((
+                str(recovery_claim.get("text", "")),
+                str(recovery_claim.get("amount_caption") or ""),
+            ))
+            source_block = source_blocks.get(
+                recovery_claim.get("source_id"), ""
+            )
+            # Normalize caption whitespace only inside the already selected
+            # source block so labels split across adjacent caption rows can be
+            # rendered without borrowing report attribution from another source.
+            normalized_source_block = re.sub(r"\s+", " ", source_block)
+            unit_context = str(
+                recovery_claim.get("amount_unit_context") or ""
+            )
+            unit_evidence = f"{amount_text} {unit_context}"
+            if re.search(r"\bcrore\s+rupees?\b", unit_evidence, re.IGNORECASE):
+                formatted = f"{value} crore rupees"
+            elif re.search(r"\bcrores?\b|\bcr\b", unit_evidence, re.IGNORECASE):
+                formatted = f"{value} crore"
+            elif re.search(r"\brupees?\b|\bINR\b|₹|\bRs\.?", unit_evidence, re.IGNORECASE):
+                formatted = f"{value} rupees"
+            else:
+                formatted = f"the figure {value}"
+
+            if recovery_claim.get("topic") == "recovery_report":
+                if re.search(
+                    r"\bministry\b.*\bfinance\b.*\breport\b",
+                    normalized_source_block,
+                    re.IGNORECASE,
+                ):
+                    report_label = "Ministry of Finance report"
+                elif re.search(r"\bfinance\s+report\b", normalized_source_block, re.IGNORECASE):
+                    report_label = "Finance report"
+                elif re.search(r"\bministry\s+report\b", normalized_source_block, re.IGNORECASE):
+                    report_label = "Ministry report"
+                else:
+                    report_label = "report"
+                lines.append(
+                    f"- Recovery amount: the transcript attributes a recovery "
+                    f"figure of {formatted} to the {report_label}."
+                )
+            else:
+                lines.append(
+                    f"- Recovery statement: the transcript describes "
+                    f"{formatted} as recovered, but this source does not "
+                    "attribute the figure to a specific report."
+                )
+
+        for item in bank_evidence["bank_payment"][:1]:
+            lines.append(
+                "- Bank-payment status: the transcript states that "
+                + item["text"].rstrip(".")
+                + "."
+            )
+        for item in bank_evidence["account_statement"][:1]:
+            lines.append(
+                "- Account/Parliament reference: the transcript states that "
+                + item["text"].rstrip(".")
+                + "."
+            )
+        return "\n\n".join(lines)
+
     missing_topics = [
         topic for topic in required_topics
         if topic not in claims_by_topic
@@ -4098,6 +4350,7 @@ def _build_financial_evidence_fallback(
     if diagnostics is not None:
         diagnostics.clear()
         diagnostics.update({
+            "scope": "comprehensive_financial",
             "rejection_reason": (
                 "missing_required_topics" if missing_topics else None
             ),
@@ -6232,12 +6485,15 @@ def build_rag_chain(
                     },
                 }
 
-        is_financial_question = bool(re.search(
-            r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-            r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
-            question_text,
-            re.IGNORECASE,
-        ))
+        is_financial_question = bool(
+            _financial_fallback_question_scope(question_text) == "bank_recovery"
+            or re.search(
+                r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+                question_text,
+                re.IGNORECASE,
+            )
+        )
         # Keep the model's prompt bounded, but do not let context truncation hide
         # already-retrieved evidence from deterministic financial validation or
         # the extractive fallback. This context is built only from retrieved source
@@ -6276,6 +6532,11 @@ def build_rag_chain(
                 else:
                     answer = FINANCIAL_VERIFICATION_FALLBACK
                     financial_answer_suppressed = True
+            provider_failure_reason = (
+                "daily_token_quota_exhausted"
+                if daily_quota_exhausted
+                else "empty_answer_after_retries"
+            )
             failure_reason = (
                 "provider daily token quota exhaustion"
                 if daily_quota_exhausted
@@ -6295,6 +6556,7 @@ def build_rag_chain(
                     "quality_repair_attempted": False,
                     "quality_repair_passed": False,
                     "repair_aborted_due_quota": daily_quota_exhausted,
+                    "provider_failure_reason": provider_failure_reason,
                     "response_language_repair_attempted": False,
                     "response_language_repair_passed": None,
                     "question_language_repair_attempted": False,
@@ -6588,6 +6850,11 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "repair_aborted_due_quota": repair_aborted_due_quota,
+                "provider_failure_reason": (
+                    "daily_token_quota_exhausted"
+                    if repair_aborted_due_quota
+                    else None
+                ),
                 "abstention_recheck_attempted": abstention_recheck_attempted,
                 "abstention_recheck_passed": abstention_recheck_passed,
                 "response_language_repair_attempted": question_language_repair_attempted,
