@@ -110,10 +110,10 @@ Suggested batch plan (all 43 IDs exactly once):
 | 09 | AR08, AR09, AR10 |
 
 Use this complete PowerShell block from the audit terminal after syncing to main
-and restarting the backend on the same clean commit. It checks the working tree,
-captures the runner commit, verifies the accepted index, and saves a separate
-JSON report after each batch. It stops if any batch returns a non-zero result,
-so inspect that batch report before deciding whether to retry or continue.
+and restarting the backend on the same clean commit. Keep this PowerShell
+session open through consolidation so the report-path arrays remain available.
+The run ID makes each report filename unique and prevents an earlier batch
+report from being overwritten by a later run.
 
     $ErrorActionPreference = "Stop"
     Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
@@ -136,6 +136,10 @@ so inspect that batch report before deciding whether to retry or continue.
         throw "The accepted Kingfisher index is not ready."
     }
 
+    $batchRunId = Get-Date -Format "yyyyMMdd-HHmmss"
+    $batchReports = @()
+    $retryReports = @()
+
     $batches = @(
         @{ Name = "01"; CaseIds = "Q01,Q02,Q03,Q04,Q05" }
         @{ Name = "02"; CaseIds = "Q06,Q07,Q08,Q09,Q10" }
@@ -149,9 +153,10 @@ so inspect that batch report before deciding whether to retry or continue.
     )
 
     foreach ($batch in $batches) {
-        $output = "evaluation_reports/phase11_6_batch_$($batch.Name).json"
+        $output = "evaluation_reports/phase11_6_batch_" + $batchRunId + "_" + $batch.Name + ".json"
         Write-Host "Running batch $($batch.Name): $($batch.CaseIds)"
         & $python -m scripts.chat_answer_source_audit --suite phase11_0 --case-ids $batch.CaseIds --output $output --expected-namespace "phase10-10-acceptance-minilm-20261023" --expected-embedding-model "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        $batchReports += $output
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Batch $($batch.Name) did not pass. Saved report: $output"
             throw "Stop here; inspect the saved batch report before continuing."
@@ -162,59 +167,56 @@ so inspect that batch report before deciding whether to retry or continue.
 A batch can fail because of a transport/quota problem or because an HTTP-success
 answer failed its quality checks. These are different recovery paths.
 
-For transport failures, identify only the cases whose result status is not
-success, then rerun those IDs with a new report path. Example:
+For transport failures, inspect the saved JSON report and identify only the case
+IDs whose result status is not success. Rerun those IDs with a new report path.
+Example:
 
     $retryCaseIds = "Q03,Q04"
-    $retryOutput = "evaluation_reports/phase11_6_batch_02_retry_01.json"
+    $retryOutput = "evaluation_reports/phase11_6_retry_" + $batchRunId + "_01.json"
     & $python -m scripts.chat_answer_source_audit --suite phase11_0 --case-ids $retryCaseIds --output $retryOutput --expected-namespace "phase10-10-acceptance-minilm-20261023" --expected-embedding-model "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    $retryReports += $retryOutput
+    if ($LASTEXITCODE -ne 0) { throw "The transport retry did not pass; inspect its report." }
 
 The example case IDs above are placeholders; use only the actual transport-failed
 IDs in your saved report. Include both the original report and every retry report
 in the final consolidation. The consolidator permits a later success to replace
-an earlier transport failure, but will reject two HTTP-success attempts for the
-same case.
+an earlier transport failure, but rejects two HTTP-success attempts for the same
+case. Never overwrite or discard an original failed report.
+
+If the loop stopped on a failed batch, do not rerun the whole batch list from the
+beginning. Preserve the saved report paths, retry only transport-failed IDs, and
+run only the later batches that have not yet been executed. Add every new report
+path to the corresponding report array before consolidating.
 
 For an HTTP-success answer-quality failure, do not simply rerun the same case
-and choose whichever model answer passes. Review the failed checks and trace,
-make a targeted code/annotation correction only if justified, then restart from
-a clean commit. Reports produced by different commits cannot be consolidated.
-
-
-If a batch has transport failures from provider quota, wait until provider
-quota is available and rerun only those failed case IDs into a new report.
-Include both the original failed report and retry report during consolidation;
-the duplicate policy replaces only the prior transport failure with the later
-successful response.
-
-Do not blindly rerun cases that returned HTTP 200 but failed an answer-quality
-check. Diagnose those cases first. If a code change is required, use a new clean
-runner commit and keep reports from different commits separate.
+and choose whichever model answer passes. Review the failed checks and trace.
+If a code change is justified, use a new clean runner commit and repeat the
+full 43-case audit on that commit; reports produced by different commits cannot
+be consolidated.
 
 ## 6. Consolidation command
 
-After the nine original batch reports and any transport-retry reports are saved,
-run this command. Add any retry report paths to the list; do not remove the
-original reports that contain the first failed attempts.
+Run this in the same PowerShell session after all nine batch reports and any
+transport-retry reports have been saved. It consumes the original reports and
+retry reports together, preserving their attempt history and source hashes.
 
-    $ErrorActionPreference = "Stop"
-    Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
-    $python = ".\.venv\Scripts\python.exe"
+    $allReports = @($batchReports) + @($retryReports)
+    if ($allReports.Count -eq 0) { throw "No batch reports are available to consolidate." }
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $output = "evaluation_reports/phase11_6_full_registry_consolidated_$timestamp.json"
-    $expectedRunnerCommit = (git rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0 -or $expectedRunnerCommit.Length -ne 40) { throw "Could not verify the current Git commit." }
+    $consolidatedOutput = "evaluation_reports/phase11_6_full_registry_consolidated_$timestamp.json"
 
-    & $python -m scripts.merge_chat_answer_source_audit_reports --reports evaluation_reports/phase11_6_batch_01.json evaluation_reports/phase11_6_batch_02.json evaluation_reports/phase11_6_batch_03.json evaluation_reports/phase11_6_batch_04.json evaluation_reports/phase11_6_batch_05.json evaluation_reports/phase11_6_batch_06.json evaluation_reports/phase11_6_batch_07.json evaluation_reports/phase11_6_batch_08.json evaluation_reports/phase11_6_batch_09.json --output $output --expected-runner-commit $expectedRunnerCommit
+    & $python -m scripts.merge_chat_answer_source_audit_reports --reports $allReports --output $consolidatedOutput --expected-runner-commit $runnerCommit
 
-    Write-Host "Consolidated report: $output"
+    Write-Host "Consolidated report: $consolidatedOutput"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Acceptance is incomplete or failed. Inspect missing, transport-failed, and quality-failed IDs in the report."
         throw "Phase 11.6 full-registry acceptance did not pass."
     }
 
-The batch filenames above are a canonical naming convention. Timestamp suffixes
-may be added as long as the exact paths are supplied to the consolidator.
+If the PowerShell session was closed, recreate the report arrays using the exact
+paths printed when each batch and retry report was saved. Keep every original
+transport-failure report in the list; do not include multiple HTTP-success
+attempts for the same case.
 
 ## 7. Acceptance gate
 
