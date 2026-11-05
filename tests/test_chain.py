@@ -4716,6 +4716,7 @@ def test_initial_quota_exhaustion_returns_safe_fallback(
     assert trace["generated"] is False
     assert trace["fallback_used"] is True
     assert trace["repair_aborted_due_quota"] is True
+    assert trace["provider_failure_reason"] == "daily_token_quota_exhausted"
     assert trace["quality_repair_attempted"] is False
     assert trace["financial_answer_suppressed"] is expect_financial
 
@@ -5429,11 +5430,60 @@ def test_rag_chain_uses_grounded_financial_fallback_when_initial_provider_answer
     assert trace["fallback_used"] is True
     assert trace["grounded_financial_fallback_used"] is True
     assert trace["repair_aborted_due_quota"] is False
+    assert trace["provider_failure_reason"] == "empty_answer_after_retries"
     assert "3,000 crore" in answer
     assert "4,999 crore" in answer
     assert "6,203" in answer
     assert "14,100 crore" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+
+@pytest.mark.unit
+def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provider_answer(monkeypatch):
+    context = (
+        "The Ministry of Finance report records that 14,100 crore rupees "
+        "were recovered from me. The banks have been fully paid. "
+        "The government and banks have not rendered a statement of account."
+    )
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(159, 10630, 10759, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [159],
+                "citation_chunk_ids": [159],
+            },
+        ),
+    )
+
+    def fail_with_empty_provider_answer(**kwargs):
+        raise RuntimeError(
+            "The Groq model returned an empty answer after 3 attempts."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fail_with_empty_provider_answer)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "What does Vijay Mallya say about banks and the recovery of money?",
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["provider_failure_reason"] == "empty_answer_after_retries"
+    assert trace["grounded_financial_fallback_used"] is True
+    assert trace["financial_answer_suppressed"] is False
+    assert "14,100 crore" in result["answer"]
+    assert "statement of account" in result["answer"].casefold()
+    assert "fully paid" in result["answer"].casefold()
+    assert "3,000 crore" not in result["answer"]
+    assert "4,999 crore" not in result["answer"]
+    assert "6,203" not in result["answer"]
+    assert "22,280" not in result["answer"]
 
 
 @pytest.mark.unit
@@ -5544,6 +5594,171 @@ def test_rag_chain_suppresses_unverified_financial_draft_when_safe_extraction_fa
     assert "6,2003" not in result["answer"]
     assert "6,0002" not in result["answer"]
     assert "9,000" not in result["answer"]
+
+
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_uses_only_question_relevant_source_evidence():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:12–10:20] The Ministry of Finance report acknowledges 14,100 crores recovered from me.
+- [10:20–10:35] The government and banks have not rendered a statement of account.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about banks and the recovery of money?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is not None
+    assert "14,100 crore" in fallback
+    assert "Ministry of Finance report" in fallback
+    assert "statement of account" in fallback.casefold()
+    assert "3,000" not in fallback
+    assert "4,999" not in fallback
+    assert "6,203" not in fallback
+    assert diagnostics["scope"] == "bank_recovery"
+    assert diagnostics["rejection_reason"] is None
+    assert set(diagnostics["supported_evidence_groups"]) == {
+        "recovery_amount", "account_statement"
+    }
+    assert diagnostics["minimum_supported_evidence_groups"] == 2
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_abstains_with_only_one_evidence_family():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:12–10:20] The Ministry of Finance report acknowledges 14,100 crores recovered from me."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and recovery of money?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is None
+    assert diagnostics["scope"] == "bank_recovery"
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+    assert diagnostics["supported_evidence_groups"] == ["recovery_amount"]
+    assert set(diagnostics["missing_evidence_groups"]) == {
+        "bank_payment", "account_statement"
+    }
+
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_does_not_borrow_report_attribution_across_sources():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:00–10:10] The Ministry of Finance report was published for Parliament.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [10:12–10:20] The total amount recovered was 14,100 crore rupees.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [10:20–10:35] The banks have been fully paid."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and money recovery?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is not None
+    assert "14,100 crore" in fallback
+    assert "fully paid" in fallback.casefold()
+    assert "Ministry of Finance report" not in fallback
+    assert "does not attribute the figure to a specific report" in fallback
+    assert diagnostics["recognized_topics"]["recovery"]["source_id"] == 2
+
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_can_answer_from_payment_and_account_statements_without_amount():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:12–10:20] The banks have been fully paid.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [10:20–10:35] The speaker refers to a statement in Parliament."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and recovery?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is not None
+    assert "fully paid" in fallback.casefold()
+    assert "statement in Parliament" in fallback
+    assert "recovery_amount" not in diagnostics["supported_evidence_groups"]
+
+
+@pytest.mark.unit
+def test_bank_recovery_fallback_timestamps_are_selected_from_returned_sources():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:12–10:20] The Ministry of Finance report acknowledges 14,100 crores recovered from me.
+- [10:20–10:35] The government and banks have not rendered a statement of account."""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and recovery?",
+        context,
+    )
+    assert fallback is not None
+
+    stamped = chain.append_relevant_source_timestamps(
+        fallback,
+        [
+            {
+                "start": 612.0,
+                "end": 635.0,
+                "distance": 0.4,
+                "transcript_text": (
+                    "The Ministry of Finance report acknowledges 14,100 crore "
+                    "recovered from me. The government and banks have not "
+                    "rendered a statement of account."
+                ),
+            },
+            {
+                "start": 1200.0,
+                "end": 1220.0,
+                "distance": 0.01,
+                "transcript_text": (
+                    "The unrelated report discusses 22,280 crore paid to "
+                    "different claimants."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert "Relevant timestamps:" in stamped
+    assert "10:12–10:35" in stamped
+    assert "20:00–20:20" not in stamped
+
+
+@pytest.mark.unit
+def test_financial_question_scope_preserves_comprehensive_default_and_detects_bank_recovery():
+    assert chain._financial_fallback_question_scope(
+        "What does Vijay Mallya say about banks and the recovery of money?"
+    ) == "bank_recovery"
+    assert chain._financial_fallback_question_scope(
+        "What does Vijay Mallya say about the amount of debt or money involved?"
+    ) == "comprehensive_financial"
+    assert chain._financial_fallback_question_scope(
+        "What amounts of investment, debt, and recovery are mentioned?"
+    ) == "comprehensive_financial"
 
 
 @pytest.mark.unit
