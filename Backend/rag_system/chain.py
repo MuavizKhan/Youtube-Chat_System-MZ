@@ -4288,6 +4288,10 @@ def _build_financial_evidence_fallback(
             source_block = source_blocks.get(
                 recovery_claim.get("source_id"), ""
             )
+            # Normalize caption whitespace only inside the already selected
+            # source block so labels split across adjacent caption rows can be
+            # rendered without borrowing report attribution from another source.
+            normalized_source_block = re.sub(r"\s+", " ", source_block)
             unit_context = str(
                 recovery_claim.get("amount_unit_context") or ""
             )
@@ -4304,13 +4308,13 @@ def _build_financial_evidence_fallback(
             if recovery_claim.get("topic") == "recovery_report":
                 if re.search(
                     r"\bministry\b.*\bfinance\b.*\breport\b",
-                    source_block,
+                    normalized_source_block,
                     re.IGNORECASE,
                 ):
                     report_label = "Ministry of Finance report"
-                elif re.search(r"\bfinance\s+report\b", source_block, re.IGNORECASE):
+                elif re.search(r"\bfinance\s+report\b", normalized_source_block, re.IGNORECASE):
                     report_label = "Finance report"
-                elif re.search(r"\bministry\s+report\b", source_block, re.IGNORECASE):
+                elif re.search(r"\bministry\s+report\b", normalized_source_block, re.IGNORECASE):
                     report_label = "Ministry report"
                 else:
                     report_label = "report"
