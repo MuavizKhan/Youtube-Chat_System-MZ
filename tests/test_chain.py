@@ -5633,6 +5633,31 @@ Transcript caption segments in chronological order:
     assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
 
 
+
+@pytest.mark.unit
+def test_bank_recovery_statement_extractor_ignores_interviewer_questions():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [10:00–10:10] Have the banks been fully paid?
+- [10:10–10:20] Did you provide a statement in Parliament?
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [10:20–10:35] The Ministry of Finance report acknowledges 14,100 crores recovered from me."""
+
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        "What does the speaker say about banks and money recovery?",
+        context,
+        diagnostics=diagnostics,
+    )
+
+    assert fallback is None
+    assert diagnostics["supported_evidence_groups"] == ["recovery_amount"]
+    assert set(diagnostics["missing_evidence_groups"]) == {
+        "bank_payment", "account_statement"
+    }
+
+
 @pytest.mark.unit
 def test_bank_recovery_fallback_abstains_with_only_one_evidence_family():
     context = """[SOURCE 1]
@@ -5756,6 +5781,13 @@ def test_financial_question_scope_preserves_comprehensive_default_and_detects_ba
     assert chain._financial_fallback_question_scope(
         "What does Vijay Mallya say about the amount of debt or money involved?"
     ) == "comprehensive_financial"
+    assert chain._financial_fallback_question_scope(
+        "What does the video say about banks?"
+    ) == "comprehensive_financial"
+    assert chain._build_financial_evidence_fallback(
+        "What does the video say about banks?",
+        "[SOURCE 1]\\nThe banks are mentioned.",
+    ) is None
     assert chain._financial_fallback_question_scope(
         "What amounts of investment, debt, and recovery are mentioned?"
     ) == "comprehensive_financial"
