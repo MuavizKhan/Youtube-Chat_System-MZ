@@ -39,6 +39,9 @@ class GoldEvidenceCase:
     # This is separate from retrieval-context evaluation so prompt packing can
     # reserve the evidence needed to answer the registered question.
     min_generation_context_group_coverage: float | None = None
+    # Optional paraphrases accepted only when checking generated answers.
+    # Retrieval and prompt-context matching continue to use exact source phrases.
+    generation_answer_aliases: tuple[tuple[str, ...], ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -129,6 +132,19 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            (),
+            (
+                "cash flow nightmare",
+                "cash flow crisis",
+                "cash flow problem",
+                "working capital cycle broke",
+                "broke the working capital cycle",
+                "broken working capital cycle",
+                "working capital cycle was disrupted",
+            ),
+            (),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q06",
@@ -403,3 +419,29 @@ def matched_gold_groups(
             for normalized_block in normalized_blocks
         )
     }
+
+
+def matched_gold_answer_groups(
+    text: str,
+    case: GoldEvidenceCase,
+) -> set[int]:
+    """Match generated-answer evidence, including curated answer-only aliases.
+
+    This intentionally does not alter matched_gold_groups(), which remains the
+    strict transcript/context matcher used by retrieval and prompt packing.
+    """
+    matched = matched_gold_groups(text, case)
+    if not isinstance(text, str) or not text or not case.generation_answer_aliases:
+        return matched
+
+    normalized_answer = normalize_evidence_text(text)
+    for group_index, aliases in enumerate(case.generation_answer_aliases):
+        if group_index >= len(case.groups):
+            break
+        if any(
+            normalize_evidence_text(alias) in normalized_answer
+            for alias in aliases
+        ):
+            matched.add(group_index)
+
+    return matched

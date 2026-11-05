@@ -1034,6 +1034,82 @@ def test_hindi_movement_generation_is_suppressed_without_bijolia_evidence(
 
 
 @pytest.mark.unit
+def test_q05_generation_accepts_cash_flow_paraphrase_without_weakening_context_matching():
+    from Backend.rag_system.gold_evidence import (
+        get_gold_evidence_case,
+        matched_gold_answer_groups,
+        matched_gold_groups,
+    )
+
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "- [00:05–00:10] The working capital cycle got disrupted. "
+        "There was a cash flow issue.\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees or the landing charges."
+    )
+    answer = (
+        "Vijay Mallya says running Kingfisher Airlines was a cash-flow nightmare. "
+        "The airline struggled to pay oil bills and airport landing charges, "
+        "while the global financial crisis of 2008 dried up credit."
+    )
+    case = get_gold_evidence_case("Q05")
+
+    # Transcript/retrieval matching remains exact and does not accept an answer
+    # paraphrase as if that phrase had appeared in the transcript.
+    assert matched_gold_groups(answer, case) == {0, 2}
+    assert matched_gold_answer_groups(answer, case) == {0, 1, 2}
+
+    # A complete answer should not trigger a needless model rewrite.
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+@pytest.mark.unit
+def test_gold_evidence_repair_instructs_model_to_preserve_already_covered_groups():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "- [00:05–00:10] The working capital cycle got disrupted. "
+        "There was a cash flow issue.\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees or the landing charges."
+    )
+    partial_answer = (
+        "The global financial crisis stopped the money. "
+        "The airline could not pay landing charges."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=partial_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "ALREADY-COVERED EVIDENCE TO PRESERVE" in instruction
+    assert "MISSING EVIDENCE TO ADD" in instruction
+    assert "global financial crisis" in instruction.lower()
+    assert "landing charges" in instruction.lower()
+    assert "cash flow issue" in instruction.lower()
+    assert "do not omit a previously covered group" in instruction.lower()
+
+
+@pytest.mark.unit
 def test_generation_repair_includes_missing_policy_evidence_from_registered_q09_context():
     question = (
         "What does Vijay Mallya say about the role of Indian government policy "

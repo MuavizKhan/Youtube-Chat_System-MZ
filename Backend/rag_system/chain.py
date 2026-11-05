@@ -94,6 +94,7 @@ from .query_understanding import (
 from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
     matched_gold_groups,
+    matched_gold_answer_groups,
     matched_gold_group_caption_spans,
     normalize_evidence_text,
 )
@@ -2284,7 +2285,7 @@ def _gold_evidence_repair_instruction(
     context_text = context or ""
     answer_text = _strip_unverified_timestamp_summary(answer or "")
     context_groups = matched_gold_groups(context_text, gold_case)
-    answer_groups = matched_gold_groups(answer_text, gold_case)
+    answer_groups = matched_gold_answer_groups(answer_text, gold_case)
     required_coverage = gold_case.min_generation_context_group_coverage
     required_groups = math.ceil(
         len(gold_case.groups) * float(required_coverage)
@@ -2294,6 +2295,7 @@ def _gold_evidence_repair_instruction(
         return None
 
     missing_groups = sorted(context_groups - answer_groups)
+    preserved_groups = sorted(context_groups & answer_groups)
     instructions = []
     if missing_groups:
         normalized_context = normalize_evidence_text(context_text)
@@ -2327,18 +2329,44 @@ def _gold_evidence_repair_instruction(
                         + " / ".join(registered_english_aliases[:3])
                     )
                 evidence_lines.append(evidence_line)
+
+        preserved_lines = []
+        for group_index in preserved_groups:
+            supported_phrases = [
+                phrase
+                for phrase in gold_case.groups[group_index]
+                if normalize_evidence_text(phrase) in normalized_context
+            ]
+            if supported_phrases:
+                preserved_lines.append(
+                    f"- Evidence group {group_index + 1} (already covered; "
+                    "preserve in the final answer): "
+                    + " / ".join(supported_phrases[:3])
+                )
+
         if evidence_lines:
+            preserved_section = (
+                "\nALREADY-COVERED EVIDENCE TO PRESERVE:\n"
+                + "\n".join(preserved_lines)
+                if preserved_lines
+                else "\nALREADY-COVERED EVIDENCE TO PRESERVE:\n- None."
+            )
             instructions.append(
                 "CURATED EVIDENCE COMPLETENESS REPAIR. Rewrite the answer from "
                 "scratch and include each distinct source-supported point listed "
-                "below. The exact source wording is quoted separately from any "
-                "registered English answer spelling, which is an annotation alias "
-                "for that same source term rather than a separate fact. These points "
-                "are present in the transcript context already supplied to you but "
-                "are missing from the draft. Use only that context, preserve the "
-                "speaker's attribution, and do not replace "
-                "a specific cause with a vague phrase such as 'financial problems'. "
-                "Do not add a timestamp line.\n"
+                "under MISSING EVIDENCE TO ADD. The final answer must also retain "
+                "every already-covered point listed under ALREADY-COVERED EVIDENCE "
+                "TO PRESERVE. Cover all required evidence groups available in the "
+                "supplied context; do not omit a previously covered group while "
+                "adding a missing one. The exact source wording is quoted separately "
+                "from any registered English answer spelling, which is an annotation "
+                "alias for that same source term rather than a separate fact. These "
+                "points are present in the transcript context already supplied to "
+                "you. Use only that context, preserve the speaker's attribution, and "
+                "do not replace a specific cause with a vague phrase such as "
+                "'financial problems'. Do not add a timestamp line."
+                + preserved_section
+                + "\nMISSING EVIDENCE TO ADD:\n"
                 + "\n".join(evidence_lines)
             )
 
