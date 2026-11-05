@@ -4758,6 +4758,7 @@ def test_quota_exhaustion_during_repair_returns_localized_safe_fallback(monkeypa
     assert result["generation_trace"]["quality_repair_attempted"] is True
     assert result["generation_trace"]["quality_repair_passed"] is False
     assert result["generation_trace"]["repair_aborted_due_quota"] is True
+    assert result["generation_trace"]["provider_failure_reason"] == "daily_token_quota_exhausted"
     assert result["generation_trace"]["question_language_repair_attempted"] is True
     assert result["generation_trace"]["question_language_repair_passed"] is False
 
