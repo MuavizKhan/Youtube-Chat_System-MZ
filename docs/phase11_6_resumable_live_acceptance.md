@@ -28,7 +28,7 @@ The new module is:
 
 Example:
 
-    .\\.venv\\Scripts\\python.exe -m scripts.merge_chat_answer_source_audit_reports --reports evaluation_reports/batch-01.json evaluation_reports/batch-02.json --output evaluation_reports/phase11_6_full_registry_consolidated.json
+    .\.venv\Scripts\python.exe -m scripts.merge_chat_answer_source_audit_reports --reports evaluation_reports/batch-01.json evaluation_reports/batch-02.json --output evaluation_reports/phase11_6_full_registry_consolidated.json
 
 The report includes:
 - Cases attempted, succeeded, and failed, distinct from semantic quality failures.
@@ -130,8 +130,8 @@ run this command. Add any retry report paths to the list; do not remove the
 original reports that contain the first failed attempts.
 
     $ErrorActionPreference = "Stop"
-    Set-Location -LiteralPath "C:\\Users\\Muaviz Khan\\OneDrive\\Desktop\\All Projects\\Youtube_Video_ChatSystem"
-    $python = ".\\.venv\\Scripts\\python.exe"
+    Set-Location -LiteralPath "C:\Users\Muaviz Khan\OneDrive\Desktop\All Projects\Youtube_Video_ChatSystem"
+    $python = ".\.venv\Scripts\python.exe"
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $output = "evaluation_reports/phase11_6_full_registry_consolidated_$timestamp.json"
     $expectedRunnerCommit = (git rev-parse HEAD).Trim()
