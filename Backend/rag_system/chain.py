@@ -999,8 +999,13 @@ def append_requested_temporal_timestamp(
     start = temporal_window.get("start_seconds")
     end = temporal_window.get("end_seconds")
     if (
-        not isinstance(start, (int, float))
+        isinstance(start, bool)
+        or isinstance(end, bool)
+        or not isinstance(start, (int, float))
         or not isinstance(end, (int, float))
+        or not math.isfinite(float(start))
+        or not math.isfinite(float(end))
+        or start < 0
         or end <= start
     ):
         return answer
