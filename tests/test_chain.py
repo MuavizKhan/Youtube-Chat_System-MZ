@@ -7473,4 +7473,3 @@ def test_temporal_location_timestamp_selection_prefers_substantive_answer_sectio
     assert "01:10:38–01:14:34" in result
     assert "01:19:53–01:22:48" in result
     assert "01:58:47–02:01:17" in result
-
