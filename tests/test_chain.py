@@ -337,7 +337,9 @@ def test_inline_model_timestamp_claim_is_removed_even_without_source_metadata():
         has_evidence=False,
     )
 
-    assert result == "A grounded explanation."
+    assert result == (
+        "A grounded explanation. The event occurs, and the discussion continues."
+    )
 
 
 @pytest.mark.unit
