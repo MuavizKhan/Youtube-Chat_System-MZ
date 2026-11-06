@@ -34,7 +34,10 @@ from Backend.rag_system.timestamp_utils import (
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
-from Backend.rag_system.chain import is_temporal_location_question
+from Backend.rag_system.chain import (
+    _temporal_location_answer_coverage,
+    is_temporal_location_question,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
