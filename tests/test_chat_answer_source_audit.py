@@ -1583,3 +1583,105 @@ def test_phase11_0_full_registry_gate_requires_all_43_cases(monkeypatch, tmp_pat
         "all_registered_question_cases_live_audited",
     }
 
+
+def test_temporal_location_audit_fails_when_incomplete_first_pass_is_not_repaired():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 3,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+    }
+
+    check = audit._temporal_location_review_quality_check(case, generation)
+
+    assert check is not None
+    assert check["name"] == "temporal_location_answer_covers_substantive_sections"
+    assert check["passed"] is False
+
+
+def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 3,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 3,
+            "coverage_ratio": 0.8,
+            "needs_review": False,
+        },
+    }
+
+    check = audit._temporal_location_review_quality_check(case, generation)
+
+    assert check is not None
+    assert check["passed"] is True
+
+
+def test_temporal_location_audit_passes_when_no_repair_was_needed():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3],
+            "covered_source_group_numbers": [1, 2, 3],
+            "required_covered_source_group_count": 2,
+            "coverage_ratio": 1.0,
+            "needs_review": False,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+    }
+
+    check = audit._temporal_location_review_quality_check(case, generation)
+
+    assert check is not None
+    assert check["passed"] is True
+
+
+def test_temporal_location_audit_does_not_apply_to_ordinary_topic_questions():
+    case = {
+        "id": "Q01",
+        "question": "What does the speaker say about the airline's passenger experience?",
+    }
+
+    assert audit._temporal_location_review_quality_check(case, {}) is None
+
+
