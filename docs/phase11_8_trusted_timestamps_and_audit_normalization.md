@@ -86,7 +86,7 @@ The deterministic tests cover:
 - dash variants, "to", and "and" separators;
 - invalid seconds, invalid clock fields, and reversed ranges;
 - removal of inline model-authored ranges and labelled timestamp summaries;
-- retention of ordinary explanatory prose and duration phrases;
+- retention of ordinary explanatory prose and duration phrases, including answer-bearing sentences that contain an untrusted timestamp;
 - trusted source metadata replacing an inline model timestamp;
 - timestamp removal when no trusted metadata is available;
 - Q11 timestamps that are source-covered but outside registered temporal sections failing the temporal audit;
