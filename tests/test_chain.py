@@ -7144,7 +7144,7 @@ def test_temporal_location_coverage_requires_distinct_source_content_not_topic_n
     assert incomplete["is_temporal_location_question"] is True
     assert incomplete["candidate_source_group_numbers"] == [1, 2, 3, 4, 5]
     assert incomplete["covered_source_group_numbers"] == [1]
-    assert incomplete["required_covered_source_group_count"] == 3
+    assert incomplete["required_covered_source_group_count"] == 4
     assert incomplete["needs_review"] is True
 
     complete = chain._temporal_location_answer_coverage(
