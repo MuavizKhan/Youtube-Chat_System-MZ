@@ -97,7 +97,7 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
         question="Cite the relevant timestamp for 25:35–26:25.",
         retrieval_trace=trace,
         has_evidence=True,
-    ) == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+        "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
 
 
 @pytest.mark.unit
