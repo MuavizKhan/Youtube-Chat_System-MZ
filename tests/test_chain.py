@@ -7153,7 +7153,7 @@ def test_temporal_location_coverage_requires_distinct_source_content_not_topic_n
         context,
     )
     assert complete["needs_review"] is False
-    assert len(complete["covered_source_group_numbers"]) >= 3
+    assert len(complete["covered_source_group_numbers"]) >= 4
 
 
 @pytest.mark.unit
