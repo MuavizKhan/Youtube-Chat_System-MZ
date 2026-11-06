@@ -712,6 +712,16 @@ def test_q11_temporal_timestamps_must_match_registered_video_sections(
     assert audit["temporal_timestamp_alignment"]["passed"] is expected_temporal_pass
 
 
+def test_malformed_timestamp_ranges_are_not_silently_ignored():
+    answer = "The model claims the segment runs from 01:75 to 02:00."
+
+    assert _answer_timestamp_ranges(answer) == ["01:75 to 02:00"]
+    assert not _timestamp_range_covered_by_sources(
+        "01:75 to 02:00",
+        [{"display_range": "00:00–10:00"}],
+    )
+
+
 def test_timestamp_range_must_be_fully_covered_by_returned_source_intervals():
     hi_sources = [
         {"display_range": "00:02–01:18"},
