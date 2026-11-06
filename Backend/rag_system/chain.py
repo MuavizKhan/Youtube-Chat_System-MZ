@@ -911,8 +911,10 @@ def _temporal_location_answer_coverage(
             covered_numbers.append(source_number)
 
     candidate_count = len(candidates)
+    # Permit at most one incidental teaser/name-drop block, but require
+    # the answer to reflect the remaining topic-matching discussion regions.
     required_count = (
-        min(candidate_count, max(2, math.ceil(candidate_count * 0.5)))
+        min(candidate_count, max(2, candidate_count - 1))
         if candidate_count >= 2
         else candidate_count
     )
