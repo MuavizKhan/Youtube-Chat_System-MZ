@@ -872,12 +872,14 @@ def _temporal_location_answer_coverage(
     answer: str,
     context: str,
 ) -> dict[str, Any]:
-    """Measure answer coverage across distinct source blocks matching the requested topic.
+    """Measure temporal answer coverage using source-discriminative content anchors.
 
-    Topic-name overlap alone never counts as covering a source block. A block
-    counts only when the answer also reflects at least two source-specific
-    content terms from that block. This keeps an opening name-drop from
-    masquerading as a summary of later substantive discussions.
+    A source block is not covered merely because its topic or generic vocabulary
+    appears in the answer. It must contribute at least two answer-matched terms
+    that are distinctive across the topic-matching blocks (or all available
+    distinctive terms when a block has fewer than two). This makes repeated
+    words such as "airline", "government", or "company" insufficient by
+    themselves to satisfy a substantive-section requirement.
     """
     if not is_temporal_location_question(question):
         return {
@@ -887,29 +889,66 @@ def _temporal_location_answer_coverage(
             "required_covered_source_group_count": 0,
             "coverage_ratio": None,
             "needs_review": False,
+            "source_group_anchor_diagnostics": [],
         }
 
     topic_terms = _temporal_location_terms(question)
     answer_terms = _temporal_location_terms(answer)
-    blocks = _temporal_location_source_blocks(context)
-
-    candidates: list[tuple[int, str, set[str]]] = []
-    for source_number, block_text in blocks:
+    matching_blocks: list[tuple[int, set[str]]] = []
+    for source_number, block_text in _temporal_location_source_blocks(context):
         source_terms = _temporal_location_terms(block_text)
         if topic_terms & source_terms:
-            candidates.append((source_number, block_text, source_terms))
+            matching_blocks.append((source_number, source_terms - topic_terms))
 
-    candidate_numbers = [item[0] for item in candidates]
-    covered_numbers = []
-    for source_number, _block_text, source_terms in candidates:
-        source_specific_terms = source_terms - topic_terms
-        meaningful_overlap = answer_terms & source_specific_terms
-        if len(meaningful_overlap) >= 2:
+    candidate_numbers = [number for number, _ in matching_blocks]
+    term_document_frequency: dict[str, int] = {}
+    for _number, content_terms in matching_blocks:
+        for term in content_terms:
+            term_document_frequency[term] = (
+                term_document_frequency.get(term, 0) + 1
+            )
+
+    candidate_count = len(matching_blocks)
+    # A content term is considered discriminative only when it appears in
+    # fewer than half of the topic-matching source blocks. With one or two
+    # blocks, this naturally reduces to terms unique to that block.
+    rare_term_limit = max(1, (candidate_count - 1) // 2)
+    covered_numbers: list[int] = []
+    anchor_diagnostics: list[dict[str, Any]] = []
+
+    for source_number, content_terms in matching_blocks:
+        distinctive_terms = {
+            term
+            for term in content_terms
+            if term_document_frequency.get(term, 0) <= rare_term_limit
+        }
+        answer_overlap = answer_terms & content_terms
+        distinctive_overlap = answer_overlap & distinctive_terms
+        required_distinctive_count = min(2, len(distinctive_terms))
+        covered = (
+            bool(distinctive_terms)
+            and len(answer_overlap) >= 2
+            and len(distinctive_overlap) >= required_distinctive_count
+        )
+        if covered:
             covered_numbers.append(source_number)
 
-    candidate_count = len(candidates)
-    # Permit at most one incidental teaser/name-drop block, but require
-    # the answer to reflect the remaining topic-matching discussion regions.
+        anchor_diagnostics.append({
+            "source_group_number": source_number,
+            "source_specific_term_count": len(content_terms),
+            "distinctive_term_count": len(distinctive_terms),
+            "matched_source_specific_term_count": len(answer_overlap),
+            "matched_distinctive_term_count": len(distinctive_overlap),
+            "required_distinctive_term_count": required_distinctive_count,
+            "distinctive_term_coverage": round(
+                len(distinctive_overlap) / len(distinctive_terms),
+                4,
+            ) if distinctive_terms else 0.0,
+            "covered": covered,
+        })
+
+    # Permit at most one incidental teaser/name-drop block, but require the
+    # answer to reflect the remaining topic-matching discussion regions.
     required_count = (
         min(candidate_count, max(2, candidate_count - 1))
         if candidate_count >= 2
@@ -932,7 +971,92 @@ def _temporal_location_answer_coverage(
         "required_covered_source_group_count": required_count,
         "coverage_ratio": round(coverage_ratio, 4),
         "needs_review": needs_review,
+        "source_group_anchor_diagnostics": anchor_diagnostics,
     }
+
+
+def _select_temporal_location_timestamp_candidates(
+    question: str,
+    answer: str,
+    candidates: list[dict[str, Any]],
+    *,
+    max_ranges: int,
+) -> list[dict[str, Any]] | None:
+    """Select timestamp ranges from answer-covered, topic-bearing time clusters.
+
+    Overlapping citation chunks are first coalesced into chronological clusters.
+    We then reuse the same discriminative-anchor test as the temporal
+    completeness guard. This prevents an opening teaser from becoming the sole
+    timestamp just because it has generic lexical overlap with the answer.
+    """
+    ordered = sorted(
+        (
+            item for item in candidates
+            if isinstance(item.get("transcript_text"), str)
+            and item["transcript_text"].strip()
+        ),
+        key=lambda item: (item["start"], item["end"]),
+    )
+    clusters: list[dict[str, Any]] = []
+    for item in ordered:
+        text = item["transcript_text"].strip()
+        if (
+            clusters
+            and float(item["start"]) <= (
+                clusters[-1]["end"] + SOURCE_MERGE_GAP_SECONDS
+            )
+        ):
+            cluster = clusters[-1]
+            cluster["end"] = max(cluster["end"], float(item["end"]))
+            cluster["distance"] = min(
+                cluster["distance"], float(item["distance"])
+            )
+            if text not in cluster["_transcript_parts"]:
+                cluster["_transcript_parts"].append(text)
+        else:
+            clusters.append({
+                "start": float(item["start"]),
+                "end": float(item["end"]),
+                "distance": float(item["distance"]),
+                "_transcript_parts": [text],
+            })
+
+    if not clusters:
+        return None
+
+    context = "\n\n".join(
+        f"[SOURCE {index}]\n" + "\n".join(cluster["_transcript_parts"])
+        for index, cluster in enumerate(clusters, start=1)
+    )
+    coverage = _temporal_location_answer_coverage(
+        question,
+        answer,
+        context,
+    )
+    diagnostics = {
+        item["source_group_number"]: item
+        for item in coverage.get("source_group_anchor_diagnostics", [])
+    }
+    eligible = [
+        (index, cluster, diagnostics.get(index))
+        for index, cluster in enumerate(clusters, start=1)
+        if diagnostics.get(index, {}).get("covered") is True
+    ]
+    if not eligible:
+        return None
+
+    eligible.sort(
+        key=lambda item: (
+            item[2]["matched_distinctive_term_count"],
+            item[2]["matched_source_specific_term_count"],
+            item[2]["distinctive_term_coverage"],
+            -item[1]["distance"],
+        ),
+        reverse=True,
+    )
+    selected = [item[1] for item in eligible[:max_ranges]]
+    selected.sort(key=lambda item: (item["start"], item["end"]))
+    return selected or None
 
 
 def _temporal_location_completeness_repair_instruction(
@@ -1088,6 +1212,7 @@ def append_relevant_source_timestamps(
     *,
     has_evidence: bool,
     max_ranges: int = 3,
+    question: str | None = None,
 ) -> str:
     """Append source-grounded timestamp ranges to a substantive answer.
 
@@ -1169,17 +1294,29 @@ def append_relevant_source_timestamps(
     if not candidates:
         return answer
 
-    selected = _select_claim_aligned_timestamp_candidates(
-        answer,
-        candidates,
-        max_ranges=max_ranges,
-    )
-    if selected is None:
-        selected = _select_answer_aligned_timestamp_candidates(
+    if is_temporal_location_question(question):
+        selected = _select_temporal_location_timestamp_candidates(
+            question,
             answer,
             candidates,
             max_ranges=max_ranges,
         )
+        # Temporal-location requests must not fall back to a nearest or generic
+        # opening interval when no answer-covered substantive section is found.
+        if selected is None:
+            return answer
+    else:
+        selected = _select_claim_aligned_timestamp_candidates(
+            answer,
+            candidates,
+            max_ranges=max_ranges,
+        )
+        if selected is None:
+            selected = _select_answer_aligned_timestamp_candidates(
+                answer,
+                candidates,
+                max_ranges=max_ranges,
+            )
     if selected is None:
         # Do not attach a nearest-by-distance timestamp to an eye/eyelid sound
         # claim when source text is available but provides no acoustic evidence
@@ -1321,6 +1458,7 @@ def append_verified_response_timestamps(
         answer=temporal_answer,
         sources=sources,
         has_evidence=has_evidence,
+        question=question,
     )
 
 

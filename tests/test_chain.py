@@ -180,6 +180,10 @@ def test_append_relevant_source_timestamps_aligns_multi_amount_claims_to_transcr
     )
     result = chain.append_relevant_source_timestamps(
         answer=answer,
+        question=(
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
         sources=[
             {
                 "start": 10,
@@ -7369,3 +7373,104 @@ def test_temporal_location_answer_timestamps_align_to_later_substantive_sections
     assert "01:10:38–01:14:34" in result
     assert "01:19:53–01:22:48" in result
     assert "01:58:47–02:01:17" in result
+
+
+@pytest.mark.regression
+def test_temporal_location_coverage_rejects_live_q11_answer_with_missing_sections():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    answer = (
+        "Vijay Mallya talks about Kingfisher Airlines in the early part of the "
+        "interview, from the start of the video. The host mentions the 9,000 "
+        "crore loan-default scam. Mallya says he was the biggest airline owner "
+        "in India and that the airline was forced to struggle after the "
+        "government told him not to downsize. He discusses media coverage and "
+        "its impact on his family, then describes the original vision as the "
+        "best flying experience, focused on passenger comfort, safety, and "
+        "connecting previously unconnected places in India."
+    )
+
+    coverage = chain._temporal_location_answer_coverage(
+        question,
+        answer,
+        _temporal_location_regression_context(),
+    )
+
+    assert coverage["candidate_source_group_numbers"] == [1, 2, 3, 4, 5]
+    assert coverage["required_covered_source_group_count"] == 4
+    assert 1 in coverage["covered_source_group_numbers"]
+    assert 3 in coverage["covered_source_group_numbers"]
+    assert 2 not in coverage["covered_source_group_numbers"]
+    assert 4 not in coverage["covered_source_group_numbers"]
+    assert 5 not in coverage["covered_source_group_numbers"]
+    assert coverage["needs_review"] is True
+
+
+@pytest.mark.regression
+def test_temporal_location_timestamp_selection_prefers_substantive_answer_sections():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    answer = _temporal_location_complete_answer()
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        question=question,
+        sources=[
+            {
+                "start": 0.4,
+                "end": 188.0,
+                "distance": 0.68,
+                "transcript_text": (
+                    "Vijay Mallya is out of the country. He faces a raging "
+                    "loan default case. Kingfisher Airlines is described as a class apart."
+                ),
+            },
+            {
+                "start": 4001.4,
+                "end": 4134.64,
+                "distance": 0.81,
+                "transcript_text": (
+                    "Let's walk through the case. What happened in Kingfisher Airlines? "
+                    "When did you decide to start Kingfisher Airlines? 2002 2003."
+                ),
+            },
+            {
+                "start": 4238.679,
+                "end": 4474.239,
+                "distance": 0.65,
+                "transcript_text": (
+                    "The vision of Kingfisher Airlines was the best flying experience, "
+                    "a premium experience focused on passenger comfort and safety, "
+                    "connecting places in India."
+                ),
+            },
+            {
+                "start": 4793.28,
+                "end": 4968.56,
+                "distance": 0.73,
+                "transcript_text": (
+                    "The Deccan acquisition, one-rupee tickets, industry consolidation "
+                    "and the Kingfisher merger are discussed."
+                ),
+            },
+            {
+                "start": 7127.84,
+                "end": 7277.36,
+                "distance": 1.30,
+                "transcript_text": (
+                    "The Kingfisher financial turmoil, banks' support and the "
+                    "Finance Minister meeting are discussed."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert "00:00–03:08" not in result
+    assert "01:10:38–01:14:34" in result
+    assert "01:19:53–01:22:48" in result
+    assert "01:58:47–02:01:17" in result
+
