@@ -1139,32 +1139,35 @@ def _temporal_location_review_quality_check(
             "The temporal-location review did not establish adequate section coverage.",
         )
 
-    # The audit must verify the actual answer returned by the API. Do not trust
-    # generation-trace booleans when later language/fallback safeguards may
-    # have replaced the repaired draft.
-    final_coverage = _temporal_location_answer_coverage(
-        question=question,
-        answer=answer,
-        context=generation.get("temporal_location_context", ""),
-    )
+    # The generation pipeline computes this against the actual answer after
+    # all language/fallback safeguards. Keep transcript text out of the public
+    # observability payload; only the source-group coverage summary is exposed.
+    final_coverage = generation.get("temporal_location_coverage_final")
     if not isinstance(final_coverage, dict):
         return _quality_check(
             "temporal_location_answer_covers_substantive_sections",
             False,
-            "Final-answer temporal-location coverage could not be verified.",
+            "Final-answer temporal-location coverage diagnostics are missing or malformed.",
         )
 
     final_candidates = final_coverage.get("candidate_source_group_numbers")
     final_covered = final_coverage.get("covered_source_group_numbers")
     final_required = final_coverage.get("required_covered_source_group_count")
-    if (
-        final_coverage.get("is_temporal_location_question") is not True
-        or final_coverage.get("needs_review") is not False
-        or final_candidates != candidates
-        or final_required != required_count
-        or not isinstance(final_covered, list)
-        or len(final_covered) < required_count
-    ):
+    final_coverage_valid = (
+        final_coverage.get("is_temporal_location_question") is True
+        and final_coverage.get("needs_review") is False
+        and final_candidates == candidates
+        and final_required == required_count
+        and isinstance(final_covered, list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in final_covered
+        )
+        and len(set(final_covered)) == len(final_covered)
+        and set(final_covered).issubset(candidate_set)
+        and len(final_covered) >= required_count
+    )
+    if not final_coverage_valid:
         return _quality_check(
             "temporal_location_answer_covers_substantive_sections",
             False,
