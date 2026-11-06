@@ -2,6 +2,7 @@ import pytest
 
 from Backend.rag_system.timestamp_utils import (
     find_timestamp_ranges,
+    find_timestamp_range_texts,
     parse_timestamp_range,
     strip_unverified_timestamp_claims,
 )
@@ -37,6 +38,13 @@ def test_shared_timestamp_parser_accepts_common_formats(value, start, end):
 )
 def test_shared_timestamp_parser_rejects_invalid_or_reversed_ranges(value):
     assert parse_timestamp_range(value) is None
+
+
+def test_range_shape_detection_retains_malformed_expressions_for_auditing():
+    answer = "The model claims the segment is 01:75 to 02:00."
+
+    assert find_timestamp_range_texts(answer) == ["01:75 to 02:00"]
+    assert find_timestamp_ranges(answer) == []
 
 
 def test_timestamp_finder_extracts_inline_ranges_and_word_separators():
