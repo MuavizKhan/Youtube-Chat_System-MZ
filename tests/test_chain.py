@@ -7171,8 +7171,10 @@ def test_generation_repair_instruction_reviews_incomplete_temporal_location_answ
 
     assert instruction is not None
     assert "TEMPORAL LOCATION COMPLETENESS REVIEW" in instruction
-    assert "SOURCE 2 (01:06:41 - 01:08:54)" in instruction
-    assert "SOURCE 3 (01:10:38 - 01:14:34)" in instruction
+    assert "SOURCE 2" in instruction
+    assert "SOURCE 3" in instruction
+    assert "01:06:41 - 01:08:54" not in instruction
+    assert "01:10:38 - 01:14:34" not in instruction
     assert "opening narration" not in instruction.lower()
     assert "do not force coverage of a block" in instruction.lower()
 
