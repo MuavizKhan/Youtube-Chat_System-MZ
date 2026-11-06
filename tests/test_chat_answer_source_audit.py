@@ -746,6 +746,52 @@ def test_temporal_alignment_honors_annotation_minimum_window_coverage():
     assert sufficient["window_coverage"] == 0.75
 
 
+def test_audit_rejects_inline_model_timestamp_claims_outside_trusted_footer():
+    case = {
+        "id": "TIMESTAMP_TEST",
+        "video_id": "video-test",
+        "question": "What is discussed?",
+        "expected_behavior": "answerable",
+        "answer_requirements": [],
+        "evidence_groups": [],
+        "answer_language": "en",
+    }
+    response = {
+        "answer": (
+            "A grounded answer about the topic, with the discussion occurring "
+            "around 01:20.\\n\\nRelevant timestamps: 00:10–00:20"
+        ),
+        "video_id": "video-test",
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [
+            {
+                "source_id": "source-1",
+                "chunk_ids": ["1"],
+                "start": 10,
+                "end": 20,
+            }
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": ["1"],
+                "citation_chunk_ids": ["1"],
+            },
+            "generation": {
+                "context_budget": {
+                    "included_chunk_ids": ["1"],
+                    "budget_chars": 8000,
+                    "final_chars": 200,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+
+    assert audit["unverified_model_timestamp_claims_present"] is True
+    assert "unverified_model_timestamp_claims_absent" in audit["quality"]["failed_checks"]
+
+
 def test_malformed_timestamp_ranges_are_not_silently_ignored():
     answer = "The model claims the segment runs from 01:75 to 02:00."
 
