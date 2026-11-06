@@ -1711,7 +1711,7 @@ def test_temporal_location_audit_passes_when_no_repair_was_needed():
         "temporal_location_review_attempted": False,
         "temporal_location_review_passed": None,
         "temporal_location_coverage_after": None,
-        "temporal_location_context": context,
+        **_temporal_final_diagnostics(case["question"], answer, context),
     }
 
     check = audit_module._temporal_location_review_quality_check(
