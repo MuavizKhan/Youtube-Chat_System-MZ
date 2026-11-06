@@ -28,11 +28,12 @@ _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
 _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN = re.compile(
-    r"\b(?:up\s+to(?:\s+(?:about|around|approximately|roughly))?|"
-    r"at|around|about|approximately|roughly|near|from|between|to|until|"
-    r"in|within|during|by|timestamp(?:s| range(?:s)?)?|timecode|"
+    r"\b(?:(?:at|in|from|between|to|until|up\s+to)\s+)*"
+    r"(?:at|around|about|approximately|roughly|near|from|between|to|until|"
+    r"in|within|during|by|up\s+to|timestamp(?:s| range(?:s)?)?|timecode|"
     r"time(?:\s*stamp)?|minute|mark)\s*:?\s*$"
-    r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|لدى|लगभग|करीब|पर|से|तक|में)\s*$",
+    r"|(?:(?:في|من|حتى)\s+)*(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|لدى|"
+    r"लगभग|करीब|पर|से|तक|में)\s*$",
     re.IGNORECASE,
 )
 _TIMESTAMP_UNIT_SUFFIX_PATTERN = re.compile(r"^\s*(?:minutes?|mins?)\b", re.IGNORECASE)
