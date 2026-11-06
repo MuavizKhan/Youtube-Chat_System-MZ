@@ -180,10 +180,6 @@ def test_append_relevant_source_timestamps_aligns_multi_amount_claims_to_transcr
     )
     result = chain.append_relevant_source_timestamps(
         answer=answer,
-        question=(
-            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
-            "and what is discussed there?"
-        ),
         sources=[
             {
                 "start": 10,
@@ -7318,6 +7314,10 @@ def test_temporal_location_answer_timestamps_align_to_later_substantive_sections
     answer = _temporal_location_complete_answer()
     result = chain.append_relevant_source_timestamps(
         answer=answer,
+        question=(
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
         sources=[
             {
                 "start": 0.4,
