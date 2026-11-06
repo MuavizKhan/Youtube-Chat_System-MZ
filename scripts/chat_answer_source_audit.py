@@ -605,10 +605,7 @@ def _normalize_answer_requirement_text(answer: str) -> str:
     # applying registered answer requirements.
     text = text.replace("’", "'").replace("‘", "'")
     text = text.replace("“", '"').replace("”", '"')
-    dash_variants = (
-        "\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015"
-        "\\u2212\\ufe58\\ufe63\\uff0d\\u00ad"
-    )
+    dash_variants = "‐‑‒–—―−﹘﹣－­"
     text = text.translate(str.maketrans({character: "-" for character in dash_variants}))
     # Do not let presentation markup split otherwise valid phrases such as
     # "**three** ways" and cause a false negative in the acceptance gate.
