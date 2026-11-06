@@ -1041,13 +1041,18 @@ def _temporal_location_review_quality_check(
         and before.get("is_temporal_location_question") is True
         and isinstance(before.get("needs_review"), bool)
         and isinstance(before.get("candidate_source_group_numbers"), list)
-        and bool(before.get("candidate_source_group_numbers"))
     )
     if not diagnostics_valid:
         return _quality_check(
             "temporal_location_answer_covers_substantive_sections",
             False,
             "Temporal-location coverage diagnostics are missing or malformed.",
+        )
+    if not before["candidate_source_group_numbers"]:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "No topic-matching transcript source blocks reached the generation prompt.",
         )
 
     first_pass_needed_review = before["needs_review"]
