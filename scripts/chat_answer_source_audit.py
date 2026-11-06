@@ -34,6 +34,7 @@ from Backend.rag_system.timestamp_utils import (
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
+from Backend.rag_system.chain import is_temporal_location_question
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1017,6 +1018,81 @@ def _citation_provenance_diagnostics(
     }
 
 
+
+
+def _temporal_location_review_quality_check(
+    case: dict[str, Any],
+    generation: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Require complete section coverage when the question asks where a topic appears."""
+    question = case.get("question")
+    if not is_temporal_location_question(
+        question if isinstance(question, str) else None
+    ):
+        return None
+
+    before = generation.get("temporal_location_coverage_before")
+    attempted = generation.get("temporal_location_review_attempted") is True
+    review_passed = generation.get("temporal_location_review_passed") is True
+    after = generation.get("temporal_location_coverage_after")
+
+    diagnostics_valid = (
+        isinstance(before, dict)
+        and before.get("is_temporal_location_question") is True
+        and isinstance(before.get("needs_review"), bool)
+        and isinstance(before.get("candidate_source_group_numbers"), list)
+    )
+    if not diagnostics_valid:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location coverage diagnostics are missing or malformed.",
+        )
+
+    first_pass_needed_review = before["needs_review"]
+    if first_pass_needed_review:
+        passed = (
+            attempted
+            and review_passed
+            and isinstance(after, dict)
+            and after.get("is_temporal_location_question") is True
+            and after.get("needs_review") is False
+        )
+        detail = (
+            "The bounded temporal-location repair covered the required distinct topic sections."
+            if passed
+            else (
+                "The initial answer omitted distinct topic-bearing sections and the "
+                "bounded temporal-location repair did not establish adequate coverage."
+            )
+        )
+    else:
+        passed = (
+            not attempted
+            or (
+                attempted
+                and review_passed
+                and isinstance(after, dict)
+                and after.get("needs_review") is False
+            )
+        )
+        detail = (
+            "The initial answer already covered the identified substantive sections."
+            if passed and not attempted
+            else (
+                "The temporal-location review preserved adequate section coverage."
+                if passed
+                else "The temporal-location review did not establish adequate section coverage."
+            )
+        )
+
+    return _quality_check(
+        "temporal_location_answer_covers_substantive_sections",
+        passed,
+        detail,
+    )
+
+
 def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
     """Compare annotated candidate evidence with context, anchors, sources, and timestamp line."""
     observability = response.get("observability")
@@ -1146,6 +1222,12 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
     quality_checks = _answer_quality_checks(case, answer)
+    temporal_location_check = _temporal_location_review_quality_check(
+        case,
+        generation,
+    )
+    if temporal_location_check is not None:
+        quality_checks.append(temporal_location_check)
     has_unverified_timestamp_claims = contains_unverified_timestamp_claims(
         _substantive_answer(answer)
     )
