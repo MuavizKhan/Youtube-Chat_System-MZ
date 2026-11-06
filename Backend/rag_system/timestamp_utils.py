@@ -28,12 +28,14 @@ _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
 _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN = re.compile(
-    r"\b(?:at|around|about|approximately|roughly|near|from|between|to|until|"
+    r"\b(?:up\s+to(?:\s+(?:about|around|approximately|roughly))?|"
+    r"at|around|about|approximately|roughly|near|from|between|to|until|"
     r"in|within|during|by|timestamp(?:s| range(?:s)?)?|timecode|"
     r"time(?:\s*stamp)?|minute|mark)\s*:?\s*$"
     r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|لدى|लगभग|करीब|पर|से|तक|में)\s*$",
     re.IGNORECASE,
 )
+_TIMESTAMP_UNIT_SUFFIX_PATTERN = re.compile(r"^\s*(?:minutes?|mins?)\b", re.IGNORECASE)
 _TIMESTAMP_LOCATION_CUE_WORD_PATTERN = re.compile(
     r"\b(?:timestamp(?:s)?|timecode|time\s*stamp|mark)\b",
     re.IGNORECASE,
@@ -189,9 +191,17 @@ def _remove_timestamp_span(
         start = opening_parenthesis.start()
 
     suffix_after = fragment[end:]
-    if suffix_after.lstrip().startswith(")"):
-        closing_offset = len(suffix_after) - len(suffix_after.lstrip())
-        end += closing_offset + 1
+    unit_match = _TIMESTAMP_UNIT_SUFFIX_PATTERN.match(suffix_after)
+    if unit_match is not None:
+        end += unit_match.end()
+        suffix_after = fragment[end:]
+
+    closing_group = re.match(r"\s*([)\]])", suffix_after)
+    if closing_group is not None and (
+        opening_parenthesis is not None
+        or prefix.rstrip().endswith("[")
+    ):
+        end += closing_group.end()
 
     return fragment[:start] + " " + fragment[end:]
 
