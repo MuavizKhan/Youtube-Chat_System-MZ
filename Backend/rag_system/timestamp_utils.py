@@ -201,30 +201,25 @@ def _clean_fragment_spacing(fragment: str) -> str:
 
 def _strip_timestamp_claim_fragment(fragment: str) -> str:
     """Remove timestamp claims while preserving non-timestamp answer content."""
-    ranges = list(TIMESTAMP_RANGE_PATTERN.finditer(fragment))
-    if ranges:
-        cleaned = fragment
-        for match in reversed(ranges):
-            cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
-        return _clean_fragment_spacing(cleaned)
+    cleaned = fragment
+    ranges = list(TIMESTAMP_RANGE_PATTERN.finditer(cleaned))
+    for match in reversed(ranges):
+        cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
 
-    time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
+    # Re-scan after range removal: the same sentence may also contain a
+    # separate single-point timestamp such as "around 00:45".
+    time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(cleaned))
     if len(time_values) >= 2:
-        cleaned = fragment
         for match in reversed(time_values):
             cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
-        return _clean_fragment_spacing(cleaned)
-
-    if len(time_values) == 1 and _has_single_point_location_cue(
-        fragment,
+    elif len(time_values) == 1 and _has_single_point_location_cue(
+        cleaned,
         time_values[0],
     ):
         match = time_values[0]
-        return _clean_fragment_spacing(
-            _remove_timestamp_span(fragment, match.start(), match.end())
-        )
+        cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
 
-    return fragment.strip()
+    return _clean_fragment_spacing(cleaned)
 
 
 def strip_unverified_timestamp_claims(answer: str) -> str:
