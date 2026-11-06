@@ -88,16 +88,19 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
         "temporal_window": {"start_seconds": 1535.0, "end_seconds": 1584.52},
     }
     answer = (
-        "A factual answer.\n\n"
+        "A factual answer.\\n\\n"
         "Relevant timestamps: 00:10–00:20"
     )
 
-    assert chain.append_requested_temporal_timestamp(
+    result = chain.append_requested_temporal_timestamp(
         answer=answer,
         question="Cite the relevant timestamp for 25:35–26:25.",
         retrieval_trace=trace,
         has_evidence=True,
-        "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+    )
+
+    assert result == "A factual answer.\\n\\nRelevant timestamp: 25:35–26:24"
+    assert "00:10–00:20" not in result
 
 
 @pytest.mark.unit
