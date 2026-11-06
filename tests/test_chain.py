@@ -4551,7 +4551,7 @@ def test_all_abstention_fallbacks_are_english(question):
 def test_generation_repair_instruction_rechecks_abstention_against_supplied_passages():
     question = "How does the lecturer explain binary representation?"
     context = (
-        "[SOURCE 1]\n"
+        "[SOURCE 1]\\n"
         "Transcript: Computers use zeros and ones in the binary system. "
         "A single bit is a zero or one."
     )
