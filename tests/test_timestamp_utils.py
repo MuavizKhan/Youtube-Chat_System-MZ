@@ -128,7 +128,7 @@ def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single
     ],
 )
 def test_unverified_timestamp_sanitizer_removes_model_timestamp_heading_lines(heading):
-    answer = f"A grounded answer.\\n{heading}"
+    answer = f"A grounded answer.\n{heading}"
 
     assert strip_unverified_timestamp_claims(answer) == "A grounded answer."
 
