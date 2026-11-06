@@ -25,6 +25,7 @@ Final Answer + Sources
 
 import time
 import argparse
+import hashlib
 import logging
 import math
 import re
@@ -7578,6 +7579,12 @@ def answer_question(
             ),
         }
     )
+
+    generation_observability = observability.get("generation", {})
+    if isinstance(generation_observability.get("temporal_location_coverage_final"), dict):
+        generation_observability["temporal_location_answer_sha256"] = hashlib.sha256(
+            final_answer.encode("utf-8")
+        ).hexdigest()
 
     return {
     "answer":
