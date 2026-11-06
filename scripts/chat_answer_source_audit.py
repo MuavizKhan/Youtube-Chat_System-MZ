@@ -1041,6 +1041,7 @@ def _temporal_location_review_quality_check(
         and before.get("is_temporal_location_question") is True
         and isinstance(before.get("needs_review"), bool)
         and isinstance(before.get("candidate_source_group_numbers"), list)
+        and bool(before.get("candidate_source_group_numbers"))
     )
     if not diagnostics_valid:
         return _quality_check(
