@@ -1685,3 +1685,31 @@ def test_temporal_location_audit_does_not_apply_to_ordinary_topic_questions():
     assert audit_module._temporal_location_review_quality_check(case, {}) is None
 
 
+def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [],
+            "covered_source_group_numbers": [],
+            "required_covered_source_group_count": 0,
+            "coverage_ratio": 0.0,
+            "needs_review": False,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+    }
+
+    check = audit_module._temporal_location_review_quality_check(case, generation)
+
+    assert check is not None
+    assert check["passed"] is False
+    assert "missing or malformed" in check["detail"].lower()
+
