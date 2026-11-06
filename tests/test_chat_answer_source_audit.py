@@ -588,6 +588,26 @@ def test_answer_requirement_normalizer_converts_smart_apostrophes():
     assert normalized == "The farmers' movement was discussed."
 
 
+def test_answer_requirement_normalizer_canonicalizes_unicode_hyphens():
+    for dash in ("\\u2011", "\\u2010"):
+        normalized = audit_module._normalize_answer_requirement_text(
+            f"30{dash}second"
+        )
+        assert normalized == "30-second"
+
+
+def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "EW02"
+    )
+    checks = _answer_quality_checks(
+        case,
+        "The speaker offers a 30\\u2011second structure for explaining work.",
+    )
+
+    assert all(check["passed"] for check in checks), checks
+
+
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
 def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
     case = next(
@@ -618,6 +638,78 @@ def test_answer_timestamp_parser_finds_inline_hindi_ranges_without_footer():
         "00:02–00:06",
         "16:30–16:37",
     ]
+
+
+def test_answer_timestamp_parser_accepts_word_range_separators():
+    answer = (
+        "The first section is 00:00 to 01:08 and the next is "
+        "01:10 and 01:22."
+    )
+
+    assert _answer_timestamp_ranges(answer) == [
+        "00:00 to 01:08",
+        "01:10 and 01:22",
+    ]
+
+
+@pytest.mark.parametrize(
+    "timestamp_range,source_start,source_end,expected_temporal_pass",
+    [
+        ("00:00 to 01:08", 0, 130, False),
+        ("01:10:38–01:12:04", 4238, 4324, True),
+    ],
+)
+def test_q11_temporal_timestamps_must_match_registered_video_sections(
+    timestamp_range,
+    source_start,
+    source_end,
+    expected_temporal_pass,
+):
+    case = audit_module._make_audit_case(
+        "Q11",
+        "MdeQMVBuGgY",
+        expected_behavior="answerable",
+        answer_language="en",
+    )
+    response = {
+        "answer": (
+            "Kingfisher Airlines is discussed in the interview."
+            f"\\n\\nRelevant timestamps: {timestamp_range}"
+        ),
+        "video_id": "MdeQMVBuGgY",
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [
+            {
+                "source_id": "source-1",
+                "chunk_ids": ["1"],
+                "start": source_start,
+                "end": source_end,
+            }
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": ["1"],
+                "citation_chunk_ids": ["1"],
+            },
+            "generation": {
+                "context_budget": {
+                    "included_chunk_ids": ["1"],
+                    "budget_chars": 8000,
+                    "final_chars": 250,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+    checks = {item["name"]: item["passed"] for item in audit["quality"]["checks"]}
+
+    assert checks["timestamp_summary_matches_returned_sources"] is True
+    assert (
+        checks["timestamp_summary_matches_registered_temporal_evidence"]
+        is expected_temporal_pass
+    )
+    assert audit["temporal_timestamp_alignment"]["passed"] is expected_temporal_pass
 
 
 def test_timestamp_range_must_be_fully_covered_by_returned_source_intervals():
