@@ -89,6 +89,8 @@ def test_unverified_timestamp_claim_sanitizer_removes_time_sentences_not_answers
 
     assert cleaned == (
         "The speaker explains the airline's launch. "
+        "The discussion runs. "
+        "The later detail appears. "
         "He also describes a 30-second structure and a 90-minute talk."
     )
 
@@ -99,7 +101,9 @@ def test_unverified_timestamp_claim_sanitizer_also_removes_invalid_ranges():
         "from 01:75 to 02:00."
     )
 
-    assert strip_unverified_timestamp_claims(answer) == "A grounded answer."
+    assert strip_unverified_timestamp_claims(answer) == (
+        "A grounded answer. The model claims the section runs."
+    )
 
 
 def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single_time_cue():
@@ -109,4 +113,20 @@ def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single
         "Relevant timestamps: 00:00–01:08"
     )
 
-    assert strip_unverified_timestamp_claims(answer) == "A grounded answer."
+
+def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
+    answer = (
+        "The speaker offers a 30-second structure for explaining your work "
+        "at 02:25–04:33."
+    )
+
+    cleaned = strip_unverified_timestamp_claims(answer)
+
+    assert cleaned == (
+        "The speaker offers a 30-second structure for explaining your work."
+    )
+
+
+    assert strip_unverified_timestamp_claims(answer) == (
+        "A grounded answer.\\nThe event occurs."
+    )
