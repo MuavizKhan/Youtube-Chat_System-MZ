@@ -273,6 +273,47 @@ def test_append_relevant_source_timestamps_replaces_model_summary_with_source_ra
 
 
 @pytest.mark.unit
+def test_inline_model_timestamp_claim_cannot_bypass_source_owned_timestamp_footer():
+    answer = (
+        "The transcript discusses Kingfisher Airlines and its financial difficulties. "
+        "The speaker says this runs from 00:00 to 01:08, with more detail "
+        "between 01:10 and 01:22."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 4238,
+                "end": 4324,
+                "distance": 0.1,
+                "transcript_text": (
+                    "Kingfisher Airlines faced financial difficulties during the interview."
+                ),
+            }
+        ],
+        has_evidence=True,
+    )
+
+    assert "00:00 to 01:08" not in result
+    assert "01:10 and 01:22" not in result
+    assert result.endswith("Relevant timestamps: 01:10:38–01:12:04")
+
+
+@pytest.mark.unit
+def test_inline_model_timestamp_claim_is_removed_even_without_source_metadata():
+    result = chain.append_relevant_source_timestamps(
+        answer=(
+            "A grounded explanation. The event occurs around 00:45, "
+            "and the discussion continues from 01:00 to 02:00."
+        ),
+        sources=[],
+        has_evidence=False,
+    )
+
+    assert result == "A grounded explanation."
+
+
+@pytest.mark.unit
 def test_append_relevant_source_timestamps_removes_unverified_summary_without_sources():
     answer = "A grounded answer.\n\nRelevant timestamps: 99:00–99:01"
 
