@@ -712,6 +712,12 @@ def test_q11_temporal_timestamps_must_match_registered_video_sections(
     assert audit["temporal_timestamp_alignment"]["passed"] is expected_temporal_pass
 
 
+def test_audit_source_timestamp_formatter_rejects_non_finite_values():
+    assert audit_module._format_timestamp(float("nan")) is None
+    assert audit_module._format_timestamp(float("inf")) is None
+    assert audit_module._format_timestamp(-1) is None
+
+
 def test_temporal_alignment_honors_annotation_minimum_window_coverage():
     windows = [
         {"section_id": "one", "start_seconds": 0, "end_seconds": 10},
