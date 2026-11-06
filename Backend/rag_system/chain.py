@@ -846,11 +846,6 @@ def append_relevant_source_timestamps(
     ):
         return answer
 
-    # Preserve timestamp ranges that are part of the substantive answer, but
-    # not a labelled summary (which was removed above).
-    if _TIMESTAMP_RANGE_IN_ANSWER_PATTERN.search(answer):
-        return answer
-
     candidates = []
     seen_ranges = set()
     for source in sources:
@@ -995,10 +990,6 @@ def append_requested_temporal_timestamp(
         or not isinstance(retrieval_trace, dict)
         or retrieval_trace.get("route") != "temporal_window"
     ):
-        return answer
-
-    # Avoid duplicating a timestamp range already present in substantive text.
-    if _TIMESTAMP_RANGE_IN_ANSWER_PATTERN.search(answer):
         return answer
 
     temporal_window = retrieval_trace.get("temporal_window")
