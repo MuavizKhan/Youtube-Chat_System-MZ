@@ -720,9 +720,11 @@ _TEMPORAL_LOCATION_QUESTION_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:at what (?:point|time)|which|what)\s+"
-        r"(?:parts?|sections?|portions?|segments?|points?|times?)\b"
-        r".{0,120}\b(?:video|interview|episode|recording|podcast|clip)\b",
+        r"\b(?:at what (?:point|time)|(?:which|what)\s+"
+        r"(?:parts?|sections?|portions?|segments?|points?|times?))\b"
+        r".{0,140}\b(?:video|interview|episode|recording|podcast|clip|"
+        r"discuss\w*|talk\w*|speak\w*|mention\w*|cover\w*|"
+        r"explain\w*|address\w*)\b",
         re.IGNORECASE,
     ),
     re.compile(
