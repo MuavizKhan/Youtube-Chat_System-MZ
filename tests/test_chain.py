@@ -1114,7 +1114,7 @@ def test_q05_generation_accepts_cash_flow_paraphrase_without_weakening_context_m
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\n"
+        "[SOURCE 1]\\n"
         "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
         "- [00:05–00:10] The working capital cycle got disrupted. "
         "There was a cash flow issue.\n"
@@ -5881,7 +5881,7 @@ def test_financial_question_scope_preserves_comprehensive_default_and_detects_ba
     ) == "comprehensive_financial"
     assert chain._build_financial_evidence_fallback(
         "What does the video say about banks?",
-        "[SOURCE 1]\nThe banks are mentioned.",
+        "[SOURCE 1]\\nThe banks are mentioned.",
     ) is None
     assert chain._financial_fallback_question_scope(
         "What amounts of investment, debt, and recovery are mentioned?"
