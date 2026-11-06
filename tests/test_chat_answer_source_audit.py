@@ -1805,11 +1805,11 @@ def test_temporal_location_audit_passes_only_when_final_answer_matches_source_co
         ),
     }
     context = (
-        "[SOURCE 1] Kingfisher Airlines is briefly introduced. "
-        "[SOURCE 2] Kingfisher Airlines was launched in 2002 after an initial planning period. "
-        "[SOURCE 3] Kingfisher Airlines focused on premium passenger comfort and safety. "
-        "[SOURCE 4] The Deccan acquisition and one-rupee tickets were discussed. "
-        "[SOURCE 5] Kingfisher's financial turmoil and bank support were discussed."
+        "[SOURCE 1]\\nKingfisher Airlines is briefly introduced.\\n"
+        "[SOURCE 2]\\nKingfisher Airlines was launched in 2002 after an initial planning period.\\n"
+        "[SOURCE 3]\\nKingfisher Airlines focused on premium passenger comfort and safety.\\n"
+        "[SOURCE 4]\\nThe Deccan acquisition and one-rupee tickets were discussed.\\n"
+        "[SOURCE 5]\\nKingfisher's financial turmoil and bank support were discussed."
     )
     answer = (
         "The interviewer asks when Mallya decided to start Kingfisher Airlines; "
