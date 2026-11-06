@@ -712,6 +712,34 @@ def test_q11_temporal_timestamps_must_match_registered_video_sections(
     assert audit["temporal_timestamp_alignment"]["passed"] is expected_temporal_pass
 
 
+def test_temporal_alignment_honors_annotation_minimum_window_coverage():
+    windows = [
+        {"section_id": "one", "start_seconds": 0, "end_seconds": 10},
+        {"section_id": "two", "start_seconds": 20, "end_seconds": 30},
+        {"section_id": "three", "start_seconds": 40, "end_seconds": 50},
+        {"section_id": "four", "start_seconds": 60, "end_seconds": 70},
+    ]
+    case = {
+        "temporal_evidence_windows": windows,
+        "temporal_evidence_min_window_coverage": 0.75,
+    }
+
+    partial = audit_module._temporal_timestamp_alignment(
+        case,
+        ["00:00–00:10", "00:20–00:30"],
+    )
+    sufficient = audit_module._temporal_timestamp_alignment(
+        case,
+        ["00:00–00:10", "00:20–00:30", "00:40–00:50"],
+    )
+
+    assert partial["passed"] is False
+    assert partial["window_coverage"] == 0.5
+    assert partial["required_window_coverage"] == 0.75
+    assert sufficient["passed"] is True
+    assert sufficient["window_coverage"] == 0.75
+
+
 def test_malformed_timestamp_ranges_are_not_silently_ignored():
     answer = "The model claims the segment runs from 01:75 to 02:00."
 
