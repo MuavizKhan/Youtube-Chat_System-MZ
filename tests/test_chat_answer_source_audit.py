@@ -589,7 +589,7 @@ def test_answer_requirement_normalizer_converts_smart_apostrophes():
 
 
 def test_answer_requirement_normalizer_canonicalizes_unicode_hyphens():
-    for dash in ("\\u2011", "\\u2010"):
+    for dash in ("‑", "‐"):
         normalized = audit_module._normalize_answer_requirement_text(
             f"30{dash}second"
         )
@@ -602,7 +602,7 @@ def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
     )
     checks = _answer_quality_checks(
         case,
-        "The speaker offers a 30\\u2011second structure for explaining work.",
+        "The speaker offers a 30‑second structure for explaining work.",
     )
 
     assert all(check["passed"] for check in checks), checks
@@ -674,7 +674,7 @@ def test_q11_temporal_timestamps_must_match_registered_video_sections(
     response = {
         "answer": (
             "Kingfisher Airlines is discussed in the interview."
-            f"\\n\\nRelevant timestamps: {timestamp_range}"
+            f"\n\nRelevant timestamps: {timestamp_range}"
         ),
         "video_id": "MdeQMVBuGgY",
         "retrieval_config": {"citation_policy": "prompt_included_chunks"},
