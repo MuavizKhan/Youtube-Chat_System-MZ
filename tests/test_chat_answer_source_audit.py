@@ -1859,7 +1859,7 @@ def test_temporal_location_audit_passes_only_when_final_answer_matches_source_co
             "coverage_ratio": 0.8,
             "needs_review": False,
         },
-        "temporal_location_context": context,
+        **_temporal_final_diagnostics(case["question"], answer, context),
     }
 
     check = audit_module._temporal_location_review_quality_check(
