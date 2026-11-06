@@ -25,7 +25,9 @@ TIMESTAMP_VALUE_PATTERN = re.compile(
     rf"(?<![\d:]){_TIMESTAMP_VALUE}(?![\d:])"
 )
 _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
-    r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
+    r"(?im)^[ \t]*(?:(?:[-*+]\s+|>\s*)*)"
+    r"(?:(?:relevant\s+)?(?:time\s*stamps?|timestamps?))\s*:"
+    r"[^\r\n]*(?:\r?\n|$)"
 )
 _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN = re.compile(
     r"\b(?:(?:at|in|from|between|to|until|up\s+to)\s+)*"
