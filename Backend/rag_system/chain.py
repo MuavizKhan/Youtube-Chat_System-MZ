@@ -7134,6 +7134,12 @@ def build_rag_chain(
                         "or transcript-name mismatch"
                     )
 
+        temporal_location_coverage_final = _temporal_location_answer_coverage(
+            question_text,
+            answer,
+            inputs.get("context", ""),
+        )
+
         return {
             "answer": answer,
             "generation_trace": {
@@ -7154,8 +7160,8 @@ def build_rag_chain(
                     else None
                 ),
                 "temporal_location_coverage_after": temporal_location_coverage_after,
-                "temporal_location_context": (
-                    inputs.get("context", "")
+                "temporal_location_coverage_final": (
+                    temporal_location_coverage_final
                     if temporal_location_coverage_before["is_temporal_location_question"]
                     else None
                 ),
