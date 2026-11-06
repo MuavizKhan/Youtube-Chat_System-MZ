@@ -759,7 +759,7 @@ def test_audit_rejects_inline_model_timestamp_claims_outside_trusted_footer():
     response = {
         "answer": (
             "A grounded answer about the topic, with the discussion occurring "
-            "around 01:20.\\n\\nRelevant timestamps: 00:10–00:20"
+            "around 01:20.\n\nRelevant timestamps: 00:10–00:20"
         ),
         "video_id": "video-test",
         "retrieval_config": {"citation_policy": "prompt_included_chunks"},
