@@ -1114,7 +1114,7 @@ def test_q05_generation_accepts_cash_flow_paraphrase_without_weakening_context_m
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
+        "[SOURCE 1]\n"
         "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
         "- [00:05–00:10] The working capital cycle got disrupted. "
         "There was a cash flow issue.\n"
