@@ -29,7 +29,6 @@ from Backend.rag_system.benchmark_registry import (
     VIDEO_BENCHMARKS,
 )
 from Backend.rag_system.timestamp_utils import (
-    TIMESTAMP_RANGE_PATTERN,
     find_timestamp_range_texts,
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
@@ -427,7 +426,6 @@ _MOJIBAKE_MARKERS = (
     # a different Latin-1/control-code variant.
     "â€“", "â€”", "â€™", "â€œ", "â€", "â€˜", "â€¦",
 )
-_TIMESTAMP_RANGE_PATTERN = TIMESTAMP_RANGE_PATTERN
 
 
 
@@ -497,7 +495,7 @@ def _timestamp_range_bounds(value: str) -> tuple[int, int] | None:
 
 
 def _answer_timestamp_ranges(answer: str) -> list[str]:
-    """Extract valid displayed timestamp ranges from any part of the answer."""
+    """Extract range-shaped timestamp claims, including malformed ones."""
     return find_timestamp_range_texts(answer)
 
 
