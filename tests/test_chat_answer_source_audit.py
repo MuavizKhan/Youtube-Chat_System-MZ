@@ -1,3 +1,4 @@
+import hashlib
 import json
 from io import BytesIO
 from urllib.error import HTTPError
@@ -23,6 +24,19 @@ from scripts.chat_answer_source_audit import (
 
 def _case(case_id):
     return next(case for case in AUDIT_CASES if case["id"] == case_id)
+
+
+def _temporal_final_diagnostics(question, answer, context):
+    return {
+        "temporal_location_coverage_final": chain._temporal_location_answer_coverage(
+            question,
+            answer,
+            context,
+        ),
+        "temporal_location_answer_sha256": hashlib.sha256(
+            answer.encode("utf-8")
+        ).hexdigest(),
+    }
 
 
 def test_select_audit_cases_preserves_requested_order_and_returns_expected_subset():
@@ -1657,7 +1671,7 @@ def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
             "coverage_ratio": 0.8,
             "needs_review": False,
         },
-        "temporal_location_context": context,
+        **_temporal_final_diagnostics(case["question"], answer, context),
     }
 
     check = audit_module._temporal_location_review_quality_check(
@@ -1764,6 +1778,13 @@ def test_temporal_location_audit_rejects_final_answer_replaced_after_successful_
         "[SOURCE 4]\nKingfisher's merger, the Deccan acquisition and one-rupee tickets were discussed.\n"
         "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
     )
+    repaired_answer = (
+        "The interviewer asks when Mallya decided to launch Kingfisher Airlines; "
+        "Mallya describes the initial planning and gives 2002. He describes premium "
+        "passenger comfort and safety. The discussion later covers Kingfisher's "
+        "merger, the Deccan acquisition and one-rupee tickets, followed by its "
+        "financial turmoil and bank support."
+    )
     generation = {
         "temporal_location_coverage_before": {
             "is_temporal_location_question": True,
@@ -1783,7 +1804,7 @@ def test_temporal_location_audit_rejects_final_answer_replaced_after_successful_
             "coverage_ratio": 0.8,
             "needs_review": False,
         },
-        "temporal_location_context": context,
+        **_temporal_final_diagnostics(case["question"], repaired_answer, context),
     }
 
     check = audit_module._temporal_location_review_quality_check(
