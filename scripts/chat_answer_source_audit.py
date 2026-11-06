@@ -30,7 +30,7 @@ from Backend.rag_system.benchmark_registry import (
 )
 from Backend.rag_system.timestamp_utils import (
     TIMESTAMP_RANGE_PATTERN,
-    find_timestamp_ranges,
+    find_timestamp_range_texts,
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
@@ -498,7 +498,7 @@ def _timestamp_range_bounds(value: str) -> tuple[int, int] | None:
 
 def _answer_timestamp_ranges(answer: str) -> list[str]:
     """Extract valid displayed timestamp ranges from any part of the answer."""
-    return [item.raw for item in find_timestamp_ranges(answer)]
+    return find_timestamp_range_texts(answer)
 
 
 def _temporal_timestamp_alignment(
