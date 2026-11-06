@@ -6563,6 +6563,9 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
         "application appends a separate",
+        "source blocks chronologically",
+        "distinguish passing mentions from substantive discussions",
+        "each distinct supported section",
     ):
         assert required_rule in prompt
 
