@@ -75,6 +75,15 @@ def test_unverified_timestamp_claim_sanitizer_removes_time_sentences_not_answers
     )
 
 
+def test_unverified_timestamp_claim_sanitizer_also_removes_invalid_ranges():
+    answer = (
+        "A grounded answer. The model claims the section runs "
+        "from 01:75 to 02:00."
+    )
+
+    assert strip_unverified_timestamp_claims(answer) == "A grounded answer."
+
+
 def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single_time_cue():
     answer = (
         "A grounded answer.\n"
