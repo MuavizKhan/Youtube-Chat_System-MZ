@@ -1140,8 +1140,25 @@ def _temporal_location_review_quality_check(
         )
 
     # The generation pipeline computes this against the actual answer after
-    # all language/fallback safeguards. Keep transcript text out of the public
-    # observability payload; only the source-group coverage summary is exposed.
+    # all language/fallback safeguards. Its digest binds the compact coverage
+    # summary to the exact returned answer, without exposing transcript text.
+    answer_digest = generation.get("temporal_location_answer_sha256")
+    expected_answer_digest = (
+        hashlib.sha256(answer.encode("utf-8")).hexdigest()
+        if isinstance(answer, str)
+        else None
+    )
+    if (
+        not isinstance(answer_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", answer_digest) is None
+        or answer_digest != expected_answer_digest
+    ):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "The final returned answer does not match its temporal-location coverage diagnostic.",
+        )
+
     final_coverage = generation.get("temporal_location_coverage_final")
     if not isinstance(final_coverage, dict):
         return _quality_check(
