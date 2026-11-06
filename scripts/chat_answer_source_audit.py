@@ -579,14 +579,6 @@ def _timestamp_range_covered_by_sources(
     return False
 
 
-def _answer_timestamp_ranges(answer: str) -> list[str]:
-    """Extract displayed timestamp ranges whether inline or in the footer."""
-    return [
-        item.group(0).strip()
-        for item in _TIMESTAMP_RANGE_PATTERN.finditer(answer)
-    ]
-
-
 def _substantive_answer(answer: str) -> str:
     """Remove the application timestamp footer before checking answer content."""
     return re.sub(
