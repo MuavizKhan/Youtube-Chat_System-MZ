@@ -92,12 +92,40 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
         "Relevant timestamps: 00:10–00:20"
     )
 
-    assert chain.append_requested_temporal_timestamp(
+    result = chain.append_requested_temporal_timestamp(
         answer=answer,
         question="Cite the relevant timestamp for 25:35–26:25.",
         retrieval_trace=trace,
         has_evidence=True,
-    ) == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+    )
+
+    assert result == "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+    assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
+def test_requested_temporal_window_overrides_inline_model_timestamp_claims():
+    trace = {
+        "route": "temporal_window",
+        "temporal_window": {
+            "start_seconds": 1535.0,
+            "end_seconds": 1584.52,
+        },
+    }
+    result = chain.append_requested_temporal_timestamp(
+        answer=(
+            "A factual answer. The model says the section runs from "
+            "00:10 to 00:20, and later 00:21 and 00:24."
+        ),
+        question="Where does this happen? Cite the relevant timestamp.",
+        retrieval_trace=trace,
+        has_evidence=True,
+    )
+
+    assert result == (
+        "A factual answer. The model says the section runs, and later.\n\n"
+        "Relevant timestamp: 25:35–26:24"
+    )
 
 
 @pytest.mark.unit
@@ -270,6 +298,49 @@ def test_append_relevant_source_timestamps_replaces_model_summary_with_source_ra
 
     assert result == "A grounded answer.\n\nRelevant timestamps: 02:00–02:40"
     assert "00:10–00:20" not in result
+
+
+@pytest.mark.unit
+def test_inline_model_timestamp_claim_cannot_bypass_source_owned_timestamp_footer():
+    answer = (
+        "The transcript discusses Kingfisher Airlines and its financial difficulties. "
+        "The speaker says this runs from 00:00 to 01:08, with more detail "
+        "between 01:10 and 01:22."
+    )
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 4238,
+                "end": 4324,
+                "distance": 0.1,
+                "transcript_text": (
+                    "Kingfisher Airlines faced financial difficulties during the interview."
+                ),
+            }
+        ],
+        has_evidence=True,
+    )
+
+    assert "00:00 to 01:08" not in result
+    assert "01:10 and 01:22" not in result
+    assert result.endswith("Relevant timestamps: 01:10:38–01:12:04")
+
+
+@pytest.mark.unit
+def test_inline_model_timestamp_claim_is_removed_even_without_source_metadata():
+    result = chain.append_relevant_source_timestamps(
+        answer=(
+            "A grounded explanation. The event occurs around 00:45, "
+            "and the discussion continues from 01:00 to 02:00."
+        ),
+        sources=[],
+        has_evidence=False,
+    )
+
+    assert result == (
+        "A grounded explanation. The event occurs, and the discussion continues."
+    )
 
 
 @pytest.mark.unit

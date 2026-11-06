@@ -588,6 +588,26 @@ def test_answer_requirement_normalizer_converts_smart_apostrophes():
     assert normalized == "The farmers' movement was discussed."
 
 
+def test_answer_requirement_normalizer_canonicalizes_unicode_hyphens():
+    for dash in ("‑", "‐"):
+        normalized = audit_module._normalize_answer_requirement_text(
+            f"30{dash}second"
+        )
+        assert normalized == "30-second"
+
+
+def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
+    case = next(
+        case for case in PHASE11_0_AUDIT_CASES if case["id"] == "EW02"
+    )
+    checks = _answer_quality_checks(
+        case,
+        "The speaker offers a 30‑second structure for explaining work.",
+    )
+
+    assert all(check["passed"] for check in checks), checks
+
+
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
 def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
     case = next(
@@ -618,6 +638,168 @@ def test_answer_timestamp_parser_finds_inline_hindi_ranges_without_footer():
         "00:02–00:06",
         "16:30–16:37",
     ]
+
+
+def test_answer_timestamp_parser_accepts_word_range_separators():
+    answer = (
+        "The first section is 00:00 to 01:08 and the next is "
+        "01:10 and 01:22."
+    )
+
+    assert _answer_timestamp_ranges(answer) == [
+        "00:00 to 01:08",
+        "01:10 and 01:22",
+    ]
+
+
+@pytest.mark.parametrize(
+    "timestamp_range,source_start,source_end,expected_temporal_pass",
+    [
+        ("00:00 to 01:08", 0, 130, False),
+        ("01:10:38–01:12:04", 4238, 4324, True),
+    ],
+)
+def test_q11_temporal_timestamps_must_match_registered_video_sections(
+    timestamp_range,
+    source_start,
+    source_end,
+    expected_temporal_pass,
+):
+    case = audit_module._make_audit_case(
+        "Q11",
+        "MdeQMVBuGgY",
+        expected_behavior="answerable",
+        answer_language="en",
+    )
+    response = {
+        "answer": (
+            "Kingfisher Airlines is discussed in the interview."
+            f"\n\nRelevant timestamps: {timestamp_range}"
+        ),
+        "video_id": "MdeQMVBuGgY",
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [
+            {
+                "source_id": "source-1",
+                "chunk_ids": ["1"],
+                "start": source_start,
+                "end": source_end,
+            }
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": ["1"],
+                "citation_chunk_ids": ["1"],
+            },
+            "generation": {
+                "context_budget": {
+                    "included_chunk_ids": ["1"],
+                    "budget_chars": 8000,
+                    "final_chars": 250,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+    checks = {item["name"]: item["passed"] for item in audit["quality"]["checks"]}
+
+    assert checks["timestamp_summary_matches_returned_sources"] is True
+    assert (
+        checks["timestamp_summary_matches_registered_temporal_evidence"]
+        is expected_temporal_pass
+    )
+    assert audit["temporal_timestamp_alignment"]["passed"] is expected_temporal_pass
+
+
+def test_audit_source_timestamp_formatter_rejects_non_finite_values():
+    assert audit_module._format_timestamp(float("nan")) is None
+    assert audit_module._format_timestamp(float("inf")) is None
+    assert audit_module._format_timestamp(-1) is None
+
+
+def test_temporal_alignment_honors_annotation_minimum_window_coverage():
+    windows = [
+        {"section_id": "one", "start_seconds": 0, "end_seconds": 10},
+        {"section_id": "two", "start_seconds": 20, "end_seconds": 30},
+        {"section_id": "three", "start_seconds": 40, "end_seconds": 50},
+        {"section_id": "four", "start_seconds": 60, "end_seconds": 70},
+    ]
+    case = {
+        "temporal_evidence_windows": windows,
+        "temporal_evidence_min_window_coverage": 0.75,
+    }
+
+    partial = audit_module._temporal_timestamp_alignment(
+        case,
+        ["00:00–00:10", "00:20–00:30"],
+    )
+    sufficient = audit_module._temporal_timestamp_alignment(
+        case,
+        ["00:00–00:10", "00:20–00:30", "00:40–00:50"],
+    )
+
+    assert partial["passed"] is False
+    assert partial["window_coverage"] == 0.5
+    assert partial["required_window_coverage"] == 0.75
+    assert sufficient["passed"] is True
+    assert sufficient["window_coverage"] == 0.75
+
+
+def test_audit_rejects_inline_model_timestamp_claims_outside_trusted_footer():
+    case = {
+        "id": "TIMESTAMP_TEST",
+        "video_id": "video-test",
+        "question": "What is discussed?",
+        "expected_behavior": "answerable",
+        "answer_requirements": [],
+        "evidence_groups": [],
+        "answer_language": "en",
+    }
+    response = {
+        "answer": (
+            "A grounded answer about the topic, with the discussion occurring "
+            "around 01:20.\n\nRelevant timestamps: 00:10–00:20"
+        ),
+        "video_id": "video-test",
+        "retrieval_config": {"citation_policy": "prompt_included_chunks"},
+        "sources": [
+            {
+                "source_id": "source-1",
+                "chunk_ids": ["1"],
+                "start": 10,
+                "end": 20,
+            }
+        ],
+        "observability": {
+            "retrieval": {
+                "final_chunk_ids": ["1"],
+                "citation_chunk_ids": ["1"],
+            },
+            "generation": {
+                "context_budget": {
+                    "included_chunk_ids": ["1"],
+                    "budget_chars": 8000,
+                    "final_chars": 200,
+                }
+            },
+        },
+    }
+
+    audit = analyze_response(case, response)
+
+    assert audit["unverified_model_timestamp_claims_present"] is True
+    assert "unverified_model_timestamp_claims_absent" in audit["quality"]["failed_checks"]
+
+
+def test_malformed_timestamp_ranges_are_not_silently_ignored():
+    answer = "The model claims the segment runs from 01:75 to 02:00."
+
+    assert _answer_timestamp_ranges(answer) == ["01:75 to 02:00"]
+    assert not _timestamp_range_covered_by_sources(
+        "01:75 to 02:00",
+        [{"display_range": "00:00–10:00"}],
+    )
 
 
 def test_timestamp_range_must_be_fully_covered_by_returned_source_intervals():
