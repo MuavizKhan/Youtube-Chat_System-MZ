@@ -138,7 +138,7 @@ def strip_unverified_timestamp_claims(answer: str) -> str:
 
     for line in cleaned.splitlines():
         # Keep line boundaries and bullet structure for the substantive prose.
-        fragments = re.split(r"(?<=[.!?])\s+", line)
+        fragments = re.split(r"(?<=[.!?؟؛;])\s+", line)
         retained_fragments = []
         for fragment in fragments:
             if not fragment.strip():
