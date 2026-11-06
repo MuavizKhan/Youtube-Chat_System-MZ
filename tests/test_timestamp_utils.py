@@ -2,6 +2,7 @@ import pytest
 
 from Backend.rag_system.timestamp_utils import (
     find_timestamp_ranges,
+    contains_unverified_timestamp_claims,
     find_timestamp_range_texts,
     parse_timestamp_range,
     strip_unverified_timestamp_claims,
@@ -57,6 +58,23 @@ def test_timestamp_finder_extracts_inline_ranges_and_word_separators():
         "00:00 to 01:08",
         "01:10 and 01:22",
     ]
+
+
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("The discussion happens around 01:20.", True),
+        ("The relevant passage is in 01:20.", True),
+        ("This ranges from 00:10 to 00:30.", True),
+        ("The speaker gives a 30-second structure and a 90-minute talk.", False),
+        ("A grounded answer.\\nRelevant timestamps: 00:10–00:30", False),
+    ],
+)
+def test_unverified_timestamp_claim_detector_distinguishes_video_locations(
+    answer,
+    expected,
+):
+    assert contains_unverified_timestamp_claims(answer) is expected
 
 
 def test_unverified_timestamp_claim_sanitizer_removes_time_sentences_not_answers():
