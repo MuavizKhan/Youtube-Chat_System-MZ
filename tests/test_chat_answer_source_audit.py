@@ -1711,7 +1711,7 @@ def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
 
     assert check is not None
     assert check["passed"] is False
-    assert "missing or malformed" in check["detail"].lower()
+    assert "no topic-matching transcript source blocks" in check["detail"].lower()
 
 
 def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candidates():
