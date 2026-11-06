@@ -51,7 +51,7 @@ An inline model range can no longer suppress that deterministic step. If there i
 
 The live audit runner now loads optional temporal evidence from the canonical, video-scoped benchmark registry when a case has it.
 
-For a case with registered temporal windows, the audit adds a separate check requiring at least one displayed timestamp to overlap a registered relevant section. The existing check still requires every displayed range to be fully covered by returned source intervals.
+For a case with registered temporal windows, the audit adds a separate check requiring timestamp ranges to cover at least the annotation's configured `min_window_coverage` fraction of distinct relevant sections. The default registry case Q11 therefore accepts either of its two independently annotated chapters, without hard-coding that count in the checker. The report records matched section count and measured/required coverage. The existing check still requires every displayed range to be fully covered by returned source intervals.
 
 This is deliberately an evaluation-only check:
 - production chain code does not import question IDs, video IDs, or gold windows;
