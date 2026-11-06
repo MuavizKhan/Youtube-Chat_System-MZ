@@ -27,11 +27,19 @@ TIMESTAMP_VALUE_PATTERN = re.compile(
 _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
-_TIMESTAMP_CLAUSE_CUE_PATTERN = re.compile(
-    r"\b(?:at|around|about|near|from|to|until|in|within|during|by|timestamp|timecode|time(?:\s*stamp)?|minute|mark)\b"
-    r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|लगभग|करीब|पर|से|तक|में)",
+_TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN = re.compile(
+    r"\b(?:at|around|about|approximately|roughly|near|from|between|to|until|"
+    r"in|within|during|by|timestamp(?:s| range(?:s)?)?|timecode|"
+    r"time(?:\s*stamp)?|minute|mark)\s*:?\s*$"
+    r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|لدى|लगभग|करीब|पर|से|तक|में)\s*$",
     re.IGNORECASE,
 )
+_TIMESTAMP_LOCATION_CUE_WORD_PATTERN = re.compile(
+    r"\b(?:timestamp(?:s)?|timecode|time\s*stamp|mark)\b",
+    re.IGNORECASE,
+)
+_TIMESTAMP_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?؟؛;])\s+")
+_TIMESTAMP_STRIP_EDGE_CHARS = " \t,;:—–-()[]{}•*"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +129,17 @@ def find_timestamp_ranges(text: str) -> list[ParsedTimestampRange]:
     return ranges
 
 
+def _has_single_point_location_cue(fragment: str, match: re.Match[str]) -> bool:
+    """Detect a single timestamp used as a location rather than a duration."""
+    prefix = fragment[:match.start()]
+    bare_value = fragment.strip(" \t-*•()[]{}")
+    return bool(
+        _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN.search(prefix)
+        or _TIMESTAMP_LOCATION_CUE_WORD_PATTERN.search(fragment)
+        or bare_value == match.group(0)
+    )
+
+
 def contains_unverified_timestamp_claims(answer: str) -> bool:
     """Return whether substantive text still contains a model-authored time claim.
 
@@ -134,28 +153,86 @@ def contains_unverified_timestamp_claims(answer: str) -> bool:
 
     substantive = _TIMESTAMP_SUMMARY_LINE_PATTERN.sub("", answer)
     for line in substantive.splitlines():
-        for fragment in re.split(r"(?<=[.!?؟؛;])\s+", line):
+        for fragment in _TIMESTAMP_SENTENCE_SPLIT_PATTERN.split(line):
             if not fragment.strip():
                 continue
             if find_timestamp_range_texts(fragment):
                 return True
             time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
-            if time_values and (
-                len(time_values) >= 2
-                or _TIMESTAMP_CLAUSE_CUE_PATTERN.search(fragment)
+            if len(time_values) >= 2:
+                return True
+            if len(time_values) == 1 and _has_single_point_location_cue(
+                fragment,
+                time_values[0],
             ):
                 return True
     return False
 
 
-def strip_unverified_timestamp_claims(answer: str) -> str:
-    """Remove model-authored timestamp summaries/claims before trusted stamping.
+def _remove_timestamp_span(
+    fragment: str,
+    start: int,
+    end: int,
+) -> str:
+    """Remove a timestamp and its immediately preceding location cue."""
+    prefix = fragment[:start]
+    cue_match = _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN.search(prefix)
+    if cue_match is not None:
+        start = cue_match.start()
 
-    Whole sentence or bullet fragments containing timestamp ranges are removed
-    so deleting a range cannot leave misleading or broken prose. A single
-    timestamp is removed only when it is explicitly presented as a video
-    location (for example, "at 01:20" or "around 01:20"). Ordinary durations,
-    ratios, dates, and unrelated numbers are not treated as video locations.
+    prefix_before = fragment[:start]
+    suffix_after = fragment[end:]
+    if prefix_before.rstrip().endswith("(") and suffix_after.lstrip().startswith(")"):
+        start = prefix_before.rfind("(")
+        closing_offset = len(suffix_after) - len(suffix_after.lstrip())
+        end += closing_offset + 1
+
+    return fragment[:start] + " " + fragment[end:]
+
+
+def _clean_fragment_spacing(fragment: str) -> str:
+    """Clean punctuation/spacing after removing a timestamp phrase."""
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", fragment)
+    cleaned = re.sub(r"([,;:])\s*([,;:])+", r"\1", cleaned)
+    cleaned = re.sub(r"\(\s*\)|\[\s*\]", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip(_TIMESTAMP_STRIP_EDGE_CHARS).strip()
+
+
+def _strip_timestamp_claim_fragment(fragment: str) -> str:
+    """Remove timestamp claims while preserving non-timestamp answer content."""
+    ranges = list(TIMESTAMP_RANGE_PATTERN.finditer(fragment))
+    if ranges:
+        cleaned = fragment
+        for match in reversed(ranges):
+            cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
+        return _clean_fragment_spacing(cleaned)
+
+    time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
+    if len(time_values) >= 2:
+        cleaned = fragment
+        for match in reversed(time_values):
+            cleaned = _remove_timestamp_span(cleaned, match.start(), match.end())
+        return _clean_fragment_spacing(cleaned)
+
+    if len(time_values) == 1 and _has_single_point_location_cue(
+        fragment,
+        time_values[0],
+    ):
+        match = time_values[0]
+        return _clean_fragment_spacing(
+            _remove_timestamp_span(fragment, match.start(), match.end())
+        )
+
+    return fragment.strip()
+
+
+def strip_unverified_timestamp_claims(answer: str) -> str:
+    """Remove untrusted model-authored time phrases before trusted stamping.
+
+    Timestamp clauses are removed without discarding surrounding answer content.
+    Labelled Relevant timestamps footer lines are always removed. Common
+    durations without a video-location cue remain intact.
     """
     if not isinstance(answer, str) or not answer:
         return answer
@@ -164,22 +241,13 @@ def strip_unverified_timestamp_claims(answer: str) -> str:
     retained_lines: list[str] = []
 
     for line in cleaned.splitlines():
-        # Keep line boundaries and bullet structure for the substantive prose.
-        fragments = re.split(r"(?<=[.!?؟؛;])\s+", line)
         retained_fragments = []
-        for fragment in fragments:
+        for fragment in _TIMESTAMP_SENTENCE_SPLIT_PATTERN.split(line):
             if not fragment.strip():
                 continue
-            if find_timestamp_range_texts(fragment):
-                continue
-
-            time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
-            if time_values and (
-                len(time_values) >= 2
-                or _TIMESTAMP_CLAUSE_CUE_PATTERN.search(fragment)
-            ):
-                continue
-            retained_fragments.append(fragment.strip())
+            cleaned_fragment = _strip_timestamp_claim_fragment(fragment)
+            if cleaned_fragment:
+                retained_fragments.append(cleaned_fragment)
 
         if retained_fragments:
             retained_lines.append(" ".join(retained_fragments))
