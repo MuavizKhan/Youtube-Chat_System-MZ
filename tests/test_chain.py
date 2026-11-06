@@ -101,6 +101,30 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
 
 
 @pytest.mark.unit
+def test_requested_temporal_window_overrides_inline_model_timestamp_claims():
+    trace = {
+        "route": "temporal_window",
+        "temporal_window": {
+            "start_seconds": 1535.0,
+            "end_seconds": 1584.52,
+        },
+    }
+    result = chain.append_requested_temporal_timestamp(
+        answer=(
+            "A factual answer. The model says the section runs from "
+            "00:10 to 00:20, and later 00:21 and 00:24."
+        ),
+        question="Where does this happen? Cite the relevant timestamp.",
+        retrieval_trace=trace,
+        has_evidence=True,
+    )
+
+    assert result == (
+        "A factual answer.\\n\\nRelevant timestamp: 25:35–26:24"
+    )
+
+
+@pytest.mark.unit
 def test_append_verified_response_timestamps_preserves_requested_temporal_window():
     result = chain.append_verified_response_timestamps(
         answer=(
