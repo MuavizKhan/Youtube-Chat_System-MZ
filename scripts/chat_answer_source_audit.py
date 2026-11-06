@@ -1225,9 +1225,15 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
             "timestamp_summary_matches_registered_temporal_evidence",
             temporal_timestamp_alignment["passed"],
             (
-                "At least one displayed timestamp overlaps a registered relevant temporal section."
-                if temporal_timestamp_alignment["passed"]
-                else "No displayed timestamp overlaps any registered relevant temporal section."
+                (
+                    f"Displayed timestamp ranges overlap "
+                    f"{temporal_timestamp_alignment['matched_window_count']} / "
+                    f"{temporal_timestamp_alignment['registered_window_count']} "
+                    f"registered sections "
+                    f"({temporal_timestamp_alignment['window_coverage']:.1%}); "
+                    f"required coverage is "
+                    f"{temporal_timestamp_alignment['required_window_coverage']:.1%}."
+                )
             ),
         ))
     quality_checks.append(_quality_check(
