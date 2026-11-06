@@ -1606,7 +1606,9 @@ def test_temporal_location_audit_fails_when_incomplete_first_pass_is_not_repaire
         "temporal_location_coverage_after": None,
     }
 
-    check = audit_module._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
 
     assert check is not None
     assert check["name"] == "temporal_location_answer_covers_substantive_sections"
@@ -1642,7 +1644,9 @@ def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
         },
     }
 
-    check = audit_module._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
 
     assert check is not None
     assert check["passed"] is True
@@ -1670,7 +1674,9 @@ def test_temporal_location_audit_passes_when_no_repair_was_needed():
         "temporal_location_coverage_after": None,
     }
 
-    check = audit_module._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
 
     assert check is not None
     assert check["passed"] is True
@@ -1682,7 +1688,7 @@ def test_temporal_location_audit_does_not_apply_to_ordinary_topic_questions():
         "question": "What does the speaker say about the airline's passenger experience?",
     }
 
-    assert audit_module._temporal_location_review_quality_check(case, {}) is None
+    assert audit_module._temporal_location_review_quality_check(case, {}, "") is None
 
 
 def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
@@ -1707,7 +1713,9 @@ def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
         "temporal_location_coverage_after": None,
     }
 
-    check = audit_module._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
 
     assert check is not None
     assert check["passed"] is False
@@ -1845,7 +1853,9 @@ def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candida
         },
     }
 
-    check = audit_module._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
 
     assert check is not None
     assert check["passed"] is False
