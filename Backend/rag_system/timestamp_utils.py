@@ -121,6 +121,33 @@ def find_timestamp_ranges(text: str) -> list[ParsedTimestampRange]:
     return ranges
 
 
+def contains_unverified_timestamp_claims(answer: str) -> bool:
+    """Return whether substantive text still contains a model-authored time claim.
+
+    A labelled Relevant timestamps footer is application-owned and is ignored.
+    Inline ranges, malformed range-shaped expressions, multiple bare time
+    values in one sentence, and single values framed as video locations are
+    considered unverified. Ordinary durations without a location cue are not.
+    """
+    if not isinstance(answer, str) or not answer:
+        return False
+
+    substantive = _TIMESTAMP_SUMMARY_LINE_PATTERN.sub("", answer)
+    for line in substantive.splitlines():
+        for fragment in re.split(r"(?<=[.!?؟؛;])\\s+", line):
+            if not fragment.strip():
+                continue
+            if find_timestamp_range_texts(fragment):
+                return True
+            time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
+            if time_values and (
+                len(time_values) >= 2
+                or _TIMESTAMP_CLAUSE_CUE_PATTERN.search(fragment)
+            ):
+                return True
+    return False
+
+
 def strip_unverified_timestamp_claims(answer: str) -> str:
     """Remove model-authored timestamp summaries/claims before trusted stamping.
 
