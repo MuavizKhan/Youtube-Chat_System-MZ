@@ -96,6 +96,17 @@ def parse_timestamp_range(value: str) -> ParsedTimestampRange | None:
     )
 
 
+def find_timestamp_range_texts(text: str) -> list[str]:
+    """Return every range-shaped timestamp expression, including invalid ones.
+
+    Audits must see malformed values so they fail rather than disappearing
+    during parsing. Production sanitization also removes malformed model claims.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    return [match.group(0) for match in TIMESTAMP_RANGE_PATTERN.finditer(text)]
+
+
 def find_timestamp_ranges(text: str) -> list[ParsedTimestampRange]:
     """Find valid timestamp ranges in arbitrary answer text."""
     if not isinstance(text, str) or not text:
@@ -131,7 +142,7 @@ def strip_unverified_timestamp_claims(answer: str) -> str:
         for fragment in fragments:
             if not fragment.strip():
                 continue
-            if find_timestamp_ranges(fragment):
+            if find_timestamp_range_texts(fragment):
                 continue
 
             time_values = list(TIMESTAMP_VALUE_PATTERN.finditer(fragment))
