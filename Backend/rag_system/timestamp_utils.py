@@ -199,6 +199,8 @@ def _remove_timestamp_span(
 def _clean_fragment_spacing(fragment: str) -> str:
     """Clean punctuation/spacing after removing a timestamp phrase."""
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", fragment)
+    cleaned = re.sub(r",\s*(?=[.!?])", "", cleaned)
+    cleaned = re.sub(r";\s*(?=[.!?])", "", cleaned)
     cleaned = re.sub(r"([,;:])\s*([,;:])+", r"\1", cleaned)
     cleaned = re.sub(r"\(\s*\)|\[\s*\]", "", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
