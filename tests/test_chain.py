@@ -7034,3 +7034,331 @@ def test_ar07_retrieval_trace_distinguishes_missing_price_evidence_from_weak_sem
     )
     assert trace["planner_failure_fallback_evidence_gate_passed"] is False
     assert len(calls) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Where in the video does the speaker discuss the launch?",
+        "Which sections of this interview cover the company's acquisition?",
+        "At what point in the episode is the funding decision discussed?",
+        "أين في الفيديو يناقش المتحدث هذه القضية؟",
+        "الفيديو في أي جزء يناقش المتحدث هذه القضية؟",
+        "वीडियो में किस हिस्से में इस विषय की चर्चा होती है?",
+    ],
+)
+def test_temporal_location_question_intent_recognizes_supported_phrasings(question):
+    assert chain.is_temporal_location_question(question)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What does Vijay Mallya say about Kingfisher Airlines?",
+        "Where is the settings file stored on my computer?",
+        "What happened during 25:35–26:25?",
+        "What is discussed in this video?",
+    ],
+)
+def test_temporal_location_question_intent_rejects_non_location_questions(question):
+    assert not chain.is_temporal_location_question(question)
+
+
+def _temporal_location_regression_context():
+    return (
+        "[SOURCE 1]\n"
+        "Video ID: MdeQMVBuGgY\n"
+        "Timestamp: 00:00 - 03:08\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [00:00–00:05] Vijay Mallya is out of the country.\n"
+        "- [00:05–00:11] He faces a raging loan default case.\n"
+        "- [00:29–00:36] Kingfisher Airlines is described as a class apart.\n"
+        "\n[SOURCE 2]\n"
+        "Video ID: MdeQMVBuGgY\n"
+        "Timestamp: 01:06:41 - 01:08:54\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [01:07:17–01:07:22] Let's walk through the case.\n"
+        "- [01:07:22–01:07:26] What happened in Kingfisher Airlines?\n"
+        "- [01:07:25–01:07:34] When did you decide to start Kingfisher Airlines? 2002 2003.\n"
+        "\n[SOURCE 3]\n"
+        "Video ID: MdeQMVBuGgY\n"
+        "Timestamp: 01:10:38 - 01:14:34\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [01:10:42–01:10:47] The vision of Kingfisher Airlines.\n"
+        "- [01:10:47–01:10:53] The best flying experience.\n"
+        "- [01:10:53–01:11:07] A premium experience focused on passenger comfort and safety.\n"
+        "- [01:11:01–01:11:14] Connect places in India that had never been connected before.\n"
+        "\n[SOURCE 4]\n"
+        "Video ID: MdeQMVBuGgY\n"
+        "Timestamp: 01:19:53 - 01:22:48\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [01:19:59–01:20:12] I acquired Deccan; everybody says it was a mistake.\n"
+        "- [01:20:37–01:20:52] Deccan promoted one-rupee tickets.\n"
+        "- [01:20:22–01:21:16] Industry consolidation and the Kingfisher merger.\n"
+        "\n[SOURCE 5]\n"
+        "Video ID: MdeQMVBuGgY\n"
+        "Timestamp: 01:58:47 - 02:01:17\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [01:59:30–01:59:39] Let's return to the Kingfisher financial turmoil.\n"
+        "- [01:59:39–01:59:51] You went to the Finance Minister; banks would support you.\n"
+        "- [01:59:42–01:59:47] What happened after that meeting?\n"
+    )
+
+
+def _temporal_location_incomplete_answer():
+    return (
+        "Vijay Mallya is identified near the start of the video as being out of "
+        "the country amid a loan-default allegation, while Kingfisher Airlines "
+        "is briefly introduced."
+    )
+
+
+def _temporal_location_complete_answer():
+    return (
+        "The opening briefly identifies Vijay Mallya as being out of the country "
+        "amid the loan-default framing. The interviewer then asks when he decided "
+        "to start Kingfisher Airlines, and he gives 2002 and 2003. Mallya describes "
+        "a premium flying experience focused on passenger comfort, safety and "
+        "connecting places. The discussion later turns to the Deccan acquisition, "
+        "one-rupee tickets, industry consolidation and the merger. A later section "
+        "returns to Kingfisher's financial turmoil, banks' support and his meeting "
+        "with the Finance Minister."
+    )
+
+
+@pytest.mark.unit
+def test_temporal_location_coverage_requires_distinct_source_content_not_topic_name():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    context = _temporal_location_regression_context()
+
+    incomplete = chain._temporal_location_answer_coverage(
+        question,
+        _temporal_location_incomplete_answer(),
+        context,
+    )
+    assert incomplete["is_temporal_location_question"] is True
+    assert incomplete["candidate_source_group_numbers"] == [1, 2, 3, 4, 5]
+    assert incomplete["covered_source_group_numbers"] == [1]
+    assert incomplete["required_covered_source_group_count"] == 3
+    assert incomplete["needs_review"] is True
+
+    complete = chain._temporal_location_answer_coverage(
+        question,
+        _temporal_location_complete_answer(),
+        context,
+    )
+    assert complete["needs_review"] is False
+    assert len(complete["covered_source_group_numbers"]) >= 3
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_reviews_incomplete_temporal_location_answers():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=_temporal_location_incomplete_answer(),
+        context=_temporal_location_regression_context(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "TEMPORAL LOCATION COMPLETENESS REVIEW" in instruction
+    assert "SOURCE 2 (01:06:41 - 01:08:54)" in instruction
+    assert "SOURCE 3 (01:10:38 - 01:14:34)" in instruction
+    assert "opening narration" not in instruction.lower()
+    assert "do not force coverage of a block" in instruction.lower()
+
+    assert chain._generation_repair_instruction(
+        question=question,
+        answer=_temporal_location_complete_answer(),
+        context=_temporal_location_regression_context(),
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+@pytest.mark.regression
+def test_rag_chain_repairs_incomplete_temporal_location_answer_once(monkeypatch):
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    source_specs = [
+        (801, 0.4, 188.0, 0.68, "Vijay Mallya is out of the country. He faces a raging loan default case. Kingfisher Airlines is described as a class apart."),
+        (802, 4001.4, 4134.64, 0.81, "Let's walk through the case. What happened in Kingfisher Airlines? When did you decide to start Kingfisher Airlines? 2002 2003."),
+        (803, 4238.679, 4474.239, 0.65, "The vision of Kingfisher Airlines was the best flying experience, a premium experience focused on passenger comfort and safety, connecting places in India."),
+        (804, 4793.28, 4968.56, 0.73, "The Deccan acquisition, one-rupee tickets, industry consolidation and the Kingfisher merger are discussed."),
+        (805, 7127.84, 7277.36, 1.30, "The Kingfisher financial turmoil, banks' support and the Finance Minister meeting are discussed."),
+    ]
+    retrieved = []
+    for chunk_id, start, end, distance, text in source_specs:
+        document = doc(chunk_id, start, end, text)
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+        retrieved.append((document, distance))
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [item[0].metadata["chunk_id"] for item in retrieved],
+                "citation_chunk_ids": [item[0].metadata["chunk_id"] for item in retrieved],
+            },
+        ),
+    )
+
+    outputs = iter([
+        _temporal_location_incomplete_answer(),
+        _temporal_location_complete_answer(),
+    ])
+    prompt_texts = []
+
+    def fake_generate_with_llm(**kwargs):
+        prompt_texts.append(kwargs["prompt_value"].to_string())
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    trace = result["generation_trace"]
+    assert len(prompt_texts) == 2
+    assert "VIDEO-LOCATION QUESTIONS" in prompt_texts[0]
+    assert "TEMPORAL LOCATION COMPLETENESS REVIEW" in prompt_texts[1]
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is True
+    assert trace["temporal_location_review_attempted"] is True
+    assert trace["temporal_location_review_passed"] is True
+    assert trace["temporal_location_coverage_before"]["covered_source_group_numbers"] == [1]
+    assert len(trace["temporal_location_coverage_after"]["covered_source_group_numbers"]) >= 3
+    assert "premium flying experience" in result["answer"].lower()
+    assert "deccan acquisition" in result["answer"].lower()
+    assert "financial turmoil" in result["answer"].lower()
+
+
+@pytest.mark.regression
+def test_rag_chain_does_not_run_temporal_location_repair_when_answer_covers_sections(monkeypatch):
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    source_specs = [
+        (811, 0.4, 188.0, 0.68, "Vijay Mallya is out of the country amid a loan default. Kingfisher Airlines is introduced."),
+        (812, 4001.4, 4134.64, 0.81, "Kingfisher Airlines: when did you decide to start? 2002 2003."),
+        (813, 4238.679, 4474.239, 0.65, "Kingfisher Airlines aims for premium flying, passenger comfort, safety and connecting places."),
+        (814, 4793.28, 4968.56, 0.73, "Deccan acquisition, one-rupee tickets, industry consolidation and the Kingfisher merger."),
+        (815, 7127.84, 7277.36, 1.30, "Kingfisher financial turmoil, banks' support and a Finance Minister meeting."),
+    ]
+    retrieved = []
+    for chunk_id, start, end, distance, text in source_specs:
+        document = doc(chunk_id, start, end, text)
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+        retrieved.append((document, distance))
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [item[0].metadata["chunk_id"] for item in retrieved],
+                "citation_chunk_ids": [item[0].metadata["chunk_id"] for item in retrieved],
+            },
+        ),
+    )
+    calls = []
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **kwargs: (calls.append(kwargs) or _temporal_location_complete_answer()),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert len(calls) == 1
+    assert result["generation_trace"]["quality_repair_attempted"] is False
+    assert result["generation_trace"]["temporal_location_review_attempted"] is False
+    assert result["generation_trace"]["temporal_location_review_passed"] is None
+
+
+@pytest.mark.unit
+def test_temporal_location_answer_timestamps_align_to_later_substantive_sections():
+    answer = _temporal_location_complete_answer()
+    result = chain.append_relevant_source_timestamps(
+        answer=answer,
+        sources=[
+            {
+                "start": 0.4,
+                "end": 188.0,
+                "distance": 0.68,
+                "transcript_text": (
+                    "Vijay Mallya is out of the country. He faces a raging "
+                    "loan default case. Kingfisher Airlines is described as a class apart."
+                ),
+            },
+            {
+                "start": 4001.4,
+                "end": 4134.64,
+                "distance": 0.81,
+                "transcript_text": (
+                    "Let's walk through the case. What happened in Kingfisher Airlines? "
+                    "When did you decide to start Kingfisher Airlines? 2002 2003."
+                ),
+            },
+            {
+                "start": 4238.679,
+                "end": 4474.239,
+                "distance": 0.65,
+                "transcript_text": (
+                    "The vision of Kingfisher Airlines was the best flying experience, "
+                    "a premium experience focused on passenger comfort and safety, "
+                    "connecting places in India."
+                ),
+            },
+            {
+                "start": 4793.28,
+                "end": 4968.56,
+                "distance": 0.73,
+                "transcript_text": (
+                    "The Deccan acquisition, one-rupee tickets, industry consolidation "
+                    "and the Kingfisher merger are discussed."
+                ),
+            },
+            {
+                "start": 7127.84,
+                "end": 7277.36,
+                "distance": 1.30,
+                "transcript_text": (
+                    "The Kingfisher financial turmoil, banks' support and the "
+                    "Finance Minister meeting are discussed."
+                ),
+            },
+        ],
+        has_evidence=True,
+    )
+
+    assert "00:00–03:08" not in result
+    assert "01:10:38–01:14:34" in result
+    assert "01:19:53–01:22:48" in result
+    assert "01:58:47–02:01:17" in result
+
