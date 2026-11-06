@@ -123,7 +123,8 @@ def test_requested_temporal_window_overrides_inline_model_timestamp_claims():
     )
 
     assert result == (
-        "A factual answer.\n\nRelevant timestamp: 25:35–26:24"
+        "A factual answer. The model says the section runs, and later.\n\n"
+        "Relevant timestamp: 25:35–26:24"
     )
 
 
