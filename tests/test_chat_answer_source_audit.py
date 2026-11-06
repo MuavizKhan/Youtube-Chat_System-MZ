@@ -1623,6 +1623,20 @@ def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
             "and what is discussed there?"
         ),
     }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines is briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines was launched in 2002 after an initial planning period.\n"
+        "[SOURCE 3]\nKingfisher Airlines focused on premium passenger comfort and safety.\n"
+        "[SOURCE 4]\nThe Deccan acquisition and one-rupee tickets were discussed.\n"
+        "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
+    )
+    answer = (
+        "The opening briefly introduces Kingfisher Airlines. The interviewer asks "
+        "when Mallya decided to start the airline; he gives 2002. Mallya describes "
+        "a premium experience focused on passenger comfort and safety. The later "
+        "discussion covers the Deccan acquisition and one-rupee tickets, followed "
+        "by Kingfisher's financial turmoil and bank support."
+    )
     generation = {
         "temporal_location_coverage_before": {
             "is_temporal_location_question": True,
@@ -1642,10 +1656,11 @@ def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
             "coverage_ratio": 0.8,
             "needs_review": False,
         },
+        "temporal_location_context": context,
     }
 
     check = audit_module._temporal_location_review_quality_check(
-        case, generation, "The final answer covers all relevant sections."
+        case, generation, answer
     )
 
     assert check is not None
@@ -1660,6 +1675,15 @@ def test_temporal_location_audit_passes_when_no_repair_was_needed():
             "and what is discussed there?"
         ),
     }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines was briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines launched in 2002 after planning.\n"
+        "[SOURCE 3]\nKingfisher Airlines emphasized premium passenger comfort and safety."
+    )
+    answer = (
+        "Kingfisher Airlines was briefly introduced. It launched in 2002 after "
+        "planning. Its premium focus included passenger comfort and safety."
+    )
     generation = {
         "temporal_location_coverage_before": {
             "is_temporal_location_question": True,
@@ -1672,10 +1696,11 @@ def test_temporal_location_audit_passes_when_no_repair_was_needed():
         "temporal_location_review_attempted": False,
         "temporal_location_review_passed": None,
         "temporal_location_coverage_after": None,
+        "temporal_location_context": context,
     }
 
     check = audit_module._temporal_location_review_quality_check(
-        case, generation, "The final answer covers all relevant sections."
+        case, generation, answer
     )
 
     assert check is not None
@@ -1732,11 +1757,11 @@ def test_temporal_location_audit_rejects_final_answer_replaced_after_successful_
         ),
     }
     context = (
-        "[SOURCE 1] Kingfisher Airlines is briefly introduced. "
-        "[SOURCE 2] Kingfisher Airlines was launched in 2002 after an initial planning period. "
-        "[SOURCE 3] Kingfisher Airlines focused on premium passenger comfort and safety. "
-        "[SOURCE 4] The Deccan acquisition and one-rupee tickets were discussed. "
-        "[SOURCE 5] Kingfisher's financial turmoil and bank support were discussed."
+        "[SOURCE 1]\nKingfisher Airlines is briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines was launched in 2002 after an initial planning period.\n"
+        "[SOURCE 3]\nKingfisher Airlines focused on premium passenger comfort and safety.\n"
+        "[SOURCE 4]\nThe Deccan acquisition and one-rupee tickets were discussed.\n"
+        "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
     )
     generation = {
         "temporal_location_coverage_before": {
