@@ -1713,3 +1713,38 @@ def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
     assert check["passed"] is False
     assert "missing or malformed" in check["detail"].lower()
 
+
+def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candidates():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 3,
+            "coverage_ratio": 1.0,
+            "needs_review": False,
+        },
+    }
+
+    check = audit_module._temporal_location_review_quality_check(case, generation)
+
+    assert check is not None
+    assert check["passed"] is False
+
