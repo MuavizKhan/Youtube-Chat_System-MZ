@@ -1063,15 +1063,26 @@ def _temporal_location_review_quality_check(
             "No topic-matching transcript source blocks reached the generation prompt.",
         )
 
-    if len(set(candidates)) != len(candidates) or any(
-        not isinstance(item, int) or isinstance(item, bool) for item in candidates
-    ):
+    if any(not isinstance(item, int) or isinstance(item, bool) for item in candidates):
         return _quality_check(
             "temporal_location_answer_covers_substantive_sections",
             False,
             "Temporal-location candidate source identifiers are malformed.",
         )
-
+    try:
+        candidate_set = set(candidates)
+    except TypeError:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location candidate source identifiers are malformed.",
+        )
+    if len(candidate_set) != len(candidates):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location candidate source identifiers are duplicated.",
+        )
     first_pass_needed_review = before["needs_review"]
     required_count = before["required_covered_source_group_count"]
     if required_count < 1 or required_count > len(candidates):
