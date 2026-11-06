@@ -28,6 +28,12 @@ from Backend.rag_system.benchmark_registry import (
     BENCHMARK_CURATION_BLOCKERS,
     VIDEO_BENCHMARKS,
 )
+from Backend.rag_system.timestamp_utils import (
+    TIMESTAMP_RANGE_PATTERN,
+    find_timestamp_ranges,
+    parse_timestamp_range,
+    timestamp_to_seconds as _shared_timestamp_to_seconds,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +77,24 @@ def _make_audit_case(
         "answer_requirements": list(answer_requirements),
         "evidence_groups": list(evidence_groups),
     }
+    benchmark = VIDEO_BENCHMARKS.get(video_id)
+    temporal_case = (
+        benchmark.temporal_evidence_by_question.get(question_id)
+        if benchmark is not None
+        else None
+    )
+    if temporal_case is not None:
+        # Attach video-scoped temporal gold only when the canonical registry
+        # supplies it. Production timestamp formatting remains video-agnostic.
+        case["temporal_evidence_windows"] = [
+            {
+                "section_id": window.section_id,
+                "start_seconds": window.start_seconds,
+                "end_seconds": window.end_seconds,
+                "label": window.label,
+            }
+            for window in temporal_case.windows
+        ]
     if answer_language is not None:
         # Historical cases may declare the language of their old native-language
         # question. The product response contract is now English for every case.
@@ -403,10 +427,7 @@ _MOJIBAKE_MARKERS = (
     # a different Latin-1/control-code variant.
     "â€“", "â€”", "â€™", "â€œ", "â€", "â€˜", "â€¦",
 )
-_TIMESTAMP_RANGE_PATTERN = re.compile(
-    r"(?<!\d)(?:\d{1,2}:)?\d{1,2}:\d{2}\s*[–—-]\s*"
-    r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?!\d)"
-)
+_TIMESTAMP_RANGE_PATTERN = TIMESTAMP_RANGE_PATTERN
 
 
 
@@ -455,44 +476,77 @@ def _format_timestamp(seconds: Any) -> str | None:
 
 
 def _normalize_range(value: str) -> tuple[str, str] | None:
-    parts = re.split(r"\s*[–—-]\s*", value.strip(), maxsplit=1)
-    if len(parts) != 2:
+    """Return the endpoints of one valid timestamp range."""
+    parsed = parse_timestamp_range(value)
+    if parsed is None:
         return None
-    return parts[0].strip(), parts[1].strip()
+    return parsed.start_text, parsed.end_text
 
 
 def _timestamp_to_seconds(value: str) -> int | None:
-    """Convert a displayed MM:SS or HH:MM:SS value into whole seconds."""
-    try:
-        parts = [int(part) for part in value.strip().split(":")]
-    except (AttributeError, TypeError, ValueError):
-        return None
-
-    if len(parts) == 2:
-        minutes, seconds = parts
-        if seconds >= 60:
-            return None
-        return minutes * 60 + seconds
-
-    if len(parts) == 3:
-        hours, minutes, seconds = parts
-        if minutes >= 60 or seconds >= 60:
-            return None
-        return hours * 3600 + minutes * 60 + seconds
-
-    return None
+    """Compatibility wrapper around the shared timestamp parser."""
+    return _shared_timestamp_to_seconds(value)
 
 
 def _timestamp_range_bounds(value: str) -> tuple[int, int] | None:
-    """Return inclusive whole-second bounds for a displayed timestamp range."""
-    normalized = _normalize_range(value)
-    if normalized is None:
+    """Return validated whole-second bounds for a displayed timestamp range."""
+    parsed = parse_timestamp_range(value)
+    if parsed is None:
         return None
-    start = _timestamp_to_seconds(normalized[0])
-    end = _timestamp_to_seconds(normalized[1])
-    if start is None or end is None or end < start:
+    return parsed.start_seconds, parsed.end_seconds
+
+
+def _answer_timestamp_ranges(answer: str) -> list[str]:
+    """Extract valid displayed timestamp ranges from any part of the answer."""
+    return [item.raw for item in find_timestamp_ranges(answer)]
+
+
+def _temporal_timestamp_alignment(
+    case: dict[str, Any],
+    timestamp_ranges: list[str],
+) -> dict[str, Any] | None:
+    """Check displayed timestamp ranges against optional video-scoped temporal gold.
+
+    These annotations are independent evaluation references. They are never
+    imported into production chain logic and are not required for unannotated
+    videos or questions.
+    """
+    windows = case.get("temporal_evidence_windows")
+    if not isinstance(windows, list) or not windows:
         return None
-    return start, end
+
+    matched = []
+    for displayed_range in timestamp_ranges:
+        bounds = _timestamp_range_bounds(displayed_range)
+        if bounds is None:
+            continue
+        start, end = bounds
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            try:
+                window_start = float(window["start_seconds"])
+                window_end = float(window["end_seconds"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not math.isfinite(window_start) or not math.isfinite(window_end):
+                continue
+            if window_end <= window_start:
+                continue
+            overlap_seconds = min(end, window_end) - max(start, window_start)
+            if overlap_seconds > 0:
+                matched.append({
+                    "timestamp_range": displayed_range,
+                    "section_id": window.get("section_id"),
+                    "section_label": window.get("label"),
+                    "overlap_seconds": round(overlap_seconds, 3),
+                })
+
+    return {
+        "passed": bool(matched),
+        "registered_window_count": len(windows),
+        "matched_ranges": matched,
+    }
 
 
 def _timestamp_range_covered_by_sources(
@@ -547,11 +601,15 @@ def _substantive_answer(answer: str) -> str:
 def _normalize_answer_requirement_text(answer: str) -> str:
     """Remove inline Markdown wrappers before matching answer requirements."""
     text = unicodedata.normalize("NFKC", _substantive_answer(answer))
-    # Smart apostrophes are common in model output. Normalize them before
-    # applying registered answer requirements so punctuation does not change
-    # whether an otherwise identical phrase matches.
+    # Canonicalize smart punctuation and Unicode hyphens/dashes before
+    # applying registered answer requirements.
     text = text.replace("’", "'").replace("‘", "'")
     text = text.replace("“", '"').replace("”", '"')
+    dash_variants = (
+        "\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015"
+        "\\u2212\\ufe58\\ufe63\\uff0d\\u00ad"
+    )
+    text = text.translate(str.maketrans({character: "-" for character in dash_variants}))
     # Do not let presentation markup split otherwise valid phrases such as
     # "**three** ways" and cause a false negative in the acceptance gate.
     text = re.sub(r"(\*\*|__)(.+?)\1", r"\2", text, flags=re.DOTALL)
@@ -1001,6 +1059,10 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         answer = ""
 
     timestamp_ranges = _answer_timestamp_ranges(answer)
+    temporal_timestamp_alignment = _temporal_timestamp_alignment(
+        case,
+        timestamp_ranges,
+    )
     normalized_summary_ranges = [
         bounds
         for item in timestamp_ranges
@@ -1143,6 +1205,16 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
             else "; ".join(timestamp_alignment_failures)
         ),
     ))
+    if temporal_timestamp_alignment is not None:
+        quality_checks.append(_quality_check(
+            "timestamp_summary_matches_registered_temporal_evidence",
+            temporal_timestamp_alignment["passed"],
+            (
+                "At least one displayed timestamp overlaps a registered relevant temporal section."
+                if temporal_timestamp_alignment["passed"]
+                else "No displayed timestamp overlaps any registered relevant temporal section."
+            ),
+        ))
     quality_checks.append(_quality_check(
         "encoding_integrity",
         not bool(mojibake_markers),
@@ -1230,6 +1302,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         ],
         "returned_source_chunk_ids": returned_source_ids,
         "plain_text_timestamp_ranges": timestamp_ranges,
+        "temporal_timestamp_alignment": temporal_timestamp_alignment,
         "source_ranges": source_ranges,
         "answer_text_encoding_suspect": bool(mojibake_markers),
         "possible_mojibake_markers": mojibake_markers,
