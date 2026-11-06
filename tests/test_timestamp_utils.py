@@ -1,9 +1,9 @@
 import pytest
 
 from Backend.rag_system.timestamp_utils import (
-    find_timestamp_ranges,
     contains_unverified_timestamp_claims,
     find_timestamp_range_texts,
+    find_timestamp_ranges,
     parse_timestamp_range,
     strip_unverified_timestamp_claims,
 )
@@ -77,7 +77,7 @@ def test_unverified_timestamp_claim_detector_distinguishes_video_locations(
     assert contains_unverified_timestamp_claims(answer) is expected
 
 
-def test_unverified_timestamp_claim_sanitizer_removes_time_sentences_not_answers():
+def test_unverified_timestamp_claim_sanitizer_preserves_prose_around_ranges():
     answer = (
         "The speaker explains the airline's launch. "
         "The discussion runs from 00:00 to 01:08. "
@@ -113,6 +113,10 @@ def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single
         "Relevant timestamps: 00:00–01:08"
     )
 
+    assert strip_unverified_timestamp_claims(answer) == (
+        "A grounded answer.\nThe event occurs."
+    )
+
 
 def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
     answer = (
@@ -127,6 +131,12 @@ def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
     )
 
 
+def test_unverified_timestamp_sanitizer_removes_mixed_point_and_range_claims():
+    answer = (
+        "A grounded answer. The event occurs around 00:45, and the discussion "
+        "continues from 01:00 to 02:00."
+    )
+
     assert strip_unverified_timestamp_claims(answer) == (
-        "A grounded answer.\\nThe event occurs."
+        "A grounded answer. The event occurs, and the discussion continues."
     )
