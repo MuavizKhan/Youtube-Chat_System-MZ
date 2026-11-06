@@ -94,6 +94,9 @@ def _make_audit_case(
             }
             for window in temporal_case.windows
         ]
+        case["temporal_evidence_min_window_coverage"] = (
+            temporal_case.min_window_coverage
+        )
     if answer_language is not None:
         # Historical cases may declare the language of their old native-language
         # question. The product response contract is now English for every case.
@@ -513,13 +516,33 @@ def _temporal_timestamp_alignment(
     if not isinstance(windows, list) or not windows:
         return None
 
+    try:
+        minimum_coverage = float(
+            case.get("temporal_evidence_min_window_coverage", 1.0)
+        )
+    except (TypeError, ValueError):
+        minimum_coverage = float("nan")
+    if (
+        not math.isfinite(minimum_coverage)
+        or not 0 < minimum_coverage <= 1
+    ):
+        return {
+            "passed": False,
+            "registered_window_count": len(windows),
+            "matched_window_count": 0,
+            "window_coverage": 0.0,
+            "required_window_coverage": minimum_coverage,
+            "matched_ranges": [],
+        }
+
     matched = []
+    matched_window_indexes: set[int] = set()
     for displayed_range in timestamp_ranges:
         bounds = _timestamp_range_bounds(displayed_range)
         if bounds is None:
             continue
         start, end = bounds
-        for window in windows:
+        for window_index, window in enumerate(windows):
             if not isinstance(window, dict):
                 continue
             try:
@@ -533,6 +556,7 @@ def _temporal_timestamp_alignment(
                 continue
             overlap_seconds = min(end, window_end) - max(start, window_start)
             if overlap_seconds > 0:
+                matched_window_indexes.add(window_index)
                 matched.append({
                     "timestamp_range": displayed_range,
                     "section_id": window.get("section_id"),
@@ -540,9 +564,13 @@ def _temporal_timestamp_alignment(
                     "overlap_seconds": round(overlap_seconds, 3),
                 })
 
+    window_coverage = len(matched_window_indexes) / len(windows)
     return {
-        "passed": bool(matched),
+        "passed": window_coverage >= minimum_coverage,
         "registered_window_count": len(windows),
+        "matched_window_count": len(matched_window_indexes),
+        "window_coverage": window_coverage,
+        "required_window_coverage": minimum_coverage,
         "matched_ranges": matched,
     }
 
