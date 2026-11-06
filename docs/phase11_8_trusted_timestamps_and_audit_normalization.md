@@ -36,10 +36,10 @@ The model may explain the transcript, but it does not own clickable timestamp me
 
 Before final response formatting, the shared sanitizer removes:
 - model-authored "Relevant timestamp(s):" footer lines;
-- sentences or bullet fragments containing inline timestamp ranges;
+- timestamp ranges and their immediate location cues, preserving the surrounding answer prose;
 - single timestamp claims explicitly framed as video locations (for example, "around 01:20").
 
-Substantive sentences that do not make timestamp claims are retained. Ordinary durations such as 30-second and 90-minute are not interpreted as YouTube timestamp ranges.
+A sentence containing both an answer and an untrusted timestamp keeps its substantive words. Ordinary durations such as 30-second and 90-minute are not interpreted as YouTube timestamp ranges.
 
 The production finalizer then always gets the opportunity to append:
 - a validated temporal-retrieval window when the question explicitly requests a timestamp and the retrieval trace supplies a valid temporal window; or
