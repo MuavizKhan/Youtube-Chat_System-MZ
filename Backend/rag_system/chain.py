@@ -920,7 +920,7 @@ def _temporal_location_answer_coverage(
         else 0.0
     )
     needs_review = (
-        candidate_count >= 2
+        candidate_count >= 1
         and len(covered_numbers) < required_count
     )
 
@@ -949,16 +949,7 @@ def _temporal_location_completeness_repair_instruction(
     for source_number, block_text in _temporal_location_source_blocks(context):
         if source_number not in coverage["candidate_source_group_numbers"] or source_number in covered:
             continue
-        timestamp_match = re.search(
-            r"(?im)^\s*Timestamp\s*:\s*(.+?)\s*$",
-            block_text,
-        )
-        if timestamp_match:
-            missing_labels.append(
-                f"SOURCE {source_number} ({timestamp_match.group(1)})"
-            )
-        else:
-            missing_labels.append(f"SOURCE {source_number}")
+        missing_labels.append(f"SOURCE {source_number}")
 
     return (
         "TEMPORAL LOCATION COMPLETENESS REVIEW. The question asks where a topic "
@@ -7159,7 +7150,7 @@ def build_rag_chain(
                 "temporal_location_review_passed": temporal_location_review_passed,
                 "temporal_location_coverage_before": (
                     temporal_location_coverage_before
-                    if temporal_location_review_attempted
+                    if temporal_location_coverage_before["is_temporal_location_question"]
                     else None
                 ),
                 "temporal_location_coverage_after": temporal_location_coverage_after,
