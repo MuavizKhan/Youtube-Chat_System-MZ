@@ -176,14 +176,20 @@ def _remove_timestamp_span(
 ) -> str:
     """Remove a timestamp and its immediately preceding location cue."""
     prefix = fragment[:start]
-    cue_match = _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN.search(prefix)
+    opening_parenthesis = re.search(r"\(\s*$", prefix)
+    cue_prefix = (
+        prefix[:opening_parenthesis.start()]
+        if opening_parenthesis is not None
+        else prefix
+    )
+    cue_match = _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN.search(cue_prefix)
     if cue_match is not None:
         start = cue_match.start()
+    elif opening_parenthesis is not None:
+        start = opening_parenthesis.start()
 
-    prefix_before = fragment[:start]
     suffix_after = fragment[end:]
-    if prefix_before.rstrip().endswith("(") and suffix_after.lstrip().startswith(")"):
-        start = prefix_before.rfind("(")
+    if suffix_after.lstrip().startswith(")"):
         closing_offset = len(suffix_after) - len(suffix_after.lstrip())
         end += closing_offset + 1
 
