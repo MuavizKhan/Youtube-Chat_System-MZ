@@ -29,6 +29,7 @@ from Backend.rag_system.benchmark_registry import (
     VIDEO_BENCHMARKS,
 )
 from Backend.rag_system.timestamp_utils import (
+    contains_unverified_timestamp_claims,
     find_timestamp_range_texts,
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
@@ -1145,6 +1146,18 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
     quality_checks = _answer_quality_checks(case, answer)
+    has_unverified_timestamp_claims = contains_unverified_timestamp_claims(
+        _substantive_answer(answer)
+    )
+    quality_checks.append(_quality_check(
+        "unverified_model_timestamp_claims_absent",
+        not has_unverified_timestamp_claims,
+        (
+            "No inline model-authored timestamp claims remain outside the application timestamp footer."
+            if not has_unverified_timestamp_claims
+            else "An inline model-authored timestamp claim remains outside the application timestamp footer."
+        ),
+    ))
     if citation_provenance["citation_policy"] in {"prompt_included_chunks", "selected_anchors"}:
         quality_checks.append(_quality_check(
             "citation_prompt_provenance",
@@ -1323,6 +1336,7 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
         ],
         "returned_source_chunk_ids": returned_source_ids,
         "plain_text_timestamp_ranges": timestamp_ranges,
+        "unverified_model_timestamp_claims_present": has_unverified_timestamp_claims,
         "temporal_timestamp_alignment": temporal_timestamp_alignment,
         "source_ranges": source_ranges,
         "answer_text_encoding_suspect": bool(mojibake_markers),
