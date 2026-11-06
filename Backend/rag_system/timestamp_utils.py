@@ -13,22 +13,22 @@ import re
 
 
 # YouTube timestamps are normally MM:SS and become HH:MM:SS for long videos.
-_TIMESTAMP_VALUE = r"(?:\\d{1,3}:)?\\d{1,2}:\\d{2}"
-_TIMESTAMP_SEPARATOR = r"(?:[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\ufe58\\ufe63\\uff0d]|\\bto\\b|\\band\\b|&|/)"
+_TIMESTAMP_VALUE = r"(?:\d{1,3}:)?\d{1,2}:\d{2}"
+_TIMESTAMP_SEPARATOR = r"(?:[-\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d]|\bto\b|\band\b|&|/)"
 TIMESTAMP_RANGE_PATTERN = re.compile(
-    rf"(?<![\\d:])(?P<start>{_TIMESTAMP_VALUE})"
-    rf"\\s*{_TIMESTAMP_SEPARATOR}\\s*"
-    rf"(?P<end>{_TIMESTAMP_VALUE})(?![\\d:])",
+    rf"(?<![\d:])(?P<start>{_TIMESTAMP_VALUE})"
+    rf"\s*{_TIMESTAMP_SEPARATOR}\s*"
+    rf"(?P<end>{_TIMESTAMP_VALUE})(?![\d:])",
     re.IGNORECASE,
 )
 TIMESTAMP_VALUE_PATTERN = re.compile(
-    rf"(?<![\\d:]){_TIMESTAMP_VALUE}(?![\\d:])"
+    rf"(?<![\d:]){_TIMESTAMP_VALUE}(?![\d:])"
 )
 _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
-    r"(?im)^[ \\t]*Relevant timestamps?[ \\t]*:[^\\r\\n]*(?:\\r?\\n|$)"
+    r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
 _TIMESTAMP_CLAUSE_CUE_PATTERN = re.compile(
-    r"\\b(?:at|around|about|near|from|to|until|timestamp|timecode|time\\s*stamp)\\b",
+    r"\b(?:at|around|about|near|from|to|until|timestamp|timecode|time\s*stamp)\b",
     re.IGNORECASE,
 )
 
@@ -126,7 +126,7 @@ def strip_unverified_timestamp_claims(answer: str) -> str:
 
     for line in cleaned.splitlines():
         # Keep line boundaries and bullet structure for the substantive prose.
-        fragments = re.split(r"(?<=[.!?])\\s+", line)
+        fragments = re.split(r"(?<=[.!?])\s+", line)
         retained_fragments = []
         for fragment in fragments:
             if not fragment.strip():
@@ -145,6 +145,6 @@ def strip_unverified_timestamp_claims(answer: str) -> str:
         if retained_fragments:
             retained_lines.append(" ".join(retained_fragments))
 
-    result = "\\n".join(retained_lines)
-    result = re.sub(r"\\n{3,}", "\\n\\n", result)
+    result = "\n".join(retained_lines)
+    result = re.sub(r"\n{3,}", "\n\n", result)
     return result.strip()
