@@ -465,7 +465,7 @@ def _format_timestamp(seconds: Any) -> str | None:
         value = float(seconds)
     except (TypeError, ValueError):
         return None
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         return None
 
     total = int(value)
