@@ -67,7 +67,7 @@ def test_timestamp_finder_extracts_inline_ranges_and_word_separators():
         ("The relevant passage is in 01:20.", True),
         ("This ranges from 00:10 to 00:30.", True),
         ("The speaker gives a 30-second structure and a 90-minute talk.", False),
-        ("A grounded answer.\\nRelevant timestamps: 00:10–00:30", False),
+        ("A grounded answer.\nRelevant timestamps: 00:10–00:30", False),
     ],
 )
 def test_unverified_timestamp_claim_detector_distinguishes_video_locations(
