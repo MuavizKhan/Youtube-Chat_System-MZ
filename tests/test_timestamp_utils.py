@@ -131,6 +131,26 @@ def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
     )
 
 
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        (
+            "The interview discusses the airline's launch, from the start of the video up to about 01:08 minutes.",
+            "The interview discusses the airline's launch, from the start of the video.",
+        ),
+        (
+            "The event occurs at around 01:20 minutes.",
+            "The event occurs.",
+        ),
+    ],
+)
+def test_unverified_timestamp_sanitizer_removes_natural_language_time_units(
+    answer,
+    expected,
+):
+    assert strip_unverified_timestamp_claims(answer) == expected
+
+
 def test_unverified_timestamp_sanitizer_removes_parenthetical_time_without_losing_answer():
     answer = (
         "The speaker offers a 30-second structure for explaining your work "
