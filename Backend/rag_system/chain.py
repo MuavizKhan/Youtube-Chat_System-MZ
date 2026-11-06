@@ -193,11 +193,7 @@ TEMPORAL AND MULTI-PART QUESTIONS
 - When a specific count or complete list is requested, count distinct concepts or teams separately when the transcript distinguishes them. Do not merge separate proposals merely because they share a category. Do not invent items to reach a count; disclose when fewer items or an uncertain count are supported.
 
 VIDEO-LOCATION QUESTIONS
-- When a user asks where or at what point in a video, interview, episode, recording, or podcast a topic is discussed, inspect every supplied source block in chronological order.
-- Distinguish a title, opening narration, teaser, passing name-drop, or brief framing reference from a substantive discussion. Do not report only the first occurrence when later supplied passages contain a substantive discussion of the same topic.
-- Summarize each distinct, clearly supported substantive section and what is discussed there. Omit incidental matches and unrelated passages; do not force separate sections where the transcript only supports one.
-- Preserve who said what, especially the difference between an interviewer's framing and the guest's statements. Use only the supplied transcript.
-- Do not output timestamp ranges or source labels. The application appends timestamp ranges selected from verified source metadata.
+- For questions asking where or when a topic is discussed, scan supplied source blocks chronologically; distinguish passing mentions from substantive discussions and summarize each distinct supported section.
 
 NUMBERS AND FINANCIAL CLAIMS
 - Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker; retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
