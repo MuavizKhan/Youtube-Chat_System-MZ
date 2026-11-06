@@ -1051,14 +1051,21 @@ def _temporal_location_review_quality_check(
         )
 
     first_pass_needed_review = before["needs_review"]
+    after_coverage_valid = (
+        isinstance(after, dict)
+        and after.get("is_temporal_location_question") is True
+        and after.get("needs_review") is False
+        and after.get("candidate_source_group_numbers")
+        == before.get("candidate_source_group_numbers")
+        and after.get("required_covered_source_group_count")
+        == before.get("required_covered_source_group_count")
+        and isinstance(after.get("covered_source_group_numbers"), list)
+        and len(set(after.get("covered_source_group_numbers", []))
+                & set(before.get("candidate_source_group_numbers", [])))
+        >= before.get("required_covered_source_group_count", 1)
+    )
     if first_pass_needed_review:
-        passed = (
-            attempted
-            and review_passed
-            and isinstance(after, dict)
-            and after.get("is_temporal_location_question") is True
-            and after.get("needs_review") is False
-        )
+        passed = attempted and review_passed and after_coverage_valid
         detail = (
             "The bounded temporal-location repair covered the required distinct topic sections."
             if passed
@@ -1070,12 +1077,7 @@ def _temporal_location_review_quality_check(
     else:
         passed = (
             not attempted
-            or (
-                attempted
-                and review_passed
-                and isinstance(after, dict)
-                and after.get("needs_review") is False
-            )
+            or (attempted and review_passed and after_coverage_valid)
         )
         detail = (
             "The initial answer already covered the identified substantive sections."
