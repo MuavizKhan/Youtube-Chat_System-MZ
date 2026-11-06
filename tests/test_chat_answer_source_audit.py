@@ -1606,7 +1606,7 @@ def test_temporal_location_audit_fails_when_incomplete_first_pass_is_not_repaire
         "temporal_location_coverage_after": None,
     }
 
-    check = audit._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(case, generation)
 
     assert check is not None
     assert check["name"] == "temporal_location_answer_covers_substantive_sections"
@@ -1642,7 +1642,7 @@ def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
         },
     }
 
-    check = audit._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(case, generation)
 
     assert check is not None
     assert check["passed"] is True
@@ -1670,7 +1670,7 @@ def test_temporal_location_audit_passes_when_no_repair_was_needed():
         "temporal_location_coverage_after": None,
     }
 
-    check = audit._temporal_location_review_quality_check(case, generation)
+    check = audit_module._temporal_location_review_quality_check(case, generation)
 
     assert check is not None
     assert check["passed"] is True
@@ -1682,6 +1682,6 @@ def test_temporal_location_audit_does_not_apply_to_ordinary_topic_questions():
         "question": "What does the speaker say about the airline's passenger experience?",
     }
 
-    assert audit._temporal_location_review_quality_check(case, {}) is None
+    assert audit_module._temporal_location_review_quality_check(case, {}) is None
 
 
