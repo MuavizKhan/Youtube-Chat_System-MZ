@@ -118,6 +118,21 @@ def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single
     )
 
 
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "Timestamps: 00:10–00:20",
+        "- Relevant timestamps: 00:10–00:20",
+        "> Relevant timestamps: 00:10–00:20",
+        "Time stamps: 00:10–00:20",
+    ],
+)
+def test_unverified_timestamp_sanitizer_removes_model_timestamp_heading_lines(heading):
+    answer = f"A grounded answer.\\n{heading}"
+
+    assert strip_unverified_timestamp_claims(answer) == "A grounded answer."
+
+
 def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
     answer = (
         "The speaker offers a 30-second structure for explaining your work "
