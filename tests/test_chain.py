@@ -7250,6 +7250,9 @@ def test_rag_chain_repairs_incomplete_temporal_location_answer_once(monkeypatch)
     assert trace["temporal_location_review_passed"] is True
     assert trace["temporal_location_coverage_before"]["covered_source_group_numbers"] == [1]
     assert len(trace["temporal_location_coverage_after"]["covered_source_group_numbers"]) >= 3
+    assert "temporal_location_context" not in trace
+    assert trace["temporal_location_coverage_final"]["candidate_source_group_numbers"] == [1, 2, 3, 4, 5]
+    assert len(trace["temporal_location_coverage_final"]["covered_source_group_numbers"]) >= 4
     assert "premium flying experience" in result["answer"].lower()
     assert "deccan acquisition" in result["answer"].lower()
     assert "financial turmoil" in result["answer"].lower()
