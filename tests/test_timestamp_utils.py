@@ -131,6 +131,17 @@ def test_unverified_timestamp_sanitizer_preserves_answer_with_inline_range():
     )
 
 
+def test_unverified_timestamp_sanitizer_removes_parenthetical_time_without_losing_answer():
+    answer = (
+        "The speaker offers a 30-second structure for explaining your work "
+        "(02:25–04:33)."
+    )
+
+    assert strip_unverified_timestamp_claims(answer) == (
+        "The speaker offers a 30-second structure for explaining your work."
+    )
+
+
 def test_unverified_timestamp_sanitizer_removes_mixed_point_and_range_claims():
     answer = (
         "A grounded answer. The event occurs around 00:45, and the discussion "
