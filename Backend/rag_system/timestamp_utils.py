@@ -28,8 +28,8 @@ _TIMESTAMP_SUMMARY_LINE_PATTERN = re.compile(
     r"(?im)^[ \t]*Relevant timestamps?[ \t]*:[^\r\n]*(?:\r?\n|$)"
 )
 _TIMESTAMP_CLAUSE_CUE_PATTERN = re.compile(
-    r"\b(?:at|around|about|near|from|to|until|timestamp|timecode|time(?:\s*stamp)?|minute|mark)\b"
-    r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|लगभग|करीब|पर|से|तक)",
+    r"\b(?:at|around|about|near|from|to|until|in|within|during|by|timestamp|timecode|time(?:\s*stamp)?|minute|mark)\b"
+    r"|(?:عند|حوالي|قرابة|تقريبًا|تقريبا|من|حتى|في|लगभग|करीब|पर|से|तक|में)",
     re.IGNORECASE,
 )
 
@@ -134,7 +134,7 @@ def contains_unverified_timestamp_claims(answer: str) -> bool:
 
     substantive = _TIMESTAMP_SUMMARY_LINE_PATTERN.sub("", answer)
     for line in substantive.splitlines():
-        for fragment in re.split(r"(?<=[.!?؟؛;])\\s+", line):
+        for fragment in re.split(r"(?<=[.!?؟؛;])\s+", line):
             if not fragment.strip():
                 continue
             if find_timestamp_range_texts(fragment):
