@@ -7154,6 +7154,11 @@ def build_rag_chain(
                     else None
                 ),
                 "temporal_location_coverage_after": temporal_location_coverage_after,
+                "temporal_location_context": (
+                    inputs.get("context", "")
+                    if temporal_location_coverage_before["is_temporal_location_question"]
+                    else None
+                ),
                 "repair_aborted_due_quota": repair_aborted_due_quota,
                 "provider_failure_reason": (
                     "daily_token_quota_exhausted"
