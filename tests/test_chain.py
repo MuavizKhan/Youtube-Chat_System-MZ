@@ -4580,6 +4580,53 @@ def test_response_language_mismatch_always_requires_english_but_allows_short_sou
 
 
 @pytest.mark.unit
+def test_response_language_guard_rejects_repeated_hindi_source_quotations():
+    question = "Which tax is identified as new, and what name does the speaker give for it?"
+    repeated_quote_answer = (
+        "The speaker identifies a new tax called the **“चवरी कर”** (chari tax).\n"
+        "> “चवरी कर” – a tax that was newly imposed."
+    )
+
+    assert chain._question_answer_language_mismatch(
+        question, repeated_quote_answer
+    ) == ("en", "source_quotes")
+
+    single_quote_answer = (
+        "The speaker identifies the new tax as “चवरी कर” (chavri tax), "
+        "which was newly imposed."
+    )
+    assert chain._question_answer_language_mismatch(
+        question, single_quote_answer
+    ) is None
+
+    overlong_quote_answer = "The transcript says “" + ("च" * 181) + "”."
+    assert chain._question_answer_language_mismatch(
+        question, overlong_quote_answer
+    ) == ("en", "source_quotes")
+
+
+@pytest.mark.unit
+def test_generation_repair_instruction_explains_single_source_quote_rule():
+    question = "Which tax is identified as new, and what name does the speaker give for it?"
+    repeated_quote_answer = (
+        "The speaker identifies a new tax called “चवरी कर” (chari tax).\n"
+        "> “चवरी कर” – a tax that was newly imposed."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        repeated_quote_answer,
+        "यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।",
+        video_id="INpnuL7qnzY",
+    )
+
+    assert instruction is not None
+    assert "ENGLISH-ONLY RESPONSE REPAIR" in instruction
+    assert "at most one short" in instruction.lower()
+    assert "do not repeat the excerpt" in instruction.lower()
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("question", [
     "What is discussed in the video?",
     "इस वीडियो में क्या बताया गया है?",
@@ -4765,6 +4812,58 @@ def test_rag_chain_retries_once_when_answer_uses_transcript_language(monkeypatch
     assert "sound" in result["answer"].lower()
     assert "perception" in result["answer"].lower()
     assert "perceive" in result["answer"].lower()
+
+
+@pytest.mark.unit
+def test_rag_chain_repairs_repeated_hindi_source_quotations(monkeypatch):
+    question = "Which tax is identified as new, and what name does the speaker give for it?"
+    context = "- [02:49–02:56] यहाँ पर एक नया टैक्स लगाया गया था चवरी कर।"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(doc(51, 169, 176, context), 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [51],
+                "citation_chunk_ids": [51],
+            },
+        ),
+    )
+
+    repeated_quote_answer = (
+        "The speaker identifies a new tax called the **“चवरी कर”** (chari tax).\n"
+        "> “चवरी कर” – a tax that was newly imposed."
+    )
+    corrected_answer = (
+        "The speaker identifies the new tax as “चवरी कर” (chavri tax), "
+        "which was newly imposed."
+    )
+    outputs = iter([repeated_quote_answer, corrected_answer])
+    prompts = []
+
+    def fake_generate_with_llm(**kwargs):
+        prompts.append(kwargs["prompt_value"])
+        return next(outputs)
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "INpnuL7qnzY",
+    })
+
+    trace = result["generation_trace"]
+    assert len(prompts) == 2
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is True
+    assert trace["question_language_repair_attempted"] is True
+    assert trace["question_language_repair_passed"] is True
+    assert result["answer"].count("“") == 1
+    assert "चवरी कर" in result["answer"]
+    assert "newly imposed" in result["answer"].lower()
 
 
 @pytest.mark.unit

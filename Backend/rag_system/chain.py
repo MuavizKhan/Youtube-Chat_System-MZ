@@ -3895,6 +3895,51 @@ def _dominant_supported_script_language(text: str) -> str | None:
     return ranked[0][0]
 
 
+
+_SOURCE_LANGUAGE_SCRIPT_PATTERN = re.compile(
+    r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\u0900-\u097f]"
+)
+_SOURCE_LANGUAGE_QUOTE_PATTERN = re.compile(
+    r"“(?P<curly_double>[^”\r\n]*)”|"
+    r"«(?P<guillemet>[^»\r\n]*)»|"
+    r"‘(?P<curly_single>[^’\r\n]*)’|"
+    r'"(?P<straight_double>[^"\r\n]*)"'
+)
+_MAX_SOURCE_LANGUAGE_QUOTE_CHARS = 180
+_MAX_SOURCE_LANGUAGE_QUOTE_WORDS = 32
+
+
+def _remove_permitted_source_language_quote(text: str) -> str | None:
+    """Remove one short, delimited Hindi/Arabic/Urdu excerpt for language scoring.
+
+    The source-language quotation is permitted only once and only as a short,
+    clearly delimited excerpt. Returning None means the draft violates that
+    contract and should receive the bounded English-only repair.
+    """
+    source_quotes = []
+    for match in _SOURCE_LANGUAGE_QUOTE_PATTERN.finditer(text):
+        excerpt = next(
+            value for value in match.groupdict().values() if value is not None
+        )
+        if _SOURCE_LANGUAGE_SCRIPT_PATTERN.search(excerpt):
+            source_quotes.append((match, excerpt))
+
+    if not source_quotes:
+        return text
+
+    if len(source_quotes) != 1:
+        return None
+
+    match, excerpt = source_quotes[0]
+    if (
+        len(excerpt) > _MAX_SOURCE_LANGUAGE_QUOTE_CHARS
+        or len(re.findall(r"\S+", excerpt)) > _MAX_SOURCE_LANGUAGE_QUOTE_WORDS
+    ):
+        return None
+
+    return text[:match.start()] + " " + text[match.end():]
+
+
 def _question_answer_language_mismatch(
     question: str,
     answer: str,
@@ -3912,7 +3957,16 @@ def _question_answer_language_mismatch(
     if _looks_like_turkish_answer(normalized_answer):
         return expected, "tr"
 
-    counts = _supported_script_letter_counts(normalized_answer)
+    answer_for_language_check = _remove_permitted_source_language_quote(
+        normalized_answer
+    )
+    if answer_for_language_check is None:
+        # The English audit contract permits only one short, delimited source
+        # quotation. Trigger a rewrite instead of letting repeated quotations
+        # pass merely because English prose remains the dominant script.
+        return expected, "source_quotes"
+
+    counts = _supported_script_letter_counts(answer_for_language_check)
     total = sum(counts.values())
     if total < 8:
         return None
@@ -3962,18 +4016,31 @@ def _generation_repair_instruction(
     )
     if language_mismatch is not None:
         _required_language, previous_language = language_mismatch
-        previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
-        instructions.append(
-            "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
-            + previous_name
-            + ". Rewrite the complete main answer in English, regardless of the "
-            + "question or transcript language. Translate only meaning supported by "
-            + "the supplied transcript context. You may retain one short, exact "
-            + "original-language excerpt when it helps verify a key point, but "
-            + "immediately explain it in English. Do not invent quotations, facts, "
-            + "names, dates, numbers, or timestamps. Do not include a timestamp "
-            + "line; the application adds verified timestamps separately."
-        )
+        if previous_language == "source_quotes":
+            instructions.append(
+                "ENGLISH-ONLY RESPONSE REPAIR. The previous draft violated the "
+                "single source-language quotation rule by repeating an original-"
+                "language excerpt or using an overlong excerpt. Rewrite the complete "
+                "main answer in English. Retain at most one short, exact Hindi, "
+                "Arabic, or Urdu quotation from the supplied context, with its "
+                "English meaning immediately beside it. Keep all other wording in "
+                "English and do not repeat the excerpt. Do not invent quotations, "
+                "facts, names, dates, numbers, or timestamps. Do not include a "
+                "timestamp line; the application adds verified timestamps separately."
+            )
+        else:
+            previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
+            instructions.append(
+                "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
+                + previous_name
+                + ". Rewrite the complete main answer in English, regardless of the "
+                + "question or transcript language. Translate only meaning supported by "
+                + "the supplied transcript context. You may retain one short, exact "
+                + "original-language excerpt when it helps verify a key point, but "
+                + "immediately explain it in English. Do not invent quotations, facts, "
+                + "names, dates, numbers, or timestamps. Do not include a timestamp "
+                + "line; the application adds verified timestamps separately."
+            )
 
     if _is_abstention_answer(answer_text) and context_text.strip():
         instructions.append(
