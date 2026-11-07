@@ -216,7 +216,7 @@ def _clean_fragment_spacing(fragment: str) -> str:
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     # A leading Markdown list marker is structure, not disposable edge punctuation.
     # Preserve it while trimming punctuation left behind by timestamp removal.
-    list_marker = re.match(r"^([ \\t]*(?:[-*+]|•)[ \\t]+)", cleaned)
+    list_marker = re.match(r"^([ \t]*(?:[-*+]|•)[ \t]+)", cleaned)
     if list_marker is not None:
         marker = list_marker.group(1)
         body = cleaned[len(marker):].strip(_TIMESTAMP_STRIP_EDGE_CHARS).strip()
