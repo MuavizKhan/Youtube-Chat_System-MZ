@@ -109,7 +109,7 @@ def test_unverified_timestamp_claim_sanitizer_also_removes_invalid_ranges():
 @pytest.mark.parametrize("marker", ["-", "*", "+", "•"])
 def test_timestamp_sanitizer_preserves_markdown_list_markers(marker):
     answer = (
-        f"{marker} Investment: the speaker put in 3,000 crore of UB Group money.\\n"
+        f"{marker} Investment: the speaker put in 3,000 crore of UB Group money.\n"
         f"{marker} DRT debt: the transcript identifies 4,999 crore as debt."
     )
 
