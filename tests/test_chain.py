@@ -105,14 +105,26 @@ def test_append_requested_temporal_timestamp_replaces_model_summary_with_window(
 
 @pytest.mark.unit
 def test_append_verified_response_timestamps_preserves_financial_fallback_bullets():
-    answer = (
-        "The transcript supports these distinct financial statements:\n"
-        "- Investment: the speaker put in 3,000 crore of UB Group money.\n"
-        "- DRT debt: the transcript describes 4,999 crore as debt.\n"
-        "- Debt certificate: the transcript identifies a certificate amount of 6,203 crore.\n"
-        "- Ministry of Finance recovery report: the transcript associates 14,100 crore with recovery.\n"
-        "The transcript does not clearly explain how the DRT judgment and debt-certificate figures relate."
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:01:07–02:02:31] I invested 3,000 crore rupees into Kingfisher Airlines.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:18:34–02:20:28] The DRT judgment debt was 4,999 crore rupees plus interest.
+[SOURCE 3]
+Transcript caption segments in chronological order:
+- [02:49:56–02:50:25] The Ministry of Finance report says the total amount recovered was
+- [02:50:25–02:51:41] 14,100 crore rupees.
+[SOURCE 4]
+Transcript caption segments in chronological order:
+- [04:08:59–04:09:30] The debt certificate gives a figure of 6203.
+- [04:09:30–04:10:15] The principal amount carries unapplied interest at 11.5% per annum."""
+
+    answer = chain._build_financial_evidence_fallback(
+        "What debt and money amounts are mentioned in the Kingfisher case?",
+        context,
     )
+    assert answer is not None
 
     result = chain.append_verified_response_timestamps(
         answer=answer,
