@@ -106,6 +106,25 @@ def test_unverified_timestamp_claim_sanitizer_also_removes_invalid_ranges():
     )
 
 
+@pytest.mark.parametrize("marker", ["-", "*", "+", "•"])
+def test_timestamp_sanitizer_preserves_markdown_list_markers(marker):
+    answer = (
+        f"{marker} Investment: the speaker put in 3,000 crore of UB Group money.\n"
+        f"{marker} DRT debt: the transcript identifies 4,999 crore as debt."
+    )
+
+    assert strip_unverified_timestamp_claims(answer) == answer
+
+
+@pytest.mark.parametrize("marker", ["-", "*", "+", "•"])
+def test_timestamp_sanitizer_preserves_list_marker_when_removing_timestamp(marker):
+    answer = f"{marker} The speaker explains the issue at 02:25–04:33."
+
+    assert strip_unverified_timestamp_claims(answer) == (
+        f"{marker} The speaker explains the issue."
+    )
+
+
 def test_unverified_timestamp_claim_sanitizer_removes_labelled_footer_and_single_time_cue():
     answer = (
         "A grounded answer.\n"

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from io import BytesIO
 from urllib.error import HTTPError
@@ -23,6 +24,19 @@ from scripts.chat_answer_source_audit import (
 
 def _case(case_id):
     return next(case for case in AUDIT_CASES if case["id"] == case_id)
+
+
+def _temporal_final_diagnostics(question, answer, context):
+    return {
+        "temporal_location_coverage_final": chain._temporal_location_answer_coverage(
+            question,
+            answer,
+            context,
+        ),
+        "temporal_location_answer_sha256": hashlib.sha256(
+            answer.encode("utf-8")
+        ).hexdigest(),
+    }
 
 
 def test_select_audit_cases_preserves_requested_order_and_returns_expected_subset():
@@ -1582,4 +1596,315 @@ def test_phase11_0_full_registry_gate_requires_all_43_cases(monkeypatch, tmp_pat
         "representative_five_video_live_coverage",
         "all_registered_question_cases_live_audited",
     }
+
+
+def test_temporal_location_audit_fails_when_incomplete_first_pass_is_not_repaired():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
+
+    assert check is not None
+    assert check["name"] == "temporal_location_answer_covers_substantive_sections"
+    assert check["passed"] is False
+
+
+def test_temporal_location_audit_passes_when_review_covers_distinct_sections():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines is briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines was launched in 2002 after an initial planning period.\n"
+        "[SOURCE 3]\nKingfisher Airlines focused on premium passenger comfort and safety.\n"
+        "[SOURCE 4]\nKingfisher's merger, the Deccan acquisition and one-rupee tickets were discussed.\n"
+        "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
+    )
+    answer = (
+        "The opening briefly introduces Kingfisher Airlines. The interviewer asks "
+        "when Mallya decided to launch the airline; Mallya describes the initial "
+        "planning and gives 2002. He describes a premium experience focused on "
+        "passenger comfort and safety. The later discussion covers Kingfisher's "
+        "merger, the Deccan acquisition and one-rupee tickets, followed by the "
+        "airline's financial turmoil and bank support."
+    )
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.8,
+            "needs_review": False,
+        },
+        **_temporal_final_diagnostics(case["question"], answer, context),
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, answer
+    )
+
+    assert check is not None
+    assert check["passed"] is True
+
+
+def test_temporal_location_audit_passes_when_no_repair_was_needed():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines was briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines launched in 2002 after planning.\n"
+        "[SOURCE 3]\nKingfisher Airlines emphasized premium passenger comfort and safety."
+    )
+    answer = (
+        "Kingfisher Airlines was briefly introduced. It launched in 2002 after "
+        "planning. Its premium focus included passenger comfort and safety."
+    )
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3],
+            "covered_source_group_numbers": [1, 2, 3],
+            "required_covered_source_group_count": 2,
+            "coverage_ratio": 1.0,
+            "needs_review": False,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+        **_temporal_final_diagnostics(case["question"], answer, context),
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, answer
+    )
+
+    assert check is not None
+    assert check["passed"] is True
+
+
+def test_temporal_location_audit_does_not_apply_to_ordinary_topic_questions():
+    case = {
+        "id": "Q01",
+        "question": "What does the speaker say about the airline's passenger experience?",
+    }
+
+    assert audit_module._temporal_location_review_quality_check(case, {}, "") is None
+
+
+def test_temporal_location_audit_fails_when_no_topic_evidence_reached_context():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [],
+            "covered_source_group_numbers": [],
+            "required_covered_source_group_count": 0,
+            "coverage_ratio": 0.0,
+            "needs_review": False,
+        },
+        "temporal_location_review_attempted": False,
+        "temporal_location_review_passed": None,
+        "temporal_location_coverage_after": None,
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
+
+    assert check is not None
+    assert check["passed"] is False
+    assert "no topic-matching transcript source blocks" in check["detail"].lower()
+
+
+
+def test_temporal_location_audit_rejects_final_answer_replaced_after_successful_repair():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines is briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines was launched in 2002 after an initial planning period.\n"
+        "[SOURCE 3]\nKingfisher Airlines focused on premium passenger comfort and safety.\n"
+        "[SOURCE 4]\nKingfisher's merger, the Deccan acquisition and one-rupee tickets were discussed.\n"
+        "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
+    )
+    repaired_answer = (
+        "The interviewer asks when Mallya decided to launch Kingfisher Airlines; "
+        "Mallya describes the initial planning and gives 2002. He describes premium "
+        "passenger comfort and safety. The discussion later covers Kingfisher's "
+        "merger, the Deccan acquisition and one-rupee tickets, followed by its "
+        "financial turmoil and bank support."
+    )
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.8,
+            "needs_review": False,
+        },
+        **_temporal_final_diagnostics(case["question"], repaired_answer, context),
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case,
+        generation,
+        "I couldn't find enough information about that in the video. It may not be covered by this video.",
+    )
+
+    assert check is not None
+    assert check["passed"] is False
+    assert "final returned answer" in check["detail"].lower()
+
+
+def test_temporal_location_audit_passes_only_when_final_answer_matches_source_coverage():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    context = (
+        "[SOURCE 1]\nKingfisher Airlines is briefly introduced.\n"
+        "[SOURCE 2]\nKingfisher Airlines was launched in 2002 after an initial planning period.\n"
+        "[SOURCE 3]\nKingfisher Airlines focused on premium passenger comfort and safety.\n"
+        "[SOURCE 4]\nKingfisher's merger, the Deccan acquisition and one-rupee tickets were discussed.\n"
+        "[SOURCE 5]\nKingfisher's financial turmoil and bank support were discussed."
+    )
+    answer = (
+        "The interviewer asks when Mallya decided to launch Kingfisher Airlines; "
+        "Mallya describes the initial planning and gives 2002. He describes premium "
+        "passenger comfort and safety. The discussion later covers Kingfisher's "
+        "merger, the Deccan acquisition and one-rupee tickets, followed by its "
+        "financial turmoil and bank support."
+    )
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.8,
+            "needs_review": False,
+        },
+        **_temporal_final_diagnostics(case["question"], answer, context),
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case,
+        generation,
+        answer,
+    )
+
+    assert check is not None
+    assert check["passed"] is True
+
+
+def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candidates():
+    case = {
+        "id": "Q11",
+        "question": (
+            "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+            "and what is discussed there?"
+        ),
+    }
+    generation = {
+        "temporal_location_coverage_before": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [1, 2, 3, 4, 5],
+            "covered_source_group_numbers": [1],
+            "required_covered_source_group_count": 4,
+            "coverage_ratio": 0.2,
+            "needs_review": True,
+        },
+        "temporal_location_review_attempted": True,
+        "temporal_location_review_passed": True,
+        "temporal_location_coverage_after": {
+            "is_temporal_location_question": True,
+            "candidate_source_group_numbers": [2, 3, 4, 5],
+            "covered_source_group_numbers": [2, 3, 4, 5],
+            "required_covered_source_group_count": 3,
+            "coverage_ratio": 1.0,
+            "needs_review": False,
+        },
+    }
+
+    check = audit_module._temporal_location_review_quality_check(
+        case, generation, "The final answer covers all relevant sections."
+    )
+
+    assert check is not None
+    assert check["passed"] is False
 

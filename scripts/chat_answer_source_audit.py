@@ -34,6 +34,7 @@ from Backend.rag_system.timestamp_utils import (
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
+from Backend.rag_system.chain import is_temporal_location_question
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -1017,6 +1018,183 @@ def _citation_provenance_diagnostics(
     }
 
 
+
+
+
+def _temporal_location_review_quality_check(
+    case: dict[str, Any],
+    generation: dict[str, Any],
+    answer: str,
+) -> dict[str, Any] | None:
+    """Require source-block coverage in the actual final answer, not only model diagnostics."""
+    question = case.get("question")
+    if not is_temporal_location_question(
+        question if isinstance(question, str) else None
+    ):
+        return None
+
+    before = generation.get("temporal_location_coverage_before")
+    attempted = generation.get("temporal_location_review_attempted") is True
+    review_passed = generation.get("temporal_location_review_passed") is True
+    after = generation.get("temporal_location_coverage_after")
+
+    diagnostics_valid = (
+        isinstance(before, dict)
+        and before.get("is_temporal_location_question") is True
+        and isinstance(before.get("needs_review"), bool)
+        and isinstance(before.get("candidate_source_group_numbers"), list)
+        and isinstance(before.get("covered_source_group_numbers"), list)
+        and isinstance(before.get("required_covered_source_group_count"), int)
+        and not isinstance(before.get("required_covered_source_group_count"), bool)
+        and before.get("required_covered_source_group_count", 0) >= 0
+    )
+    if not diagnostics_valid:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location coverage diagnostics are missing or malformed.",
+        )
+
+    candidates = before["candidate_source_group_numbers"]
+    if not candidates:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "No topic-matching transcript source blocks reached the generation prompt.",
+        )
+
+    if any(not isinstance(item, int) or isinstance(item, bool) for item in candidates):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location candidate source identifiers are malformed.",
+        )
+    try:
+        candidate_set = set(candidates)
+    except TypeError:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location candidate source identifiers are malformed.",
+        )
+    if len(candidate_set) != len(candidates):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location candidate source identifiers are duplicated.",
+        )
+    first_pass_needed_review = before["needs_review"]
+    required_count = before["required_covered_source_group_count"]
+    if required_count < 1 or required_count > len(candidates):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Temporal-location required coverage threshold is invalid.",
+        )
+
+    before_covered = before["covered_source_group_numbers"]
+    before_coverage_valid = (
+        all(isinstance(item, int) and not isinstance(item, bool) for item in before_covered)
+        and len(set(before_covered)) == len(before_covered)
+        and set(before_covered).issubset(set(candidates))
+        and len(before_covered) <= len(candidates)
+    )
+    if not before_coverage_valid:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Initial temporal-location covered-source diagnostics are malformed.",
+        )
+
+    after_coverage_valid = (
+        isinstance(after, dict)
+        and after.get("is_temporal_location_question") is True
+        and after.get("needs_review") is False
+        and after.get("candidate_source_group_numbers") == candidates
+        and after.get("required_covered_source_group_count") == required_count
+        and isinstance(after.get("covered_source_group_numbers"), list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in after["covered_source_group_numbers"]
+        )
+        and len(set(after["covered_source_group_numbers"])) == len(after["covered_source_group_numbers"])
+        and set(after["covered_source_group_numbers"]).issubset(set(candidates))
+        and len(after["covered_source_group_numbers"]) >= required_count
+    )
+
+    if first_pass_needed_review and not (attempted and review_passed and after_coverage_valid):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "The initial answer omitted distinct topic-bearing sections and the bounded temporal-location repair did not establish adequate coverage.",
+        )
+
+    if not first_pass_needed_review and attempted and not (review_passed and after_coverage_valid):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "The temporal-location review did not establish adequate section coverage.",
+        )
+
+    # The generation pipeline computes this against the actual answer after
+    # all language/fallback safeguards. Its digest binds the compact coverage
+    # summary to the exact returned answer, without exposing transcript text.
+    answer_digest = generation.get("temporal_location_answer_sha256")
+    expected_answer_digest = (
+        hashlib.sha256(answer.encode("utf-8")).hexdigest()
+        if isinstance(answer, str)
+        else None
+    )
+    if (
+        not isinstance(answer_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", answer_digest) is None
+        or answer_digest != expected_answer_digest
+    ):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "The final returned answer does not match its temporal-location coverage diagnostic.",
+        )
+
+    final_coverage = generation.get("temporal_location_coverage_final")
+    if not isinstance(final_coverage, dict):
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "Final-answer temporal-location coverage diagnostics are missing or malformed.",
+        )
+
+    final_candidates = final_coverage.get("candidate_source_group_numbers")
+    final_covered = final_coverage.get("covered_source_group_numbers")
+    final_required = final_coverage.get("required_covered_source_group_count")
+    final_coverage_valid = (
+        final_coverage.get("is_temporal_location_question") is True
+        and final_coverage.get("needs_review") is False
+        and final_candidates == candidates
+        and final_required == required_count
+        and isinstance(final_covered, list)
+        and all(
+            isinstance(item, int) and not isinstance(item, bool)
+            for item in final_covered
+        )
+        and len(set(final_covered)) == len(final_covered)
+        and set(final_covered).issubset(candidate_set)
+        and len(final_covered) >= required_count
+    )
+    if not final_coverage_valid:
+        return _quality_check(
+            "temporal_location_answer_covers_substantive_sections",
+            False,
+            "The final returned answer does not independently cover the required topic-matching source sections.",
+        )
+
+    return _quality_check(
+        "temporal_location_answer_covers_substantive_sections",
+        True,
+        "The final returned answer independently covers the required topic-matching source sections, with repair diagnostics consistent.",
+    )
+
+
 def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
     """Compare annotated candidate evidence with context, anchors, sources, and timestamp line."""
     observability = response.get("observability")
@@ -1146,6 +1324,13 @@ def analyze_response(case: dict[str, Any], response: dict[str, Any]) -> dict[str
 
     mojibake_markers = [marker for marker in _MOJIBAKE_MARKERS if marker in answer]
     quality_checks = _answer_quality_checks(case, answer)
+    temporal_location_check = _temporal_location_review_quality_check(
+        case,
+        generation,
+        answer,
+    )
+    if temporal_location_check is not None:
+        quality_checks.append(temporal_location_check)
     has_unverified_timestamp_claims = contains_unverified_timestamp_claims(
         _substantive_answer(answer)
     )

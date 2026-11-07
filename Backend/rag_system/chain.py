@@ -25,6 +25,7 @@ Final Answer + Sources
 
 import time
 import argparse
+import hashlib
 import logging
 import math
 import re
@@ -191,6 +192,9 @@ TEMPORAL AND MULTI-PART QUESTIONS
 - Answer time-scoped questions only from the relevant supplied passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage.
 - Include every supported part and distinct item; omit unsupported parts. Use bullets only for genuinely multi-part answers.
 - When a specific count or complete list is requested, count distinct concepts or teams separately when the transcript distinguishes them. Do not merge separate proposals merely because they share a category. Do not invent items to reach a count; disclose when fewer items or an uncertain count are supported.
+
+VIDEO-LOCATION QUESTIONS
+- For questions asking where or when a topic is discussed, scan supplied source blocks chronologically; distinguish passing mentions from substantive discussions and summarize each distinct supported section.
 
 NUMBERS AND FINANCIAL CLAIMS
 - Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker; retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
@@ -699,6 +703,402 @@ def _answer_alignment_terms(text: str, *, source: bool = False) -> set[str]:
     return terms
 
 
+
+_TEMPORAL_LOCATION_QUESTION_PATTERNS = (
+    re.compile(
+        r"\bwhere\b.{0,120}\b(?:in|within|throughout)\s+(?:the\s+)?"
+        r"(?:video|interview|episode|recording|podcast|clip)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:where|when)\b.{0,140}\b"
+        r"(?:discuss\w*|talk\w*|speak\w*|mention\w*|cover\w*|"
+        r"explain\w*|address\w*)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:at what (?:point|time)|(?:which|what)\s+"
+        r"(?:parts?|sections?|portions?|segments?|points?|times?))\b"
+        r".{0,140}\b(?:video|interview|episode|recording|podcast|clip|"
+        r"discuss\w*|talk\w*|speak\w*|mention\w*|cover\w*|"
+        r"explain\w*|address\w*)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:أين|متى|في أي جزء|في أي قسم).{0,120}"
+        r"(?:الفيديو|المقابلة|المقطع)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:الفيديو|المقابلة|المقطع).{0,120}"
+        r"(?:أين|متى|أي جزء|يناقش|يتحدث|يذكر|يشرح)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:कहाँ|कब|किस हिस्से|किस भाग|किस खंड).{0,120}"
+        r"(?:वीडियो|इंटरव्यू|प्रकरण)",
+    ),
+    re.compile(
+        r"(?:वीडियो|इंटरव्यू|प्रकरण).{0,120}"
+        r"(?:कहाँ|कब|किस हिस्से|किस भाग|किस खंड)",
+    ),
+)
+
+_TEMPORAL_LOCATION_STOP_WORDS = frozenset(
+    _CLAIM_STOP_WORDS
+    | set("""
+        video videos interview interviews episode episodes recording recordings
+        podcast podcasts clip clips transcript transcripts caption captions
+        source sources timestamp timestamps chronological order boundaries
+        speaker speakers labels where when point part section portion segment
+        parts sections portions segments discuss discusses discussed discussing
+        discussion discussions talk talks talked talking speak speaks spoke
+        speaking mention mentions mentioned mentioning cover covers covered
+        covering explain explains explained explaining address addresses
+        addressed addressing come comes came up about in at on within throughout
+        this that these those there here which what who does do did is are was
+        were has have had the and for from with into of to a an it its
+        the interviewer guest user asks ask asked asking question questions
+        video interview episode recording podcast clip
+        أين متى الفيديو المقابلة المقطع جزء قسم أجزاء أقسام يتحدث يناقش يذكر يشرح
+        في من عن ما هو هي هذا هذه ذلك هناك
+        कहाँ कब वीडियो इंटरव्यू प्रकरण हिस्सा हिस्से भाग खंड चर्चा बात उल्लेख
+        बताता बताया बताते बताते हैं करता करते किया किस कौन में का की के और है हैं
+        वह यह उस इस पर से तक
+    """.split())
+)
+
+
+def is_temporal_location_question(question: str | None) -> bool:
+    """Recognize questions asking where a subject is substantively discussed."""
+    if not isinstance(question, str) or not question.strip():
+        return False
+    return any(
+        pattern.search(question)
+        for pattern in _TEMPORAL_LOCATION_QUESTION_PATTERNS
+    )
+
+
+def _temporal_location_terms(text: str | None) -> set[str]:
+    """Extract script-aware content terms while excluding source headers and intent words."""
+    if not isinstance(text, str) or not text.strip():
+        return set()
+
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = re.sub(
+        r"(?im)^\s*(?:video id|timestamp)\s*:\s*.*$",
+        " ",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?m)^\s*\[source\s+\d+\]\s*$",
+        " ",
+        normalized,
+    )
+    normalized = re.sub(
+        r"\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*"
+        r"\d{1,2}:\d{2}(?::\d{2})?\s*\]",
+        " ",
+        normalized,
+    )
+
+    terms: set[str] = set()
+    for token in re.findall(r"[^\W_]{2,}", normalized, flags=re.UNICODE):
+        if token in _TEMPORAL_LOCATION_STOP_WORDS:
+            continue
+
+        variants = {token}
+        if re.search(r"[a-z]", token):
+            if len(token) > 5 and token.endswith("ies"):
+                variants.add(token[:-3] + "y")
+            if len(token) > 5 and token.endswith("ing"):
+                stem = token[:-3]
+                variants.add(stem)
+                if len(stem) > 2 and stem[-1] == stem[-2]:
+                    variants.add(stem[:-1])
+            if len(token) > 4 and token.endswith("ed"):
+                variants.add(token[:-2])
+            if len(token) > 4 and token.endswith("es"):
+                variants.add(token[:-2])
+            if len(token) > 4 and token.endswith("s"):
+                variants.add(token[:-1])
+        else:
+            current = token
+            for prefix in ("وال", "بال", "كال", "فال", "لل", "ال"):
+                if current.startswith(prefix) and len(current) > len(prefix) + 2:
+                    variants.add(current[len(prefix):])
+                    break
+            for suffix in ("هما", "كما", "كم", "كن", "هم", "هن", "ها", "نا", "ون", "ات"):
+                if current.endswith(suffix) and len(current) > len(suffix) + 2:
+                    variants.add(current[:-len(suffix)])
+                    break
+
+        terms.update(
+            variant
+            for variant in variants
+            if len(variant) >= 2
+            and variant not in _TEMPORAL_LOCATION_STOP_WORDS
+        )
+    return terms
+
+
+def _temporal_location_source_blocks(context: str) -> list[tuple[int, str]]:
+    """Split prompt context into independent source blocks without joining evidence."""
+    if not isinstance(context, str) or not context.strip():
+        return []
+
+    markers = list(re.finditer(
+        r"(?m)^\s*\[SOURCE\s+(\d+)\]\s*$",
+        context,
+    ))
+    if not markers:
+        return [(1, context.strip())]
+
+    blocks = []
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(context)
+        block_text = context[marker.end():end].strip()
+        try:
+            source_number = int(marker.group(1))
+        except (TypeError, ValueError):
+            source_number = index + 1
+        if block_text:
+            blocks.append((source_number, block_text))
+    return blocks
+
+
+def _temporal_location_answer_coverage(
+    question: str,
+    answer: str,
+    context: str,
+) -> dict[str, Any]:
+    """Measure temporal answer coverage using source-discriminative content anchors.
+
+    A source block is not covered merely because its topic or generic vocabulary
+    appears in the answer. It must contribute at least two answer-matched terms
+    that are distinctive across the topic-matching blocks (or all available
+    distinctive terms when a block has fewer than two). This makes repeated
+    words such as "airline", "government", or "company" insufficient by
+    themselves to satisfy a substantive-section requirement.
+    """
+    if not is_temporal_location_question(question):
+        return {
+            "is_temporal_location_question": False,
+            "candidate_source_group_numbers": [],
+            "covered_source_group_numbers": [],
+            "required_covered_source_group_count": 0,
+            "coverage_ratio": None,
+            "needs_review": False,
+            "source_group_anchor_diagnostics": [],
+        }
+
+    topic_terms = _temporal_location_terms(question)
+    answer_terms = _temporal_location_terms(answer)
+    matching_blocks: list[tuple[int, set[str]]] = []
+    for source_number, block_text in _temporal_location_source_blocks(context):
+        source_terms = _temporal_location_terms(block_text)
+        if topic_terms & source_terms:
+            matching_blocks.append((source_number, source_terms - topic_terms))
+
+    candidate_numbers = [number for number, _ in matching_blocks]
+    term_document_frequency: dict[str, int] = {}
+    for _number, content_terms in matching_blocks:
+        for term in content_terms:
+            term_document_frequency[term] = (
+                term_document_frequency.get(term, 0) + 1
+            )
+
+    candidate_count = len(matching_blocks)
+    # A content term is considered discriminative only when it appears in
+    # fewer than half of the topic-matching source blocks. With one or two
+    # blocks, this naturally reduces to terms unique to that block.
+    rare_term_limit = max(1, (candidate_count - 1) // 2)
+    covered_numbers: list[int] = []
+    anchor_diagnostics: list[dict[str, Any]] = []
+
+    for source_number, content_terms in matching_blocks:
+        distinctive_terms = {
+            term
+            for term in content_terms
+            if term_document_frequency.get(term, 0) <= rare_term_limit
+        }
+        answer_overlap = answer_terms & content_terms
+        distinctive_overlap = answer_overlap & distinctive_terms
+        required_distinctive_count = min(2, len(distinctive_terms))
+        covered = (
+            bool(distinctive_terms)
+            and len(answer_overlap) >= 2
+            and len(distinctive_overlap) >= required_distinctive_count
+        )
+        if covered:
+            covered_numbers.append(source_number)
+
+        anchor_diagnostics.append({
+            "source_group_number": source_number,
+            "source_specific_term_count": len(content_terms),
+            "distinctive_term_count": len(distinctive_terms),
+            "matched_source_specific_term_count": len(answer_overlap),
+            "matched_distinctive_term_count": len(distinctive_overlap),
+            "required_distinctive_term_count": required_distinctive_count,
+            "distinctive_term_coverage": round(
+                len(distinctive_overlap) / len(distinctive_terms),
+                4,
+            ) if distinctive_terms else 0.0,
+            "covered": covered,
+        })
+
+    # Permit at most one incidental teaser/name-drop block, but require the
+    # answer to reflect the remaining topic-matching discussion regions.
+    required_count = (
+        min(candidate_count, max(2, candidate_count - 1))
+        if candidate_count >= 2
+        else candidate_count
+    )
+    coverage_ratio = (
+        len(covered_numbers) / candidate_count
+        if candidate_count
+        else 0.0
+    )
+    needs_review = (
+        candidate_count >= 1
+        and len(covered_numbers) < required_count
+    )
+
+    return {
+        "is_temporal_location_question": True,
+        "candidate_source_group_numbers": candidate_numbers,
+        "covered_source_group_numbers": covered_numbers,
+        "required_covered_source_group_count": required_count,
+        "coverage_ratio": round(coverage_ratio, 4),
+        "needs_review": needs_review,
+        "source_group_anchor_diagnostics": anchor_diagnostics,
+    }
+
+
+def _select_temporal_location_timestamp_candidates(
+    question: str,
+    answer: str,
+    candidates: list[dict[str, Any]],
+    *,
+    max_ranges: int,
+) -> list[dict[str, Any]] | None:
+    """Select timestamp ranges from answer-covered, topic-bearing time clusters.
+
+    Overlapping citation chunks are first coalesced into chronological clusters.
+    We then reuse the same discriminative-anchor test as the temporal
+    completeness guard. This prevents an opening teaser from becoming the sole
+    timestamp just because it has generic lexical overlap with the answer.
+    """
+    ordered = sorted(
+        (
+            item for item in candidates
+            if isinstance(item.get("transcript_text"), str)
+            and item["transcript_text"].strip()
+        ),
+        key=lambda item: (item["start"], item["end"]),
+    )
+    clusters: list[dict[str, Any]] = []
+    for item in ordered:
+        text = item["transcript_text"].strip()
+        if (
+            clusters
+            and float(item["start"]) <= (
+                clusters[-1]["end"] + SOURCE_MERGE_GAP_SECONDS
+            )
+        ):
+            cluster = clusters[-1]
+            cluster["end"] = max(cluster["end"], float(item["end"]))
+            cluster["distance"] = min(
+                cluster["distance"], float(item["distance"])
+            )
+            if text not in cluster["_transcript_parts"]:
+                cluster["_transcript_parts"].append(text)
+        else:
+            clusters.append({
+                "start": float(item["start"]),
+                "end": float(item["end"]),
+                "distance": float(item["distance"]),
+                "_transcript_parts": [text],
+            })
+
+    if not clusters:
+        return None
+
+    context = "\n\n".join(
+        f"[SOURCE {index}]\n" + "\n".join(cluster["_transcript_parts"])
+        for index, cluster in enumerate(clusters, start=1)
+    )
+    coverage = _temporal_location_answer_coverage(
+        question,
+        answer,
+        context,
+    )
+    diagnostics = {
+        item["source_group_number"]: item
+        for item in coverage.get("source_group_anchor_diagnostics", [])
+    }
+    eligible = [
+        (index, cluster, diagnostics.get(index))
+        for index, cluster in enumerate(clusters, start=1)
+        if diagnostics.get(index, {}).get("covered") is True
+    ]
+    if not eligible:
+        return None
+
+    eligible.sort(
+        key=lambda item: (
+            item[2]["matched_distinctive_term_count"],
+            item[2]["matched_source_specific_term_count"],
+            item[2]["distinctive_term_coverage"],
+            -item[1]["distance"],
+        ),
+        reverse=True,
+    )
+    selected = [item[1] for item in eligible[:max_ranges]]
+    selected.sort(key=lambda item: (item["start"], item["end"]))
+    return selected or None
+
+
+def _temporal_location_completeness_repair_instruction(
+    question: str,
+    answer: str,
+    context: str,
+) -> str | None:
+    """Request one bounded rewrite when a location answer omits distinct topic-bearing sections."""
+    coverage = _temporal_location_answer_coverage(question, answer, context)
+    if not coverage["needs_review"]:
+        return None
+
+    covered = set(coverage["covered_source_group_numbers"])
+    missing_labels = []
+    for source_number, block_text in _temporal_location_source_blocks(context):
+        if source_number not in coverage["candidate_source_group_numbers"] or source_number in covered:
+            continue
+        missing_labels.append(f"SOURCE {source_number}")
+
+    return (
+        "TEMPORAL LOCATION COMPLETENESS REVIEW. The question asks where a topic "
+        "is substantively discussed in the video, not merely where its name first "
+        "appears. The previous draft meaningfully covered "
+        f"{len(coverage['covered_source_group_numbers'])} of "
+        f"{len(coverage['candidate_source_group_numbers'])} topic-matching source "
+        "blocks; the supplied context supports reviewing at least "
+        f"{coverage['required_covered_source_group_count']} distinct blocks. "
+        "Re-read every supplied source block in chronological order, including "
+        "these topic-matching blocks not yet represented in the draft: "
+        + (", ".join(missing_labels) if missing_labels else "the remaining matching blocks")
+        + ". Verify whether each is a substantive discussion rather than a teaser, "
+        "passing mention, interviewer framing, or incidental match. Rewrite the "
+        "answer from scratch in English, covering each distinct substantive section "
+        "and briefly explaining what is discussed there. Do not force coverage of "
+        "a block that is only an incidental mention, and do not merge separate "
+        "discussions into a vague statement. Preserve guest/interviewer attribution "
+        "and uncertainty. Use only the supplied transcript context. Do not output "
+        "timestamp ranges, source labels, or invented times; the application adds "
+        "verified timestamps separately."
+    )
+
+
 def _select_answer_aligned_timestamp_candidates(
     answer: str,
     candidates: list[dict[str, Any]],
@@ -812,6 +1212,7 @@ def append_relevant_source_timestamps(
     *,
     has_evidence: bool,
     max_ranges: int = 3,
+    question: str | None = None,
 ) -> str:
     """Append source-grounded timestamp ranges to a substantive answer.
 
@@ -893,17 +1294,29 @@ def append_relevant_source_timestamps(
     if not candidates:
         return answer
 
-    selected = _select_claim_aligned_timestamp_candidates(
-        answer,
-        candidates,
-        max_ranges=max_ranges,
-    )
-    if selected is None:
-        selected = _select_answer_aligned_timestamp_candidates(
+    if is_temporal_location_question(question):
+        selected = _select_temporal_location_timestamp_candidates(
+            question,
             answer,
             candidates,
             max_ranges=max_ranges,
         )
+        # Temporal-location requests must not fall back to a nearest or generic
+        # opening interval when no answer-covered substantive section is found.
+        if selected is None:
+            return answer
+    else:
+        selected = _select_claim_aligned_timestamp_candidates(
+            answer,
+            candidates,
+            max_ranges=max_ranges,
+        )
+        if selected is None:
+            selected = _select_answer_aligned_timestamp_candidates(
+                answer,
+                candidates,
+                max_ranges=max_ranges,
+            )
     if selected is None:
         # Do not attach a nearest-by-distance timestamp to an eye/eyelid sound
         # claim when source text is available but provides no acoustic evidence
@@ -1045,6 +1458,7 @@ def append_verified_response_timestamps(
         answer=temporal_answer,
         sources=sources,
         has_evidence=has_evidence,
+        question=question,
     )
 
 
@@ -3481,6 +3895,51 @@ def _dominant_supported_script_language(text: str) -> str | None:
     return ranked[0][0]
 
 
+
+_SOURCE_LANGUAGE_SCRIPT_PATTERN = re.compile(
+    r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\u0900-\u097f]"
+)
+_SOURCE_LANGUAGE_QUOTE_PATTERN = re.compile(
+    r"“(?P<curly_double>[^”\r\n]*)”|"
+    r"«(?P<guillemet>[^»\r\n]*)»|"
+    r"‘(?P<curly_single>[^’\r\n]*)’|"
+    r'"(?P<straight_double>[^"\r\n]*)"'
+)
+_MAX_SOURCE_LANGUAGE_QUOTE_CHARS = 180
+_MAX_SOURCE_LANGUAGE_QUOTE_WORDS = 32
+
+
+def _remove_permitted_source_language_quote(text: str) -> str | None:
+    """Remove one short, delimited Hindi/Arabic/Urdu excerpt for language scoring.
+
+    The source-language quotation is permitted only once and only as a short,
+    clearly delimited excerpt. Returning None means the draft violates that
+    contract and should receive the bounded English-only repair.
+    """
+    source_quotes = []
+    for match in _SOURCE_LANGUAGE_QUOTE_PATTERN.finditer(text):
+        excerpt = next(
+            value for value in match.groupdict().values() if value is not None
+        )
+        if _SOURCE_LANGUAGE_SCRIPT_PATTERN.search(excerpt):
+            source_quotes.append((match, excerpt))
+
+    if not source_quotes:
+        return text
+
+    if len(source_quotes) != 1:
+        return None
+
+    match, excerpt = source_quotes[0]
+    if (
+        len(excerpt) > _MAX_SOURCE_LANGUAGE_QUOTE_CHARS
+        or len(re.findall(r"\S+", excerpt)) > _MAX_SOURCE_LANGUAGE_QUOTE_WORDS
+    ):
+        return None
+
+    return text[:match.start()] + " " + text[match.end():]
+
+
 def _question_answer_language_mismatch(
     question: str,
     answer: str,
@@ -3498,7 +3957,16 @@ def _question_answer_language_mismatch(
     if _looks_like_turkish_answer(normalized_answer):
         return expected, "tr"
 
-    counts = _supported_script_letter_counts(normalized_answer)
+    answer_for_language_check = _remove_permitted_source_language_quote(
+        normalized_answer
+    )
+    if answer_for_language_check is None:
+        # The English audit contract permits only one short, delimited source
+        # quotation. Trigger a rewrite instead of letting repeated quotations
+        # pass merely because English prose remains the dominant script.
+        return expected, "source_quotes"
+
+    counts = _supported_script_letter_counts(answer_for_language_check)
     total = sum(counts.values())
     if total < 8:
         return None
@@ -3526,6 +3994,14 @@ def _generation_repair_instruction(
     answer_text = _strip_unverified_timestamp_summary(answer or "")
     context_text = context or ""
 
+    temporal_location_instruction = _temporal_location_completeness_repair_instruction(
+        question=question_text,
+        answer=answer_text,
+        context=context_text,
+    )
+    if temporal_location_instruction:
+        instructions.append(temporal_location_instruction)
+
     gold_evidence_instruction = _gold_evidence_repair_instruction(
         question=question_text,
         answer=answer_text,
@@ -3540,18 +4016,31 @@ def _generation_repair_instruction(
     )
     if language_mismatch is not None:
         _required_language, previous_language = language_mismatch
-        previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
-        instructions.append(
-            "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
-            + previous_name
-            + ". Rewrite the complete main answer in English, regardless of the "
-            + "question or transcript language. Translate only meaning supported by "
-            + "the supplied transcript context. You may retain one short, exact "
-            + "original-language excerpt when it helps verify a key point, but "
-            + "immediately explain it in English. Do not invent quotations, facts, "
-            + "names, dates, numbers, or timestamps. Do not include a timestamp "
-            + "line; the application adds verified timestamps separately."
-        )
+        if previous_language == "source_quotes":
+            instructions.append(
+                "ENGLISH-ONLY RESPONSE REPAIR. The previous draft violated the "
+                "single source-language quotation rule by repeating an original-"
+                "language excerpt or using an overlong excerpt. Rewrite the complete "
+                "main answer in English. Retain at most one short, exact Hindi, "
+                "Arabic, or Urdu quotation from the supplied context, with its "
+                "English meaning immediately beside it. Keep all other wording in "
+                "English and do not repeat the excerpt. Do not invent quotations, "
+                "facts, names, dates, numbers, or timestamps. Do not include a "
+                "timestamp line; the application adds verified timestamps separately."
+            )
+        else:
+            previous_name = _SUPPORTED_SCRIPT_NAMES[previous_language]
+            instructions.append(
+                "ENGLISH-ONLY RESPONSE REPAIR. The previous draft is predominantly in "
+                + previous_name
+                + ". Rewrite the complete main answer in English, regardless of the "
+                + "question or transcript language. Translate only meaning supported by "
+                + "the supplied transcript context. You may retain one short, exact "
+                + "original-language excerpt when it helps verify a key point, but "
+                + "immediately explain it in English. Do not invent quotations, facts, "
+                + "names, dates, numbers, or timestamps. Do not include a timestamp "
+                + "line; the application adds verified timestamps separately."
+            )
 
     if _is_abstention_answer(answer_text) and context_text.strip():
         instructions.append(
@@ -6405,6 +6894,10 @@ def build_rag_chain(
                     "fallback_used": True,
                     "latency_ms": 0.0,
                     "context_budget": context_budget,
+                    "temporal_location_review_attempted": False,
+                    "temporal_location_review_passed": None,
+                    "temporal_location_coverage_before": None,
+                    "temporal_location_coverage_after": None,
                 },
             }
 
@@ -6592,6 +7085,17 @@ def build_rag_chain(
         )
         repair_attempted = repair_instruction is not None
         repair_passed = None
+        temporal_location_coverage_before = _temporal_location_answer_coverage(
+            question_text,
+            answer,
+            inputs.get("context", ""),
+        )
+        temporal_location_review_attempted = bool(
+            repair_instruction
+            and "TEMPORAL LOCATION COMPLETENESS REVIEW" in repair_instruction
+        )
+        temporal_location_review_passed = None
+        temporal_location_coverage_after = None
         grounded_financial_fallback_used = False
         financial_answer_suppressed = False
         financial_fallback_diagnostics: dict[str, Any] = {}
@@ -6717,6 +7221,23 @@ def build_rag_chain(
                         "no source-bound extractive fallback was available"
                     )
 
+        if temporal_location_review_attempted:
+            temporal_location_coverage_after = _temporal_location_answer_coverage(
+                question_text,
+                answer,
+                inputs.get("context", ""),
+            )
+            temporal_location_review_passed = not temporal_location_coverage_after["needs_review"]
+            logger.info(
+                "Temporal-location completeness review finished video_id=%s "
+                "passed=%s covered=%s candidates=%s required=%s",
+                inputs.get("video_id"),
+                temporal_location_review_passed,
+                temporal_location_coverage_after["covered_source_group_numbers"],
+                temporal_location_coverage_after["candidate_source_group_numbers"],
+                temporal_location_coverage_after["required_covered_source_group_count"],
+            )
+
         # A failed language repair must never leak a non-English main answer.
         # Preserve the fixed response contract even when the provider ignores the
         # one bounded rewrite instruction.
@@ -6819,6 +7340,12 @@ def build_rag_chain(
                         "or transcript-name mismatch"
                     )
 
+        temporal_location_coverage_final = _temporal_location_answer_coverage(
+            question_text,
+            answer,
+            inputs.get("context", ""),
+        )
+
         return {
             "answer": answer,
             "generation_trace": {
@@ -6831,6 +7358,19 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "temporal_location_review_attempted": temporal_location_review_attempted,
+                "temporal_location_review_passed": temporal_location_review_passed,
+                "temporal_location_coverage_before": (
+                    temporal_location_coverage_before
+                    if temporal_location_coverage_before["is_temporal_location_question"]
+                    else None
+                ),
+                "temporal_location_coverage_after": temporal_location_coverage_after,
+                "temporal_location_coverage_final": (
+                    temporal_location_coverage_final
+                    if temporal_location_coverage_before["is_temporal_location_question"]
+                    else None
+                ),
                 "repair_aborted_due_quota": repair_aborted_due_quota,
                 "provider_failure_reason": (
                     "daily_token_quota_exhausted"
@@ -7244,6 +7784,12 @@ def answer_question(
             ),
         }
     )
+
+    generation_observability = observability.get("generation", {})
+    if isinstance(generation_observability.get("temporal_location_coverage_final"), dict):
+        generation_observability["temporal_location_answer_sha256"] = hashlib.sha256(
+            final_answer.encode("utf-8")
+        ).hexdigest()
 
     return {
     "answer":
