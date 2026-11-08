@@ -414,8 +414,11 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI03",
+        # The count-bearing caption is the opening passage; reserve it so
+        # generation and source-extractive recovery can both verify "84".
         groups=(("84 प्रकार के कर",),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="HI04",
@@ -432,13 +435,17 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI07",
-        groups=(("बिजोलिया में",),),
+        # The opening caption locates the first major movement with the exact
+        # phrase "अपने बिजोलिया"; the following "बिजोलिया में" clause is about taxes.
+        groups=(("अपने बिजोलिया",),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="HI08",
         groups=(("84 प्रकार के कर",),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
     ),
     GoldEvidenceCase(
         question_id="HI09",

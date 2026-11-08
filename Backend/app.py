@@ -874,6 +874,8 @@ def chat(
         has_grounded_non_llm_fallback = bool(
             generation_trace.get("grounded_financial_fallback_used")
             or generation_trace.get("grounded_hindi_tax_fallback_used")
+            or generation_trace.get("grounded_hindi_tax_count_fallback_used")
+            or generation_trace.get("grounded_hindi_movement_location_fallback_used")
         )
         if (
             generation_trace.get("repair_aborted_due_quota")

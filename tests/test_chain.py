@@ -4103,6 +4103,127 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "question,caption,expected_id,required_phrase",
+    [
+        (
+            "How many types of taxes does the speaker mention?",
+            "84 प्रकार के कर लग रहे थे",
+            "HI03",
+            "84 प्रकार के कर",
+        ),
+        (
+            "Where does the speaker locate the first major farmers' movement in relation to Bijolia?",
+            "पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया बिजोलिया में",
+            "HI07",
+            "अपने बिजोलिया",
+        ),
+    ],
+)
+def test_hindi_generation_context_reserves_answer_bearing_caption_under_budget(
+    question, caption, expected_id, required_phrase
+):
+    filler = [
+        "राजस्थान के इतिहास में किसानों से जुड़े अन्य सामान्य विषयों का उल्लेख किया गया।"
+        for _ in range(30)
+    ]
+    group = _caption_group(
+        820,
+        0,
+        [*filler, caption],
+        0.78,
+    )
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=1400,
+        video_id="INpnuL7qnzY",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 1400
+    assert diagnostics["reduced"] is True
+    assert required_phrase in result["context"]
+    assert diagnostics["gold_evidence_question_id"] == expected_id
+    assert diagnostics["gold_evidence_groups_required"] == 1
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert diagnostics["gold_evidence_context_coverage"] == 1.0
+
+
+@pytest.mark.unit
+def test_hindi_tax_count_fallback_requires_explicit_caption_evidence():
+    question = "How many types of taxes does the speaker mention?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:03] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\n"
+        "- [00:03–00:06] बिजोलिया में कितने प्रकार के कर थे।\n"
+        "- [00:06–00:09] 84 प्रकार के कर लग रहे थे।"
+    )
+    diagnostics = {}
+
+    answer = chain._build_hindi_tax_count_evidence_fallback(
+        question,
+        context,
+        diagnostics,
+    )
+
+    assert answer == "The speaker mentions 84 types of taxes."
+    assert diagnostics["used"] is True
+    assert diagnostics["extracted_count"] == "84"
+    assert diagnostics["matched_evidence_phrase"] == "84 प्रकार के कर"
+
+    assert chain._build_hindi_tax_count_evidence_fallback(
+        question,
+        "[SOURCE 1]\n- [00:00–00:03] किसानों पर कई प्रकार के कर लगाए गए।",
+    ) is None
+    assert chain._build_hindi_tax_count_evidence_fallback(
+        "What is the new tax called?",
+        context,
+    ) is None
+    assert chain._build_hindi_tax_count_evidence_fallback(
+        question,
+        "[SOURCE 1]\n- [00:00–00:03] ८४ प्रकार के कर थे।",
+    ) == "The speaker mentions 84 types of taxes."
+
+
+@pytest.mark.unit
+def test_hindi_movement_location_fallback_requires_both_movement_and_place_evidence():
+    question = "Where does the speaker locate the first major farmers' movement in relation to Bijolia?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:04] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\n"
+        "- [00:04–00:07] बिजोलिया में कितने प्रकार के कर थे।"
+    )
+    diagnostics = {}
+
+    answer = chain._build_hindi_movement_location_evidence_fallback(
+        question,
+        context,
+        diagnostics,
+    )
+
+    assert answer == "The speaker locates the first major farmers' movement in Bijolia."
+    assert diagnostics["used"] is True
+    assert diagnostics["matched_movement_phrase"] == "पहला बड़ा किसान आंदोलन"
+    assert diagnostics["matched_location_phrase"] == "अपने बिजोलिया"
+
+    assert chain._build_hindi_movement_location_evidence_fallback(
+        question,
+        "[SOURCE 1]\n- [00:00–00:04] पहला बड़ा किसान आंदोलन हुआ। बिजोलिया में कर लगाए गए।",
+    ) is None
+    assert chain._build_hindi_movement_location_evidence_fallback(
+        question,
+        (
+            "[SOURCE 1]\n- [00:00–00:04] पहला बड़ा किसान आंदोलन कौन सा हुआ था।\n"
+            "[SOURCE 2]\n- [00:04–00:07] अपने बिजोलिया।"
+        ),
+    ) is None
+
+
+@pytest.mark.unit
 def test_generation_context_preserves_hindi_named_tax_evidence_across_budgeted_caption_lines():
     question = "कौन-सा नया टैक्स लगाया गया था और उसे क्या नाम दिया?"
     filler = [
@@ -5595,6 +5716,124 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
     assert "Debt certificate: the transcript identifies the certificate amount as the figure 6,203" in answer
     assert "recovery figure of 14,100 crore rupees" in answer
     assert "does not clearly explain how the DRT judgment and debt-certificate figures relate" in answer
+
+
+@pytest.mark.unit
+def test_rag_chain_uses_grounded_hindi_tax_count_after_empty_provider_answer(monkeypatch):
+    source_text = (
+        "पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया। "
+        "बिजोलिया में कितने प्रकार के कर थे। 84 प्रकार के कर लग रहे थे।"
+    )
+    source_document = doc(911, 0, 30, source_text)
+    source_document.metadata["video_id"] = "INpnuL7qnzY"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(source_document, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [911],
+                "citation_chunk_ids": [911],
+            },
+        ),
+    )
+
+    def fail_with_empty_provider_answer(**kwargs):
+        raise RuntimeError(
+            "The Groq model returned an empty answer after 3 attempts. "
+            "Diagnostics: {'finish_reason': 'length', 'content_length': 0, "
+            "'reasoning_length': 0}"
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", fail_with_empty_provider_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "How many types of taxes does the speaker mention?",
+        "video_id": "INpnuL7qnzY",
+    })
+
+    trace = result["generation_trace"]
+    assert result["answer"].startswith("The speaker mentions 84 types of taxes.")
+    assert trace["generated"] is False
+    assert trace["fallback_used"] is True
+    assert trace["provider_failure_reason"] == "empty_answer_after_retries"
+    assert trace["grounded_hindi_tax_count_fallback_used"] is True
+    assert trace["hindi_tax_count_fallback_diagnostics"]["extracted_count"] == "84"
+    assert trace["tax_count_fallback_context_source"] == "full_retrieved_source_groups"
+    assert "911" in {str(value) for value in trace["context_budget"]["included_chunk_ids"]}
+
+    selected_results = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    assert selected_results
+    formatted_sources = chain.format_sources(
+        chain.merge_overlapping_results(selected_results)
+    )
+    assert formatted_sources
+    assert formatted_sources[0]["video_id"] == "INpnuL7qnzY"
+    assert 911 in formatted_sources[0]["chunk_ids"]
+
+
+@pytest.mark.unit
+def test_rag_chain_repairs_hi07_with_source_grounded_bijolia_location_when_model_abstains(monkeypatch):
+    source_text = (
+        "पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया। "
+        "बिजोलिया में कितने प्रकार के कर थे।"
+    )
+    source_document = doc(912, 0, 30, source_text)
+    source_document.metadata["video_id"] = "INpnuL7qnzY"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            [(source_document, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [912],
+                "citation_chunk_ids": [912],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **kwargs: chain.FALLBACK_ANSWER,
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": "Where does the speaker locate the first major farmers' movement in relation to Bijolia?",
+        "video_id": "INpnuL7qnzY",
+    })
+
+    trace = result["generation_trace"]
+    assert result["answer"].startswith(
+        "The speaker locates the first major farmers' movement in Bijolia."
+    )
+    assert trace["grounded_hindi_movement_location_fallback_used"] is True
+    assert trace["hindi_movement_location_fallback_diagnostics"]["matched_location_phrase"] == "अपने बिजोलिया"
+    assert trace["movement_location_fallback_context_source"] == "full_retrieved_source_groups"
+    assert trace["temporal_location_coverage_before"] is None
+    assert "912" in {str(value) for value in trace["context_budget"]["included_chunk_ids"]}
+
+    selected_results = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    assert selected_results
+    formatted_sources = chain.format_sources(
+        chain.merge_overlapping_results(selected_results)
+    )
+    assert formatted_sources
+    assert formatted_sources[0]["video_id"] == "INpnuL7qnzY"
+    assert 912 in formatted_sources[0]["chunk_ids"]
 
 
 @pytest.mark.unit
@@ -7205,6 +7444,25 @@ def test_temporal_location_question_intent_recognizes_supported_phrasings(questi
 )
 def test_temporal_location_question_intent_rejects_non_location_questions(question):
     assert not chain.is_temporal_location_question(question)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Where does the speaker locate the first major farmers' movement in relation to Bijolia?",
+        "Where is the speaker located in relation to Bijolia?",
+    ],
+)
+def test_temporal_location_classifier_does_not_treat_speaker_as_speak(question):
+    assert not chain.is_temporal_location_question(question)
+
+
+@pytest.mark.unit
+def test_temporal_location_classifier_still_recognizes_discussion_questions():
+    assert chain.is_temporal_location_question(
+        "Where does the speaker discuss the Bijolia movement in the video?"
+    )
 
 
 def _temporal_location_regression_context():
