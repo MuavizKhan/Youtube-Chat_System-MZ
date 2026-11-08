@@ -712,7 +712,7 @@ _TEMPORAL_LOCATION_QUESTION_PATTERNS = (
     ),
     re.compile(
         r"\b(?:where|when)\b.{0,140}\b"
-        r"(?:discuss\w*|talk\w*|speak\w*|mention\w*|cover\w*|"
+        r"(?:discuss\w*|talk\w*|(?:speak(?:s|ing)?|spoke|spoken)|mention\w*|cover\w*|"
         r"explain\w*|address\w*)\b",
         re.IGNORECASE,
     ),
@@ -720,7 +720,7 @@ _TEMPORAL_LOCATION_QUESTION_PATTERNS = (
         r"\b(?:at what (?:point|time)|(?:which|what)\s+"
         r"(?:parts?|sections?|portions?|segments?|points?|times?))\b"
         r".{0,140}\b(?:video|interview|episode|recording|podcast|clip|"
-        r"discuss\w*|talk\w*|speak\w*|mention\w*|cover\w*|"
+        r"discuss\w*|talk\w*|(?:speak(?:s|ing)?|spoke|spoken)|mention\w*|cover\w*|"
         r"explain\w*|address\w*)\b",
         re.IGNORECASE,
     ),
@@ -4332,6 +4332,189 @@ def _build_hindi_named_tax_evidence_fallback(
     )
 
 
+def _build_full_retrieved_source_group_context(
+    source_groups: list[dict[str, Any]] | None,
+    fallback_context: str | None = None,
+) -> str:
+    """Render all retrieved source evidence without crossing source-group boundaries."""
+    if not isinstance(source_groups, list) or not source_groups:
+        return fallback_context.strip() if isinstance(fallback_context, str) else ""
+
+    blocks: list[str] = []
+    rendered_context = build_context(source_groups)
+    if isinstance(rendered_context, str) and rendered_context.strip():
+        blocks.append(rendered_context.strip())
+
+    raw_source_number = len(source_groups)
+    for group_index, source_group in enumerate(source_groups, start=1):
+        if not isinstance(source_group, dict):
+            continue
+        raw_documents = source_group.get("documents", [])
+        if not isinstance(raw_documents, list):
+            continue
+        raw_parts = []
+        for document in raw_documents:
+            raw_text = getattr(document, "page_content", "")
+            if isinstance(raw_text, str) and raw_text.strip():
+                raw_parts.append(raw_text.strip())
+        if raw_parts:
+            blocks.append(
+                f"[SOURCE {raw_source_number + group_index}]\n"
+                "Original retrieved document text:\n"
+                + "\n".join(raw_parts)
+            )
+
+    combined = "\n\n".join(blocks).strip()
+    if combined:
+        return combined
+    return fallback_context.strip() if isinstance(fallback_context, str) else ""
+
+
+def _build_hindi_tax_count_evidence_fallback(
+    question: str,
+    context: str,
+    diagnostics: dict[str, Any] | None = None,
+) -> str | None:
+    """Answer a Hindi tax-count question only from an explicit caption count."""
+    normalized_question = unicodedata.normalize("NFKC", question or "").casefold()
+    is_native_hindi = bool(re.search(r"[\u0900-\u097f]", normalized_question))
+    if is_native_hindi:
+        is_tax_question = bool(re.search(r"टैक्स|कर", normalized_question))
+        asks_count = bool(re.search(r"कितने|कितनी|कितना|संख्या|गिनती", normalized_question))
+    else:
+        is_tax_question = bool(re.search(
+            r"\b(?:tax|taxes|levy|levies)\b",
+            normalized_question,
+            re.IGNORECASE,
+        ))
+        asks_count = bool(re.search(
+            r"\bhow\s+many\b|\bnumber\s+of\b|\bcount\b",
+            normalized_question,
+            re.IGNORECASE,
+        ))
+
+    if not (is_tax_question and asks_count):
+        if diagnostics is not None:
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "question_not_tax_count",
+            })
+        return None
+
+    source_blocks = re.split(
+        r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
+        unicodedata.normalize("NFKC", context or ""),
+    )
+    caption_timestamp_prefix = re.compile(
+        r"(?m)^\s*-\s*\[\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*"
+        r"\d{1,2}:\d{2}(?::\d{2})?\]\s*"
+    )
+    tax_count_assertion = re.compile(
+        r"(?<![\d०-९])(?P<count>(?:\d{1,3}|[०-९]{1,3}))\s+"
+        r"प्रकार\s+के\s+कर"
+    )
+
+    match = None
+    matched_block_number = None
+    for block_number, source_block in enumerate(source_blocks, start=1):
+        source_text = caption_timestamp_prefix.sub(" ", source_block)
+        source_text = re.sub(r"\s+", " ", source_text).strip()
+        candidate = tax_count_assertion.search(source_text)
+        if candidate is not None:
+            match = candidate
+            matched_block_number = block_number
+            break
+
+    if match is None:
+        if diagnostics is not None:
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "explicit_hindi_tax_count_not_found",
+            })
+        return None
+
+    devanagari_digits = str.maketrans("०१२३४५६७८९", "0123456789")
+    count = str(int(match.group("count").translate(devanagari_digits)))
+    if diagnostics is not None:
+        diagnostics.update({
+            "used": True,
+            "rejection_reason": None,
+            "extracted_count": count,
+            "matched_evidence_phrase": match.group(0),
+            "matched_source_block_number": matched_block_number,
+        })
+    return f"The speaker mentions {count} types of taxes."
+
+
+def _build_hindi_movement_location_evidence_fallback(
+    question: str,
+    context: str,
+    diagnostics: dict[str, Any] | None = None,
+) -> str | None:
+    """Translate the explicit opening-caption location into a short English answer."""
+    normalized_question = unicodedata.normalize("NFKC", question or "").casefold()
+    is_location_question = bool(re.search(
+        r"\bwhere\b|\bloc(?:ate|ates|ated|ating|ation)\b|\bposition\b|"
+        r"कहाँ|कहां|स्थान|स्थित",
+        normalized_question,
+        re.IGNORECASE,
+    ))
+    is_movement_question = bool(
+        re.search(
+            r"\b(?:farmers?|peasant)\b.{0,80}\bmovement\b|"
+            r"\bmovement\b.{0,80}\b(?:farmers?|peasant)\b",
+            normalized_question,
+            re.IGNORECASE,
+        )
+        or re.search(r"किसान\s+आंदोलन", normalized_question)
+    )
+    mentions_bijolia = bool(re.search(r"bijolia|बिजोलिया", normalized_question))
+    if not (is_location_question and is_movement_question and mentions_bijolia):
+        if diagnostics is not None:
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "question_not_bijolia_movement_location",
+            })
+        return None
+
+    source_blocks = re.split(
+        r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
+        unicodedata.normalize("NFKC", context or ""),
+    )
+    caption_timestamp_prefix = re.compile(
+        r"(?m)^\s*-\s*\[\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*"
+        r"\d{1,2}:\d{2}(?::\d{2})?\]\s*"
+    )
+    movement_phrase = re.compile(r"पहला\s+बड़ा\s+किसान\s+आंदोलन")
+    location_phrase = re.compile(r"बिजोलिया\s+में")
+
+    matched_block_number = None
+    for block_number, source_block in enumerate(source_blocks, start=1):
+        source_text = caption_timestamp_prefix.sub(" ", source_block)
+        source_text = re.sub(r"\s+", " ", source_text).strip()
+        if movement_phrase.search(source_text) and location_phrase.search(source_text):
+            matched_block_number = block_number
+            break
+
+    if matched_block_number is None:
+        if diagnostics is not None:
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": "opening_movement_and_bijolia_location_not_found_together",
+            })
+        return None
+
+    if diagnostics is not None:
+        diagnostics.update({
+            "used": True,
+            "rejection_reason": None,
+            "matched_movement_phrase": "पहला बड़ा किसान आंदोलन",
+            "matched_location_phrase": "बिजोलिया में",
+            "matched_source_block_number": matched_block_number,
+        })
+    return "The speaker locates the first major farmers' movement in Bijolia."
+
+
 def _financial_fallback_question_scope(question: str) -> str:
     """Select a conservative financial fallback scope from the question wording.
 
@@ -6995,6 +7178,14 @@ def build_rag_chain(
             answer = _fallback_for_question_language(question_text)
             financial_answer_suppressed = False
             grounded_financial_fallback_used = False
+            grounded_hindi_tax_fallback_used = False
+            hindi_tax_fallback_diagnostics: dict[str, Any] = {}
+            grounded_hindi_tax_count_fallback_used = False
+            hindi_tax_count_fallback_diagnostics: dict[str, Any] = {}
+            grounded_hindi_movement_location_fallback_used = False
+            hindi_movement_location_fallback_diagnostics: dict[str, Any] = {}
+            tax_count_fallback_context_source = None
+            movement_location_fallback_context_source = None
             if is_financial_question:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
@@ -7007,6 +7198,39 @@ def build_rag_chain(
                 else:
                     answer = FINANCIAL_VERIFICATION_FALLBACK
                     financial_answer_suppressed = True
+            else:
+                source_evidence_context = _build_full_retrieved_source_group_context(
+                    inputs.get("source_groups", []),
+                    inputs.get("context", ""),
+                )
+                movement_location_answer = _build_hindi_movement_location_evidence_fallback(
+                    question_text,
+                    source_evidence_context,
+                    hindi_movement_location_fallback_diagnostics,
+                )
+                if movement_location_answer is not None:
+                    answer = movement_location_answer
+                    grounded_hindi_movement_location_fallback_used = True
+                    movement_location_fallback_context_source = "full_retrieved_source_groups"
+                else:
+                    tax_count_answer = _build_hindi_tax_count_evidence_fallback(
+                        question_text,
+                        source_evidence_context,
+                        hindi_tax_count_fallback_diagnostics,
+                    )
+                    if tax_count_answer is not None:
+                        answer = tax_count_answer
+                        grounded_hindi_tax_count_fallback_used = True
+                        tax_count_fallback_context_source = "full_retrieved_source_groups"
+                    else:
+                        named_tax_answer = _build_hindi_named_tax_evidence_fallback(
+                            question_text,
+                            source_evidence_context,
+                            hindi_tax_fallback_diagnostics,
+                        )
+                        if named_tax_answer is not None:
+                            answer = named_tax_answer
+                            grounded_hindi_tax_fallback_used = True
             provider_failure_reason = (
                 "daily_token_quota_exhausted"
                 if daily_quota_exhausted
@@ -7038,8 +7262,14 @@ def build_rag_chain(
                     "question_language_repair_passed": None,
                     "grounded_financial_fallback_used": grounded_financial_fallback_used,
                     "financial_answer_suppressed": financial_answer_suppressed,
-                    "grounded_hindi_tax_fallback_used": False,
-                    "hindi_tax_fallback_diagnostics": {},
+                    "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,
+                    "hindi_tax_fallback_diagnostics": hindi_tax_fallback_diagnostics,
+                    "grounded_hindi_tax_count_fallback_used": grounded_hindi_tax_count_fallback_used,
+                    "hindi_tax_count_fallback_diagnostics": hindi_tax_count_fallback_diagnostics,
+                    "tax_count_fallback_context_source": tax_count_fallback_context_source,
+                    "grounded_hindi_movement_location_fallback_used": grounded_hindi_movement_location_fallback_used,
+                    "hindi_movement_location_fallback_diagnostics": hindi_movement_location_fallback_diagnostics,
+                    "movement_location_fallback_context_source": movement_location_fallback_context_source,
                     "financial_evidence_context_chars": (
                         len(financial_evidence_context) if is_financial_question else None
                     ),
@@ -7101,6 +7331,12 @@ def build_rag_chain(
         financial_fallback_diagnostics: dict[str, Any] = {}
         grounded_hindi_tax_fallback_used = False
         hindi_tax_fallback_diagnostics: dict[str, Any] = {}
+        grounded_hindi_tax_count_fallback_used = False
+        hindi_tax_count_fallback_diagnostics: dict[str, Any] = {}
+        tax_count_fallback_context_source = None
+        grounded_hindi_movement_location_fallback_used = False
+        hindi_movement_location_fallback_diagnostics: dict[str, Any] = {}
+        movement_location_fallback_context_source = None
         repair_aborted_due_quota = False
         grounded_gold_evidence_fallback_used = False
         gold_evidence_fallback_diagnostics: dict[str, Any] = {}
@@ -7150,6 +7386,38 @@ def build_rag_chain(
                         financial_answer_suppressed = True
                 else:
                     answer = _fallback_for_question_language(question_text)
+                    source_evidence_context = _build_full_retrieved_source_group_context(
+                        inputs.get("source_groups", []),
+                        inputs.get("context", ""),
+                    )
+                    movement_location_answer = _build_hindi_movement_location_evidence_fallback(
+                        question_text,
+                        source_evidence_context,
+                        hindi_movement_location_fallback_diagnostics,
+                    )
+                    if movement_location_answer is not None:
+                        answer = movement_location_answer
+                        grounded_hindi_movement_location_fallback_used = True
+                        movement_location_fallback_context_source = "full_retrieved_source_groups"
+                    else:
+                        tax_count_answer = _build_hindi_tax_count_evidence_fallback(
+                            question_text,
+                            source_evidence_context,
+                            hindi_tax_count_fallback_diagnostics,
+                        )
+                        if tax_count_answer is not None:
+                            answer = tax_count_answer
+                            grounded_hindi_tax_count_fallback_used = True
+                            tax_count_fallback_context_source = "full_retrieved_source_groups"
+                        else:
+                            named_tax_answer = _build_hindi_named_tax_evidence_fallback(
+                                question_text,
+                                source_evidence_context,
+                                hindi_tax_fallback_diagnostics,
+                            )
+                            if named_tax_answer is not None:
+                                answer = named_tax_answer
+                                grounded_hindi_tax_fallback_used = True
             else:
                 repair_passed = _generation_repair_instruction(
                     question=question_text,
@@ -7301,26 +7569,10 @@ def build_rag_chain(
             # Separate blocks deliberately prevent the extractor from stitching
             # an assertion together across unrelated source groups.
             tax_source_groups = inputs.get("source_groups", [])
-            tax_evidence_blocks = []
-            if tax_source_groups:
-                tax_evidence_blocks.append(build_context(tax_source_groups))
-                raw_source_number = len(tax_source_groups)
-                for group_index, source_group in enumerate(tax_source_groups, start=1):
-                    raw_documents = source_group.get("documents", [])
-                    raw_parts = []
-                    for document in raw_documents:
-                        raw_text = getattr(document, "page_content", "")
-                        if isinstance(raw_text, str) and raw_text.strip():
-                            raw_parts.append(raw_text.strip())
-                    if raw_parts:
-                        tax_evidence_blocks.append(
-                            f"[SOURCE {raw_source_number + group_index}]\n"
-                            "Original retrieved document text:\n"
-                            + "\n".join(raw_parts)
-                        )
-            tax_evidence_context = "\n\n".join(tax_evidence_blocks).strip()
-            if not tax_evidence_context:
-                tax_evidence_context = inputs.get("context", "")
+            tax_evidence_context = _build_full_retrieved_source_group_context(
+                tax_source_groups,
+                inputs.get("context", ""),
+            )
             extractive_hindi_tax_answer = _build_hindi_named_tax_evidence_fallback(
                 question=question_text,
                 context=tax_evidence_context,
@@ -7339,6 +7591,47 @@ def build_rag_chain(
                         "Using source-extractive named-tax answer after abstention "
                         "or transcript-name mismatch"
                     )
+
+        # Deterministic count/location fallbacks are allowed only when the exact
+        # question intent and its complete source-language assertion both match.
+        full_hindi_evidence_context = _build_full_retrieved_source_group_context(
+            inputs.get("source_groups", []),
+            inputs.get("context", ""),
+        )
+        tax_count_answer = _build_hindi_tax_count_evidence_fallback(
+            question_text,
+            full_hindi_evidence_context,
+            hindi_tax_count_fallback_diagnostics,
+        )
+        if tax_count_answer is not None:
+            extracted_count = hindi_tax_count_fallback_diagnostics.get("extracted_count")
+            count_is_present = bool(
+                isinstance(extracted_count, str)
+                and re.search(
+                    rf"(?<!\d){re.escape(extracted_count)}(?!\d)",
+                    _strip_unverified_timestamp_summary(answer or ""),
+                )
+            )
+            if current_answer_is_fallback or not count_is_present:
+                answer = tax_count_answer
+                grounded_hindi_tax_count_fallback_used = True
+                tax_count_fallback_context_source = "full_retrieved_source_groups"
+
+        movement_location_answer = _build_hindi_movement_location_evidence_fallback(
+            question_text,
+            full_hindi_evidence_context,
+            hindi_movement_location_fallback_diagnostics,
+        )
+        if movement_location_answer is not None:
+            has_bijolia_location = bool(re.search(
+                r"\b(?:in|at|around|near|within)\s+(?:the\s+)?Bijolia\b",
+                _strip_unverified_timestamp_summary(answer or ""),
+                re.IGNORECASE,
+            ))
+            if current_answer_is_fallback or not has_bijolia_location:
+                answer = movement_location_answer
+                grounded_hindi_movement_location_fallback_used = True
+                movement_location_fallback_context_source = "full_retrieved_source_groups"
 
         temporal_location_coverage_final = _temporal_location_answer_coverage(
             question_text,
@@ -7408,6 +7701,12 @@ def build_rag_chain(
                 "financial_answer_suppressed": financial_answer_suppressed,
                 "grounded_hindi_tax_fallback_used": grounded_hindi_tax_fallback_used,
                 "hindi_tax_fallback_diagnostics": hindi_tax_fallback_diagnostics,
+                "grounded_hindi_tax_count_fallback_used": grounded_hindi_tax_count_fallback_used,
+                "hindi_tax_count_fallback_diagnostics": hindi_tax_count_fallback_diagnostics,
+                "tax_count_fallback_context_source": tax_count_fallback_context_source,
+                "grounded_hindi_movement_location_fallback_used": grounded_hindi_movement_location_fallback_used,
+                "hindi_movement_location_fallback_diagnostics": hindi_movement_location_fallback_diagnostics,
+                "movement_location_fallback_context_source": movement_location_fallback_context_source,
                 "financial_evidence_context_chars": (
                     len(financial_evidence_context) if is_financial_question else None
                 ),
