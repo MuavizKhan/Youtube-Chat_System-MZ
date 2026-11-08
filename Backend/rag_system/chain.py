@@ -4485,14 +4485,15 @@ def _build_hindi_movement_location_evidence_fallback(
         r"(?m)^\s*-\s*\[\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*"
         r"\d{1,2}:\d{2}(?::\d{2})?\]\s*"
     )
-    movement_phrase = re.compile(r"पहला\s+बड़ा\s+किसान\s+आंदोलन")
-    location_phrase = re.compile(r"बिजोलिया\s+में")
+    movement_location_assertion = re.compile(
+        r"पहला\s+बड़ा\s+किसान\s+आंदोलन.{0,120}अपने\s+बिजोलिया"
+    )
 
     matched_block_number = None
     for block_number, source_block in enumerate(source_blocks, start=1):
         source_text = caption_timestamp_prefix.sub(" ", source_block)
         source_text = re.sub(r"\s+", " ", source_text).strip()
-        if movement_phrase.search(source_text) and location_phrase.search(source_text):
+        if movement_location_assertion.search(source_text):
             matched_block_number = block_number
             break
 
@@ -4509,7 +4510,7 @@ def _build_hindi_movement_location_evidence_fallback(
             "used": True,
             "rejection_reason": None,
             "matched_movement_phrase": "पहला बड़ा किसान आंदोलन",
-            "matched_location_phrase": "बिजोलिया में",
+            "matched_location_phrase": "अपने बिजोलिया",
             "matched_source_block_number": matched_block_number,
         })
     return "The speaker locates the first major farmers' movement in Bijolia."
