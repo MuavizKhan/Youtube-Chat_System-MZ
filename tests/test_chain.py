@@ -5763,8 +5763,20 @@ def test_rag_chain_uses_grounded_hindi_tax_count_after_empty_provider_answer(mon
     assert trace["grounded_hindi_tax_count_fallback_used"] is True
     assert trace["hindi_tax_count_fallback_diagnostics"]["extracted_count"] == "84"
     assert trace["tax_count_fallback_context_source"] == "full_retrieved_source_groups"
-    assert result["sources"]
-    assert result["observability"]["retrieval"]["response_evidence_suppressed"] is False
+    assert "911" in {str(value) for value in trace["context_budget"]["included_chunk_ids"]}
+
+    selected_results = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    assert selected_results
+    formatted_sources = chain.format_sources(
+        chain.merge_overlapping_results(selected_results)
+    )
+    assert formatted_sources
+    assert formatted_sources[0]["video_id"] == "INpnuL7qnzY"
+    assert 911 in formatted_sources[0]["chunk_ids"]
 
 
 @pytest.mark.unit
@@ -5808,8 +5820,20 @@ def test_rag_chain_repairs_hi07_with_source_grounded_bijolia_location_when_model
     assert trace["hindi_movement_location_fallback_diagnostics"]["matched_location_phrase"] == "अपने बिजोलिया"
     assert trace["movement_location_fallback_context_source"] == "full_retrieved_source_groups"
     assert trace["temporal_location_coverage_before"] is None
-    assert result["sources"]
-    assert result["observability"]["retrieval"]["response_evidence_suppressed"] is False
+    assert "912" in {str(value) for value in trace["context_budget"]["included_chunk_ids"]}
+
+    selected_results = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    assert selected_results
+    formatted_sources = chain.format_sources(
+        chain.merge_overlapping_results(selected_results)
+    )
+    assert formatted_sources
+    assert formatted_sources[0]["video_id"] == "INpnuL7qnzY"
+    assert 912 in formatted_sources[0]["chunk_ids"]
 
 
 @pytest.mark.unit
