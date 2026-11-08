@@ -4116,7 +4116,7 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
             "Where does the speaker locate the first major farmers' movement in relation to Bijolia?",
             "पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया बिजोलिया में",
             "HI07",
-            "बिजोलिया में",
+            "अपने बिजोलिया",
         ),
     ],
 )
@@ -4204,11 +4204,11 @@ def test_hindi_movement_location_fallback_requires_both_movement_and_place_evide
     assert answer == "The speaker locates the first major farmers' movement in Bijolia."
     assert diagnostics["used"] is True
     assert diagnostics["matched_movement_phrase"] == "पहला बड़ा किसान आंदोलन"
-    assert diagnostics["matched_location_phrase"] == "बिजोलिया में"
+    assert diagnostics["matched_location_phrase"] == "अपने बिजोलिया"
 
     assert chain._build_hindi_movement_location_evidence_fallback(
         question,
-        "[SOURCE 1]\n- [00:00–00:04] बिजोलिया में किसान आंदोलन हुआ।",
+        "[SOURCE 1]\n- [00:00–00:04] पहला बड़ा किसान आंदोलन हुआ। बिजोलिया में कर लगाए गए।",
     ) is None
 
 
@@ -5794,7 +5794,7 @@ def test_rag_chain_repairs_hi07_with_source_grounded_bijolia_location_when_model
         "The speaker locates the first major farmers' movement in Bijolia."
     )
     assert trace["grounded_hindi_movement_location_fallback_used"] is True
-    assert trace["hindi_movement_location_fallback_diagnostics"]["matched_location_phrase"] == "बिजोलिया में"
+    assert trace["hindi_movement_location_fallback_diagnostics"]["matched_location_phrase"] == "अपने बिजोलिया"
     assert trace["movement_location_fallback_context_source"] == "full_retrieved_source_groups"
     assert trace["temporal_location_coverage_before"] is None
     assert result["sources"]
