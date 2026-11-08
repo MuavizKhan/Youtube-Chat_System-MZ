@@ -4103,7 +4103,6 @@ def test_temporal_trace_stops_when_requested_window_has_no_chunks(monkeypatch):
 
 
 @pytest.mark.unit
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "question,caption,expected_id,required_phrase",
     [
@@ -4158,9 +4157,9 @@ def test_hindi_generation_context_reserves_answer_bearing_caption_under_budget(
 def test_hindi_tax_count_fallback_requires_explicit_caption_evidence():
     question = "How many types of taxes does the speaker mention?"
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:03] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\\n"
-        "- [00:03–00:06] बिजोलिया में कितने प्रकार के कर थे।\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:03] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\n"
+        "- [00:03–00:06] बिजोलिया में कितने प्रकार के कर थे।\n"
         "- [00:06–00:09] 84 प्रकार के कर लग रहे थे।"
     )
     diagnostics = {}
@@ -4178,7 +4177,7 @@ def test_hindi_tax_count_fallback_requires_explicit_caption_evidence():
 
     assert chain._build_hindi_tax_count_evidence_fallback(
         question,
-        "[SOURCE 1]\\n- [00:00–00:03] किसानों पर कई प्रकार के कर लगाए गए।",
+        "[SOURCE 1]\n- [00:00–00:03] किसानों पर कई प्रकार के कर लगाए गए।",
     ) is None
     assert chain._build_hindi_tax_count_evidence_fallback(
         "What is the new tax called?",
@@ -4190,8 +4189,8 @@ def test_hindi_tax_count_fallback_requires_explicit_caption_evidence():
 def test_hindi_movement_location_fallback_requires_both_movement_and_place_evidence():
     question = "Where does the speaker locate the first major farmers' movement in relation to Bijolia?"
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:04] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:04] पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया।\n"
         "- [00:04–00:07] बिजोलिया में कितने प्रकार के कर थे।"
     )
     diagnostics = {}
@@ -4209,7 +4208,7 @@ def test_hindi_movement_location_fallback_requires_both_movement_and_place_evide
 
     assert chain._build_hindi_movement_location_evidence_fallback(
         question,
-        "[SOURCE 1]\\n- [00:00–00:04] बिजोलिया में किसान आंदोलन हुआ।",
+        "[SOURCE 1]\n- [00:00–00:04] बिजोलिया में किसान आंदोलन हुआ।",
     ) is None
 
 
@@ -4751,7 +4750,7 @@ def test_all_abstention_fallbacks_are_english(question):
 def test_generation_repair_instruction_rechecks_abstention_against_supplied_passages():
     question = "How does the lecturer explain binary representation?"
     context = (
-        "[SOURCE 1]\\n"
+        "[SOURCE 1]\n"
         "Transcript: Computers use zeros and ones in the binary system. "
         "A single bit is a zero or one."
     )
@@ -5709,7 +5708,6 @@ def test_financial_abstention_fallback_uses_full_retrieved_sources_when_prompt_i
 
 
 @pytest.mark.unit
-@pytest.mark.unit
 def test_rag_chain_uses_grounded_hindi_tax_count_after_empty_provider_answer(monkeypatch):
     source_text = (
         "पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया। "
@@ -6228,7 +6226,7 @@ def test_financial_question_scope_preserves_comprehensive_default_and_detects_ba
     ) == "comprehensive_financial"
     assert chain._build_financial_evidence_fallback(
         "What does the video say about banks?",
-        "[SOURCE 1]\\nThe banks are mentioned.",
+        "[SOURCE 1]\nThe banks are mentioned.",
     ) is None
     assert chain._financial_fallback_question_scope(
         "What amounts of investment, debt, and recovery are mentioned?"
@@ -6516,7 +6514,6 @@ def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
     assert "04:15–05:18" not in result
 
 
-@pytest.mark.unit
 @pytest.mark.unit
 def test_verified_chunk2_caption_aligns_eye_sound_only_query_to_early_source():
     answer = "You may even hear the sound of your eyelids blinking."
