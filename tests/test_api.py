@@ -167,7 +167,21 @@ def test_chat_returns_verified_hindi_evidence_fallback_during_provider_quota_exh
     def grounded_quota_fallback(**kwargs):
         return {
             "answer": answer,
-            "sources": [{"source_id": 1, "start": 0, "end": 8}],
+            "video_id": VALID_VIDEO_ID,
+            "sources": [{
+                "source_id": 1,
+                "chunk_ids": [101],
+                "video_id": VALID_VIDEO_ID,
+                "start": 0.0,
+                "end": 8.0,
+                "duration": 8.0,
+                "distance": 0.2,
+            }],
+            "retrieved_chunks": 1,
+            "model": "test-model",
+            "source_segments": 1,
+            "retrieval_method": "question_aware_soft_facet_rerank",
+            "retrieval_config": {"top_k": 4, "fetch_k": 10, "lambda_mult": 0.7, "max_distance": 1.3},
             "observability": {
                 "generation": {
                     "generated": False,
