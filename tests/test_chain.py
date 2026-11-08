@@ -4750,7 +4750,7 @@ def test_all_abstention_fallbacks_are_english(question):
 def test_generation_repair_instruction_rechecks_abstention_against_supplied_passages():
     question = "How does the lecturer explain binary representation?"
     context = (
-        "[SOURCE 1]\n"
+        "[SOURCE 1]\\n"
         "Transcript: Computers use zeros and ones in the binary system. "
         "A single bit is a zero or one."
     )
@@ -6226,7 +6226,7 @@ def test_financial_question_scope_preserves_comprehensive_default_and_detects_ba
     ) == "comprehensive_financial"
     assert chain._build_financial_evidence_fallback(
         "What does the video say about banks?",
-        "[SOURCE 1]\nThe banks are mentioned.",
+        "[SOURCE 1]\\nThe banks are mentioned.",
     ) is None
     assert chain._financial_fallback_question_scope(
         "What amounts of investment, debt, and recovery are mentioned?"
@@ -6514,6 +6514,7 @@ def test_english_eye_sound_caption_without_explicit_blink_verb_gets_timestamp():
     assert "04:15–05:18" not in result
 
 
+@pytest.mark.unit
 @pytest.mark.unit
 def test_verified_chunk2_caption_aligns_eye_sound_only_query_to_early_source():
     answer = "You may even hear the sound of your eyelids blinking."
