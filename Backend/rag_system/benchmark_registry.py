@@ -435,9 +435,9 @@ HINDI_HISTORY_GOLD = (
     ),
     GoldEvidenceCase(
         question_id="HI07",
-        # The question is geographic, not a request for where a topic appears
-        # in the video's timeline. Reserve the exact opening-caption location.
-        groups=(("बिजोलिया में",),),
+        # The opening caption locates the first major movement with the exact
+        # phrase "अपने बिजोलिया"; the following "बिजोलिया में" clause is about taxes.
+        groups=(("अपने बिजोलिया",),),
         min_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
     ),
