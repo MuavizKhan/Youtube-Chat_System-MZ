@@ -4183,6 +4183,10 @@ def test_hindi_tax_count_fallback_requires_explicit_caption_evidence():
         "What is the new tax called?",
         context,
     ) is None
+    assert chain._build_hindi_tax_count_evidence_fallback(
+        question,
+        "[SOURCE 1]\n- [00:00–00:03] ८४ प्रकार के कर थे।",
+    ) == "The speaker mentions 84 types of taxes."
 
 
 @pytest.mark.unit
@@ -4209,6 +4213,13 @@ def test_hindi_movement_location_fallback_requires_both_movement_and_place_evide
     assert chain._build_hindi_movement_location_evidence_fallback(
         question,
         "[SOURCE 1]\n- [00:00–00:04] पहला बड़ा किसान आंदोलन हुआ। बिजोलिया में कर लगाए गए।",
+    ) is None
+    assert chain._build_hindi_movement_location_evidence_fallback(
+        question,
+        (
+            "[SOURCE 1]\n- [00:00–00:04] पहला बड़ा किसान आंदोलन कौन सा हुआ था।\n"
+            "[SOURCE 2]\n- [00:04–00:07] अपने बिजोलिया।"
+        ),
     ) is None
 
 
