@@ -642,6 +642,27 @@ def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
     assert failed == ["answer_requirement_named_movement"]
 
 
+def test_hi07_answer_gate_requires_an_explicit_bijolia_location_not_only_the_movement_name():
+    case = next(
+        item for item in PHASE11_0_AUDIT_CASES if item["id"] == "HI07"
+    )
+
+    assert audit_module.is_temporal_location_question(case["question"]) is False
+
+    grounded_checks = _answer_quality_checks(
+        case,
+        "The speaker locates the first major farmers' movement in Bijolia.",
+    )
+    assert all(check["passed"] for check in grounded_checks), grounded_checks
+
+    name_only_checks = _answer_quality_checks(
+        case,
+        "The first major farmers' movement was the Bijolia movement.",
+    )
+    failed = [check["name"] for check in name_only_checks if not check["passed"]]
+    assert failed == ["answer_requirement_movement_location"]
+
+
 def test_answer_timestamp_parser_finds_inline_hindi_ranges_without_footer():
     answer = (
         "पहला उल्लेख 00:02–00:06 के आसपास है और दूसरा "
