@@ -377,7 +377,10 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "HI07", "INpnuL7qnzY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "movement_location", "pattern": r"\bBijolia\b"},),
+        answer_requirements=({
+            "name": "movement_location",
+            "pattern": r"\b(?:in|at|around|near|within)\s+(?:the\s+)?Bijolia\b",
+        },),
     ),
     _make_audit_case(
         "HI08", "INpnuL7qnzY",
