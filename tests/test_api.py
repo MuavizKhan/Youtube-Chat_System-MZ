@@ -147,6 +147,51 @@ def test_chat_does_not_present_provider_quota_fallback_as_missing_transcript_evi
     assert "not answered" in response.json()["message"]
 
 
+@pytest.mark.api
+@pytest.mark.parametrize(
+    "fallback_field,answer",
+    [
+        (
+            "grounded_hindi_tax_count_fallback_used",
+            "The speaker mentions 84 types of taxes.",
+        ),
+        (
+            "grounded_hindi_movement_location_fallback_used",
+            "The speaker locates the first major farmers' movement in Bijolia.",
+        ),
+    ],
+)
+def test_chat_returns_verified_hindi_evidence_fallback_during_provider_quota_exhaustion(
+    client, monkeypatch, fallback_field, answer
+):
+    def grounded_quota_fallback(**kwargs):
+        return {
+            "answer": answer,
+            "sources": [{"source_id": 1, "start": 0, "end": 8}],
+            "observability": {
+                "generation": {
+                    "generated": False,
+                    "fallback_used": True,
+                    "repair_aborted_due_quota": True,
+                    fallback_field: True,
+                }
+            },
+        }
+
+    monkeypatch.setattr(app_module, "answer_question", grounded_quota_fallback)
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "A grounded Hindi test question",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == answer
+    assert response.json()["sources"]
+
+
 @pytest.fixture
 def client():
     with TestClient(app_module.app,raise_server_exceptions=False) as c:
