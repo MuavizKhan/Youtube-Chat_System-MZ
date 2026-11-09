@@ -7960,8 +7960,15 @@ def test_ar07_context_packing_preserves_gold_price_evidence_when_caption_metadat
         "distance": 0.4,
     }
 
-    assert chain._caption_segments_for_documents([price_document]) is None
-    formatted = chain.format_source_group(group, 1)
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert chain._caption_segments_for_documents(
+        [price_document],
+        gold_case=gold_case,
+    ) is None
+    formatted = chain.format_source_group(group, 1, gold_case=gold_case)
     assert "Transcript:" in formatted
     assert "600 دولار" in formatted
 

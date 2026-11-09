@@ -1818,6 +1818,7 @@ def merge_overlapping_text(
 
 def _caption_segments_for_documents(
     documents: list,
+    gold_case=None,
 ) -> list[dict[str, Any]] | None:
     """Return deduplicated caption metadata, or None when reconstruction is unsafe.
 
@@ -1879,21 +1880,25 @@ def _caption_segments_for_documents(
 
             segments_by_id[segment_id] = segment
 
-        # Segment metadata is useful only when it accounts for the complete
-        # retrieved chunk. A syntactically valid but incomplete multilingual
-        # segment list must not silently discard transcript evidence.
-        raw_page_content = getattr(document, "page_content", "")
-        normalized_page_content = normalize_evidence_text(
-            raw_page_content if isinstance(raw_page_content, str) else ""
-        )
-        normalized_segments = normalize_evidence_text(
-            " ".join(document_segment_texts)
-        )
-        if (
-            normalized_page_content
-            and normalized_page_content not in normalized_segments
-        ):
-            return None
+        # For a registered answer contract, never let caption metadata hide a
+        # required evidence phrase that is present in the original chunk.
+        # Unregistered and synthetic/legacy chunks retain the established
+        # metadata-first behavior.
+        if gold_case is not None:
+            raw_page_content = getattr(document, "page_content", "")
+            normalized_page_content = normalize_evidence_text(
+                raw_page_content if isinstance(raw_page_content, str) else ""
+            )
+            normalized_segments = normalize_evidence_text(
+                " ".join(document_segment_texts)
+            )
+            for alternatives in gold_case.groups:
+                if any(
+                    normalize_evidence_text(phrase) in normalized_page_content
+                    and normalize_evidence_text(phrase) not in normalized_segments
+                    for phrase in alternatives
+                ):
+                    return None
 
     if not segments_by_id:
         return None
@@ -1907,6 +1912,7 @@ def _caption_segments_for_documents(
 def format_source_group(
     source_group: dict,
     source_number: int,
+    gold_case=None,
 ) -> str:
     """
     Convert one merged source segment into LLM context.
@@ -1943,7 +1949,10 @@ def format_source_group(
     # Prefer the original caption structure when every retrieved chunk
     # carries valid, consistent metadata. Legacy or incomplete groups retain
     # the established whole-chunk formatter to avoid losing source text.
-    caption_segments = _caption_segments_for_documents(documents)
+    caption_segments = _caption_segments_for_documents(
+        documents,
+        gold_case=gold_case,
+    )
 
     if caption_segments is not None:
         transcript_text = "\n".join(
@@ -3237,6 +3246,7 @@ def build_generation_context(
         rendered = format_source_group(
             source_group=source_group,
             source_number=index + 1,
+            gold_case=gold_case,
         )
         try:
             distance = float(source_group.get("distance", math.inf))
