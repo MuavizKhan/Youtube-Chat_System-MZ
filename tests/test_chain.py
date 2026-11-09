@@ -8134,15 +8134,29 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     assert retrieval_diagnostics[0]["formatted_gold_groups"] == [0]
     assert retrieval_diagnostics[0]["raw_chunk_fallback_used"] is True
 
+    filler_document = doc(
+        907,
+        180,
+        300,
+        "Unrelated background discussion. " * 180,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    filler_group = chain.merge_overlapping_results(
+        [(filler_document, 0.6)]
+    )[0]
+
+    # Force the context packer to reduce the overall prompt. Both raw evidence
+    # rows must survive together and map back to their original indexed chunks.
     result = chain.build_generation_context(
-        groups,
+        [groups[0], filler_group],
         question=question,
-        max_chars=1600,
+        max_chars=1400,
         video_id="fAd2nKfrDB8",
     )
 
     diagnostics = result["diagnostics"]
-    assert len(result["context"]) <= 1600
+    assert diagnostics["reduced"] is True
+    assert len(result["context"]) <= 1400
     assert "600" in result["context"]
     assert "دولار" in result["context"]
     assert chain.matched_gold_groups(result["context"], gold_case) == {0}
@@ -8152,6 +8166,7 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     assert {"905", "906"}.issubset(set(diagnostics["included_chunk_ids"]))
 
     source_diagnostic = diagnostics["gold_evidence_source_groups"][0]
+    assert source_diagnostic["chunk_ids"] == ["905", "906"]
     assert source_diagnostic["raw_gold_groups"] == [0]
     assert source_diagnostic["caption_metadata_gold_groups"] == []
     assert source_diagnostic["formatted_gold_groups"] == [0]
