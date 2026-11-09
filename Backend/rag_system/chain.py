@@ -2793,7 +2793,7 @@ def _gold_answer_contract_repair_instruction(
 
     missing_alias_groups = [
         group_index
-        for group_index in sorted(context_groups - answer_groups)
+        for group_index in sorted(context_groups - answer_alias_groups)
         if group_index < len(gold_case.generation_answer_aliases)
         and gold_case.generation_answer_aliases[group_index]
         and group_index not in answer_alias_groups
