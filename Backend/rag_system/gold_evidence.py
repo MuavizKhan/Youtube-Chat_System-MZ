@@ -435,14 +435,15 @@ def matched_gold_answer_alias_groups(
         return set()
 
     normalized_answer = normalize_evidence_text(text)
-    return {
-        group_index
-        for group_index, aliases in enumerate(case.generation_answer_aliases)
-        if any(
-            normalize_evidence_text(alias) in normalized_answer
-            for alias in aliases
-        )
-    }
+    padded_answer = f" {normalized_answer} "
+    matched = set()
+    for group_index, aliases in enumerate(case.generation_answer_aliases):
+        for alias in aliases:
+            normalized_alias = normalize_evidence_text(alias)
+            if normalized_alias and f" {normalized_alias} " in padded_answer:
+                matched.add(group_index)
+                break
+    return matched
 
 
 def matched_gold_answer_groups(

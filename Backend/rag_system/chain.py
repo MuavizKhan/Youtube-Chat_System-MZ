@@ -2878,7 +2878,11 @@ def _build_registered_gold_answer_fallback(
 
     for source_index, source_block in enumerate(source_blocks, start=1):
         normalized_block = normalize_evidence_text(source_block)
-        if not all(phrase in normalized_block for phrase in normalized_phrases):
+        padded_block = f" {normalized_block} "
+        if not all(
+            phrase and f" {phrase} " in padded_block
+            for phrase in normalized_phrases
+        ):
             continue
         included_gold_groups = matched_gold_groups(source_block, gold_case)
         if len(included_gold_groups) < required_gold_groups:
