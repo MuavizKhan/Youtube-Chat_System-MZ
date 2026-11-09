@@ -8199,6 +8199,110 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
 
 
 @pytest.mark.regression
+def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_raw_evidence(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(
+        905,
+        0,
+        60,
+        "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+    )
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    first_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 60.0,
+            "text": "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+        }
+    ]
+
+    second_document = doc(906, 55, 120, "دولار")
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+    second_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 906,
+            "start": 55.0,
+            "end": 120.0,
+            "text": "USD per hour",
+        }
+    ]
+
+    filler_document = doc(
+        908,
+        110,
+        300,
+        "معلومات جانبية في الحوار. " * 180,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    filler_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 908,
+            "start": 110.0,
+            "end": 300.0,
+            "text": "معلومات جانبية في الحوار.",
+        }
+    ]
+
+    retrieved = [
+        (first_document, 0.2),
+        (second_document, 0.3),
+        (filler_document, 0.6),
+    ]
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1400)
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved,
+            {
+                "recovery_used": True,
+                "final_stage": "deterministic_alias_evidence_recovery",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [905, 906, 908],
+                "citation_chunk_ids": [905, 906, 908],
+            },
+        ),
+    )
+
+    generation_calls = []
+
+    def unsupported_draft(**_kwargs):
+        generation_calls.append(True)
+        return "The room may have a price for an hourly visit."
+
+    monkeypatch.setattr(chain, "generate_with_llm", unsupported_draft)
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "fAd2nKfrDB8"}
+    )
+
+    assert len(generation_calls) == 2
+    assert "600 دولار" in result["answer"]
+    assert "may reach $600" in result["answer"]
+
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_gold_evidence_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["gold_evidence_fallback_diagnostics"]["used"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["hour_context_present"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["cost_context_present"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["upper_bound_qualifier_present"] is True
+    assert trace["context_budget"]["gold_evidence_groups_available"] == [0]
+    assert trace["context_budget"]["gold_evidence_groups_included"] == [0]
+    assert {"905", "906"}.issubset(
+        set(trace["context_budget"]["included_chunk_ids"])
+    )
+    assert "908" not in trace["context_budget"]["included_chunk_ids"]
+
+
+@pytest.mark.regression
 def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
     question = "How much might one hour inside the Orfield room cost?"
     first_document = doc(951, 0, 20, "The amount mentioned is 600.")
