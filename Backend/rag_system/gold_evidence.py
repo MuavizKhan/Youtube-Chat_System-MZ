@@ -402,28 +402,45 @@ def matched_gold_group_caption_spans(
     return matched_spans
 
 
+def matched_gold_group_phrases(
+    text: str,
+    case: GoldEvidenceCase,
+) -> dict[int, list[str]]:
+    """Return matched source phrases per gold group within each source block.
+
+    Timestamped caption rows are joined before matching, so a phrase split by
+    row timestamps remains discoverable. Distinct [SOURCE] blocks are never
+    concatenated to manufacture evidence.
+    """
+    normalized_blocks = [
+        normalize_evidence_text(block)
+        for block in _source_scoped_evidence_texts(text)
+    ]
+    matched_phrases: dict[int, list[str]] = {}
+    for group_index, alternatives in enumerate(case.groups):
+        phrases = []
+        for phrase in alternatives:
+            normalized_phrase = normalize_evidence_text(phrase)
+            if normalized_phrase and any(
+                normalized_phrase in normalized_block
+                for normalized_block in normalized_blocks
+            ):
+                phrases.append(phrase)
+        if phrases:
+            matched_phrases[group_index] = phrases
+    return matched_phrases
+
+
 def matched_gold_groups(
     text: str,
     case: GoldEvidenceCase,
 ) -> set[int]:
     """Return evidence groups present in transcript text.
 
-    Timestamped caption rows are joined within each source block. Distinct
-    source blocks are never concatenated to manufacture a phrase.
+    Uses the same source-scoped caption matching as the supporting-phrase
+    lookup so evidence detection and repair instructions cannot disagree.
     """
-    normalized_blocks = [
-        normalize_evidence_text(block)
-        for block in _source_scoped_evidence_texts(text)
-    ]
-    return {
-        group_index
-        for group_index, alternatives in enumerate(case.groups)
-        if any(
-            normalize_evidence_text(phrase) in normalized_block
-            for phrase in alternatives
-            for normalized_block in normalized_blocks
-        )
-    }
+    return set(matched_gold_group_phrases(text, case))
 
 
 def matched_gold_answer_alias_groups(
