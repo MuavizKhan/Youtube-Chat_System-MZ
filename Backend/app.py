@@ -876,6 +876,7 @@ def chat(
             or generation_trace.get("grounded_hindi_tax_fallback_used")
             or generation_trace.get("grounded_hindi_tax_count_fallback_used")
             or generation_trace.get("grounded_hindi_movement_location_fallback_used")
+            or generation_trace.get("grounded_registered_gold_answer_fallback_used")
         )
         if (
             generation_trace.get("repair_aborted_due_quota")

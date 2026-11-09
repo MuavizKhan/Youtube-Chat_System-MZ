@@ -1012,7 +1012,10 @@ def test_registered_generation_gold_case_reads_video_scoped_annotations(
 
     assert question_id == expected_id
     assert gold_case is not None
-    assert gold_case.groups == (("बिजोलिया", "Bijolia"),)
+    assert gold_case.groups == (("बिजोलिया",),)
+    assert gold_case.generation_answer_aliases == (
+        ("Bijolia", "Bijolia movement", "the Bijolia movement"),
+    )
     assert gold_case.min_generation_context_group_coverage == 1.0
 
 
@@ -1079,9 +1082,48 @@ def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
     assert "exact transcript wording" in instruction
     assert "बिजोलिया" in instruction
-    assert "Registered English answer spelling(s)" in instruction
-    assert "Bijolia" in instruction
-    assert "annotation alias" in instruction
+
+    answer_contract_instruction = chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=generic_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert answer_contract_instruction is not None
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in answer_contract_instruction
+    assert "Bijolia movement" in answer_contract_instruction
+    assert "generic category" in answer_contract_instruction
+
+    combined_instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=generic_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert combined_instruction is not None
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in combined_instruction
+
+    source_quote_only_answer = "The speaker says “बिजोलिया” was the first major farmers' movement."
+    assert chain.matched_gold_answer_alias_groups(
+        source_quote_only_answer,
+        chain._registered_generation_gold_case(
+            "INpnuL7qnzY",
+            question,
+        )[1],
+    ) == set()
+    assert chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=source_quote_only_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    ) is not None
+    source_quote_repair = chain._generation_repair_instruction(
+        question=question,
+        answer=source_quote_only_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in source_quote_repair
 
     grounded_answer = "The first major farmers' movement was the Bijolia movement."
     assert chain._gold_evidence_repair_instruction(
@@ -1090,6 +1132,19 @@ def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
         context=context,
         video_id="INpnuL7qnzY",
     ) is None
+    assert chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=grounded_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    ) is None
+    assert chain.matched_gold_answer_alias_groups(
+        grounded_answer,
+        chain._registered_generation_gold_case(
+            "INpnuL7qnzY",
+            question,
+        )[1],
+    ) == {0}
 
 
 @pytest.mark.unit
@@ -7869,3 +7924,143 @@ def test_temporal_location_timestamp_selection_prefers_substantive_answer_sectio
     assert "01:10:38–01:14:34" in result
     assert "01:19:53–01:22:48" in result
     assert "01:58:47–02:01:17" in result
+
+
+@pytest.mark.regression
+def test_ar07_context_packing_preserves_gold_price_evidence_when_caption_metadata_is_incomplete():
+    question = "How much might one hour inside the Orfield room cost?"
+    price_document = doc(
+        905,
+        0,
+        40,
+        "For one hour, the room may cost up to 600 دولار.",
+    )
+    price_document.metadata["video_id"] = "fAd2nKfrDB8"
+    # This metadata is structurally valid but omits the currency word from the
+    # original chunk. The formatter must reject it and retain raw chunk text.
+    price_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 40.0,
+            "text": "For one hour, the room may cost up to 600.",
+        }
+    ]
+    filler_document = doc(
+        906,
+        40,
+        120,
+        "Unrelated transcript discussion. " * 130,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    group = {
+        "documents": [price_document, filler_document],
+        "start": 0,
+        "end": 120,
+        "distance": 0.4,
+    }
+
+    assert chain._caption_segments_for_documents([price_document]) is None
+    formatted = chain.format_source_group(group, 1)
+    assert "Transcript:" in formatted
+    assert "600 دولار" in formatted
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=1600,
+        video_id="fAd2nKfrDB8",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 1600
+    assert "600 دولار" in result["context"]
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert "905" in diagnostics["included_chunk_ids"]
+
+
+@pytest.mark.regression
+def test_registered_hindi_answer_fallback_requires_movement_and_bijolia_in_same_source_block():
+    question = "Which peasant movement is named as the first major movement?"
+    valid_context = (
+        "[SOURCE 1]\n"
+        "- [00:02–00:08] आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन "
+        "कौन सा हुआ था अपने बिजोलिया"
+    )
+    diagnostics = {}
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=valid_context,
+        video_id="INpnuL7qnzY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer == (
+        "The first major peasant movement named in the transcript is "
+        "the Bijolia movement."
+    )
+    assert diagnostics["used"] is True
+    assert diagnostics["question_id"] == "HI01"
+    assert diagnostics["included_gold_groups"] == [0]
+
+    split_assertion_context = (
+        "[SOURCE 1]\nपहला बड़ा किसान आंदोलन कौन सा हुआ था।\n"
+        "[SOURCE 2]\nअपने बिजोलिया।"
+    )
+    rejected = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=split_assertion_context,
+        video_id="INpnuL7qnzY",
+        diagnostics={},
+    )
+    assert rejected is None
+
+
+@pytest.mark.regression
+def test_hi01_generation_uses_source_bound_named_movement_fallback_after_failed_repair(
+    monkeypatch,
+):
+    question = "Which peasant movement is named as the first major movement?"
+    source_document = doc(
+        907,
+        2,
+        60,
+        "आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया",
+    )
+    source_document.metadata["video_id"] = "INpnuL7qnzY"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(source_document, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [907],
+                "citation_chunk_ids": [907],
+            },
+        ),
+    )
+    generation_calls = []
+
+    def generic_answer(**_kwargs):
+        generation_calls.append(True)
+        return (
+            "The first major peasant movement was a large-scale farmers' protest."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", generic_answer)
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "INpnuL7qnzY"}
+    )
+
+    assert len(generation_calls) == 2
+    assert "Bijolia movement" in result["answer"]
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True

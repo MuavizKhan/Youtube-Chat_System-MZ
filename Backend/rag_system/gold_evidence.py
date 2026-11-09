@@ -42,6 +42,11 @@ class GoldEvidenceCase:
     # Optional paraphrases accepted only when checking generated answers.
     # Retrieval and prompt-context matching continue to use exact source phrases.
     generation_answer_aliases: tuple[tuple[str, ...], ...] = ()
+    # Optional deterministic response, permitted only when every configured
+    # source assertion is present in one retrieved source block and the gold
+    # evidence contract is also satisfied.
+    generation_fallback_answer: str | None = None
+    generation_fallback_source_phrases: tuple[str, ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -417,6 +422,25 @@ def matched_gold_groups(
             normalize_evidence_text(phrase) in normalized_block
             for phrase in alternatives
             for normalized_block in normalized_blocks
+        )
+    }
+
+
+def matched_gold_answer_alias_groups(
+    text: str,
+    case: GoldEvidenceCase,
+) -> set[int]:
+    """Match only explicitly registered answer aliases, never source quotations."""
+    if not isinstance(text, str) or not text or not case.generation_answer_aliases:
+        return set()
+
+    normalized_answer = normalize_evidence_text(text)
+    return {
+        group_index
+        for group_index, aliases in enumerate(case.generation_answer_aliases)
+        if any(
+            normalize_evidence_text(alias) in normalized_answer
+            for alias in aliases
         )
     }
 

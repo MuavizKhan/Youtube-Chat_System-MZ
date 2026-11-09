@@ -98,6 +98,7 @@ from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
     matched_gold_groups,
     matched_gold_answer_groups,
+    matched_gold_answer_alias_groups,
     matched_gold_group_caption_spans,
     normalize_evidence_text,
 )
@@ -1838,6 +1839,7 @@ def _caption_segments_for_documents(
         if not isinstance(records, list) or not records:
             return None
 
+        document_segment_texts = []
         for record in records:
             if not isinstance(record, dict):
                 return None
@@ -1869,12 +1871,29 @@ def _caption_segments_for_documents(
                 "end": float(end),
                 "text": text,
             }
+            document_segment_texts.append(text)
             existing = segments_by_id.get(segment_id)
             if existing is not None and existing != segment:
                 # Conflicting copies of one caption are not safe to reconcile.
                 return None
 
             segments_by_id[segment_id] = segment
+
+        # Segment metadata is useful only when it accounts for the complete
+        # retrieved chunk. A syntactically valid but incomplete multilingual
+        # segment list must not silently discard transcript evidence.
+        raw_page_content = getattr(document, "page_content", "")
+        normalized_page_content = normalize_evidence_text(
+            raw_page_content if isinstance(raw_page_content, str) else ""
+        )
+        normalized_segments = normalize_evidence_text(
+            " ".join(document_segment_texts)
+        )
+        if (
+            normalized_page_content
+            and normalized_page_content not in normalized_segments
+        ):
+            return None
 
     if not segments_by_id:
         return None
@@ -2360,12 +2379,75 @@ def _truncate_formatted_source(
         available = max_chars - len(header) - 1 - len(marker)
         if available <= 0:
             return source_text[:max_chars]
+
+        # A one-group annotation can keep a compact source-local window around
+        # its exact phrase when legacy indexes lack complete caption metadata.
+        # This retains nearby amount/hour/cost wording without expanding the
+        # generation budget or joining different source groups.
+        if gold_case is not None and len(gold_case.groups) == 1:
+            for phrase in gold_case.groups[0]:
+                if not phrase:
+                    continue
+                match_start = transcript.casefold().find(phrase.casefold())
+                if match_start < 0:
+                    continue
+                window_size = min(1400, available)
+                window_start = max(
+                    0,
+                    match_start - max(0, (window_size - len(phrase)) // 2),
+                )
+                window_end = min(len(transcript), window_start + window_size)
+                window_start = max(0, window_end - window_size)
+                while window_start > 0 and not transcript[window_start - 1].isspace():
+                    window_start -= 1
+                while window_end < len(transcript) and not transcript[window_end].isspace():
+                    window_end += 1
+                evidence_window = transcript[window_start:window_end].strip()
+                if (
+                    evidence_window
+                    and len(evidence_window) <= available
+                    and normalize_evidence_text(phrase)
+                    in normalize_evidence_text(evidence_window)
+                ):
+                    excerpt = header + "\n" + evidence_window + marker
+                    if len(excerpt) <= max_chars:
+                        return excerpt
+
         sentences = [
             sentence.strip()
             for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", transcript)
             if sentence.strip()
         ]
         if sentences:
+            gold_sentence_indices: set[int] = set()
+            if gold_case is not None:
+                for alternatives in gold_case.groups:
+                    best_window = None
+                    for window_size in range(1, min(6, len(sentences)) + 1):
+                        for start_index in range(
+                            0,
+                            len(sentences) - window_size + 1,
+                        ):
+                            window_text = " ".join(
+                                sentences[start_index:start_index + window_size]
+                            )
+                            normalized_window = normalize_evidence_text(window_text)
+                            if any(
+                                normalize_evidence_text(phrase) in normalized_window
+                                for phrase in alternatives
+                            ):
+                                best_window = (
+                                    start_index,
+                                    start_index + window_size,
+                                )
+                                break
+                        if best_window is not None:
+                            break
+                    if best_window is not None:
+                        gold_sentence_indices.update(
+                            range(best_window[0], best_window[1])
+                        )
+
             scored = [
                 (
                     _generation_line_relevance(
@@ -2373,7 +2455,7 @@ def _truncate_formatted_source(
                         question_terms,
                         financial_question=financial_question,
                         financial_group_context=financial_group_context,
-                    ),
+                    ) + (1000 if index in gold_sentence_indices else 0),
                     index,
                     sentence,
                 )
@@ -2445,7 +2527,28 @@ def _included_chunk_ids_for_excerpt(
         if line.strip().startswith("- [")
     }
     if not included_rows:
-        return []
+        # Legacy transcript formatting has no caption rows. A chunk is safe to
+        # cite only when its complete original text survived in the excerpt;
+        # partial legacy chunks intentionally remain unmapped.
+        normalized_excerpt = normalize_evidence_text(excerpt)
+        included = []
+        for document in source_group.get("documents", []):
+            metadata = getattr(document, "metadata", {})
+            if not isinstance(metadata, dict):
+                continue
+            chunk_id = metadata.get("chunk_id")
+            raw_text = getattr(document, "page_content", "")
+            normalized_chunk = normalize_evidence_text(
+                raw_text if isinstance(raw_text, str) else ""
+            )
+            if (
+                chunk_id is not None
+                and normalized_chunk
+                and normalized_chunk in normalized_excerpt
+                and str(chunk_id) not in included
+            ):
+                included.append(str(chunk_id))
+        return included
 
     included = []
     for document in source_group.get("documents", []):
@@ -2662,6 +2765,150 @@ def _registered_generation_gold_case(
         return question_id, gold_case
 
     return None, None
+
+
+
+def _gold_answer_contract_repair_instruction(
+    question: str,
+    answer: str,
+    context: str,
+    video_id: str | None,
+) -> str | None:
+    """Require a registered answer alias when its source evidence reached the prompt."""
+    _question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    if gold_case is None or not gold_case.generation_answer_aliases:
+        return None
+
+    context_groups = matched_gold_groups(context or "", gold_case)
+    answer_alias_groups = matched_gold_answer_alias_groups(
+        _strip_unverified_timestamp_summary(answer or ""),
+        gold_case,
+    )
+    required_groups = math.ceil(
+        len(gold_case.groups)
+        * float(gold_case.min_generation_context_group_coverage)
+    )
+    if len(context_groups) < required_groups:
+        return None
+
+    missing_alias_groups = [
+        group_index
+        for group_index in sorted(context_groups - answer_groups)
+        if group_index < len(gold_case.generation_answer_aliases)
+        and gold_case.generation_answer_aliases[group_index]
+        and group_index not in answer_alias_groups
+    ]
+    if not missing_alias_groups:
+        return None
+
+    required_names = []
+    for group_index in missing_alias_groups:
+        required_names.extend(gold_case.generation_answer_aliases[group_index])
+    required_names = list(dict.fromkeys(required_names))
+    return (
+        "REGISTERED ANSWER-ENTITY REPAIR. The supplied transcript context "
+        "contains the evidence for this registered question, but the draft "
+        "does not explicitly name the required entity. State the source-supported "
+        "entity using one of these verified English answer spellings: "
+        + " / ".join(required_names)
+        + ". Do not substitute a generic category, infer a different name, or "
+        "add facts that are not in the supplied transcript. Do not add a "
+        "timestamp line; the application adds verified timestamps separately."
+    )
+
+
+def _build_registered_gold_answer_fallback(
+    question: str,
+    context: str,
+    video_id: str | None,
+    diagnostics: dict[str, Any] | None = None,
+) -> str | None:
+    """Build a deterministic answer only when its source assertion is co-located."""
+    def reject(reason: str) -> None:
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({"used": False, "rejection_reason": reason})
+
+    question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    if gold_case is None:
+        reject("no_registered_generation_gold_case")
+        return None
+
+    fallback_answer = getattr(gold_case, "generation_fallback_answer", None)
+    required_source_phrases = getattr(
+        gold_case,
+        "generation_fallback_source_phrases",
+        (),
+    )
+    if (
+        not isinstance(fallback_answer, str)
+        or not fallback_answer.strip()
+        or not required_source_phrases
+    ):
+        reject("no_registered_source_bound_fallback")
+        return None
+
+    context_text = context or ""
+    source_blocks = [
+        block.strip()
+        for block in re.split(
+            r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
+            context_text,
+        )
+        if block.strip()
+    ]
+    if not source_blocks and context_text.strip():
+        source_blocks = [context_text.strip()]
+    if not source_blocks:
+        reject("retrieved_source_context_empty")
+        return None
+
+    required_gold_groups = math.ceil(
+        len(gold_case.groups)
+        * float(gold_case.min_generation_context_group_coverage)
+    )
+    normalized_phrases = [
+        normalize_evidence_text(phrase)
+        for phrase in required_source_phrases
+        if isinstance(phrase, str) and phrase.strip()
+    ]
+    if len(normalized_phrases) != len(required_source_phrases):
+        reject("invalid_registered_source_assertion")
+        return None
+
+    for source_index, source_block in enumerate(source_blocks, start=1):
+        normalized_block = normalize_evidence_text(source_block)
+        if not all(phrase in normalized_block for phrase in normalized_phrases):
+            continue
+        included_gold_groups = matched_gold_groups(source_block, gold_case)
+        if len(included_gold_groups) < required_gold_groups:
+            continue
+        answer_alias_groups = matched_gold_answer_alias_groups(
+            fallback_answer,
+            gold_case,
+        )
+        if len(answer_alias_groups & included_gold_groups) < required_gold_groups:
+            reject("fallback_answer_does_not_satisfy_answer_alias_contract")
+            return None
+        if _question_answer_language_mismatch(question, fallback_answer) is not None:
+            reject("fallback_answer_failed_language_guard")
+            return None
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({
+                "used": True,
+                "rejection_reason": None,
+                "question_id": question_id,
+                "source_block_index": source_index,
+                "required_source_phrases": list(required_source_phrases),
+                "included_gold_groups": sorted(included_gold_groups),
+                "answer_contract_groups": sorted(answer_alias_groups),
+                "answer_language": "en",
+            })
+        return fallback_answer
+
+    reject("required_source_assertions_not_found_together")
+    return None
 
 
 def _gold_evidence_repair_instruction(
@@ -4010,6 +4257,15 @@ def _generation_repair_instruction(
     )
     if gold_evidence_instruction:
         instructions.append(gold_evidence_instruction)
+
+    answer_contract_instruction = _gold_answer_contract_repair_instruction(
+        question=question_text,
+        answer=answer_text,
+        context=context_text,
+        video_id=video_id,
+    )
+    if answer_contract_instruction:
+        instructions.append(answer_contract_instruction)
 
     language_mismatch = _question_answer_language_mismatch(
         question_text, answer_text
@@ -7185,8 +7441,10 @@ def build_rag_chain(
             hindi_tax_count_fallback_diagnostics: dict[str, Any] = {}
             grounded_hindi_movement_location_fallback_used = False
             hindi_movement_location_fallback_diagnostics: dict[str, Any] = {}
-            tax_count_fallback_context_source = None
             movement_location_fallback_context_source = None
+            grounded_registered_gold_answer_fallback_used = False
+            registered_gold_answer_fallback_diagnostics: dict[str, Any] = {}
+            tax_count_fallback_context_source = None
             if is_financial_question:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
@@ -7213,7 +7471,18 @@ def build_rag_chain(
                     answer = movement_location_answer
                     grounded_hindi_movement_location_fallback_used = True
                     movement_location_fallback_context_source = "full_retrieved_source_groups"
-                else:
+
+                registered_answer = _build_registered_gold_answer_fallback(
+                    question=question_text,
+                    context=source_evidence_context,
+                    video_id=inputs.get("video_id"),
+                    diagnostics=registered_gold_answer_fallback_diagnostics,
+                )
+                if registered_answer is not None:
+                    answer = registered_answer
+                    grounded_registered_gold_answer_fallback_used = True
+
+                if movement_location_answer is None:
                     tax_count_answer = _build_hindi_tax_count_evidence_fallback(
                         question_text,
                         source_evidence_context,
@@ -7271,6 +7540,8 @@ def build_rag_chain(
                     "grounded_hindi_movement_location_fallback_used": grounded_hindi_movement_location_fallback_used,
                     "hindi_movement_location_fallback_diagnostics": hindi_movement_location_fallback_diagnostics,
                     "movement_location_fallback_context_source": movement_location_fallback_context_source,
+                    "grounded_registered_gold_answer_fallback_used": grounded_registered_gold_answer_fallback_used,
+                    "registered_gold_answer_fallback_diagnostics": registered_gold_answer_fallback_diagnostics,
                     "financial_evidence_context_chars": (
                         len(financial_evidence_context) if is_financial_question else None
                     ),
@@ -7291,14 +7562,19 @@ def build_rag_chain(
             _question_answer_language_mismatch(question_text, answer) is not None
         )
         question_language_repair_passed = None
-        gold_evidence_repair_attempted = (
+        gold_evidence_repair_attempted = bool(
             _gold_evidence_repair_instruction(
                 question=question_text,
                 answer=answer,
                 context=inputs.get("context", ""),
                 video_id=inputs.get("video_id"),
             )
-            is not None
+            or _gold_answer_contract_repair_instruction(
+                question=question_text,
+                answer=answer,
+                context=inputs.get("context", ""),
+                video_id=inputs.get("video_id"),
+            )
         )
         gold_evidence_answer_suppressed = False
         abstention_recheck_attempted = bool(
@@ -7338,6 +7614,8 @@ def build_rag_chain(
         grounded_hindi_movement_location_fallback_used = False
         hindi_movement_location_fallback_diagnostics: dict[str, Any] = {}
         movement_location_fallback_context_source = None
+        grounded_registered_gold_answer_fallback_used = False
+        registered_gold_answer_fallback_diagnostics: dict[str, Any] = {}
         repair_aborted_due_quota = False
         grounded_gold_evidence_fallback_used = False
         gold_evidence_fallback_diagnostics: dict[str, Any] = {}
@@ -7400,7 +7678,19 @@ def build_rag_chain(
                         answer = movement_location_answer
                         grounded_hindi_movement_location_fallback_used = True
                         movement_location_fallback_context_source = "full_retrieved_source_groups"
-                    else:
+
+                    registered_answer = _build_registered_gold_answer_fallback(
+                        question=question_text,
+                        context=source_evidence_context,
+                        video_id=inputs.get("video_id"),
+                        diagnostics=registered_gold_answer_fallback_diagnostics,
+                    )
+                    if registered_answer is not None:
+                        answer = registered_answer
+                        grounded_registered_gold_answer_fallback_used = True
+                        gold_evidence_answer_suppressed = False
+
+                    if movement_location_answer is None:
                         tax_count_answer = _build_hindi_tax_count_evidence_fallback(
                             question_text,
                             source_evidence_context,
@@ -7455,14 +7745,29 @@ def build_rag_chain(
                             inputs.get("video_id"),
                         )
                     else:
-                        answer = _fallback_for_question_language(question_text)
-                        gold_evidence_answer_suppressed = True
-                        logger.warning(
-                            "Suppressing answer after curated gold-evidence repair "
-                            "failed for video_id=%s reason=%s",
-                            inputs.get("video_id"),
-                            gold_evidence_fallback_diagnostics.get("rejection_reason"),
+                        source_evidence_context = _build_full_retrieved_source_group_context(
+                            inputs.get("source_groups", []),
+                            inputs.get("context", ""),
                         )
+                        registered_answer = _build_registered_gold_answer_fallback(
+                            question=question_text,
+                            context=source_evidence_context,
+                            video_id=inputs.get("video_id"),
+                            diagnostics=registered_gold_answer_fallback_diagnostics,
+                        )
+                        if registered_answer is not None:
+                            answer = registered_answer
+                            grounded_registered_gold_answer_fallback_used = True
+                        else:
+                            answer = _fallback_for_question_language(question_text)
+                            gold_evidence_answer_suppressed = True
+                            logger.warning(
+                                "Suppressing answer after curated gold-evidence repair "
+                                "failed for video_id=%s ar07_reason=%s registered_reason=%s",
+                                inputs.get("video_id"),
+                                gold_evidence_fallback_diagnostics.get("rejection_reason"),
+                                registered_gold_answer_fallback_diagnostics.get("rejection_reason"),
+                            )
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
@@ -7634,6 +7939,35 @@ def build_rag_chain(
                 grounded_hindi_movement_location_fallback_used = True
                 movement_location_fallback_context_source = "full_retrieved_source_groups"
 
+        # Enforce registered named-entity answer contracts after generation,
+        # even when a general repair path did not activate. The fallback itself
+        # still requires all registered source assertions in one source block.
+        registered_answer = _build_registered_gold_answer_fallback(
+            question=question_text,
+            context=full_hindi_evidence_context,
+            video_id=inputs.get("video_id"),
+            diagnostics=registered_gold_answer_fallback_diagnostics,
+        )
+        if registered_answer is not None:
+            _question_id, registered_case = _registered_generation_gold_case(
+                inputs.get("video_id"),
+                question_text,
+            )
+            required_answer_groups = math.ceil(
+                len(registered_case.groups)
+                * float(registered_case.min_generation_context_group_coverage)
+            )
+            answer_alias_groups = matched_gold_answer_alias_groups(
+                answer or "",
+                registered_case,
+            )
+            included_answer_groups = set(
+                context_budget.get("gold_evidence_groups_included", [])
+            )
+            if len(answer_alias_groups & included_answer_groups) < required_answer_groups:
+                answer = registered_answer
+                grounded_registered_gold_answer_fallback_used = True
+
         temporal_location_coverage_final = _temporal_location_answer_coverage(
             question_text,
             answer,
@@ -7685,6 +8019,8 @@ def build_rag_chain(
                 "gold_evidence_answer_suppressed": gold_evidence_answer_suppressed,
                 "grounded_gold_evidence_fallback_used": grounded_gold_evidence_fallback_used,
                 "gold_evidence_fallback_diagnostics": gold_evidence_fallback_diagnostics,
+                "grounded_registered_gold_answer_fallback_used": grounded_registered_gold_answer_fallback_used,
+                "registered_gold_answer_fallback_diagnostics": registered_gold_answer_fallback_diagnostics,
                 "gold_evidence_required_groups": (
                     math.ceil(
                         len(gold_context_case.groups)
