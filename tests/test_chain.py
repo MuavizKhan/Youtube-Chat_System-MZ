@@ -8267,13 +8267,41 @@ def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_r
         ),
     )
 
-    generation_calls = []
+    # Preflight the exact source-group/context path used by build_rag_chain.
+    # This proves the test is exercising a registered AR07 generation contract
+    # and that the phrase split across the raw chunks is visible to the repair gate.
+    question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert question_id == "AR07"
+    assert gold_case is not None
+    preflight_context = chain.build_generation_context(
+        chain.merge_overlapping_results(retrieved),
+        question=question,
+        video_id="fAd2nKfrDB8",
+    )["context"]
+    assert chain.matched_gold_groups(preflight_context, gold_case) == {0}
 
-    def unsupported_draft(**_kwargs):
+    unsupported_draft_text = "The room may have a price for an hourly visit."
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=unsupported_draft_text,
+        context=preflight_context,
+        video_id="fAd2nKfrDB8",
+    ) is not None
+
+    generation_calls = []
+    generation_prompts = []
+
+    def unsupported_draft(**kwargs):
         generation_calls.append(True)
-        # Preserve the exact registered amount phrase, but make no grounded
-        # statement about the hourly price or its upper-bound qualifier.
-        return "The transcript includes the phrase “600 دولار”."
+        prompt_value = kwargs.get("prompt_value")
+        assert prompt_value is not None
+        generation_prompts.append(prompt_value.to_string())
+        # Keep both drafts incomplete so the deterministic, source-bound
+        # fallback is exercised after the real repair gate has run.
+        return unsupported_draft_text
 
     monkeypatch.setattr(chain, "generate_with_llm", unsupported_draft)
 
@@ -8282,6 +8310,8 @@ def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_r
     )
 
     assert len(generation_calls) == 2
+    assert len(generation_prompts) == 2
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" in generation_prompts[1]
     assert "600 دولار" in result["answer"]
     assert "may reach $600" in result["answer"]
 
