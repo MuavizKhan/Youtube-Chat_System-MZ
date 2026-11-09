@@ -8115,8 +8115,20 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     )
     assert gold_case is not None
 
+    filler_document = doc(
+        908,
+        110,
+        300,
+        "معلومات جانبية في الحوار. " * 180,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+
     groups = chain.merge_overlapping_results(
-        [(first_document, 0.2), (second_document, 0.3)]
+        [
+            (first_document, 0.2),
+            (second_document, 0.3),
+            (filler_document, 0.6),
+        ]
     )
     assert len(groups) == 1
 
@@ -8134,21 +8146,10 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     assert retrieval_diagnostics[0]["formatted_gold_groups"] == [0]
     assert retrieval_diagnostics[0]["raw_chunk_fallback_used"] is True
 
-    filler_document = doc(
-        907,
-        180,
-        300,
-        "Unrelated background discussion. " * 180,
-    )
-    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
-    filler_group = chain.merge_overlapping_results(
-        [(filler_document, 0.6)]
-    )[0]
-
-    # Force the context packer to reduce the overall prompt. Both raw evidence
-    # rows must survive together and map back to their original indexed chunks.
+    # Force reduction inside the same source group. Both raw evidence rows must
+    # survive while the oversized unrelated chunk is excluded from the prompt.
     result = chain.build_generation_context(
-        [groups[0], filler_group],
+        groups,
         question=question,
         max_chars=1400,
         video_id="fAd2nKfrDB8",
@@ -8164,9 +8165,10 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     assert diagnostics["gold_evidence_groups_included"] == [0]
     assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
     assert {"905", "906"}.issubset(set(diagnostics["included_chunk_ids"]))
+    assert "908" not in diagnostics["included_chunk_ids"]
 
     source_diagnostic = diagnostics["gold_evidence_source_groups"][0]
-    assert source_diagnostic["chunk_ids"] == ["905", "906"]
+    assert source_diagnostic["chunk_ids"] == ["905", "906", "908"]
     assert source_diagnostic["raw_gold_groups"] == [0]
     assert source_diagnostic["caption_metadata_gold_groups"] == []
     assert source_diagnostic["formatted_gold_groups"] == [0]
