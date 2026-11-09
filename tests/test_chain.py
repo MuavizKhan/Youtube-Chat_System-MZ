@@ -8271,7 +8271,9 @@ def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_r
 
     def unsupported_draft(**_kwargs):
         generation_calls.append(True)
-        return "The room may have a price for an hourly visit."
+        # Preserve the exact registered amount phrase, but make no grounded
+        # statement about the hourly price or its upper-bound qualifier.
+        return "The transcript includes the phrase “600 دولار”."
 
     monkeypatch.setattr(chain, "generate_with_llm", unsupported_draft)
 
