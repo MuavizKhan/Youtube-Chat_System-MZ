@@ -8284,12 +8284,14 @@ def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_r
     assert chain.matched_gold_groups(preflight_context, gold_case) == {0}
 
     unsupported_draft_text = "The room may have a price for an hourly visit."
-    assert chain._gold_evidence_repair_instruction(
+    repair_instruction = chain._gold_evidence_repair_instruction(
         question=question,
         answer=unsupported_draft_text,
         context=preflight_context,
         video_id="fAd2nKfrDB8",
-    ) is not None
+    )
+    assert repair_instruction is not None
+    assert "600 دولار" in repair_instruction
 
     generation_calls = []
     generation_prompts = []
@@ -8357,4 +8359,19 @@ def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
     assert len(diagnostics) == 2
     assert all(item["formatted_gold_groups"] == [] for item in diagnostics)
     assert all(item["raw_gold_groups"] == [] for item in diagnostics)
+
+    # Caption-aware repair matching may join rows only inside one [SOURCE]
+    # block; it must not combine the price and currency from distant passages.
+    distant_context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:20] The amount mentioned is 600.\\n"
+        "[SOURCE 2]\\n"
+        "- [05:00–05:20] دولار is mentioned in a separate passage."
+    )
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer="The room may have a price for an hourly visit.",
+        context=distant_context,
+        video_id="fAd2nKfrDB8",
+    ) is None
 
