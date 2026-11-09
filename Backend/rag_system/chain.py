@@ -1840,7 +1840,6 @@ def _caption_segments_for_documents(
         if not isinstance(records, list) or not records:
             return None
 
-        document_segment_texts = []
         for record in records:
             if not isinstance(record, dict):
                 return None
@@ -1872,7 +1871,6 @@ def _caption_segments_for_documents(
                 "end": float(end),
                 "text": text,
             }
-            document_segment_texts.append(text)
             existing = segments_by_id.get(segment_id)
             if existing is not None and existing != segment:
                 # Conflicting copies of one caption are not safe to reconcile.
