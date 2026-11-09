@@ -8362,12 +8362,12 @@ def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
 
     # Caption-aware repair matching may join rows only inside one [SOURCE]
     # block; it must not combine the price and currency from distant passages.
-    distant_context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:20] The amount mentioned is 600.\\n"
-        "[SOURCE 2]\\n"
-        "- [05:00–05:20] دولار is mentioned in a separate passage."
-    )
+    distant_context = "\n".join([
+        "[SOURCE 1]",
+        "- [00:00–00:20] The amount mentioned is 600.",
+        "[SOURCE 2]",
+        "- [05:00–05:20] دولار is mentioned in a separate passage.",
+    ])
     assert chain._gold_evidence_repair_instruction(
         question=question,
         answer="The room may have a price for an hourly visit.",
