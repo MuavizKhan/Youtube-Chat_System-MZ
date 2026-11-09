@@ -8122,6 +8122,14 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
         "معلومات جانبية في الحوار. " * 180,
     )
     filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    filler_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 908,
+            "start": 110.0,
+            "end": 300.0,
+            "text": "معلومات جانبية في الحوار.",
+        }
+    ]
 
     groups = chain.merge_overlapping_results(
         [
