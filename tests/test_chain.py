@@ -7969,7 +7969,7 @@ def test_ar07_context_packing_preserves_gold_price_evidence_when_caption_metadat
         gold_case=gold_case,
     ) is None
     formatted = chain.format_source_group(group, 1, gold_case=gold_case)
-    assert "Transcript:" in formatted
+    assert "Original retrieved transcript chunks in chronological order" in formatted
     assert "600 دولار" in formatted
 
     result = chain.build_generation_context(
@@ -8071,3 +8071,114 @@ def test_hi01_generation_uses_source_bound_named_movement_fallback_after_failed_
     assert trace["grounded_registered_gold_answer_fallback_used"] is True
     assert trace["gold_evidence_answer_suppressed"] is False
     assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+
+@pytest.mark.regression
+def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(
+        905,
+        0,
+        60,
+        "The one-hour room price may be 600",
+    )
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    first_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 60.0,
+            "text": "The one-hour room price may be 600",
+        }
+    ]
+
+    second_document = doc(
+        906,
+        55,
+        120,
+        "دولار for an hour inside the room.",
+    )
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+    # The structurally valid caption metadata has lost the source-script
+    # currency word even though it remains in the original indexed chunk.
+    second_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 906,
+            "start": 55.0,
+            "end": 120.0,
+            "text": "USD for an hour inside the room.",
+        }
+    ]
+
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    groups = chain.merge_overlapping_results(
+        [(first_document, 0.2), (second_document, 0.3)]
+    )
+    assert len(groups) == 1
+
+    # Retrieval acceptance and prompt formatting must use the same temporal
+    # source-group boundary. The exact Arabic phrase spans the two raw chunks.
+    matched_groups, retrieval_diagnostics = (
+        chain._match_gold_evidence_by_source_group(
+            [(first_document, 0.2), (second_document, 0.3)],
+            gold_case,
+        )
+    )
+    assert matched_groups == {0}
+    assert len(retrieval_diagnostics) == 1
+    assert retrieval_diagnostics[0]["raw_gold_groups"] == [0]
+    assert retrieval_diagnostics[0]["formatted_gold_groups"] == [0]
+    assert retrieval_diagnostics[0]["raw_chunk_fallback_used"] is True
+
+    result = chain.build_generation_context(
+        groups,
+        question=question,
+        max_chars=1600,
+        video_id="fAd2nKfrDB8",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 1600
+    assert "600" in result["context"]
+    assert "دولار" in result["context"]
+    assert chain.matched_gold_groups(result["context"], gold_case) == {0}
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert {"905", "906"}.issubset(set(diagnostics["included_chunk_ids"]))
+
+    source_diagnostic = diagnostics["gold_evidence_source_groups"][0]
+    assert source_diagnostic["raw_gold_groups"] == [0]
+    assert source_diagnostic["caption_metadata_gold_groups"] == []
+    assert source_diagnostic["formatted_gold_groups"] == [0]
+    assert source_diagnostic["raw_chunk_fallback_used"] is True
+
+
+@pytest.mark.regression
+def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(951, 0, 20, "The amount mentioned is 600.")
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    second_document = doc(952, 300, 320, "دولار is mentioned in a separate passage.")
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    matched_groups, diagnostics = chain._match_gold_evidence_by_source_group(
+        [(first_document, 0.2), (second_document, 0.3)],
+        gold_case,
+    )
+
+    assert matched_groups == set()
+    assert len(diagnostics) == 2
+    assert all(item["formatted_gold_groups"] == [] for item in diagnostics)
+    assert all(item["raw_gold_groups"] == [] for item in diagnostics)
+
