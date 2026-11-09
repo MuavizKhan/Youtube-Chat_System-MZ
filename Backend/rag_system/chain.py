@@ -1880,33 +1880,94 @@ def _caption_segments_for_documents(
 
             segments_by_id[segment_id] = segment
 
-        # For a registered answer contract, never let caption metadata hide a
-        # required evidence phrase that is present in the original chunk.
-        # Unregistered and synthetic/legacy chunks retain the established
-        # metadata-first behavior.
-        if gold_case is not None:
-            raw_page_content = getattr(document, "page_content", "")
-            normalized_page_content = normalize_evidence_text(
-                raw_page_content if isinstance(raw_page_content, str) else ""
-            )
-            normalized_segments = normalize_evidence_text(
-                " ".join(document_segment_texts)
-            )
-            for alternatives in gold_case.groups:
-                if any(
-                    normalize_evidence_text(phrase) in normalized_page_content
-                    and normalize_evidence_text(phrase) not in normalized_segments
-                    for phrase in alternatives
-                ):
-                    return None
-
     if not segments_by_id:
         return None
 
-    return sorted(
+    ordered_segments = sorted(
         segments_by_id.values(),
         key=lambda segment: (segment["start"], segment["segment_id"]),
     )
+
+    # Compare evidence at the complete source-group level, not independently
+    # per document. A required phrase can straddle two overlapping retrieved
+    # chunks even when neither chunk contains the whole phrase by itself.
+    # If the original indexed text contains that phrase but reconstructed
+    # caption metadata does not, reject metadata reconstruction for this group.
+    if gold_case is not None:
+        raw_group_text = " ".join(
+            str(getattr(document, "page_content", "") or "").strip()
+            for document in documents
+        )
+        normalized_raw_group = normalize_evidence_text(raw_group_text)
+        normalized_segment_group = normalize_evidence_text(
+            " ".join(segment["text"] for segment in ordered_segments)
+        )
+        for alternatives in gold_case.groups:
+            if any(
+                (normalized_phrase := normalize_evidence_text(phrase))
+                and normalized_phrase in normalized_raw_group
+                and normalized_phrase not in normalized_segment_group
+                for phrase in alternatives
+            ):
+                return None
+
+    return ordered_segments
+
+
+def _raw_gold_groups_for_documents(
+    documents: list,
+    gold_case,
+) -> set[int]:
+    """Match registered evidence against raw text inside one merged source group."""
+    if gold_case is None:
+        return set()
+    raw_parts = [
+        str(getattr(document, "page_content", "") or "").strip()
+        for document in documents
+    ]
+    raw_group_text = " ".join(part for part in raw_parts if part)
+    return matched_gold_groups(raw_group_text, gold_case)
+
+
+def _format_raw_chunk_caption_rows(
+    documents: list,
+    *,
+    fallback_start: float,
+    fallback_end: float,
+) -> list[str]:
+    """Render original chunks as timestamped rows without losing chunk boundaries."""
+    rows = []
+    for document in documents:
+        metadata = getattr(document, "metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        raw_text = getattr(document, "page_content", "")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            continue
+
+        start = metadata.get("start", fallback_start)
+        end = metadata.get("end", fallback_end)
+        try:
+            start = float(start)
+            end = float(end)
+        except (TypeError, ValueError):
+            start = float(fallback_start)
+            end = float(fallback_end)
+        if not math.isfinite(start):
+            start = float(fallback_start)
+        if not math.isfinite(end):
+            end = float(fallback_end)
+        if end < start:
+            start, end = end, start
+
+        # Flatten layout whitespace only; preserve the indexed wording.
+        one_line_text = " ".join(raw_text.split())
+        if one_line_text:
+            rows.append(
+                f"- [{format_timestamp(start)}–{format_timestamp(end)}] "
+                f"{one_line_text}"
+            )
+    return rows
 
 
 def format_source_group(
@@ -1946,9 +2007,10 @@ def format_source_group(
     )
 
 
-    # Prefer the original caption structure when every retrieved chunk
-    # carries valid, consistent metadata. Legacy or incomplete groups retain
-    # the established whole-chunk formatter to avoid losing source text.
+    # Prefer caption metadata only when it preserves every registered source
+    # phrase. If raw text in this chronological source group contains a gold
+    # phrase missing from reconstructed captions, retain the original chunks
+    # as separate timestamped rows so packing and citations can trace each row.
     caption_segments = _caption_segments_for_documents(
         documents,
         gold_case=gold_case,
@@ -1966,21 +2028,38 @@ def format_source_group(
             "Each line includes its caption snippet's start and end time:\n"
         )
     else:
-        transcript_parts = []
-        seen_chunk_ids = set()
+        raw_gold_groups = _raw_gold_groups_for_documents(documents, gold_case)
+        raw_chunk_rows = (
+            _format_raw_chunk_caption_rows(
+                documents,
+                fallback_start=start,
+                fallback_end=end,
+            )
+            if raw_gold_groups
+            else []
+        )
+        if raw_chunk_rows:
+            transcript_text = "\n".join(raw_chunk_rows)
+            transcript_heading = (
+                "Original retrieved transcript chunks in chronological order. "
+                "Each timestamped row is one complete indexed chunk:\n"
+            )
+        else:
+            transcript_parts = []
+            seen_chunk_ids = set()
 
-        for document in documents:
-            chunk_id = document.metadata.get("chunk_id")
-            if chunk_id in seen_chunk_ids:
-                continue
-            seen_chunk_ids.add(chunk_id)
+            for document in documents:
+                chunk_id = document.metadata.get("chunk_id")
+                if chunk_id in seen_chunk_ids:
+                    continue
+                seen_chunk_ids.add(chunk_id)
 
-            text = document.page_content.strip()
-            if text:
-                transcript_parts.append(text)
+                text = document.page_content.strip()
+                if text:
+                    transcript_parts.append(text)
 
-        transcript_text = merge_overlapping_text(transcript_parts)
-        transcript_heading = "Transcript:\n"
+            transcript_text = merge_overlapping_text(transcript_parts)
+            transcript_heading = "Transcript:\n"
 
     return (
         f"[SOURCE {source_number}]\n"
@@ -2565,8 +2644,38 @@ def _included_chunk_ids_for_excerpt(
         if not isinstance(metadata, dict):
             continue
         chunk_id = metadata.get("chunk_id")
+        if chunk_id is None:
+            continue
+
+        # Raw-evidence fallback rows contain one complete indexed chunk per
+        # timestamped line. Map only a complete matching row back to its chunk.
+        # Partial legacy text remains deliberately non-citable.
+        raw_text = getattr(document, "page_content", "")
+        if isinstance(raw_text, str) and raw_text.strip():
+            raw_start = metadata.get("start", source_group.get("start"))
+            raw_end = metadata.get("end", source_group.get("end"))
+            try:
+                raw_start = float(raw_start)
+                raw_end = float(raw_end)
+            except (TypeError, ValueError):
+                raw_start = raw_end = None
+            if (
+                raw_start is not None
+                and raw_end is not None
+                and math.isfinite(raw_start)
+                and math.isfinite(raw_end)
+            ):
+                if raw_end < raw_start:
+                    raw_start, raw_end = raw_end, raw_start
+                raw_row = (
+                    f"- [{format_timestamp(raw_start)}–{format_timestamp(raw_end)}] "
+                    f"{' '.join(raw_text.split())}"
+                )
+                if raw_row in included_rows and str(chunk_id) not in included:
+                    included.append(str(chunk_id))
+
         segments = metadata.get("transcript_segments")
-        if chunk_id is None or not isinstance(segments, list):
+        if not isinstance(segments, list):
             continue
         matched = False
         for segment in segments:
@@ -3274,11 +3383,42 @@ def build_generation_context(
         # bonuses break near-ties in favor of question-relevant material.
         priority = distance - min(0.12, overlap * 0.015) - min(0.12, amount_count * 0.03)
         source_chunk_ids = []
-        for document in source_group.get("documents", []):
+        source_documents = source_group.get("documents", [])
+        for document in source_documents:
             metadata = getattr(document, "metadata", {})
             chunk_id = metadata.get("chunk_id") if isinstance(metadata, dict) else None
             if chunk_id is not None and str(chunk_id) not in source_chunk_ids:
                 source_chunk_ids.append(str(chunk_id))
+
+        source_gold_diagnostic = None
+        if gold_case is not None:
+            raw_gold_groups = sorted(
+                _raw_gold_groups_for_documents(source_documents, gold_case)
+            )
+            metadata_segments = _caption_segments_for_documents(source_documents)
+            metadata_gold_groups = (
+                sorted(matched_gold_groups(
+                    " ".join(segment["text"] for segment in metadata_segments),
+                    gold_case,
+                ))
+                if metadata_segments is not None
+                else []
+            )
+            formatted_gold_groups = sorted(
+                matched_gold_groups(rendered, gold_case)
+            )
+            source_gold_diagnostic = {
+                "source_group_index": index + 1,
+                "chunk_ids": source_chunk_ids,
+                "raw_gold_groups": raw_gold_groups,
+                "caption_metadata_gold_groups": metadata_gold_groups,
+                "formatted_gold_groups": formatted_gold_groups,
+                "raw_chunk_fallback_used": bool(
+                    raw_gold_groups
+                    and "Original retrieved transcript chunks in chronological order" in rendered
+                ),
+            }
+
         records.append({
             "index": index,
             "text": rendered,
@@ -3287,6 +3427,7 @@ def build_generation_context(
             "priority": priority,
             "source_chunk_ids": source_chunk_ids,
             "source_group": source_group,
+            "gold_evidence_diagnostic": source_gold_diagnostic,
             "gold_group_indexes": (
                 matched_gold_groups(rendered, gold_case)
                 if gold_case is not None
@@ -3346,6 +3487,11 @@ def build_generation_context(
                 len(included_groups) / len(gold_case.groups),
                 4,
             ),
+            "gold_evidence_source_groups": [
+                record["gold_evidence_diagnostic"]
+                for record in records
+                if isinstance(record.get("gold_evidence_diagnostic"), dict)
+            ],
         }
 
     original_chars = sum(len(record["text"]) for record in records) + (
@@ -6368,6 +6514,45 @@ def _planner_failure_query_candidates(question: str) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate.strip()))[:2]
 
 
+def _match_gold_evidence_by_source_group(
+    retrieved_results: list,
+    gold_case,
+) -> tuple[set[int], list[dict[str, Any]]]:
+    """Match gold evidence within the chronological groups used for prompting."""
+    matched_groups: set[int] = set()
+    diagnostics = []
+    source_groups = merge_overlapping_results(retrieved_results)
+    for source_index, source_group in enumerate(source_groups, start=1):
+        rendered = format_source_group(
+            source_group=source_group,
+            source_number=source_index,
+            gold_case=gold_case,
+        )
+        source_matches = matched_gold_groups(rendered, gold_case)
+        matched_groups.update(source_matches)
+        diagnostics.append({
+            "source_group_index": source_index,
+            "chunk_ids": [
+                str(document.metadata.get("chunk_id"))
+                for document in source_group.get("documents", [])
+                if document.metadata.get("chunk_id") is not None
+            ],
+            "matched_gold_groups": sorted(source_matches),
+            "raw_gold_groups": sorted(
+                _raw_gold_groups_for_documents(
+                    source_group.get("documents", []),
+                    gold_case,
+                )
+            ),
+            "formatted_gold_groups": sorted(source_matches),
+            "raw_chunk_fallback_used": (
+                "Original retrieved transcript chunks in chronological order"
+                in rendered
+            ),
+        })
+    return matched_groups, diagnostics
+
+
 def _deterministic_query_evidence_fallback(
     vector_store,
     question: str,
@@ -6443,13 +6628,11 @@ def _deterministic_query_evidence_fallback(
             attempt["expanded_context_chunks"] = len(expanded)
 
             if gold_case is not None:
-                expanded_text = "\n".join(
-                    str(getattr(document, "page_content", "") or "")
-                    for document, _distance in expanded
-                )
-                included_gold_groups = matched_gold_groups(
-                    expanded_text,
-                    gold_case,
+                included_gold_groups, source_group_diagnostics = (
+                    _match_gold_evidence_by_source_group(
+                        expanded,
+                        gold_case,
+                    )
                 )
                 missing_gold_groups = sorted(
                     set(range(len(gold_case.groups))) - included_gold_groups
@@ -6461,6 +6644,9 @@ def _deterministic_query_evidence_fallback(
                 attempt["gold_evidence_required_groups"] = required_gold_groups
                 attempt["gold_evidence_groups_present"] = sorted(included_gold_groups)
                 attempt["gold_evidence_groups_missing"] = missing_gold_groups
+                attempt["gold_evidence_source_group_diagnostics"] = (
+                    source_group_diagnostics
+                )
                 attempt["gold_evidence_gate_passed"] = evidence_gate_passed
                 if not evidence_gate_passed:
                     attempt["gold_evidence_rejection_reason"] = (
