@@ -8079,7 +8079,7 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
         905,
         0,
         60,
-        "The one-hour room price may be 600",
+        "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
     )
     first_document.metadata["video_id"] = "fAd2nKfrDB8"
     first_document.metadata["transcript_segments"] = [
@@ -8087,7 +8087,7 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
             "segment_id": 905,
             "start": 0.0,
             "end": 60.0,
-            "text": "The one-hour room price may be 600",
+            "text": "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
         }
     ]
 
@@ -8095,7 +8095,7 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
         906,
         55,
         120,
-        "دولار for an hour inside the room.",
+        "دولار",
     )
     second_document.metadata["video_id"] = "fAd2nKfrDB8"
     # The structurally valid caption metadata has lost the source-script
@@ -8105,7 +8105,7 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
             "segment_id": 906,
             "start": 55.0,
             "end": 120.0,
-            "text": "USD for an hour inside the room.",
+            "text": "USD per hour",
         }
     ]
 
@@ -8171,6 +8171,21 @@ def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
     assert source_diagnostic["caption_metadata_gold_groups"] == []
     assert source_diagnostic["formatted_gold_groups"] == [0]
     assert source_diagnostic["raw_chunk_fallback_used"] is True
+
+    fallback_diagnostics = {}
+    fallback_answer = chain._build_ar07_room_cost_evidence_fallback(
+        question=question,
+        context=result["context"],
+        video_id="fAd2nKfrDB8",
+        diagnostics=fallback_diagnostics,
+    )
+    assert fallback_answer is not None
+    assert "600 دولار" in fallback_answer
+    assert "may reach $600" in fallback_answer
+    assert fallback_diagnostics["used"] is True
+    assert fallback_diagnostics["hour_context_present"] is True
+    assert fallback_diagnostics["cost_context_present"] is True
+    assert fallback_diagnostics["upper_bound_qualifier_present"] is True
 
 
 @pytest.mark.regression
