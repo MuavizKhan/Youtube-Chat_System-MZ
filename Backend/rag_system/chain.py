@@ -97,6 +97,7 @@ from .timestamp_utils import strip_unverified_timestamp_claims
 from .benchmark_registry import get_video_benchmark
 from .gold_evidence import (
     matched_gold_groups,
+    matched_gold_group_phrases,
     matched_gold_answer_groups,
     matched_gold_answer_alias_groups,
     matched_gold_group_caption_spans,
@@ -3057,18 +3058,20 @@ def _gold_evidence_repair_instruction(
         # Do not ask the model to invent evidence the packer did not supply.
         return None
 
+    matched_context_phrases = matched_gold_group_phrases(
+        context_text,
+        gold_case,
+    )
     missing_groups = sorted(context_groups - answer_groups)
     preserved_groups = sorted(context_groups & answer_groups)
     instructions = []
     if missing_groups:
-        normalized_context = normalize_evidence_text(context_text)
         evidence_lines = []
         for group_index in missing_groups:
-            supported_phrases = [
-                phrase
-                for phrase in gold_case.groups[group_index]
-                if normalize_evidence_text(phrase) in normalized_context
-            ]
+            # Use the same source-scoped caption matching as the gold gate.
+            # A phrase spanning adjacent timestamp rows must remain available
+            # to repair even though timestamps interrupt its flattened string.
+            supported_phrases = matched_context_phrases.get(group_index, [])
             if supported_phrases:
                 evidence_line = (
                     f"- Evidence group {group_index + 1} "
@@ -3095,11 +3098,7 @@ def _gold_evidence_repair_instruction(
 
         preserved_lines = []
         for group_index in preserved_groups:
-            supported_phrases = [
-                phrase
-                for phrase in gold_case.groups[group_index]
-                if normalize_evidence_text(phrase) in normalized_context
-            ]
+            supported_phrases = matched_context_phrases.get(group_index, [])
             if supported_phrases:
                 preserved_lines.append(
                     f"- Evidence group {group_index + 1} (already covered; "
