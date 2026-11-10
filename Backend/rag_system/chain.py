@@ -3152,9 +3152,9 @@ def _normalize_registered_transcript_answer(
 
     if question_id == "Q01":
         corrected, count = re.subn(
-            r"It was founded in the early 2000s\\s*"
-            r"\\(the interview mentions a 2002[\\s\\u2010-\\u2015-]*"
-            r"2003 launch and a 2005 vision\\)",
+            r"It was founded in the early 2000s\s*"
+            r"\(the interview mentions a 2002[\s\u2010-\u2015-]*"
+            r"2003 launch and a 2005 vision\)",
             (
                 "Mallya says he decided to start the airline around "
                 "2002–2003; Kingfisher Airlines launched in May 2005"
@@ -3166,8 +3166,8 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("corrected_decision_date_vs_launch_date")
         corrected, count = re.subn(
-            r"before facing financial difficulties and a 9,000\\s*"
-            r"crore[-\\s]rupee loan default",
+            r"before facing financial difficulties and a 9,000\s*"
+            r"crore[-\s]rupee loan default",
             "before facing severe financial difficulties",
             corrected,
             count=1,
@@ -3180,7 +3180,7 @@ def _normalize_registered_transcript_answer(
         # Lenders are not businesses owned or operated by the subject. The
         # original draft also repeated United Breweries as a second company.
         corrected, count = re.subn(
-            r"(?im)^[-*]\\s*A consortium of 17 banks[^\\n]*(?:\\n|$)",
+            r"(?im)^[-*]\s*A consortium of 17 banks[^\n]*(?:\n|$)",
             "",
             corrected,
             count=1,
@@ -3188,7 +3188,7 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("removed_lender_consortium_from_business_list")
         corrected, count = re.subn(
-            r"(?im)^[-*]\\s*Breweries Limited\\*\\*?\\s*[–—-][^\\n]*(?:\\n|$)",
+            r"(?im)^[-*]\s*Breweries Limited\*\*?\s*[–—-][^\n]*(?:\n|$)",
             "",
             corrected,
             count=1,
@@ -3196,8 +3196,8 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("removed_duplicate_united_breweries_entry")
         corrected, count = re.subn(
-            r"(?m)^- ([^\\n*]+)\\*\\*\\s*[–—-]",
-            r"- **\\1** —",
+            r"(?m)^- ([^\n*]+)\*\*\s*[–—-]",
+            r"- **\1** —",
             corrected,
         )
         if count:
@@ -3205,7 +3205,7 @@ def _normalize_registered_transcript_answer(
 
     elif question_id == "Q11":
         corrected, count = re.subn(
-            r"\\bEden\\b",
+            r"\bEden\b",
             "Air Deccan",
             corrected,
             flags=re.IGNORECASE,
@@ -3213,7 +3213,7 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("corrected_asr_entity_eden_to_air_deccan")
         corrected, count = re.subn(
-            r"\\bPranav\\s+Mukharji\\b",
+            r"\bPranav\s+Mukharji\b",
             "Pranab Mukherjee",
             corrected,
             flags=re.IGNORECASE,
