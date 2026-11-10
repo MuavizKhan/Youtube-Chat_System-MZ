@@ -8518,8 +8518,10 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
                 "[SOURCE 1]\n"
                 "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
                 "[SOURCE 2]\n"
-                "- [00:05–00:10] I was told not to downsize Kingfisher; "
-                "the banks will support you."
+                "- [00:05–00:10] The banks will support you.\n"
+                "[SOURCE 3]\n"
+                "- [00:10–00:15] Government policies that didn't help; "
+                "the final straw was the refusal to let Etihad invest."
             ),
             [3, 5],
         ),
@@ -8529,7 +8531,10 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
                 "[SOURCE 1]\n"
                 "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
                 "[SOURCE 2]\n"
-                "- [00:05–00:10] The working capital cycle got disrupted."
+                "- [00:05–00:10] The working capital cycle got disrupted.\n"
+                "[SOURCE 3]\n"
+                "- [00:10–00:15] There was non-payment of the oil bills. "
+                "The airline could not pay airport fees."
             ),
             [3, 5],
         ),
@@ -8562,15 +8567,15 @@ def test_q05_fallback_rejects_airport_fees_and_landing_charges_split_across_sour
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
         "- [00:05–00:10] The working capital cycle got disrupted; "
-        "there was a cash flow issue.\\n"
-        "[SOURCE 3]\\n"
+        "there was a cash flow issue.\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] There was non-payment of the oil bills. "
-        "The airline could not pay airport fees.\\n"
-        "[SOURCE 4]\\n"
+        "The airline could not pay airport fees.\n"
+        "[SOURCE 4]\n"
         "- [00:15–00:20] The landing charges were overdue."
     )
     diagnostics = {}
@@ -8596,11 +8601,11 @@ def test_q04_fallback_rejects_partial_policy_and_loss_evidence_even_when_old_gro
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
-        "- [00:05–00:10] The banks will support you.\\n"
-        "[SOURCE 3]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The banks will support you.\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] Government policies that didn't help; "
         "the final straw was the refusal to let Etihad invest."
     )
@@ -8627,11 +8632,11 @@ def test_q05_fallback_rejects_cash_flow_and_combined_airport_charge_subclaims():
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
-        "- [00:05–00:10] The working capital cycle got disrupted.\\n"
-        "[SOURCE 3]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The working capital cycle got disrupted.\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] There was non-payment of the oil bills. "
         "The airline could not pay airport fees."
     )
