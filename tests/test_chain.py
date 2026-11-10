@@ -8890,7 +8890,7 @@ def test_q05_answer_correction_separates_mallya_contribution_from_ub_group_funds
     assert "9,000" not in corrected
     assert "forcing the airline to shut down" not in corrected
     assert "global financial crisis" in corrected
-    assert "working capital" in corrected
+    assert "working-capital cycle was disrupted" in corrected
     assert "oil bills" in corrected
     assert "airport fees" in corrected
     assert "landing charges" in corrected
