@@ -221,6 +221,7 @@ GOLD_EVIDENCE_CASES = (
             (
                 "Kingfisher Airlines was not able to pay the airport fees, the landing charges",
                 "not able to pay airport fees and landing charges",
+                "could not pay airport fees or the landing charges",
                 "could not pay airport fees or landing charges",
             ),
         ),
