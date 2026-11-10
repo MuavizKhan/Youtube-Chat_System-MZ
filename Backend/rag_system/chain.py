@@ -8280,17 +8280,25 @@ def build_rag_chain(
                     context=financial_evidence_context,
                     diagnostics=financial_fallback_diagnostics,
                 )
-                if extractive_answer is not None and not gold_evidence_answer_suppressed:
+                if (
+                    extractive_answer is not None
+                    and not gold_evidence_answer_suppressed
+                    and not grounded_registered_gold_answer_fallback_used
+                ):
                     answer = extractive_answer
                     grounded_financial_fallback_used = True
                     logger.warning(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
-                elif not gold_evidence_answer_suppressed and re.search(
-                    r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
-                    r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
-                    inputs.get("question", ""),
-                    re.IGNORECASE,
+                elif (
+                    not gold_evidence_answer_suppressed
+                    and not grounded_registered_gold_answer_fallback_used
+                    and re.search(
+                        r"\b(debt|money|amount|crore|rupee|financial|recovery|recovered|"
+                        r"liabilit\w*|loan|invest(?:ed|ment)?|borrow(?:ed|ing)?)\b",
+                        inputs.get("question", ""),
+                        re.IGNORECASE,
+                    )
                 ):
                     # Never return a known-invalid financial draft merely because
                     # its evidence is too fragmented to support an extractive
