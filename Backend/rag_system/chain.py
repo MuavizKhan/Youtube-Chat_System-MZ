@@ -7915,18 +7915,19 @@ def build_rag_chain(
                 if registered_answer is not None:
                     answer = registered_answer
                     grounded_registered_gold_answer_fallback_used = True
-            if is_financial_question and not grounded_registered_gold_answer_fallback_used:
-                extractive_answer = _build_financial_evidence_fallback(
-                    question=question_text,
-                    context=financial_evidence_context,
-                    diagnostics=quota_diagnostics,
-                )
-                if extractive_answer is not None:
-                    answer = extractive_answer
-                    grounded_financial_fallback_used = True
-                else:
-                    answer = FINANCIAL_VERIFICATION_FALLBACK
-                    financial_answer_suppressed = True
+            if is_financial_question:
+                if not grounded_registered_gold_answer_fallback_used:
+                    extractive_answer = _build_financial_evidence_fallback(
+                        question=question_text,
+                        context=financial_evidence_context,
+                        diagnostics=quota_diagnostics,
+                    )
+                    if extractive_answer is not None:
+                        answer = extractive_answer
+                        grounded_financial_fallback_used = True
+                    else:
+                        answer = FINANCIAL_VERIFICATION_FALLBACK
+                        financial_answer_suppressed = True
             else:
                 source_evidence_context = _build_full_retrieved_source_group_context(
                     inputs.get("source_groups", []),
