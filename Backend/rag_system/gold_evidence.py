@@ -557,6 +557,31 @@ def matched_gold_group_phrases(
     return matched_phrases
 
 
+def matched_source_phrase_group_indices(
+    text: str,
+    phrase_groups: tuple[tuple[str, ...], ...],
+) -> set[int]:
+    """Match registered phrase groups within source-scoped, caption-aware text.
+
+    Timestamped caption rows are joined before matching, so a phrase split by
+    row boundaries remains discoverable. Distinct [SOURCE] blocks are never
+    concatenated, preserving the source-local evidence contract.
+    """
+    normalized_blocks = [
+        normalize_evidence_text(block)
+        for block in _source_scoped_evidence_texts(text or "")
+    ]
+    matched_indices = set()
+    for group_index, alternatives in enumerate(phrase_groups):
+        if any(
+            (normalized_phrase := normalize_evidence_text(phrase))
+            and any(normalized_phrase in block for block in normalized_blocks)
+            for phrase in alternatives
+        ):
+            matched_indices.add(group_index)
+    return matched_indices
+
+
 def matched_gold_groups(
     text: str,
     case: GoldEvidenceCase,
