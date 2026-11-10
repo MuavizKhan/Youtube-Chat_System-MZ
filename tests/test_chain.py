@@ -8718,7 +8718,6 @@ def test_q03_answer_correction_removes_unrelated_lender_and_duplicate_company():
 
 
 @pytest.mark.unit
-@pytest.mark.unit
 @pytest.mark.parametrize("separator", ["\n", "\r\n"])
 def test_q03_answer_correction_handles_real_line_separators(separator):
     question = (
@@ -8748,6 +8747,7 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
 
 
 
+@pytest.mark.unit
 def test_q11_answer_correction_normalizes_air_deccan_and_pranab_mukherjee_names():
     question = (
         "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
