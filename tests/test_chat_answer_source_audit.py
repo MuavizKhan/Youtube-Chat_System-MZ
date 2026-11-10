@@ -1316,6 +1316,31 @@ def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
     assert by_name["response_language_english"] is False
 
 
+def test_q05_audit_requires_all_operational_points_and_rejects_unsupported_attributions():
+    case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q05")
+    grounded_answer = (
+        "Mallya describes the 2008 global financial crisis, when money stopped "
+        "flowing across the aviation sector. He says the working capital cycle "
+        "was disrupted after non-payment of oil bills, and Kingfisher could not "
+        "pay airport fees and landing charges. He also describes a cash-flow issue."
+    )
+
+    grounded_checks = _answer_quality_checks(case, grounded_answer)
+    assert all(check["passed"] for check in grounded_checks), grounded_checks
+
+    unsupported_answer = (
+        grounded_answer
+        + " He injected 3,000 crore of UB Group money; the 9,000-crore loan "
+        "default forced the airline to shut down."
+    )
+    unsupported_checks = _answer_quality_checks(case, unsupported_answer)
+    by_name = {check["name"]: check["passed"] for check in unsupported_checks}
+
+    assert by_name["answer_prohibited_ub_group_3000_crore_misattribution"] is False
+    assert by_name["answer_prohibited_loan_default_causally_linked_to_shutdown"] is False
+    assert not all(check["passed"] for check in unsupported_checks)
+
+
 def test_phase10_11_registered_answer_requirements_and_english_response_are_checked():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
     checks = _answer_quality_checks(
