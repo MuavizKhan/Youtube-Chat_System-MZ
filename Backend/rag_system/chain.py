@@ -3177,37 +3177,29 @@ def _normalize_registered_transcript_answer(
             corrections.append("removed_disputed_intro_default_framing")
     elif question_id == "Q03":
         # Lenders are not businesses owned or operated by the subject. The
-    elif question_id == "Q03":
-        # Lenders are not businesses owned or operated by the subject. The
         # original draft also repeated United Breweries as a second company.
-        # Provider/test drafts may encode Markdown line breaks as literal \\n;
-        # canonicalize only for this exact registered Q03 question.
+        # Some answer drafts serialize list separators as literal backslash-n;
+        # normalize those only for this exact registered Q03 question.
         corrected, escaped_breaks = re.subn(r"\\\\[nN]", "\\n", corrected)
         if escaped_breaks:
             corrections.append("normalized_escaped_business_list_newlines")
         corrected, count = re.subn(
             r"(?im)^[ \\t]*[-*][ \\t]*A consortium of 17 banks\\b[^\\r\\n]*(?:\\r?\\n|$)",
-            "",
-            corrected,
-            count=1,
+            "", corrected, count=1,
         )
         if count:
             corrections.append("removed_lender_consortium_from_business_list")
         corrected, count = re.subn(
             r"(?im)^[ \\t]*[-*][ \\t]*Breweries Limited\\*\\*?[ \\t]*[–—-][^\\r\\n]*(?:\\r?\\n|$)",
-            "",
-            corrected,
-            count=1,
+            "", corrected, count=1,
         )
         if count:
             corrections.append("removed_duplicate_united_breweries_entry")
         corrected, count = re.subn(
             r"(?m)^- ([^\\n*]+)\\*\\*\\s*[–—-]",
-            r"- **\\1** —",
-            corrected,
+            r"- **\\1** —", corrected,
         )
         if count:
-            corrections.append("normalized_business_list_emphasis")
             corrections.append("normalized_business_list_emphasis")
 
     elif question_id == "Q11":
