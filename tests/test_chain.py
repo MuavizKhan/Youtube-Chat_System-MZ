@@ -8861,21 +8861,21 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
 
 
 @pytest.mark.unit
-def test_q05_answer_correction_separates_mallya_contribution_from_ub_group_funds():
+def test_q05_answer_correction_preserves_supported_ub_group_contribution_and_repairs_misattributions():
     question = (
         "How does Vijay Mallya describe the challenges he faced "
         "while running Kingfisher Airlines?"
     )
     answer = (
-        "Vijay Mallya says running Kingfisher Airlines was a “cash‑flow nightmare” "
-        "that spiralled into a debt crisis. He had to inject about ₹3,000 crore "
-        "of UB‑group money to keep the airline afloat, yet the company still "
-        "struggled to pay oil bills, airport landing charges and other "
-        "working-capital obligations. The airline’s 9,000‑crore loan default "
-        "and the global financial crisis in 2008 further dried up funding, "
-        "forcing the airline to shut down. Mallya notes that the cash‑flow "
-        "problems “affected everybody” and that the airline was unable to meet "
-        "its financial commitments, leading to its eventual collapse."
+        "Vijay Mallya says running Kingfisher Airlines was beset by a series "
+        "of financial and operational crises. The airline was saddled with a "
+        "“9,000 cr loan default scam” and had to raise about 260 crore to stay afloat. "
+        "He himself injected roughly 3,000 crore of UB‑group money into the "
+        "carrier to keep it running, but the company still struggled with "
+        "cash-flow problems: “non-payment of the oil bills…the working-capital "
+        "cycle got disrupted” and it could not pay airport landing charges. "
+        "The global financial crisis of 2008 further tightened credit and "
+        "“the money stopped, it got dry,” compounding the airline’s liquidity woes."
     )
 
     corrected, corrections = chain._normalize_registered_transcript_answer(
@@ -8884,24 +8884,34 @@ def test_q05_answer_correction_separates_mallya_contribution_from_ub_group_funds
         video_id="MdeQMVBuGgY",
     )
 
-    assert "3,000 crore" in corrected
-    assert "put in about ₹3,000 crore" in corrected
-    assert "UB" not in corrected
+    # The primary source explicitly attributes the 3,000-crore infusion to
+    # UB Group money, so the normalizer must preserve that supported statement.
+    assert "3,000 crore of UB‑group money" in corrected
+    assert "He himself injected roughly" in corrected
+
+    # The opening 9,000-crore-default narration is not Mallya's description;
+    # the 260-crore figure in the transcript is frozen cash, not money raised.
     assert "9,000" not in corrected
-    assert "forcing the airline to shut down" not in corrected
+    assert "loan default" not in corrected
+    assert "had to raise about 260" not in corrected
+    assert (
+        "Karnataka High Court had frozen over ₹260 crore in cash in India"
+        in corrected
+    )
+
+    # The transcript names airport fees and landing charges as separate items.
+    assert "airport fees and landing charges" in corrected
+    assert "working-capital cycle got disrupted" in corrected
+    assert "non-payment of the oil bills" in corrected
     assert "global financial crisis" in corrected
-    assert "working-capital cycle was disrupted" in corrected
-    assert "oil bills" in corrected
-    assert "airport fees" in corrected
-    assert "landing charges" in corrected
-    assert "cash-flow shortage" in corrected
-    assert "cash‑flow nightmare" not in corrected
-    assert "spiralled into a debt crisis" not in corrected
+    assert "whole aviation sector" in corrected
+    assert "money stopped flowing" in corrected
+
     assert corrections == [
-        "reframed_q05_cash_flow_without_unsupported_debt_crisis",
-        "separated_q05_3000_crore_contribution_from_ub_group_funds",
-        "separated_q05_global_crisis_from_loan_default_and_shutdown",
-        "neutralized_q05_interviewer_cash_flow_attribution",
+        "removed_q05_opening_loan_default_narration",
+        "corrected_q05_260_crore_frozen_cash_context",
+        "reframed_q05_global_financial_crisis_to_transcript_wording",
+        "expanded_q05_airport_fees_and_landing_charges",
     ]
 
 
