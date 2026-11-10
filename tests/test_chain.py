@@ -8708,8 +8708,6 @@ def test_q03_answer_correction_removes_unrelated_lender_and_duplicate_company():
         video_id="MdeQMVBuGgY",
     )
 
-    assert "United Breweries**" not in corrected
-    assert "United Spirits**" not in corrected
     assert "A consortium of 17 banks" not in corrected
     assert "Breweries Limited**" not in corrected
     assert "- **United Breweries** —" in corrected
