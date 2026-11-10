@@ -8420,12 +8420,12 @@ def test_q04_registered_fallback_accepts_all_evidence_groups_across_prompt_sourc
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
         "- [00:05–00:10] I was told not to downsize Kingfisher. "
-        "The banks will support you.\\n"
-        "[SOURCE 3]\\n"
+        "The banks will support you.\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] Government policies that didn't help and mounting "
         "losses; the final straw was the refusal to let Etihad invest."
     )
@@ -8463,11 +8463,11 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
         "- [00:05–00:10] The working capital cycle got disrupted. "
-        "There was a cash flow issue.\\n"
+        "There was a cash flow issue.\n"
         "- [00:10–00:15] There was non-payment of the oil bills. "
         "The airline could not pay airport fees or the landing charges."
     )
@@ -8502,9 +8502,9 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
         (
             "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
             (
-                "[SOURCE 1]\\n"
-                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-                "[SOURCE 2]\\n"
+                "[SOURCE 1]\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+                "[SOURCE 2]\n"
                 "- [00:05–00:10] I was told not to downsize Kingfisher; "
                 "the banks will support you."
             ),
@@ -8513,9 +8513,9 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
         (
             "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
             (
-                "[SOURCE 1]\\n"
-                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-                "[SOURCE 2]\\n"
+                "[SOURCE 1]\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+                "[SOURCE 2]\n"
                 "- [00:05–00:10] The working capital cycle got disrupted; "
                 "there was a cash flow issue."
             ),
@@ -8549,14 +8549,14 @@ def test_registered_multigroup_fallback_never_stitches_a_gold_phrase_across_sour
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial\\n"
-        "[SOURCE 2]\\n"
-        "- [00:05–00:10] crisis\\n"
-        "[SOURCE 3]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] crisis\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] I was told not to downsize Kingfisher; "
-        "the banks will support you.\\n"
-        "[SOURCE 4]\\n"
+        "the banks will support you.\n"
+        "[SOURCE 4]\n"
         "- [00:15–00:20] Government policies that didn't help and mounting "
         "losses; the final straw was the refusal to let Etihad invest."
     )
@@ -8583,12 +8583,12 @@ def test_generation_repair_diagnostics_distinguish_abstention_and_incomplete_rep
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
         "- [00:05–00:10] I was told not to downsize Kingfisher; "
-        "the banks will support you.\\n"
-        "[SOURCE 3]\\n"
+        "the banks will support you.\n"
+        "[SOURCE 3]\n"
         "- [00:10–00:15] Government policies that didn't help, mounting losses, "
         "and the refusal to let Etihad invest."
     )
@@ -8631,11 +8631,11 @@ def test_generation_repair_diagnostics_report_quota_interrupted_repair_without_d
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
         "- [00:05–00:10] The working capital cycle got disrupted. "
-        "There was a cash flow issue.\\n"
+        "There was a cash flow issue.\n"
         "- [00:10–00:15] There was non-payment of the oil bills and the "
         "airline could not pay airport fees or landing charges."
     )
