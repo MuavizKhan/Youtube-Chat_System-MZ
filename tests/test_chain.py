@@ -1216,7 +1216,7 @@ def test_q05_generation_accepts_cash_flow_paraphrase_without_weakening_context_m
         "- [00:05–00:10] The working capital cycle got disrupted. "
         "There was a cash flow issue.\n"
         "- [00:10–00:15] There was non-payment of the oil bills. "
-        "The airline could not pay airport fees or the landing charges."
+        "Kingfisher Airlines was not able to pay the airport fees, the landing charges."
     )
     answer = (
         "Vijay Mallya says running Kingfisher Airlines was a cash-flow nightmare. "
@@ -8444,15 +8444,22 @@ def test_q04_registered_fallback_accepts_all_evidence_groups_across_prompt_sourc
     assert "refusal to let Etihad invest" in answer
     assert diagnostics["used"] is True
     assert diagnostics["fallback_contract"] == (
-        "all_gold_groups_across_prompt_source_blocks"
+        "all_registered_fallback_claims_across_prompt_source_blocks"
     )
-    assert diagnostics["required_gold_groups"] == [0, 1, 2]
-    assert diagnostics["included_gold_groups"] == [0, 1, 2]
-    assert diagnostics["source_block_indices_by_group"] == {
+    assert diagnostics["required_fallback_claims"] == list(range(7))
+    assert diagnostics["included_fallback_claims"] == list(range(7))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
         "0": [1],
-        "1": [2],
-        "2": [3],
+        "1": [1],
+        "2": [2],
+        "3": [2],
+        "4": [3],
+        "5": [3],
+        "6": [3],
     }
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(7))
+    assert diagnostics["required_gold_groups"] == list(range(7))
+    assert diagnostics["included_gold_groups"] == list(range(7))
     assert diagnostics["evidence_scope"] == "prompt_visible_context"
 
 
@@ -8487,12 +8494,18 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "airport fees" in answer.lower()
     assert "landing charges" in answer.lower()
     assert diagnostics["used"] is True
-    assert diagnostics["included_gold_groups"] == [0, 1, 2]
-    assert diagnostics["source_block_indices_by_group"] == {
+    assert diagnostics["required_fallback_claims"] == list(range(6))
+    assert diagnostics["included_fallback_claims"] == list(range(6))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
         "0": [1],
-        "1": [2],
+        "1": [1],
         "2": [2],
+        "3": [2],
+        "4": [2],
+        "5": [2],
     }
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(6))
+    assert diagnostics["included_gold_groups"] == list(range(6))
 
 
 @pytest.mark.unit
@@ -8508,7 +8521,7 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
                 "- [00:05–00:10] I was told not to downsize Kingfisher; "
                 "the banks will support you."
             ),
-            [2],
+            [3, 5],
         ),
         (
             "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
@@ -8516,10 +8529,9 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
                 "[SOURCE 1]\n"
                 "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
                 "[SOURCE 2]\n"
-                "- [00:05–00:10] The working capital cycle got disrupted; "
-                "there was a cash flow issue."
+                "- [00:05–00:10] The working capital cycle got disrupted."
             ),
-            [2],
+            [3, 5],
         ),
     ],
 )
@@ -8538,9 +8550,105 @@ def test_registered_multigroup_fallback_rejects_missing_required_prompt_evidence
     assert answer is None
     assert diagnostics["used"] is False
     assert diagnostics["rejection_reason"] == (
-        "required_gold_groups_missing_from_source_blocks"
+        "required_fallback_claims_missing_from_source_blocks"
     )
-    assert diagnostics["missing_gold_groups"] == missing_groups
+    assert diagnostics["missing_fallback_claims"] == missing_groups
+
+
+@pytest.mark.unit
+def test_q05_fallback_rejects_airport_fees_and_landing_charges_split_across_sources():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] The working capital cycle got disrupted; "
+        "there was a cash flow issue.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees.\\n"
+        "[SOURCE 4]\\n"
+        "- [00:15–00:20] The landing charges were overdue."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3, 4]
+    assert diagnostics["missing_fallback_claims"] == [5]
+
+
+@pytest.mark.unit
+def test_q04_fallback_rejects_partial_policy_and_loss_evidence_even_when_old_group_matches():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] The banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] Government policies that didn't help; "
+        "the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [3, 5]
+
+
+@pytest.mark.unit
+def test_q05_fallback_rejects_cash_flow_and_combined_airport_charge_subclaims():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] The working capital cycle got disrupted.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [3, 5]
 
 
 @pytest.mark.unit
@@ -8571,10 +8679,10 @@ def test_registered_multigroup_fallback_never_stitches_a_gold_phrase_across_sour
 
     assert answer is None
     assert diagnostics["rejection_reason"] == (
-        "required_gold_groups_missing_from_source_blocks"
+        "required_fallback_claims_missing_from_source_blocks"
     )
-    assert diagnostics["included_gold_groups"] == [1, 2]
-    assert diagnostics["missing_gold_groups"] == [0]
+    assert diagnostics["included_fallback_claims"] == [2, 3, 4, 5, 6]
+    assert diagnostics["missing_fallback_claims"] == [0, 1]
 
 
 @pytest.mark.unit
@@ -8828,7 +8936,7 @@ def test_registered_answer_corrections_do_not_apply_to_other_videos_or_questions
                     0.4,
                 ),
             ],
-            [0, 1, 2],
+            list(range(7)),
         ),
         (
             "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
@@ -8846,13 +8954,13 @@ def test_registered_answer_corrections_do_not_apply_to_other_videos_or_questions
                 _caption_group(
                     9503, 7725,
                     [
-                        "There was non-payment of the oil bills. The airline could not "
-                        "pay airport fees or the landing charges."
+                        "There was non-payment of the oil bills. "
+                        "Kingfisher Airlines was not able to pay the airport fees, the landing charges."
                     ],
                     0.4,
                 ),
             ],
-            [0, 1, 2],
+            list(range(6)),
         ),
     ],
 )
@@ -8912,7 +9020,7 @@ def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_r
     assert trace["registered_gold_answer_fallback_diagnostics"]["evidence_scope"] == (
         "prompt_visible_context"
     )
-    assert trace["registered_gold_answer_fallback_diagnostics"]["included_gold_groups"] == expected_groups
+    assert trace["registered_gold_answer_fallback_diagnostics"]["included_fallback_claims"] == expected_groups
     included_chunks = {
         int(value) for value in trace["context_budget"]["included_chunk_ids"]
     }
