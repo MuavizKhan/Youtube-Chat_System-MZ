@@ -52,6 +52,12 @@ class GoldEvidenceCase:
     # different prompt-visible source blocks. Each group must still be fully
     # matched inside at least one individual block.
     generation_fallback_requires_all_groups: bool = False
+    # Optional claim-level contract for deterministic fallbacks. Each source
+    # group represents one independently asserted claim; alternatives within a
+    # group are equivalent phrasings, not separate claims. The answer groups
+    # are aligned by index and must all be present in the fallback text.
+    generation_fallback_source_groups: tuple[tuple[str, ...], ...] = ()
+    generation_fallback_answer_groups: tuple[tuple[str, ...], ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -143,6 +149,24 @@ GOLD_EVIDENCE_CASES = (
             "describing the refusal to let Etihad invest as the final straw."
         ),
         generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("banks will support you",),
+            ("not to downsize Kingfisher",),
+            ("government policies that didn't help",),
+            ("mounting losses",),
+            ("final straw was the refusal to let Etihad invest",),
+        ),
+        generation_fallback_answer_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("banks will support you",),
+            ("not downsize Kingfisher",),
+            ("government policies that didn't help",),
+            ("mounting losses",),
+            ("refusal to let Etihad invest as the final straw",),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q05",
@@ -188,6 +212,26 @@ GOLD_EVIDENCE_CASES = (
             "concrete operating challenges for the airline."
         ),
         generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("working capital cycle got disrupted",),
+            ("cash flow issue",),
+            ("non-payment of the oil bills",),
+            (
+                "Kingfisher Airlines was not able to pay the airport fees, the landing charges",
+                "not able to pay airport fees and landing charges",
+                "could not pay airport fees or landing charges",
+            ),
+        ),
+        generation_fallback_answer_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("working capital cycle as disrupted",),
+            ("cash flow issue",),
+            ("non-payment of the oil bills",),
+            ("difficulty paying airport fees and landing charges",),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q06",
