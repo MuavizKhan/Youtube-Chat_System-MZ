@@ -8390,13 +8390,13 @@ def test_ar07_gold_matching_preserves_multiline_caption_continuations():
     # onto a second physical line, and the registered amount appears only
     # on that continuation line.
     context = (
-        "[SOURCE 1]\\n"
-        "Video ID: fAd2nKfrDB8\\n"
-        "Timestamp: 02:09 - 02:15\\n"
-        "Transcript caption segments in chronological order:\\n"
-        "- [02:09–02:13] هتلاقي نفسك في أوضة ممكن يا\\n"
-        "عزيزي تدفع فيها ما يصل إلي 600 دولار.\\n"
-        "- [02:13–02:15] ليه؟ عشان تقعد ساعة واحدة جوه!\\n"
+        "[SOURCE 1]\n"
+        "Video ID: fAd2nKfrDB8\n"
+        "Timestamp: 02:09 - 02:15\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [02:09–02:13] هتلاقي نفسك في أوضة ممكن يا\n"
+        "عزيزي تدفع فيها ما يصل إلي 600 دولار.\n"
+        "- [02:13–02:15] ليه؟ عشان تقعد ساعة واحدة جوه!\n"
     )
 
     assert chain.matched_gold_groups(context, gold_case) == {0}
