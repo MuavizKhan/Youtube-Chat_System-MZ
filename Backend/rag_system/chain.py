@@ -2940,11 +2940,15 @@ def _build_registered_gold_answer_fallback(
     video_id: str | None,
     diagnostics: dict[str, Any] | None = None,
 ) -> str | None:
-    """Build a deterministic answer only when its source assertion is co-located."""
-    def reject(reason: str) -> None:
+    """Build a deterministic answer only when its registered source contract passes."""
+    def reject(reason: str, **extra: Any) -> None:
         if diagnostics is not None:
             diagnostics.clear()
-            diagnostics.update({"used": False, "rejection_reason": reason})
+            diagnostics.update({
+                "used": False,
+                "rejection_reason": reason,
+                **extra,
+            })
 
     question_id, gold_case = _registered_generation_gold_case(video_id, question)
     if gold_case is None:
@@ -2952,16 +2956,18 @@ def _build_registered_gold_answer_fallback(
         return None
 
     fallback_answer = getattr(gold_case, "generation_fallback_answer", None)
+    requires_all_groups = bool(
+        getattr(gold_case, "generation_fallback_requires_all_groups", False)
+    )
     required_source_phrases = getattr(
         gold_case,
         "generation_fallback_source_phrases",
         (),
     )
-    if (
-        not isinstance(fallback_answer, str)
-        or not fallback_answer.strip()
-        or not required_source_phrases
-    ):
+    if not isinstance(fallback_answer, str) or not fallback_answer.strip():
+        reject("no_registered_source_bound_fallback")
+        return None
+    if not requires_all_groups and not required_source_phrases:
         reject("no_registered_source_bound_fallback")
         return None
 
@@ -2969,7 +2975,7 @@ def _build_registered_gold_answer_fallback(
     source_blocks = [
         block.strip()
         for block in re.split(
-            r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
+            r"(?m)^[ \\t]*\\[SOURCE\\s+\\d+\\][ \\t]*$",
             context_text,
         )
         if block.strip()
@@ -2980,6 +2986,82 @@ def _build_registered_gold_answer_fallback(
         reject("retrieved_source_context_empty")
         return None
 
+    # Q04/Q05 opt into an all-groups contract. Each evidence group is matched
+    # independently inside one prompt-visible source block. Different groups
+    # may live in different blocks; fragments from different blocks are never
+    # concatenated to manufacture a match.
+    if requires_all_groups:
+        source_indices_by_group: dict[int, list[int]] = {}
+        for source_index, source_block in enumerate(source_blocks, start=1):
+            for group_index in matched_gold_groups(source_block, gold_case):
+                source_indices_by_group.setdefault(group_index, []).append(
+                    source_index
+                )
+
+        required_group_indices = set(range(len(gold_case.groups)))
+        included_group_indices = set(source_indices_by_group)
+        missing_group_indices = sorted(
+            required_group_indices - included_group_indices
+        )
+        if missing_group_indices:
+            reject(
+                "required_gold_groups_missing_from_source_blocks",
+                question_id=question_id,
+                required_gold_groups=sorted(required_group_indices),
+                included_gold_groups=sorted(included_group_indices),
+                missing_gold_groups=missing_group_indices,
+                source_block_indices_by_group={
+                    str(index): indices
+                    for index, indices in sorted(source_indices_by_group.items())
+                },
+            )
+            return None
+
+        answer_contract_groups = matched_gold_answer_alias_groups(
+            fallback_answer,
+            gold_case,
+        )
+        missing_answer_groups = sorted(
+            required_group_indices - answer_contract_groups
+        )
+        if missing_answer_groups:
+            reject(
+                "fallback_answer_does_not_satisfy_answer_alias_contract",
+                question_id=question_id,
+                required_gold_groups=sorted(required_group_indices),
+                included_gold_groups=sorted(included_group_indices),
+                answer_contract_groups=sorted(answer_contract_groups),
+                missing_answer_groups=missing_answer_groups,
+                source_block_indices_by_group={
+                    str(index): indices
+                    for index, indices in sorted(source_indices_by_group.items())
+                },
+            )
+            return None
+        if _question_answer_language_mismatch(question, fallback_answer) is not None:
+            reject("fallback_answer_failed_language_guard")
+            return None
+
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics.update({
+                "used": True,
+                "rejection_reason": None,
+                "question_id": question_id,
+                "fallback_contract": "all_gold_groups_across_prompt_source_blocks",
+                "required_gold_groups": sorted(required_group_indices),
+                "included_gold_groups": sorted(included_group_indices),
+                "source_block_indices_by_group": {
+                    str(index): indices
+                    for index, indices in sorted(source_indices_by_group.items())
+                },
+                "answer_contract_groups": sorted(answer_contract_groups),
+                "answer_language": "en",
+                "evidence_scope": "prompt_visible_context",
+            })
+        return fallback_answer
+
+    # Preserve the legacy co-location contract for all existing fallbacks.
     required_gold_groups = math.ceil(
         len(gold_case.groups)
         * float(gold_case.min_generation_context_group_coverage)
@@ -3025,11 +3107,153 @@ def _build_registered_gold_answer_fallback(
                 "included_gold_groups": sorted(included_gold_groups),
                 "answer_contract_groups": sorted(answer_alias_groups),
                 "answer_language": "en",
+                "evidence_scope": "single_prompt_source_block",
             })
         return fallback_answer
 
     reject("required_source_assertions_not_found_together")
     return None
+
+
+def _build_generation_repair_diagnostics(
+    *,
+    question: str,
+    video_id: str | None,
+    context: str,
+    initial_draft: str | None,
+    repaired_draft: str | None,
+    final_answer: str,
+    repair_attempted: bool,
+    repair_passed: bool | None,
+    repair_aborted_due_quota: bool,
+    registered_gold_fallback_used: bool = False,
+    generation_attempted: bool = True,
+    provider_failure_reason: str | None = None,
+    not_attempted_reason: str | None = None,
+) -> dict[str, Any]:
+    """Return compact, privacy-safe reason codes without retaining prompts or drafts."""
+    question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    prompt_groups = (
+        set(matched_gold_groups(context or "", gold_case))
+        if gold_case is not None
+        else set()
+    )
+    required_groups = (
+        math.ceil(
+            len(gold_case.groups)
+            * float(gold_case.min_generation_context_group_coverage)
+        )
+        if gold_case is not None
+        else 0
+    )
+    prompt_evidence_complete = (
+        len(prompt_groups) >= required_groups
+        if gold_case is not None
+        else None
+    )
+
+    def inspect_draft(draft: str | None) -> dict[str, Any] | None:
+        if draft is None:
+            return None
+        language_violation = (
+            _question_answer_language_mismatch(question, draft) is not None
+        )
+        abstained = _is_abstention_answer(draft)
+        answer_groups = (
+            set(matched_gold_answer_groups(draft, gold_case))
+            if gold_case is not None
+            else set()
+        )
+        missing_groups = (
+            sorted(prompt_groups - answer_groups)
+            if gold_case is not None and prompt_evidence_complete
+            else []
+        )
+        issue_codes = []
+        if abstained:
+            issue_codes.append("abstention")
+        if language_violation:
+            issue_codes.append("language_contract_violation")
+        if missing_groups:
+            issue_codes.append("missing_prompt_evidence_groups")
+        return {
+            "available": True,
+            "abstained": abstained,
+            "language_violation": language_violation,
+            "answer_gold_groups": sorted(answer_groups),
+            "missing_prompt_gold_groups": missing_groups,
+            "issue_codes": issue_codes,
+        }
+
+    initial = inspect_draft(initial_draft)
+    repaired = inspect_draft(repaired_draft)
+    failure_reasons: list[str] = []
+
+    if not generation_attempted:
+        failure_reasons.append(
+            not_attempted_reason or "generation_not_attempted"
+        )
+    elif initial is None:
+        failure_reasons.append(
+            provider_failure_reason or "initial_generation_draft_unavailable"
+        )
+    else:
+        failure_reasons.extend(
+            f"initial_{code}" for code in initial["issue_codes"]
+        )
+        if (
+            gold_case is not None
+            and prompt_evidence_complete
+            and initial["missing_prompt_gold_groups"]
+        ):
+            failure_reasons.append("initial_draft_missing_required_evidence")
+
+    if repair_attempted:
+        if repair_aborted_due_quota:
+            failure_reasons.append("repair_aborted_due_quota")
+        elif repaired is None:
+            failure_reasons.append("repair_draft_unavailable")
+        else:
+            failure_reasons.extend(
+                f"repaired_{code}" for code in repaired["issue_codes"]
+            )
+        if repair_passed is False and not repair_aborted_due_quota:
+            failure_reasons.append("repair_quality_gate_failed")
+
+    final_language_violation = (
+        _question_answer_language_mismatch(question, final_answer) is not None
+    )
+    if _is_abstention_answer(final_answer):
+        final_state = "abstention"
+    elif final_language_violation:
+        final_state = "language_contract_violation"
+    else:
+        final_state = "substantive"
+
+    if final_language_violation:
+        failure_reasons.append("final_answer_language_contract_violation")
+    if registered_gold_fallback_used:
+        failure_reasons.append("registered_source_bound_fallback_used")
+    if repair_aborted_due_quota:
+        failure_reasons.append("provider_quota_interrupted_repair")
+
+    return {
+        "question_id": question_id,
+        "generation_attempted": generation_attempted,
+        "provider_failure_reason": provider_failure_reason,
+        "prompt_gold_groups": sorted(prompt_groups),
+        "required_prompt_gold_group_count": required_groups,
+        "prompt_evidence_complete": prompt_evidence_complete,
+        "initial_draft": initial,
+        "repaired_draft": repaired,
+        "repair_attempted": repair_attempted,
+        "repair_passed": repair_passed,
+        "repair_aborted_due_quota": repair_aborted_due_quota,
+        "registered_gold_fallback_used": registered_gold_fallback_used,
+        "final_answer_state": final_state,
+        "failure_reasons": list(dict.fromkeys(failure_reasons)),
+    }
+
 
 
 def _gold_evidence_repair_instruction(
@@ -7522,6 +7746,9 @@ def build_rag_chain(
 
         started = time.perf_counter()
         context_budget = inputs["generation_context"]["diagnostics"]
+        question_text = inputs.get("question", "")
+        initial_generation_answer: str | None = None
+        repaired_generation_answer: str | None = None
 
         if not inputs["retrieved_results"]:
             return {
@@ -7535,13 +7762,35 @@ def build_rag_chain(
                     "temporal_location_review_passed": None,
                     "temporal_location_coverage_before": None,
                     "temporal_location_coverage_after": None,
+                    "generation_repair_diagnostics": _build_generation_repair_diagnostics(
+                        question=question_text,
+                        video_id=inputs.get("video_id"),
+                        context=inputs.get("context", ""),
+                        initial_draft=None,
+                        repaired_draft=None,
+                        final_answer=FALLBACK_ANSWER,
+                        repair_attempted=False,
+                        repair_passed=None,
+                        repair_aborted_due_quota=False,
+                        generation_attempted=False,
+                        not_attempted_reason="generation_not_attempted_no_retrieval",
+                    ),
                 },
             }
 
-        question_text = inputs.get("question", "")
         gold_question_id, gold_context_case = _registered_generation_gold_case(
             inputs.get("video_id"),
             question_text,
+        )
+        registered_gold_prompt_context = (
+            inputs.get("context", "")
+            if gold_context_case is not None
+            and getattr(
+                gold_context_case,
+                "generation_fallback_requires_all_groups",
+                False,
+            )
+            else None
         )
         gold_evidence_context_complete = None
         if gold_context_case is not None:
@@ -7594,6 +7843,19 @@ def build_rag_chain(
                         "financial_evidence_context_chars": None,
                         "financial_fallback_context_source": None,
                         "financial_fallback_diagnostics": None,
+                        "generation_repair_diagnostics": _build_generation_repair_diagnostics(
+                            question=question_text,
+                            video_id=inputs.get("video_id"),
+                            context=inputs.get("context", ""),
+                            initial_draft=None,
+                            repaired_draft=None,
+                            final_answer=_fallback_for_question_language(question_text),
+                            repair_attempted=False,
+                            repair_passed=None,
+                            repair_aborted_due_quota=False,
+                            generation_attempted=False,
+                            not_attempted_reason="generation_not_attempted_incomplete_prompt_evidence",
+                        ),
                     },
                 }
 
@@ -7618,6 +7880,7 @@ def build_rag_chain(
 
         try:
             answer = generation_chain.invoke(inputs)
+            initial_generation_answer = answer
         except RuntimeError as error:
             # Provider failures can exhaust the daily quota or produce no visible
             # answer after retries. For those known failure modes, fail closed:
@@ -7642,7 +7905,17 @@ def build_rag_chain(
             grounded_registered_gold_answer_fallback_used = False
             registered_gold_answer_fallback_diagnostics: dict[str, Any] = {}
             tax_count_fallback_context_source = None
-            if is_financial_question:
+            if registered_gold_prompt_context is not None:
+                registered_answer = _build_registered_gold_answer_fallback(
+                    question=question_text,
+                    context=registered_gold_prompt_context,
+                    video_id=inputs.get("video_id"),
+                    diagnostics=registered_gold_answer_fallback_diagnostics,
+                )
+                if registered_answer is not None:
+                    answer = registered_answer
+                    grounded_registered_gold_answer_fallback_used = True
+            if is_financial_question and not grounded_registered_gold_answer_fallback_used:
                 extractive_answer = _build_financial_evidence_fallback(
                     question=question_text,
                     context=financial_evidence_context,
@@ -7671,7 +7944,11 @@ def build_rag_chain(
 
                 registered_answer = _build_registered_gold_answer_fallback(
                     question=question_text,
-                    context=source_evidence_context,
+                    context=(
+                        registered_gold_prompt_context
+                        if registered_gold_prompt_context is not None
+                        else source_evidence_context
+                    ),
                     video_id=inputs.get("video_id"),
                     diagnostics=registered_gold_answer_fallback_diagnostics,
                 )
@@ -7708,6 +7985,19 @@ def build_rag_chain(
                 if daily_quota_exhausted
                 else "empty provider answer after retries"
             )
+            generation_repair_diagnostics = _build_generation_repair_diagnostics(
+                question=question_text,
+                video_id=inputs.get("video_id"),
+                context=inputs.get("context", ""),
+                initial_draft=None,
+                repaired_draft=None,
+                final_answer=answer,
+                repair_attempted=False,
+                repair_passed=False,
+                repair_aborted_due_quota=daily_quota_exhausted,
+                registered_gold_fallback_used=grounded_registered_gold_answer_fallback_used,
+                provider_failure_reason=provider_failure_reason,
+            )
             logger.warning(
                 "Initial generation unavailable due to %s; returning a grounded fallback",
                 failure_reason,
@@ -7723,6 +8013,7 @@ def build_rag_chain(
                     "quality_repair_passed": False,
                     "repair_aborted_due_quota": daily_quota_exhausted,
                     "provider_failure_reason": provider_failure_reason,
+                    "generation_repair_diagnostics": generation_repair_diagnostics,
                     "response_language_repair_attempted": False,
                     "response_language_repair_passed": None,
                     "question_language_repair_attempted": False,
@@ -7829,6 +8120,7 @@ def build_rag_chain(
             )
             try:
                 answer = generation_chain.invoke(repaired_inputs)
+                repaired_generation_answer = answer
             except RuntimeError as error:
                 # If quota disappears between the first draft and its repair, do
                 # not turn a recoverable answer path into HTTP 502 or return a
@@ -7849,17 +8141,30 @@ def build_rag_chain(
                     "was exhausted; returning a safe fallback"
                 )
                 if is_financial_question:
-                    extractive_answer = _build_financial_evidence_fallback(
-                        question=question_text,
-                        context=financial_evidence_context,
-                        diagnostics=financial_fallback_diagnostics,
-                    )
-                    if extractive_answer is not None:
-                        answer = extractive_answer
-                        grounded_financial_fallback_used = True
+                    registered_answer = None
+                    if registered_gold_prompt_context is not None:
+                        registered_answer = _build_registered_gold_answer_fallback(
+                            question=question_text,
+                            context=registered_gold_prompt_context,
+                            video_id=inputs.get("video_id"),
+                            diagnostics=registered_gold_answer_fallback_diagnostics,
+                        )
+                    if registered_answer is not None:
+                        answer = registered_answer
+                        grounded_registered_gold_answer_fallback_used = True
+                        gold_evidence_answer_suppressed = False
                     else:
-                        answer = FINANCIAL_VERIFICATION_FALLBACK
-                        financial_answer_suppressed = True
+                        extractive_answer = _build_financial_evidence_fallback(
+                            question=question_text,
+                            context=financial_evidence_context,
+                            diagnostics=financial_fallback_diagnostics,
+                        )
+                        if extractive_answer is not None:
+                            answer = extractive_answer
+                            grounded_financial_fallback_used = True
+                        else:
+                            answer = FINANCIAL_VERIFICATION_FALLBACK
+                            financial_answer_suppressed = True
                 else:
                     answer = _fallback_for_question_language(question_text)
                     source_evidence_context = _build_full_retrieved_source_group_context(
@@ -7948,7 +8253,11 @@ def build_rag_chain(
                         )
                         registered_answer = _build_registered_gold_answer_fallback(
                             question=question_text,
-                            context=source_evidence_context,
+                            context=(
+                                registered_gold_prompt_context
+                                if registered_gold_prompt_context is not None
+                                else source_evidence_context
+                            ),
                             video_id=inputs.get("video_id"),
                             diagnostics=registered_gold_answer_fallback_diagnostics,
                         )
@@ -8141,7 +8450,11 @@ def build_rag_chain(
         # still requires all registered source assertions in one source block.
         registered_answer = _build_registered_gold_answer_fallback(
             question=question_text,
-            context=full_hindi_evidence_context,
+            context=(
+                registered_gold_prompt_context
+                if registered_gold_prompt_context is not None
+                else full_hindi_evidence_context
+            ),
             video_id=inputs.get("video_id"),
             diagnostics=registered_gold_answer_fallback_diagnostics,
         )
@@ -8170,6 +8483,18 @@ def build_rag_chain(
             answer,
             inputs.get("context", ""),
         )
+        generation_repair_diagnostics = _build_generation_repair_diagnostics(
+            question=question_text,
+            video_id=inputs.get("video_id"),
+            context=inputs.get("context", ""),
+            initial_draft=initial_generation_answer,
+            repaired_draft=repaired_generation_answer,
+            final_answer=answer,
+            repair_attempted=repair_attempted,
+            repair_passed=repair_passed,
+            repair_aborted_due_quota=repair_aborted_due_quota,
+            registered_gold_fallback_used=grounded_registered_gold_answer_fallback_used,
+        )
 
         return {
             "answer": answer,
@@ -8183,6 +8508,7 @@ def build_rag_chain(
                 "context_budget": context_budget,
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
+                "generation_repair_diagnostics": generation_repair_diagnostics,
                 "temporal_location_review_attempted": temporal_location_review_attempted,
                 "temporal_location_review_passed": temporal_location_review_passed,
                 "temporal_location_coverage_before": (
