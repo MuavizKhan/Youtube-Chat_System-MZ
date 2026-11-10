@@ -3318,8 +3318,8 @@ def _normalize_registered_transcript_answer(
             r'charges\s+and\s+other\s+working[-\s]capital\s+obligations\.',
             (
                 "Mallya says he also put in about ₹3,000 crore in an effort to revive "
-                "the airline. It still struggled to pay oil bills and could not pay "
-                "airport fees and landing charges."
+                "the airline. The working-capital cycle was disrupted after oil-bill "
+                "non-payment, and Kingfisher could not pay airport fees and landing charges."
             ),
             corrected,
             count=1,
