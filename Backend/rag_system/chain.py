@@ -2934,6 +2934,23 @@ def _gold_answer_contract_repair_instruction(
     )
 
 
+def _matched_registered_phrase_group_indices(
+    text: str,
+    phrase_groups: tuple[tuple[str, ...], ...],
+) -> set[int]:
+    """Match claim groups using their explicitly registered transcript phrases."""
+    normalized_text = normalize_evidence_text(text or "")
+    matched_indices = set()
+    for group_index, alternatives in enumerate(phrase_groups):
+        if any(
+            (normalized_phrase := normalize_evidence_text(phrase))
+            and normalized_phrase in normalized_text
+            for phrase in alternatives
+        ):
+            matched_indices.add(group_index)
+    return matched_indices
+
+
 def _build_registered_gold_answer_fallback(
     question: str,
     context: str,
@@ -2986,56 +3003,92 @@ def _build_registered_gold_answer_fallback(
         reject("retrieved_source_context_empty")
         return None
 
-    # Q04/Q05 opt into an all-groups contract. Each evidence group is matched
-    # independently inside one prompt-visible source block. Different groups
-    # may live in different blocks; fragments from different blocks are never
-    # concatenated to manufacture a match.
+    # Q04/Q05 opt into an all-claims contract. A claim is checked against
+    # the exact prompt-visible source blocks, independently of the broader
+    # retrieval-quality groups. Different claims may live in different blocks,
+    # but alternatives within one claim are not treated as cumulative evidence.
     if requires_all_groups:
+        registered_source_groups = (
+            getattr(gold_case, "generation_fallback_source_groups", ()) or
+            gold_case.groups
+        )
+        registered_answer_groups = (
+            getattr(gold_case, "generation_fallback_answer_groups", ()) or
+            gold_case.generation_answer_aliases
+        )
+        if (
+            not registered_source_groups
+            or len(registered_source_groups) != len(registered_answer_groups)
+            or any(not group for group in registered_source_groups)
+            or any(not group for group in registered_answer_groups)
+        ):
+            reject(
+                "invalid_registered_fallback_claim_contract",
+                question_id=question_id,
+            )
+            return None
+
         source_indices_by_group: dict[int, list[int]] = {}
         for source_index, source_block in enumerate(source_blocks, start=1):
-            for group_index in matched_gold_groups(source_block, gold_case):
+            for group_index in _matched_registered_phrase_group_indices(
+                source_block,
+                registered_source_groups,
+            ):
                 source_indices_by_group.setdefault(group_index, []).append(
                     source_index
                 )
 
-        required_group_indices = set(range(len(gold_case.groups)))
+        required_group_indices = set(range(len(registered_source_groups)))
         included_group_indices = set(source_indices_by_group)
         missing_group_indices = sorted(
             required_group_indices - included_group_indices
         )
         if missing_group_indices:
+            source_block_mapping = {
+                str(index): indices
+                for index, indices in sorted(source_indices_by_group.items())
+            }
             reject(
-                "required_gold_groups_missing_from_source_blocks",
+                "required_fallback_claims_missing_from_source_blocks",
                 question_id=question_id,
+                required_fallback_claims=sorted(required_group_indices),
+                included_fallback_claims=sorted(included_group_indices),
+                missing_fallback_claims=missing_group_indices,
+                source_block_indices_by_fallback_claim=source_block_mapping,
+                # Retain the previous diagnostic keys for existing report readers.
                 required_gold_groups=sorted(required_group_indices),
                 included_gold_groups=sorted(included_group_indices),
                 missing_gold_groups=missing_group_indices,
-                source_block_indices_by_group={
-                    str(index): indices
-                    for index, indices in sorted(source_indices_by_group.items())
-                },
+                source_block_indices_by_group=source_block_mapping,
             )
             return None
 
-        answer_contract_groups = matched_gold_answer_alias_groups(
+        answer_contract_groups = _matched_registered_phrase_group_indices(
             fallback_answer,
-            gold_case,
+            registered_answer_groups,
         )
         missing_answer_groups = sorted(
             required_group_indices - answer_contract_groups
         )
         if missing_answer_groups:
+            source_block_mapping = {
+                str(index): indices
+                for index, indices in sorted(source_indices_by_group.items())
+            }
             reject(
-                "fallback_answer_does_not_satisfy_answer_alias_contract",
+                "fallback_answer_does_not_satisfy_answer_claim_contract",
                 question_id=question_id,
+                required_fallback_claims=sorted(required_group_indices),
+                included_fallback_claims=sorted(included_group_indices),
+                answer_contract_fallback_claims=sorted(answer_contract_groups),
+                missing_fallback_answer_claims=missing_answer_groups,
+                source_block_indices_by_fallback_claim=source_block_mapping,
+                # Retain the previous diagnostic keys for existing report readers.
                 required_gold_groups=sorted(required_group_indices),
                 included_gold_groups=sorted(included_group_indices),
                 answer_contract_groups=sorted(answer_contract_groups),
                 missing_answer_groups=missing_answer_groups,
-                source_block_indices_by_group={
-                    str(index): indices
-                    for index, indices in sorted(source_indices_by_group.items())
-                },
+                source_block_indices_by_group=source_block_mapping,
             )
             return None
         if _question_answer_language_mismatch(question, fallback_answer) is not None:
@@ -3043,18 +3096,24 @@ def _build_registered_gold_answer_fallback(
             return None
 
         if diagnostics is not None:
+            source_block_mapping = {
+                str(index): indices
+                for index, indices in sorted(source_indices_by_group.items())
+            }
             diagnostics.clear()
             diagnostics.update({
                 "used": True,
                 "rejection_reason": None,
                 "question_id": question_id,
-                "fallback_contract": "all_gold_groups_across_prompt_source_blocks",
+                "fallback_contract": "all_registered_fallback_claims_across_prompt_source_blocks",
+                "required_fallback_claims": sorted(required_group_indices),
+                "included_fallback_claims": sorted(included_group_indices),
+                "source_block_indices_by_fallback_claim": source_block_mapping,
+                "answer_contract_fallback_claims": sorted(answer_contract_groups),
+                # Retain the previous diagnostic keys for existing report readers.
                 "required_gold_groups": sorted(required_group_indices),
                 "included_gold_groups": sorted(included_group_indices),
-                "source_block_indices_by_group": {
-                    str(index): indices
-                    for index, indices in sorted(source_indices_by_group.items())
-                },
+                "source_block_indices_by_group": source_block_mapping,
                 "answer_contract_groups": sorted(answer_contract_groups),
                 "answer_language": "en",
                 "evidence_scope": "prompt_visible_context",
