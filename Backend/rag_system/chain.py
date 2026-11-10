@@ -3180,7 +3180,7 @@ def _normalize_registered_transcript_answer(
         # original draft also repeated United Breweries as a second company.
         # Some answer drafts serialize list separators as literal backslash-n;
         # normalize those only for this exact registered Q03 question.
-        corrected, escaped_breaks = re.subn(r"\\\\\\\\[nN]", "\\n", corrected)
+        corrected, escaped_breaks = re.subn(r"\\[nN]", "\n", corrected)
         if escaped_breaks:
             corrections.append("normalized_escaped_business_list_newlines")
         corrected, count = re.subn(
