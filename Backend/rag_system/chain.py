@@ -3293,6 +3293,73 @@ def _normalize_registered_transcript_answer(
             corrections.append("removed_duplicate_united_breweries_entry")
         if normalized_business_emphasis:
             corrections.append("normalized_business_list_emphasis")
+    elif question_id == "Q05":
+        # The interview distinguishes Mallya's stated ₹3,000 crore contribution
+        # from the separate ₹260 crore of UB Group money later described as frozen.
+        # It also distinguishes the 2008 crisis from the opening narrator's
+        # 9,000-crore-default framing; do not turn those into one causal claim.
+        corrected, count = re.subn(
+            r'Vijay\s+Mallya\s+says\s+running\s+Kingfisher\s+Airlines\s+was\s+a\s+'
+            r'[“"]?cash[\s\u2010-\u2015-]*flow\s+nightmare[”"]?\s+'
+            r'that\s+spiralled\s+into\s+a\s+debt\s+crisis\.',
+            "Vijay Mallya describes severe cash-flow problems while running Kingfisher Airlines.",
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("reframed_q05_cash_flow_without_unsupported_debt_crisis")
+
+        corrected, count = re.subn(
+            r'He\s+had\s+to\s+inject\s+about\s+₹\s*3[, ]?000\s*crore\s+'
+            r'of\s+UB[\s\u2010-\u2015-]*group\s+money\s+to\s+keep\s+'
+            r'the\s+airline\s+afloat,\s+yet\s+the\s+company\s+still\s+'
+            r'struggled\s+to\s+pay\s+oil\s+bills,\s+airport\s+landing\s+'
+            r'charges\s+and\s+other\s+working[-\s]capital\s+obligations\.',
+            (
+                "Mallya says he also put in about ₹3,000 crore in an effort to revive "
+                "the airline. It still struggled to pay oil bills and could not pay "
+                "airport fees and landing charges."
+            ),
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("separated_q05_3000_crore_contribution_from_ub_group_funds")
+
+        corrected, count = re.subn(
+            r"The\s+airline[’']s\s+9[, ]?000[-\s\u2010-\u2015]*crore\s+loan\s+default\s+"
+            r"and\s+the\s+global\s+financial\s+crisis\s+in\s+2008\s+"
+            r"further\s+dried\s+up\s+funding,\s+forcing\s+the\s+"
+            r"airline\s+to\s+shut\s+down\.",
+            (
+                "He also recalls that the 2008 global financial crisis affected the "
+                "whole aviation sector and that money stopped flowing."
+            ),
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("separated_q05_global_crisis_from_loan_default_and_shutdown")
+
+        corrected, count = re.subn(
+            r'Mallya\s+notes\s+that\s+the\s+cash[-\s\u2010-\u2015]*flow\s+'
+            r'problems\s+[“"]affected\s+everybody[”"]\s+and\s+that\s+'
+            r'the\s+airline\s+was\s+unable\s+to\s+meet\s+its\s+financial\s+'
+            r'commitments,\s+leading\s+to\s+its\s+eventual\s+collapse\.',
+            (
+                "The discussion also describes how the cash-flow shortage affected "
+                "creditors and vendors across the airline's operations."
+            ),
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("neutralized_q05_interviewer_cash_flow_attribution")
+
     elif question_id == "Q11":
         corrected, count = re.subn(
             r"\bEden\b",
