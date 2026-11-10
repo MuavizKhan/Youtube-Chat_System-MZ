@@ -2975,7 +2975,7 @@ def _build_registered_gold_answer_fallback(
     source_blocks = [
         block.strip()
         for block in re.split(
-            r"(?m)^[ \\t]*\\[SOURCE\\s+\\d+\\][ \\t]*$",
+            r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
             context_text,
         )
         if block.strip()
