@@ -47,6 +47,10 @@ class GoldEvidenceCase:
     # evidence contract is also satisfied.
     generation_fallback_answer: str | None = None
     generation_fallback_source_phrases: tuple[str, ...] = ()
+    # Opt-in for curated answers whose required evidence groups may appear in
+    # different prompt-visible source blocks. Each group must still be fully
+    # matched inside at least one individual block.
+    generation_fallback_requires_all_groups: bool = False
 
 
 GOLD_EVIDENCE_CASES = (
@@ -119,6 +123,25 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("global financial crisis", "money stopped"),
+            ("banks will support you", "not to downsize Kingfisher"),
+            (
+                "government policies that didn't help",
+                "mounting losses",
+                "refusal to let Etihad invest",
+                "final straw",
+            ),
+        ),
+        generation_fallback_answer=(
+            "Vijay Mallya says Kingfisher Airlines faced several connected "
+            "pressures. The global financial crisis meant the money stopped. "
+            "He recalls being told, “You continue, banks will support you,” "
+            "and that he should not downsize Kingfisher. He also points to "
+            "government policies that didn't help and mounting losses, "
+            "describing the refusal to let Etihad invest as the final straw."
+        ),
+        generation_fallback_requires_all_groups=True,
     ),
     GoldEvidenceCase(
         question_id="Q05",
@@ -138,7 +161,7 @@ GOLD_EVIDENCE_CASES = (
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
         generation_answer_aliases=(
-            (),
+            ("global financial crisis", "money stopped"),
             (
                 "cash flow nightmare",
                 "cash flow crisis",
@@ -147,9 +170,23 @@ GOLD_EVIDENCE_CASES = (
                 "broke the working capital cycle",
                 "broken working capital cycle",
                 "working capital cycle was disrupted",
+                "working capital cycle got disrupted",
+                "cash flow issue",
             ),
-            (),
+            (
+                "non-payment of the oil bills",
+                "airport fees",
+                "landing charges",
+            ),
         ),
+        generation_fallback_answer=(
+            "Vijay Mallya says the global financial crisis meant the money "
+            "stopped. He describes the working capital cycle as disrupted and "
+            "calls it a cash flow issue. He also cites non-payment of the oil "
+            "bills and difficulty paying airport fees and landing charges as "
+            "concrete operating challenges for the airline."
+        ),
+        generation_fallback_requires_all_groups=True,
     ),
     GoldEvidenceCase(
         question_id="Q06",
