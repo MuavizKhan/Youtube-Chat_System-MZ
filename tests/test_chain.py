@@ -8861,6 +8861,77 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
 
 
 @pytest.mark.unit
+def test_q05_answer_correction_separates_mallya_contribution_from_ub_group_funds():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    answer = (
+        "Vijay Mallya says running Kingfisher Airlines was a “cash‑flow nightmare” "
+        "that spiralled into a debt crisis. He had to inject about ₹3,000 crore "
+        "of UB‑group money to keep the airline afloat, yet the company still "
+        "struggled to pay oil bills, airport landing charges and other "
+        "working-capital obligations. The airline’s 9,000‑crore loan default "
+        "and the global financial crisis in 2008 further dried up funding, "
+        "forcing the airline to shut down. Mallya notes that the cash‑flow "
+        "problems “affected everybody” and that the airline was unable to meet "
+        "its financial commitments, leading to its eventual collapse."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "3,000 crore" in corrected
+    assert "put in about ₹3,000 crore" in corrected
+    assert "UB" not in corrected
+    assert "9,000" not in corrected
+    assert "forcing the airline to shut down" not in corrected
+    assert "global financial crisis" in corrected
+    assert "working capital" in corrected
+    assert "oil bills" in corrected
+    assert "airport fees" in corrected
+    assert "landing charges" in corrected
+    assert "cash-flow shortage" in corrected
+    assert "cash‑flow nightmare" not in corrected
+    assert "spiralled into a debt crisis" not in corrected
+    assert corrections == [
+        "reframed_q05_cash_flow_without_unsupported_debt_crisis",
+        "separated_q05_3000_crore_contribution_from_ub_group_funds",
+        "separated_q05_global_crisis_from_loan_default_and_shutdown",
+        "neutralized_q05_interviewer_cash_flow_attribution",
+    ]
+
+
+@pytest.mark.unit
+def test_q05_answer_corrections_do_not_apply_to_other_videos_or_questions():
+    answer = (
+        "He had to inject about ₹3,000 crore of UB-group money and the "
+        "9,000-crore loan default forced the airline to shut down."
+    )
+    other_video, other_video_corrections = chain._normalize_registered_transcript_answer(
+        question=(
+            "How does Vijay Mallya describe the challenges he faced "
+            "while running Kingfisher Airlines?"
+        ),
+        answer=answer,
+        video_id="UnregisteredVideo",
+    )
+    other_question, other_question_corrections = chain._normalize_registered_transcript_answer(
+        question="Tell me about Kingfisher Airlines.",
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert other_video == answer
+    assert other_video_corrections == []
+    assert other_question == answer
+    assert other_question_corrections == []
+
+
+@pytest.mark.unit
 def test_q11_answer_correction_normalizes_air_deccan_and_pranab_mukherjee_names():
     question = (
         "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
