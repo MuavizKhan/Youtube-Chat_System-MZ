@@ -1316,28 +1316,34 @@ def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
     assert by_name["response_language_english"] is False
 
 
-def test_q05_audit_requires_all_operational_points_and_rejects_unsupported_attributions():
+def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributions():
     case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q05")
     grounded_answer = (
-        "Mallya describes the 2008 global financial crisis, when money stopped "
-        "flowing across the aviation sector. He says the working capital cycle "
-        "was disrupted after non-payment of oil bills, and Kingfisher could not "
-        "pay airport fees and landing charges. He also describes a cash-flow issue."
+        "Mallya says he put 3,000 crore of UB Group money into Kingfisher "
+        "Airlines to keep it afloat. He describes the 2008 global financial "
+        "crisis, when money stopped flowing across the aviation sector. He says "
+        "the working capital cycle was disrupted after non-payment of oil bills, "
+        "and Kingfisher could not pay airport fees and landing charges. He also "
+        "describes a cash-flow issue."
     )
 
     grounded_checks = _answer_quality_checks(case, grounded_answer)
     assert all(check["passed"] for check in grounded_checks), grounded_checks
+    assert not any(
+        check["name"] == "answer_prohibited_ub_group_3000_crore_misattribution"
+        for check in grounded_checks
+    )
 
     unsupported_answer = (
         grounded_answer
-        + " He injected 3,000 crore of UB Group money; the 9,000-crore loan "
-        "default forced the airline to shut down."
+        + " The airline was saddled with a 9,000 cr loan default scam and "
+        "had to raise about 260 crore to stay afloat."
     )
     unsupported_checks = _answer_quality_checks(case, unsupported_answer)
     by_name = {check["name"]: check["passed"] for check in unsupported_checks}
 
-    assert by_name["answer_prohibited_ub_group_3000_crore_misattribution"] is False
-    assert by_name["answer_prohibited_loan_default_causally_linked_to_shutdown"] is False
+    assert by_name["answer_prohibited_loan_default_narrator_framing"] is False
+    assert by_name["answer_prohibited_260_crore_raised_to_stay_afloat"] is False
     assert not all(check["passed"] for check in unsupported_checks)
 
 
