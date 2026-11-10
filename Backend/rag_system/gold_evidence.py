@@ -293,27 +293,97 @@ def normalize_evidence_text(text: str) -> str:
     return " ".join("".join(characters).split())
 
 
-def _source_scoped_evidence_texts(text: str) -> list[str]:
-    """Return transcript text per source block, joining adjacent caption rows."""
+def _source_scoped_caption_rows(
+    text: str,
+) -> list[tuple[str, list[tuple[tuple[int, ...], str]]]]:
+    """Parse caption rows per source, preserving physical continuation lines.
+
+    A caption's text can contain embedded newlines. Keep every physical line
+    attached to the timestamped row that introduced it, so matching and
+    context-budget selection see the same complete caption.
+    """
     if not isinstance(text, str) or not text:
         return []
 
-    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
+    source_pattern = re.compile(r"^\\s*\\[SOURCE\\s+\\d+\\]\\s*$")
     caption_pattern = re.compile(
-        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
-        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
+        r"^\\s*-\\s*\\[(?:\\d{1,2}:)?\\d{2}:\\d{2}\\s*[–—-]\\s*"
+        r"(?:\\d{1,2}:)?\\d{2}:\\d{2}\\]\\s*(?P<text>.*)$"
     )
-    blocks = source_pattern.split(text)
-    evidence_texts = []
-    for block in blocks:
-        if not block.strip():
-            continue
-        caption_texts = []
-        for line in block.splitlines():
+    lines = text.splitlines()
+    marker_indices = [
+        index
+        for index, line in enumerate(lines)
+        if source_pattern.match(line.strip())
+    ]
+    source_ranges = (
+        [
+            (0, marker_indices[0]),
+            *[
+                (
+                    marker + 1,
+                    marker_indices[index + 1]
+                    if index + 1 < len(marker_indices)
+                    else len(lines),
+                )
+                for index, marker in enumerate(marker_indices)
+            ],
+        ]
+        if marker_indices
+        else [(0, len(lines))]
+    )
+
+    parsed_blocks = []
+    for range_start, range_end in source_ranges:
+        block_text = "\\n".join(lines[range_start:range_end])
+        rows: list[tuple[tuple[int, ...], str]] = []
+        current_line_indices: list[int] | None = None
+        current_text_parts: list[str] = []
+
+        for line_index in range(range_start, range_end):
+            line = lines[line_index]
             match = caption_pattern.match(line)
-            if match and match.group("text").strip():
-                caption_texts.append(match.group("text").strip())
-        evidence_texts.append(" ".join(caption_texts) if caption_texts else block)
+            if match:
+                if current_line_indices is not None:
+                    caption_text = " ".join(
+                        part for part in current_text_parts if part
+                    ).strip()
+                    if caption_text:
+                        rows.append((tuple(current_line_indices), caption_text))
+
+                current_line_indices = [line_index]
+                initial_text = match.group("text").strip()
+                current_text_parts = [initial_text] if initial_text else []
+            elif current_line_indices is not None:
+                # Once a timestamped caption starts, un-timestamped physical
+                # lines belong to that caption until the next timestamped row.
+                continuation = line.strip()
+                if continuation:
+                    current_line_indices.append(line_index)
+                    current_text_parts.append(continuation)
+
+        if current_line_indices is not None:
+            caption_text = " ".join(
+                part for part in current_text_parts if part
+            ).strip()
+            if caption_text:
+                rows.append((tuple(current_line_indices), caption_text))
+
+        parsed_blocks.append((block_text, rows))
+
+    return parsed_blocks
+
+
+def _source_scoped_evidence_texts(text: str) -> list[str]:
+    """Return transcript text per source block, joining complete caption rows."""
+    evidence_texts = []
+    for block_text, caption_rows in _source_scoped_caption_rows(text):
+        if caption_rows:
+            evidence_texts.append(
+                " ".join(caption_text for _line_indices, caption_text in caption_rows)
+            )
+        elif block_text.strip():
+            evidence_texts.append(block_text)
     return evidence_texts
 
 
@@ -321,50 +391,23 @@ def matched_gold_group_caption_spans(
     text: str,
     case: GoldEvidenceCase,
 ) -> dict[int, set[int]]:
-    """Map matched gold groups to the exact caption rows containing their words.
+    """Map matched gold groups to all physical lines of their caption rows.
 
     Returned indexes refer to text.splitlines(). Matching is restricted to
-    one source block at a time, and normalized-caption character offsets
-    identify only the rows actually touched by each matched phrase.
+    one source block at a time. If a caption wraps across physical lines, all
+    of those lines are returned so context-budget trimming cannot keep the
+    timestamp line while dropping the evidence-bearing continuation.
     """
     if not isinstance(text, str) or not text:
         return {}
 
-    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
-    caption_pattern = re.compile(
-        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
-        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
-    )
-    lines = text.splitlines()
-    marker_indices = [
-        index for index, line in enumerate(lines)
-        if source_pattern.match(line.strip())
-    ]
-    source_ranges = (
-        [
-            (
-                marker + 1,
-                marker_indices[index + 1]
-                if index + 1 < len(marker_indices)
-                else len(lines),
-            )
-            for index, marker in enumerate(marker_indices)
-        ]
-        if marker_indices
-        else [(0, len(lines))]
-    )
-
     matched_spans: dict[int, set[int]] = {}
-    for range_start, range_end in source_ranges:
+    for _block_text, caption_rows in _source_scoped_caption_rows(text):
         captions = []
-        for line_index in range(range_start, range_end):
-            match = caption_pattern.match(lines[line_index])
-            if match and match.group("text").strip():
-                normalized_caption = normalize_evidence_text(
-                    match.group("text").strip()
-                )
-                if normalized_caption:
-                    captions.append((line_index, normalized_caption))
+        for line_indices, caption_text in caption_rows:
+            normalized_caption = normalize_evidence_text(caption_text)
+            if normalized_caption:
+                captions.append((line_indices, normalized_caption))
 
         if not captions:
             continue
@@ -372,10 +415,10 @@ def matched_gold_group_caption_spans(
         joined_parts = []
         caption_offsets = []
         cursor = 0
-        for line_index, normalized_caption in captions:
+        for line_indices, normalized_caption in captions:
             start_offset = cursor
             end_offset = start_offset + len(normalized_caption)
-            caption_offsets.append((line_index, start_offset, end_offset))
+            caption_offsets.append((line_indices, start_offset, end_offset))
             joined_parts.append(normalized_caption)
             cursor = end_offset + 1
         joined_captions = " ".join(joined_parts)
@@ -392,11 +435,11 @@ def matched_gold_group_caption_spans(
                     if match_start < 0:
                         break
                     match_end = match_start + len(phrase)
-                    matched_spans.setdefault(group_index, set()).update(
-                        line_index
-                        for line_index, caption_start, caption_end in caption_offsets
-                        if caption_start < match_end and caption_end > match_start
-                    )
+                    for line_indices, caption_start, caption_end in caption_offsets:
+                        if caption_start < match_end and caption_end > match_start:
+                            matched_spans.setdefault(group_index, set()).update(
+                                line_indices
+                            )
                     search_start = match_start + 1
 
     return matched_spans
