@@ -42,9 +42,10 @@ class GoldEvidenceCase:
     # Optional paraphrases accepted only when checking generated answers.
     # Retrieval and prompt-context matching continue to use exact source phrases.
     generation_answer_aliases: tuple[tuple[str, ...], ...] = ()
-    # Optional deterministic response, permitted only when every configured
-    # source assertion is present in one retrieved source block and the gold
-    # evidence contract is also satisfied.
+    # Optional deterministic response, permitted only when its configured
+    # source-evidence contract is satisfied. Legacy cases require all custom
+    # assertions co-located in one source block; the explicit all-groups mode
+    # below requires each registered gold group in a prompt-visible block.
     generation_fallback_answer: str | None = None
     generation_fallback_source_phrases: tuple[str, ...] = ()
     # Opt-in for curated answers whose required evidence groups may appear in
