@@ -3180,7 +3180,7 @@ def _normalize_registered_transcript_answer(
         # Lenders are not businesses owned or operated by the subject. The
         # original draft also repeated United Breweries as a second company.
         corrected, count = re.subn(
-            r"(?im)^[-*]\s*A consortium of 17 banks[^\n]*(?:\n|$)",
+            r"(?im)^[ \t]*[-*][ \t]*A consortium of 17 banks\b[^\r\n]*(?:\r?\n|$)",
             "",
             corrected,
             count=1,
@@ -3188,7 +3188,7 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("removed_lender_consortium_from_business_list")
         corrected, count = re.subn(
-            r"(?im)^[-*]\s*Breweries Limited\*\*?\s*[–—-][^\n]*(?:\n|$)",
+            r"(?im)^[ \t]*[-*][ \t]*Breweries Limited\*\*?[ \t]*[–—-][^\r\n]*(?:\r?\n|$)",
             "",
             corrected,
             count=1,
