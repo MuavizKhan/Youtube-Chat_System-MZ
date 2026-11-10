@@ -8411,3 +8411,252 @@ def test_ar07_gold_matching_preserves_multiline_caption_continuations():
     # Both the timestamped row and its continuation must be retained if the
     # generation context is shortened to fit its character budget.
     assert spans == {0: {caption_start, caption_start + 1}}
+
+
+
+@pytest.mark.unit
+def test_q04_registered_fallback_accepts_all_evidence_groups_across_prompt_source_blocks():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] I was told not to downsize Kingfisher. "
+        "The banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] Government policies that didn't help and mounting "
+        "losses; the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "global financial crisis" in answer.lower()
+    assert "banks will support you" in answer.lower()
+    assert "refusal to let Etihad invest" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["fallback_contract"] == (
+        "all_gold_groups_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_gold_groups"] == [0, 1, 2]
+    assert diagnostics["included_gold_groups"] == [0, 1, 2]
+    assert diagnostics["source_block_indices_by_group"] == {
+        "0": [1],
+        "1": [2],
+        "2": [3],
+    }
+    assert diagnostics["evidence_scope"] == "prompt_visible_context"
+
+
+@pytest.mark.unit
+def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_blocks():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] The working capital cycle got disrupted. "
+        "There was a cash flow issue.\\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees or the landing charges."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "global financial crisis" in answer.lower()
+    assert "working capital cycle" in answer.lower()
+    assert "non-payment of the oil bills" in answer.lower()
+    assert "airport fees" in answer.lower()
+    assert "landing charges" in answer.lower()
+    assert diagnostics["used"] is True
+    assert diagnostics["included_gold_groups"] == [0, 1, 2]
+    assert diagnostics["source_block_indices_by_group"] == {
+        "0": [1],
+        "1": [2],
+        "2": [2],
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "context", "missing_groups"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            (
+                "[SOURCE 1]\\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+                "[SOURCE 2]\\n"
+                "- [00:05–00:10] I was told not to downsize Kingfisher; "
+                "the banks will support you."
+            ),
+            [2],
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            (
+                "[SOURCE 1]\\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+                "[SOURCE 2]\\n"
+                "- [00:05–00:10] The working capital cycle got disrupted; "
+                "there was a cash flow issue."
+            ),
+            [2],
+        ),
+    ],
+)
+def test_registered_multigroup_fallback_rejects_missing_required_prompt_evidence(
+    question, context, missing_groups
+):
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_gold_groups_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_gold_groups"] == missing_groups
+
+
+@pytest.mark.unit
+def test_registered_multigroup_fallback_never_stitches_a_gold_phrase_across_sources():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] crisis\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] I was told not to downsize Kingfisher; "
+        "the banks will support you.\\n"
+        "[SOURCE 4]\\n"
+        "- [00:15–00:20] Government policies that didn't help and mounting "
+        "losses; the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_gold_groups_missing_from_source_blocks"
+    )
+    assert diagnostics["included_gold_groups"] == [1, 2]
+    assert diagnostics["missing_gold_groups"] == [0]
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_distinguish_abstention_and_incomplete_repair():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] I was told not to downsize Kingfisher; "
+        "the banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] Government policies that didn't help, mounting losses, "
+        "and the refusal to let Etihad invest."
+    )
+    incomplete_repair = (
+        "The global financial crisis meant the money stopped. "
+        "The banks will support you."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=chain.FALLBACK_ANSWER,
+        repaired_draft=incomplete_repair,
+        final_answer=chain.FALLBACK_ANSWER,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["question_id"] == "Q04"
+    assert diagnostics["prompt_gold_groups"] == [0, 1, 2]
+    assert diagnostics["prompt_evidence_complete"] is True
+    assert diagnostics["initial_draft"]["abstained"] is True
+    assert "abstention" in diagnostics["initial_draft"]["issue_codes"]
+    assert diagnostics["repaired_draft"]["abstained"] is False
+    assert diagnostics["repaired_draft"]["missing_prompt_gold_groups"] == [2]
+    assert "initial_abstention" in diagnostics["failure_reasons"]
+    assert "repaired_missing_prompt_evidence_groups" in diagnostics["failure_reasons"]
+    assert "repair_quality_gate_failed" in diagnostics["failure_reasons"]
+    # Observability records only classifications and group IDs, never raw drafts.
+    assert incomplete_repair not in repr(diagnostics)
+    assert chain.FALLBACK_ANSWER not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_report_quota_interrupted_repair_without_draft_text():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] The working capital cycle got disrupted. "
+        "There was a cash flow issue.\\n"
+        "- [00:10–00:15] There was non-payment of the oil bills and the "
+        "airline could not pay airport fees or landing charges."
+    )
+    initial_draft = "The airline faced financial difficulty."
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=initial_draft,
+        repaired_draft=None,
+        final_answer=chain.FALLBACK_ANSWER,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=True,
+        provider_failure_reason="daily_token_quota_exhausted",
+    )
+
+    assert diagnostics["question_id"] == "Q05"
+    assert diagnostics["repair_aborted_due_quota"] is True
+    assert diagnostics["repaired_draft"] is None
+    assert "repair_aborted_due_quota" in diagnostics["failure_reasons"]
+    assert "provider_quota_interrupted_repair" in diagnostics["failure_reasons"]
+    assert initial_draft not in repr(diagnostics)
