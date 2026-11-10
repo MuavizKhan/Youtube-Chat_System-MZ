@@ -101,6 +101,7 @@ from .gold_evidence import (
     matched_gold_answer_groups,
     matched_gold_answer_alias_groups,
     matched_gold_group_caption_spans,
+    matched_source_phrase_group_indices,
     normalize_evidence_text,
 )
 
@@ -2938,17 +2939,8 @@ def _matched_registered_phrase_group_indices(
     text: str,
     phrase_groups: tuple[tuple[str, ...], ...],
 ) -> set[int]:
-    """Match claim groups using their explicitly registered transcript phrases."""
-    normalized_text = normalize_evidence_text(text or "")
-    matched_indices = set()
-    for group_index, alternatives in enumerate(phrase_groups):
-        if any(
-            (normalized_phrase := normalize_evidence_text(phrase))
-            and normalized_phrase in normalized_text
-            for phrase in alternatives
-        ):
-            matched_indices.add(group_index)
-    return matched_indices
+    """Match registered claims within one source, joining adjacent caption rows."""
+    return matched_source_phrase_group_indices(text, phrase_groups)
 
 
 def _build_registered_gold_answer_fallback(
