@@ -8567,9 +8567,9 @@ def build_rag_chain(
                 grounded_hindi_movement_location_fallback_used = True
                 movement_location_fallback_context_source = "full_retrieved_source_groups"
 
-        # Enforce registered named-entity answer contracts after generation,
-        # even when a general repair path did not activate. The fallback itself
-        # still requires all registered source assertions in one source block.
+        # Enforce registered answer contracts after generation. Legacy cases
+        # retain their one-source assertion rule; Q04/Q05 explicitly require
+        # every gold group in the actual prompt-visible source blocks.
         registered_answer = _build_registered_gold_answer_fallback(
             question=question_text,
             context=(
@@ -8600,6 +8600,13 @@ def build_rag_chain(
                 answer = registered_answer
                 grounded_registered_gold_answer_fallback_used = True
 
+        answer, registered_transcript_corrections = (
+            _normalize_registered_transcript_answer(
+                question=question_text,
+                answer=answer,
+                video_id=inputs.get("video_id"),
+            )
+        )
         temporal_location_coverage_final = _temporal_location_answer_coverage(
             question_text,
             answer,
@@ -8631,6 +8638,7 @@ def build_rag_chain(
                 "quality_repair_attempted": repair_attempted,
                 "quality_repair_passed": repair_passed,
                 "generation_repair_diagnostics": generation_repair_diagnostics,
+                "registered_transcript_corrections": registered_transcript_corrections,
                 "temporal_location_review_attempted": temporal_location_review_attempted,
                 "temporal_location_review_passed": temporal_location_review_passed,
                 "temporal_location_coverage_before": (
