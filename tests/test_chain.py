@@ -8772,3 +8772,132 @@ def test_registered_answer_corrections_do_not_apply_to_other_videos_or_questions
     assert other_video_corrections == []
     assert other_question == answer
     assert other_question_corrections == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "source_groups", "expected_groups"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            [
+                _caption_group(
+                    9401, 4640,
+                    ["The global financial crisis arrived and the money stopped."],
+                    0.2,
+                ),
+                _caption_group(
+                    9402, 12420,
+                    ["I was told not to downsize Kingfisher. The banks will support you."],
+                    0.3,
+                ),
+                _caption_group(
+                    9403, 12020,
+                    [
+                        "Government policies that didn't help and mounting losses; "
+                        "the final straw was the refusal to let Etihad invest."
+                    ],
+                    0.4,
+                ),
+            ],
+            [0, 1, 2],
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            [
+                _caption_group(
+                    9501, 4640,
+                    ["The global financial crisis arrived and the money stopped."],
+                    0.2,
+                ),
+                _caption_group(
+                    9502, 7650,
+                    ["The working capital cycle got disrupted. There was a cash flow issue."],
+                    0.3,
+                ),
+                _caption_group(
+                    9503, 7725,
+                    [
+                        "There was non-payment of the oil bills. The airline could not "
+                        "pay airport fees or the landing charges."
+                    ],
+                    0.4,
+                ),
+            ],
+            [0, 1, 2],
+        ),
+    ],
+)
+def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_repair(
+    monkeypatch, question, source_groups, expected_groups
+):
+    for group in source_groups:
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    chunk_ids = [
+        int(document.metadata["chunk_id"])
+        for group in source_groups
+        for document in group["documents"]
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": chunk_ids,
+                "citation_chunk_ids": chunk_ids,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 8000)
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return chain.FALLBACK_ANSWER
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert result["answer"] != chain.FALLBACK_ANSWER
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"]["evidence_scope"] == (
+        "prompt_visible_context"
+    )
+    assert trace["registered_gold_answer_fallback_diagnostics"]["included_gold_groups"] == expected_groups
+    included_chunks = {
+        int(value) for value in trace["context_budget"]["included_chunk_ids"]
+    }
+    assert set(chunk_ids).issubset(included_chunks)
+
+    selected = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    selected_ids = {
+        int(document.metadata["chunk_id"])
+        for document, _distance in selected
+    }
+    assert selected_ids
+    assert selected_ids.issubset(included_chunks)
