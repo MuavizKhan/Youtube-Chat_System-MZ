@@ -3177,31 +3177,63 @@ def _normalize_registered_transcript_answer(
             corrections.append("removed_disputed_intro_default_framing")
     elif question_id == "Q03":
         # Lenders are not businesses owned or operated by the subject. The
-        # original draft also repeated United Breweries as a second company.
-        # Some answer drafts serialize list separators as literal backslash-n;
-        # normalize those only for this exact registered Q03 question.
-        corrected, escaped_breaks = re.subn(r"\\[nN]", "\n", corrected)
-        if escaped_breaks:
+        # draft can contain either real line breaks or serialized "\n" separators.
+        # Parse this one registered answer as a bullet list instead of relying
+        # on line-anchored regexes against an ambiguous escaped representation.
+        normalized_answer = (
+            corrected.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
+        if normalized_answer != corrected:
             corrections.append("normalized_escaped_business_list_newlines")
-        corrected, count = re.subn(
-            r"(?im)^[ \\t]*[-*][ \\t]*A consortium of 17 banks\\b[^\\r\\n]*(?:\\r?\\n|$)",
-            "", corrected, count=1,
-        )
-        if count:
-            corrections.append("removed_lender_consortium_from_business_list")
-        corrected, count = re.subn(
-            r"(?im)^[ \\t]*[-*][ \\t]*Breweries Limited\\*\\*?[ \\t]*[–—-][^\\r\\n]*(?:\\r?\\n|$)",
-            "", corrected, count=1,
-        )
-        if count:
-            corrections.append("removed_duplicate_united_breweries_entry")
-        corrected, count = re.subn(
-            r"(?m)^- ([^\\n*]+)\\*\\*\\s*[–—-]",
-            r"- **\\1** —", corrected,
-        )
-        if count:
-            corrections.append("normalized_business_list_emphasis")
 
+        normalized_lines = []
+        removed_lender_entry = False
+        removed_duplicate_entry = False
+        normalized_business_emphasis = False
+
+        for raw_line in normalized_answer.splitlines():
+            stripped_line = raw_line.lstrip()
+            bullet_item = (
+                stripped_line[1:].lstrip()
+                if stripped_line.startswith(("-", "*"))
+                else ""
+            )
+            folded_item = bullet_item.casefold()
+
+            if folded_item.startswith("a consortium of 17 banks"):
+                removed_lender_entry = True
+                continue
+            if folded_item.startswith("breweries limited**"):
+                removed_duplicate_entry = True
+                continue
+
+            if stripped_line.startswith("- "):
+                item_text = stripped_line[2:]
+                marker = item_text.find("**")
+                if marker > 0:
+                    company_name = item_text[:marker].strip()
+                    description = item_text[marker + 2:].lstrip()
+                    if description.startswith(("–", "—", "-")):
+                        description = description[1:].lstrip()
+                        normalized_line = f"- **{company_name}** —"
+                        if description:
+                            normalized_line += f" {description}"
+                        normalized_lines.append(normalized_line)
+                        normalized_business_emphasis = True
+                        continue
+
+            normalized_lines.append(raw_line)
+
+        corrected = "\n".join(normalized_lines)
+        if removed_lender_entry:
+            corrections.append("removed_lender_consortium_from_business_list")
+        if removed_duplicate_entry:
+            corrections.append("removed_duplicate_united_breweries_entry")
+        if normalized_business_emphasis:
+            corrections.append("normalized_business_list_emphasis")
     elif question_id == "Q11":
         corrected, count = re.subn(
             r"\bEden\b",
