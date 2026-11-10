@@ -305,7 +305,7 @@ def _source_scoped_caption_rows(
     if not isinstance(text, str) or not text:
         return []
 
-    source_pattern = re.compile(r"^\s*\[SOURCE\s+\d+\]\s*$)
+    source_pattern = re.compile(r"^\s*\[SOURCE\s+\d+\]\s*$")
     caption_pattern = re.compile(
         r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
         r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
