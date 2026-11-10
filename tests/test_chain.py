@@ -8375,3 +8375,39 @@ def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
         video_id="fAd2nKfrDB8",
     ) is None
 
+
+
+@pytest.mark.regression
+def test_ar07_gold_matching_preserves_multiline_caption_continuations():
+    question = "How much might one hour inside the Orfield room cost?"
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    # This mirrors the live Arabic index: one timestamped caption row wraps
+    # onto a second physical line, and the registered amount appears only
+    # on that continuation line.
+    context = (
+        "[SOURCE 1]\\n"
+        "Video ID: fAd2nKfrDB8\\n"
+        "Timestamp: 02:09 - 02:15\\n"
+        "Transcript caption segments in chronological order:\\n"
+        "- [02:09–02:13] هتلاقي نفسك في أوضة ممكن يا\\n"
+        "عزيزي تدفع فيها ما يصل إلي 600 دولار.\\n"
+        "- [02:13–02:15] ليه؟ عشان تقعد ساعة واحدة جوه!\\n"
+    )
+
+    assert chain.matched_gold_groups(context, gold_case) == {0}
+
+    caption_start = next(
+        index
+        for index, line in enumerate(context.splitlines())
+        if line.startswith("- [02:09–02:13]")
+    )
+    spans = chain.matched_gold_group_caption_spans(context, gold_case)
+
+    # Both the timestamped row and its continuation must be retained if the
+    # generation context is shortened to fit its character budget.
+    assert spans == {0: {caption_start, caption_start + 1}}
