@@ -8184,7 +8184,11 @@ def build_rag_chain(
 
                     registered_answer = _build_registered_gold_answer_fallback(
                         question=question_text,
-                        context=source_evidence_context,
+                        context=(
+                            registered_gold_prompt_context
+                            if registered_gold_prompt_context is not None
+                            else source_evidence_context
+                        ),
                         video_id=inputs.get("video_id"),
                         diagnostics=registered_gold_answer_fallback_diagnostics,
                     )
