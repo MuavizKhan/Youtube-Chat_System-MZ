@@ -8473,18 +8473,18 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     # caption rows. The full phrase exists within its source block, but a raw
     # flattened-text matcher sees timestamps inserted between its words.
     context = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:02] The global financial\\n"
-        "- [00:02–00:04] crisis arrived and the money\\n"
-        "- [00:04–00:06] stopped.\\n"
-        "[SOURCE 2]\\n"
-        "- [00:06–00:08] The working capital cycle got\\n"
-        "- [00:08–00:10] disrupted.\\n"
-        "- [00:10–00:12] There was a cash flow\\n"
-        "- [00:12–00:14] issue.\\n"
-        "- [00:14–00:16] There was non-payment of the oil\\n"
-        "- [00:16–00:18] bills.\\n"
-        "- [00:18–00:20] The airline could not pay airport fees or the landing\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "- [00:02–00:04] crisis arrived and the money\n"
+        "- [00:04–00:06] stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:06–00:08] The working capital cycle got\n"
+        "- [00:08–00:10] disrupted.\n"
+        "- [00:10–00:12] There was a cash flow\n"
+        "- [00:12–00:14] issue.\n"
+        "- [00:14–00:16] There was non-payment of the oil\n"
+        "- [00:16–00:18] bills.\n"
+        "- [00:18–00:20] The airline could not pay airport fees or the landing\n"
         "- [00:20–00:22] charges."
     )
     diagnostics = {}
@@ -8524,9 +8524,9 @@ def test_registered_phrase_matcher_joins_caption_rows_but_never_source_blocks():
         ("money stopped",),
     )
     same_source = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:02] The global financial\\n"
-        "- [00:02–00:04] crisis and the money\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "- [00:02–00:04] crisis and the money\n"
         "- [00:04–00:06] stopped."
     )
     assert chain._matched_registered_phrase_group_indices(
@@ -8535,10 +8535,10 @@ def test_registered_phrase_matcher_joins_caption_rows_but_never_source_blocks():
     ) == {0, 1}
 
     split_across_sources = (
-        "[SOURCE 1]\\n"
-        "- [00:00–00:02] The global financial\\n"
-        "[SOURCE 2]\\n"
-        "- [00:02–00:04] crisis and the money\\n"
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "[SOURCE 2]\n"
+        "- [00:02–00:04] crisis and the money\n"
         "- [00:04–00:06] stopped."
     )
     assert chain._matched_registered_phrase_group_indices(
