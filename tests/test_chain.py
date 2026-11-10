@@ -8660,3 +8660,115 @@ def test_generation_repair_diagnostics_report_quota_interrupted_repair_without_d
     assert "repair_aborted_due_quota" in diagnostics["failure_reasons"]
     assert "provider_quota_interrupted_repair" in diagnostics["failure_reasons"]
     assert initial_draft not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_q01_answer_correction_separates_decision_date_from_airline_launch():
+    question = "What is Kingfisher Airlines?"
+    answer = (
+        "Kingfisher Airlines was an Indian airline that positioned itself as a "
+        "premium carrier. It was founded in the early 2000s (the interview "
+        "mentions a 2002‑2003 launch and a 2005 vision) and became the country's "
+        "largest airline before facing financial difficulties and a 9,000 "
+        "crore-rupee loan default."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "decided to start the airline around 2002–2003" in corrected
+    assert "launched in May 2005" in corrected
+    assert "founded in the early 2000s" not in corrected
+    assert "9,000" not in corrected
+    assert corrections == [
+        "corrected_decision_date_vs_launch_date",
+        "removed_disputed_intro_default_framing",
+    ]
+
+
+@pytest.mark.unit
+def test_q03_answer_correction_removes_unrelated_lender_and_duplicate_company():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "Vijay Mallya talks about several ventures.\\n"
+        "- United Breweries** – the holding company that owned the beer business.\\n"
+        "- United Spirits** – the spirits arm.\\n"
+        "- Breweries Limited** – the holding company structure managing subsidiaries.\\n"
+        "- A consortium of 17 banks** – the lenders that provided a loan."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "United Breweries**" not in corrected
+    assert "United Spirits**" not in corrected
+    assert "A consortium of 17 banks" not in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "- **United Breweries** —" in corrected
+    assert "- **United Spirits** —" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections
+    assert "removed_duplicate_united_breweries_entry" in corrections
+    assert "normalized_business_list_emphasis" in corrections
+
+
+@pytest.mark.unit
+def test_q11_answer_correction_normalizes_air_deccan_and_pranab_mukherjee_names():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    answer = (
+        "He talks about the acquisition of Eden for about $137 million. "
+        "He later met Finance Minister Pranav Mukharji, who promised bank support."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "Air Deccan" in corrected
+    assert "Eden" not in corrected
+    assert "Pranab Mukherjee" in corrected
+    assert "Pranav Mukharji" not in corrected
+    assert corrections == [
+        "corrected_asr_entity_eden_to_air_deccan",
+        "corrected_pranab_mukherjee_name",
+    ]
+
+
+@pytest.mark.unit
+def test_registered_answer_corrections_do_not_apply_to_other_videos_or_questions():
+    answer = "Eden and Pranav Mukharji are named in this example."
+
+    other_video, other_video_corrections = (
+        chain._normalize_registered_transcript_answer(
+            question=(
+                "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+                "and what is discussed there?"
+            ),
+            answer=answer,
+            video_id="UnregisteredVideo",
+        )
+    )
+    other_question, other_question_corrections = (
+        chain._normalize_registered_transcript_answer(
+            question="Tell me about Eden.",
+            answer=answer,
+            video_id="MdeQMVBuGgY",
+        )
+    )
+
+    assert other_video == answer
+    assert other_video_corrections == []
+    assert other_question == answer
+    assert other_question_corrections == []
