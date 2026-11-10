@@ -8901,3 +8901,49 @@ def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_r
     }
     assert selected_ids
     assert selected_ids.issubset(included_chunks)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "video_id"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            "UnregisteredVideo",
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            "UnregisteredVideo",
+        ),
+        (
+            "What does Vijay Mallya say about building the Kingfisher brand?",
+            "MdeQMVBuGgY",
+        ),
+    ],
+)
+def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
+    question, video_id
+):
+    complete_context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] I was told not to downsize Kingfisher; the banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] Government policies that didn't help and mounting losses; "
+        "the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=complete_context,
+        video_id=video_id,
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "no_registered_generation_gold_case"
+    )
