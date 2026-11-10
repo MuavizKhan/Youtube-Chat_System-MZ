@@ -305,10 +305,10 @@ def _source_scoped_caption_rows(
     if not isinstance(text, str) or not text:
         return []
 
-    source_pattern = re.compile(r"^\\s*\\[SOURCE\\s+\\d+\\]\\s*$")
+    source_pattern = re.compile(r"^\s*\[SOURCE\s+\d+\]\s*$)
     caption_pattern = re.compile(
-        r"^\\s*-\\s*\\[(?:\\d{1,2}:)?\\d{2}:\\d{2}\\s*[–—-]\\s*"
-        r"(?:\\d{1,2}:)?\\d{2}:\\d{2}\\]\\s*(?P<text>.*)$"
+        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
+        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
     )
     lines = text.splitlines()
     marker_indices = [
@@ -335,7 +335,7 @@ def _source_scoped_caption_rows(
 
     parsed_blocks = []
     for range_start, range_end in source_ranges:
-        block_text = "\\n".join(lines[range_start:range_end])
+        block_text = "\n".join(lines[range_start:range_end])
         rows: list[tuple[tuple[int, ...], str]] = []
         current_line_indices: list[int] | None = None
         current_text_parts: list[str] = []
