@@ -299,20 +299,20 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
         ),
         answer_prohibited_patterns=(
             {
-                "name": "ub_group_3000_crore_misattribution",
+                "name": "loan_default_narrator_framing",
                 "pattern": (
-                    r"(?:\bUB[\s\u2010-\u2015-]*group\b.{0,60}"
-                    r"\b3[, ]?000\s*crore\b|"
-                    r"\b3[, ]?000\s*crore\b.{0,60}"
-                    r"\bUB[\s\u2010-\u2015-]*group\b)"
+                    r"\b9\s*[, ]?\s*000\s*[-\s\u2010-\u2015]*"
+                    r"(?:cr|crores?)\b.{0,80}\bloan\s+default\b|"
+                    r"\bloan\s+default\b.{0,80}\b9\s*[, ]?\s*000\s*"
+                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\b"
                 ),
             },
             {
-                "name": "loan_default_causally_linked_to_shutdown",
+                "name": "260_crore_raised_to_stay_afloat",
                 "pattern": (
-                    r"\b9[, ]?000[- ]?crore\b.{0,120}"
-                    r"\b(?:forc(?:e|ed|ing)|caus(?:e|d|ing)|led to)\b.{0,60}"
-                    r"\b(?:shut(?:ting)? down|collaps(?:e|ed))\b"
+                    r"\b(?:raise|raised|raising)\b.{0,60}\b260\s*"
+                    r"[-\u2010-\u2015]?\s*(?:cr|crores?)\b.{0,80}"
+                    r"\b(?:stay|keep)\s+afloat\b"
                 ),
             },
         ),
