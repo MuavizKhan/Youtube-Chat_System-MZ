@@ -8718,6 +8718,36 @@ def test_q03_answer_correction_removes_unrelated_lender_and_duplicate_company():
 
 
 @pytest.mark.unit
+@pytest.mark.unit
+@pytest.mark.parametrize("separator", ["\n", "\r\n"])
+def test_q03_answer_correction_handles_real_line_separators(separator):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = separator.join([
+        "Vijay Mallya talks about several ventures.",
+        "- United Breweries** – the holding company that owned the beer business.",
+        "- United Spirits** – the spirits arm.",
+        "- Breweries Limited** – the holding company structure managing subsidiaries.",
+        "- A consortium of 17 banks** – the lenders that provided a loan.",
+    ])
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "A consortium of 17 banks" not in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "- **United Breweries** —" in corrected
+    assert "- **United Spirits** —" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections
+    assert "removed_duplicate_united_breweries_entry" in corrections
+    assert "normalized_business_list_emphasis" in corrections
+
+
+
 def test_q11_answer_correction_normalizes_air_deccan_and_pranab_mukherjee_names():
     question = (
         "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
