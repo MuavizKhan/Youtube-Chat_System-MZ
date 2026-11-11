@@ -1381,6 +1381,16 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
     assert by_name["answer_prohibited_260_crore_raised_to_stay_afloat"] is False
     assert not all(check["passed"] for check in unsupported_checks)
 
+    # The live Q05 answer used this grammatical variant, which the earlier
+    # "9,000 crore loan default" pattern did not recognize.
+    grammatical_variant = (
+        grounded_answer
+        + " The company still defaulted on a ₹9,000\u202fcrore loan."
+    )
+    variant_checks = _answer_quality_checks(case, grammatical_variant)
+    variant_by_name = {check["name"]: check["passed"] for check in variant_checks}
+    assert variant_by_name["answer_prohibited_loan_default_narrator_framing"] is False
+
 
 def test_phase10_11_registered_answer_requirements_and_english_response_are_checked():
     case = next(case for case in PHASE10_11_AUDIT_CASES if case["id"] == "HI09")
