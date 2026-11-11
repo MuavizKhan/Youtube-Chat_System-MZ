@@ -1903,7 +1903,16 @@ def _caption_segments_for_documents(
         normalized_segment_group = normalize_evidence_text(
             " ".join(segment["text"] for segment in ordered_segments)
         )
-        for alternatives in gold_case.groups:
+        # The broad retrieval annotations and the stricter deterministic
+        # fallback claims are both source evidence contracts. Caption metadata
+        # must not erase a precise claim while retaining only a broad topic
+        # such as "airport fees".
+        evidence_phrase_groups = list(gold_case.groups)
+        if getattr(gold_case, "generation_fallback_requires_all_groups", False):
+            evidence_phrase_groups.extend(
+                getattr(gold_case, "generation_fallback_source_groups", ()) or ()
+            )
+        for alternatives in evidence_phrase_groups:
             if any(
                 (normalized_phrase := normalize_evidence_text(phrase))
                 and normalized_phrase in normalized_raw_group

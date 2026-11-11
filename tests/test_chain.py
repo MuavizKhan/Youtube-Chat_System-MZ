@@ -8521,6 +8521,71 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
 
 
 @pytest.mark.regression
+def test_q05_formatting_preserves_raw_chunk_when_caption_metadata_drops_atomic_claim():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    raw_text = (
+        "The global financial crisis arrived and the money stopped. "
+        "The working capital cycle got disrupted. There was a cash flow issue. "
+        "There was non-payment of the oil bills. "
+        "Kingfisher Airlines was not able to pay. The airport fees, the landing charges."
+    )
+    document = doc(9951, 7655, 7730, raw_text)
+    document.metadata["video_id"] = "MdeQMVBuGgY"
+    # These caption records retain the broad airport-fee topic but omit the
+    # speaker/ability wording required by Q05's sixth atomic fallback claim.
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 995101,
+            "start": 7655.0,
+            "end": 7675.0,
+            "text": "The global financial crisis arrived and the money stopped.",
+        },
+        {
+            "segment_id": 995102,
+            "start": 7675.0,
+            "end": 7695.0,
+            "text": "The working capital cycle got disrupted. There was a cash flow issue.",
+        },
+        {
+            "segment_id": 995103,
+            "start": 7695.0,
+            "end": 7730.0,
+            "text": "There was non-payment of the oil bills. Airport fees, the landing charges.",
+        },
+    ]
+    source_group = {
+        "documents": [document],
+        "start": 7655.0,
+        "end": 7730.0,
+        "distance": 0.2,
+    }
+
+    formatted = chain.format_source_group(
+        source_group,
+        source_number=1,
+        gold_case=chain.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q05"],
+    )
+    assert "Original retrieved transcript chunks in chronological order" in formatted
+    assert "Kingfisher Airlines was not able to pay." in formatted
+    assert "The airport fees, the landing charges." in formatted
+
+    packed = chain.build_generation_context(
+        [source_group],
+        question=question,
+        max_chars=8000,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = packed["diagnostics"]
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+
+
+@pytest.mark.regression
 def test_q05_context_packing_reserves_all_six_atomic_fallback_claims():
     question = (
         "How does Vijay Mallya describe the challenges he faced "
