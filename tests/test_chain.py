@@ -1349,6 +1349,53 @@ def test_generation_repair_rejects_9000_crore_intro_attribution_for_q04():
 
 
 @pytest.mark.unit
+def test_generation_repair_rejects_9000_crore_intro_attribution_for_q05():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "Opening narration: a 9,000-crore loan default scam.\\n"
+        "The global financial crisis meant the money stopped.\\n"
+        "The working capital cycle got disrupted after non-payment of the oil bills.\\n"
+        "Kingfisher Airlines was not able to pay the airport fees and landing charges. "
+        "Mallya describes the resulting cash-flow issue."
+    )
+    answer = (
+        "The global financial crisis stopped the money. The working capital cycle "
+        "was disrupted after non-payment of the oil bills. Kingfisher could not pay "
+        "airport fees and landing charges, and Mallya described the cash-flow issue. "
+        "The company still defaulted on a ₹9,000\\u202fcrore loan."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=answer,
+        final_answer=answer,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is not None
+    assert "ATTRIBUTION REPAIR" in instruction
+    assert "Do not attribute the opening" in instruction
+    assert diagnostics["initial_draft"]["opening_9000_narrator_claim"] is True
+    assert "opening_9000_narrator_claim" in diagnostics["initial_draft"]["issue_codes"]
+    assert diagnostics["repaired_draft"]["opening_9000_narrator_claim"] is True
+
+
+@pytest.mark.unit
 def test_registered_gold_evidence_repair_does_not_apply_to_unregistered_videos():
     question = (
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
