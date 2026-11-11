@@ -8507,6 +8507,7 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "kingfisher airlines was not able to pay the airport fees and landing charges" in answer.lower()
     assert "mallya responds" in answer.lower()
     assert "working capital cycle got disrupted" in answer.lower()
+    assert "non-payment of the oil bills" in answer.lower()
     assert "cash flow issue affects everybody" in answer.lower()
     assert "one creditor or vendor cannot be isolated" in answer.lower()
     assert diagnostics["used"] is True
