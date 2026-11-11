@@ -325,7 +325,17 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "Q08", "MdeQMVBuGgY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "bank_recovery", "pattern": r"\b14[, ]?100\b|\bfully paid\b|\bstatement of account\b|\bstatement in parliament\b"},),
+        answer_requirements=(
+            {"name": "recovery_amount", "pattern": r"\b14[, ]?100\b"},
+            {
+                "name": "bank_account_reference",
+                "pattern": (
+                    r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|repaid|settled|"
+                    r"statement\s+of\s+account|statement\s+in\s+parliament|"
+                    r"parliamentary\s+statement)\b"
+                ),
+            },
+        ),
     ),
     _make_audit_case(
         "Q09", "MdeQMVBuGgY",
