@@ -120,6 +120,9 @@ GOLD_EVIDENCE_CASES = (
                 "banks will support you",
                 "not to downsize Kingfisher",
                 "I was told not to downsize Kingfisher",
+                # The searchable transcript spells the airline as two words.
+                "not to downsize King Fisher",
+                "I was told not to downsize King Fisher",
             ),
             (
                 "government policies that didn't help",
@@ -153,7 +156,11 @@ GOLD_EVIDENCE_CASES = (
             ("global financial crisis",),
             ("money stopped",),
             ("banks will support you",),
-            ("not to downsize Kingfisher",),
+            (
+                "not to downsize Kingfisher",
+                "not to downsize King Fisher",
+                "I was told not to downsize King Fisher",
+            ),
             ("government policies that didn't help",),
             ("mounting losses",),
             ("final straw was the refusal to let Etihad invest",),
