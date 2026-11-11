@@ -681,8 +681,8 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
             494,
             4650,
             [
-                "I was told not to downsize Kingfisher; you continue, "
-                "banks will support you."
+                "I was told not to downsize King Fisher at that time; "
+                "you continue, banks will support you."
             ],
             0.76,
         ),
@@ -714,6 +714,12 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
     assert diagnostics["gold_evidence_groups_included"] == [0, 1, 2]
     assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
     assert diagnostics["gold_evidence_context_coverage"] == 1.0
+    assert diagnostics["registered_fallback_groups_required"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
 
 
 @pytest.mark.regression
@@ -8423,7 +8429,7 @@ def test_q04_registered_fallback_accepts_all_evidence_groups_across_prompt_sourc
         "[SOURCE 1]\n"
         "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
         "[SOURCE 2]\n"
-        "- [00:05–00:10] I was told not to downsize Kingfisher. "
+        "- [00:05–00:10] I was told not to downsize King Fisher at that time. "
         "The banks will support you.\n"
         "[SOURCE 3]\n"
         "- [00:10–00:15] Government policies that didn't help and mounting "
