@@ -622,6 +622,41 @@ def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
     assert all(check["passed"] for check in checks), checks
 
 
+def test_q08_requires_both_recovery_amount_and_bank_account_reference():
+    case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q08")
+
+    complete = _answer_quality_checks(
+        case,
+        "The Ministry of Finance report attributes 14,100 crore recovered. "
+        'The retrieved transcript includes the phrase "statement of account".',
+    )
+    assert all(check["passed"] for check in complete), complete
+
+    missing_account_reference = _answer_quality_checks(
+        case,
+        "The Ministry of Finance report attributes 14,100 crore recovered.",
+    )
+    missing_account_names = [
+        check["name"] for check in missing_account_reference
+        if not check["passed"]
+    ]
+    assert missing_account_names == [
+        "answer_requirement_bank_account_reference"
+    ]
+
+    missing_recovery_amount = _answer_quality_checks(
+        case,
+        'The retrieved transcript includes the phrase "statement of account".',
+    )
+    missing_amount_names = [
+        check["name"] for check in missing_recovery_amount
+        if not check["passed"]
+    ]
+    assert missing_amount_names == [
+        "answer_requirement_recovery_amount"
+    ]
+
+
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
 def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
     case = next(
