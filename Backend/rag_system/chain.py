@@ -3527,11 +3527,11 @@ def _build_generation_repair_diagnostics(
         opening_9000_narrator_claim = (
             question_id in {"Q04", "Q05", "Q10"}
             and re.search(
-                r"(?<!\\d)9[\\s,\\u202f-]*000(?!\\d)",
+                r"(?<!\d)9[\s,\u202f-]*000(?!\d)",
                 normalized_draft,
             ) is not None
             and re.search(
-                r"\\b(?:loan|debt|default\\w*)\\b",
+                r"\b(?:loan|debt|default\w*)\b",
                 normalized_draft,
                 re.IGNORECASE,
             ) is not None
