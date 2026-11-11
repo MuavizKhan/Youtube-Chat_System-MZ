@@ -2292,10 +2292,18 @@ def _truncate_formatted_source(
                 fallback_source_groups = (
                     getattr(gold_case, "generation_fallback_source_groups", ()) or ()
                 )
-                fallback_caption_spans = matched_source_phrase_group_caption_spans(
+                absolute_fallback_caption_spans = matched_source_phrase_group_caption_spans(
                     source_text,
                     fallback_source_groups,
                 )
+                fallback_caption_spans = {
+                    group_index: {
+                        line_index - caption_start
+                        for line_index in line_indices
+                        if line_index >= caption_start
+                    }
+                    for group_index, line_indices in absolute_fallback_caption_spans.items()
+                }
                 # A broad gold group may match only "airport fees" while the
                 # deterministic fallback needs the complete inability-to-pay
                 # assertion including both fees and landing charges. Protect
@@ -8277,7 +8285,19 @@ def build_rag_chain(
             else None
         )
         gold_evidence_context_complete = None
+        required_fallback_groups: set[int] = set()
+        included_fallback_groups: set[int] = set()
         if gold_context_case is not None:
+            required_gold_groups = math.ceil(
+                len(gold_context_case.groups)
+                * float(gold_context_case.min_generation_context_group_coverage)
+            )
+            included_gold_groups = set(
+                context_budget.get("gold_evidence_groups_included", [])
+            )
+            broad_gold_context_complete = (
+                len(included_gold_groups) >= required_gold_groups
+            )
             if getattr(
                 gold_context_case,
                 "generation_fallback_requires_all_groups",
@@ -8293,22 +8313,14 @@ def build_rag_chain(
                 included_fallback_groups = set(
                     context_budget.get("registered_fallback_groups_included", [])
                 )
-                required_gold_groups = len(required_fallback_groups)
-                included_gold_groups = included_fallback_groups
-                gold_evidence_context_complete = required_fallback_groups.issubset(
+                strict_fallback_context_complete = required_fallback_groups.issubset(
                     included_fallback_groups
                 )
-            else:
-                required_gold_groups = math.ceil(
-                    len(gold_context_case.groups)
-                    * float(gold_context_case.min_generation_context_group_coverage)
-                )
-                included_gold_groups = set(
-                    context_budget.get("gold_evidence_groups_included", [])
-                )
                 gold_evidence_context_complete = (
-                    len(included_gold_groups) >= required_gold_groups
+                    broad_gold_context_complete and strict_fallback_context_complete
                 )
+            else:
+                gold_evidence_context_complete = broad_gold_context_complete
             if not gold_evidence_context_complete:
                 logger.warning(
                     "Suppressing generation because curated evidence context "
@@ -8341,6 +8353,14 @@ def build_rag_chain(
                         "gold_evidence_answer_suppressed": True,
                         "gold_evidence_required_groups": required_gold_groups,
                         "gold_evidence_included_groups": sorted(included_gold_groups),
+                        "registered_fallback_groups_required": sorted(required_fallback_groups),
+                        "registered_fallback_groups_included": sorted(included_fallback_groups),
+                        "registered_fallback_groups_missing_from_retrieval": context_budget.get(
+                            "registered_fallback_groups_missing_from_retrieval", []
+                        ),
+                        "registered_fallback_groups_missing_from_prompt": context_budget.get(
+                            "registered_fallback_groups_missing_from_prompt", []
+                        ),
                         "grounded_financial_fallback_used": False,
                         "financial_answer_suppressed": False,
                         "grounded_hindi_tax_fallback_used": False,
