@@ -8316,9 +8316,11 @@ def build_rag_chain(
                 strict_fallback_context_complete = required_fallback_groups.issubset(
                     included_fallback_groups
                 )
-                gold_evidence_context_complete = (
-                    broad_gold_context_complete and strict_fallback_context_complete
-                )
+                # Preserve the original generation gate: the model may still
+                # answer from complete broad evidence even when one atomic
+                # deterministic-fallback claim was not retrieved. Only the
+                # registered fallback itself must satisfy every atomic claim.
+                gold_evidence_context_complete = broad_gold_context_complete
             else:
                 gold_evidence_context_complete = broad_gold_context_complete
             if not gold_evidence_context_complete:
@@ -8354,6 +8356,9 @@ def build_rag_chain(
                         "gold_evidence_required_groups": required_gold_groups,
                         "gold_evidence_included_groups": sorted(included_gold_groups),
                         "registered_fallback_groups_required": sorted(required_fallback_groups),
+                        "registered_fallback_context_complete": (
+                            required_fallback_groups.issubset(included_fallback_groups)
+                        ),
                         "registered_fallback_groups_included": sorted(included_fallback_groups),
                         "registered_fallback_groups_missing_from_retrieval": context_budget.get(
                             "registered_fallback_groups_missing_from_retrieval", []

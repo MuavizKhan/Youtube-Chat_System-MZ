@@ -8659,7 +8659,7 @@ def test_q05_context_packing_reserves_all_six_atomic_fallback_claims():
 
 
 @pytest.mark.regression
-def test_q05_generation_is_suppressed_when_an_atomic_fallback_claim_was_not_retrieved(
+def test_q05_registered_fallback_rejects_missing_atomic_claim_after_model_repair(
     monkeypatch,
 ):
     question = (
@@ -8707,21 +8707,27 @@ def test_q05_generation_is_suppressed_when_an_atomic_fallback_claim_was_not_retr
         lambda _results: source_groups,
     )
     generation_calls = []
-    monkeypatch.setattr(
-        chain,
-        "generate_with_llm",
-        lambda **_kwargs: generation_calls.append(True),
-    )
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return chain.FALLBACK_ANSWER
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
 
     result = chain.build_rag_chain(object(), object()).invoke({
         "question": question,
         "video_id": "MdeQMVBuGgY",
     })
 
-    assert generation_calls == []
+    # Broad evidence is sufficient to attempt generation, but the missing
+    # sixth atomic claim prevents the registered deterministic fallback.
+    assert len(generation_calls) == 2
     assert result["answer"] == chain.FALLBACK_ANSWER
     trace = result["generation_trace"]
-    assert trace["gold_evidence_context_complete"] is False
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["missing_fallback_claims"] == [5]
     assert trace["context_budget"]["registered_fallback_groups_missing_from_retrieval"] == [5]
     assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == [5]
 
