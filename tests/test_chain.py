@@ -5997,6 +5997,29 @@ def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provi
 
 
 @pytest.mark.unit
+def test_bank_recovery_fallback_summarizes_truncated_account_statement_caption():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:57:10–02:57:20] The Ministry of Finance report acknowledges 14,100 crores recovered from me.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:57:20–02:57:30] statement of account. That is why I have"""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about banks and the recovery of money?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "14,100 crore" in fallback
+    assert (
+        '- Account/Parliament reference: the retrieved transcript includes '
+        'the phrase "statement of account".'
+    ) in fallback
+    assert "That is why I have" not in fallback
+
+
+@pytest.mark.unit
 def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still_fails(monkeypatch):
     context = (
         "I invested 3,000 crore rupees into Kingfisher Airlines. "
