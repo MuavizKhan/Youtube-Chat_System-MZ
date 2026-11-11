@@ -3523,6 +3523,19 @@ def _build_generation_repair_diagnostics(
             if gold_case is not None and prompt_evidence_complete
             else []
         )
+        normalized_draft = unicodedata.normalize("NFKC", draft)
+        opening_9000_narrator_claim = (
+            question_id in {"Q04", "Q05", "Q10"}
+            and re.search(
+                r"(?<!\\d)9[\\s,\\u202f-]*000(?!\\d)",
+                normalized_draft,
+            ) is not None
+            and re.search(
+                r"\\b(?:loan|debt|default\\w*)\\b",
+                normalized_draft,
+                re.IGNORECASE,
+            ) is not None
+        )
         issue_codes = []
         if abstained:
             issue_codes.append("abstention")
@@ -3530,10 +3543,13 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("language_contract_violation")
         if missing_groups:
             issue_codes.append("missing_prompt_evidence_groups")
+        if opening_9000_narrator_claim:
+            issue_codes.append("opening_9000_narrator_claim")
         return {
             "available": True,
             "abstained": abstained,
             "language_violation": language_violation,
+            "opening_9000_narrator_claim": opening_9000_narrator_claim,
             "answer_gold_groups": sorted(answer_groups),
             "missing_prompt_gold_groups": missing_groups,
             "issue_codes": issue_codes,
@@ -3713,7 +3729,7 @@ def _gold_evidence_repair_instruction(
     # This opening figure is narrator/interviewer framing, not a statement that
     # Mallya makes as his explanation for the airline's failure.
     has_intro_9000_claim = (
-        question_id in {"Q04", "Q10"}
+        question_id in {"Q04", "Q05", "Q10"}
         and re.search(
             r"(?<!\d)9[\s,\u202f-]*000(?!\d)",
             answer_text,
