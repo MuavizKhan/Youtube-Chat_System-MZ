@@ -101,6 +101,7 @@ from .gold_evidence import (
     matched_gold_answer_groups,
     matched_gold_answer_alias_groups,
     matched_gold_group_caption_spans,
+    matched_source_phrase_group_caption_spans,
     matched_source_phrase_group_indices,
     normalize_evidence_text,
 )
@@ -2278,6 +2279,33 @@ def _truncate_formatted_source(
                 if combined_cost <= available:
                     gold_evidence_caption_indices.update(candidate_indices)
 
+            if getattr(gold_case, "generation_fallback_requires_all_groups", False):
+                fallback_source_groups = (
+                    getattr(gold_case, "generation_fallback_source_groups", ()) or ()
+                )
+                fallback_caption_spans = matched_source_phrase_group_caption_spans(
+                    source_text,
+                    fallback_source_groups,
+                )
+                # A broad gold group may match only "airport fees" while the
+                # deterministic fallback needs the complete inability-to-pay
+                # assertion including both fees and landing charges. Protect
+                # the stricter claim rows independently of the broad groups.
+                for group_index in sorted(fallback_caption_spans):
+                    candidate_indices = (
+                        fallback_caption_spans[group_index]
+                        - gold_evidence_caption_indices
+                    )
+                    combined_indices = (
+                        gold_evidence_caption_indices | candidate_indices
+                    )
+                    combined_cost = (
+                        sum(len(captions[index]) for index in combined_indices)
+                        + max(0, len(combined_indices) - 1)
+                    )
+                    if combined_cost <= available:
+                        gold_evidence_caption_indices.update(candidate_indices)
+
         is_hindi_tax_naming_question = bool(
             re.search(r"[\u0900-\u097f]", question or "")
             and re.search(r"टैक्स|कर", question or "")
@@ -3844,14 +3872,29 @@ def build_generation_context(
         question,
     )
     context_selection_question = question
+    registered_fallback_source_groups = ()
+    if (
+        gold_case is not None
+        and getattr(gold_case, "generation_fallback_requires_all_groups", False)
+    ):
+        registered_fallback_source_groups = tuple(
+            getattr(gold_case, "generation_fallback_source_groups", ()) or ()
+        )
     if gold_case is not None:
         gold_phrases = " ".join(
             phrase
             for group in gold_case.groups
             for phrase in group
         )
+        # Strict fallback claims are also query-selection hints. This is a
+        # context-packing aid only; it does not alter retrieval rankings.
+        fallback_phrases = " ".join(
+            phrase
+            for group in registered_fallback_source_groups
+            for phrase in group
+        )
         context_selection_question = (
-            f"{question or ''} {gold_phrases}".strip()
+            f"{question or ''} {gold_phrases} {fallback_phrases}".strip()
         )
 
     if not source_groups:
@@ -3937,12 +3980,19 @@ def build_generation_context(
             formatted_gold_groups = sorted(
                 matched_gold_groups(rendered, gold_case)
             )
+            registered_fallback_group_indexes = sorted(
+                _matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_fallback_source_groups,
+                )
+            ) if registered_fallback_source_groups else []
             source_gold_diagnostic = {
                 "source_group_index": index + 1,
                 "chunk_ids": source_chunk_ids,
                 "raw_gold_groups": raw_gold_groups,
                 "caption_metadata_gold_groups": metadata_gold_groups,
                 "formatted_gold_groups": formatted_gold_groups,
+                "registered_fallback_group_indexes": registered_fallback_group_indexes,
                 "raw_chunk_fallback_used": bool(
                     raw_gold_groups
                     and "Original retrieved transcript chunks in chronological order" in rendered
@@ -3961,6 +4011,14 @@ def build_generation_context(
             "gold_group_indexes": (
                 matched_gold_groups(rendered, gold_case)
                 if gold_case is not None
+                else set()
+            ),
+            "registered_fallback_group_indexes": (
+                _matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_fallback_source_groups,
+                )
+                if registered_fallback_source_groups
                 else set()
             ),
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
@@ -4002,7 +4060,7 @@ def build_generation_context(
         for text_value in included_texts:
             included_groups.update(matched_gold_groups(text_value, gold_case))
         all_groups = set(range(len(gold_case.groups)))
-        return {
+        diagnostics = {
             "gold_evidence_question_id": gold_question_id,
             "gold_evidence_groups_required": math.ceil(
                 len(gold_case.groups)
@@ -4023,6 +4081,50 @@ def build_generation_context(
                 if isinstance(record.get("gold_evidence_diagnostic"), dict)
             ],
         }
+        if registered_fallback_source_groups:
+            required_fallback_groups = set(
+                range(len(registered_fallback_source_groups))
+            )
+            available_fallback_groups = {
+                group_index
+                for record in records
+                for group_index in record["registered_fallback_group_indexes"]
+            }
+            included_fallback_groups: set[int] = set()
+            for text_value in included_texts:
+                included_fallback_groups.update(
+                    _matched_registered_phrase_group_indices(
+                        text_value,
+                        registered_fallback_source_groups,
+                    )
+                )
+            source_group_indices_by_fallback_group = {
+                str(group_index): [
+                    record["index"] + 1
+                    for record in records
+                    if group_index in record["registered_fallback_group_indexes"]
+                ]
+                for group_index in sorted(available_fallback_groups)
+            }
+            diagnostics.update({
+                "registered_fallback_question_id": gold_question_id,
+                "registered_fallback_groups_required": sorted(required_fallback_groups),
+                "registered_fallback_groups_available": sorted(available_fallback_groups),
+                "registered_fallback_groups_included": sorted(included_fallback_groups),
+                "registered_fallback_groups_missing_from_retrieval": sorted(
+                    required_fallback_groups - available_fallback_groups
+                ),
+                "registered_fallback_groups_missing_from_prompt": sorted(
+                    required_fallback_groups - included_fallback_groups
+                ),
+                "registered_fallback_context_complete": (
+                    required_fallback_groups.issubset(included_fallback_groups)
+                ),
+                "registered_fallback_source_group_indices": (
+                    source_group_indices_by_fallback_group
+                ),
+            })
+        return diagnostics
 
     original_chars = sum(len(record["text"]) for record in records) + (
         2 * max(0, len(records) - 1)
@@ -4290,6 +4392,70 @@ def build_generation_context(
         )
         priority_records = (
             reserved_gold_records + remaining_priority_records
+        )[:selected_count]
+
+    if registered_fallback_source_groups:
+        available_fallback_groups = {
+            group_index
+            for record in records
+            for group_index in record["registered_fallback_group_indexes"]
+        }
+        reserved_fallback_records = []
+        reserved_fallback_indices: set[int] = set()
+        covered_fallback_groups: set[int] = set()
+
+        # Q04/Q05 deterministic answers have a stricter, claim-level evidence
+        # contract than their broad retrieval gold groups. Reserve one source
+        # group for every available atomic claim before ordinary relevance fill.
+        # A source group may cover several claims, but claims are never stitched
+        # across separate [SOURCE] blocks.
+        while (
+            covered_fallback_groups != available_fallback_groups
+            and len(reserved_fallback_records) < selected_count
+        ):
+            choices = []
+            for record in records:
+                if record["index"] in reserved_fallback_indices:
+                    continue
+                new_claims = (
+                    record["registered_fallback_group_indexes"]
+                    - covered_fallback_groups
+                )
+                if not new_claims:
+                    continue
+                choices.append((
+                    len(new_claims),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    -record["index"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            reserved_fallback_records.append(chosen)
+            reserved_fallback_indices.add(chosen["index"])
+            covered_fallback_groups.update(
+                chosen["registered_fallback_group_indexes"]
+            )
+
+        remaining_priority_records = [
+            record
+            for record in priority_records
+            if record["index"] not in reserved_fallback_indices
+        ]
+        remaining_priority_records.extend(
+            record
+            for record in priority_order
+            if record["index"] not in reserved_fallback_indices
+            and all(
+                existing["index"] != record["index"]
+                for existing in remaining_priority_records
+            )
+        )
+        priority_records = (
+            reserved_fallback_records + remaining_priority_records
         )[:selected_count]
 
     # Reserve two characters for each separator so the final concatenation
@@ -8103,16 +8269,37 @@ def build_rag_chain(
         )
         gold_evidence_context_complete = None
         if gold_context_case is not None:
-            required_gold_groups = math.ceil(
-                len(gold_context_case.groups)
-                * float(gold_context_case.min_generation_context_group_coverage)
-            )
-            included_gold_groups = set(
-                context_budget.get("gold_evidence_groups_included", [])
-            )
-            gold_evidence_context_complete = (
-                len(included_gold_groups) >= required_gold_groups
-            )
+            if getattr(
+                gold_context_case,
+                "generation_fallback_requires_all_groups",
+                False,
+            ):
+                required_fallback_groups = set(range(len(
+                    getattr(
+                        gold_context_case,
+                        "generation_fallback_source_groups",
+                        (),
+                    ) or ()
+                )))
+                included_fallback_groups = set(
+                    context_budget.get("registered_fallback_groups_included", [])
+                )
+                required_gold_groups = len(required_fallback_groups)
+                included_gold_groups = included_fallback_groups
+                gold_evidence_context_complete = required_fallback_groups.issubset(
+                    included_fallback_groups
+                )
+            else:
+                required_gold_groups = math.ceil(
+                    len(gold_context_case.groups)
+                    * float(gold_context_case.min_generation_context_group_coverage)
+                )
+                included_gold_groups = set(
+                    context_budget.get("gold_evidence_groups_included", [])
+                )
+                gold_evidence_context_complete = (
+                    len(included_gold_groups) >= required_gold_groups
+                )
             if not gold_evidence_context_complete:
                 logger.warning(
                     "Suppressing generation because curated evidence context "

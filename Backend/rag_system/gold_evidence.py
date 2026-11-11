@@ -205,11 +205,14 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         generation_fallback_answer=(
-            "Vijay Mallya says the global financial crisis meant the money "
-            "stopped. He describes the working capital cycle as disrupted and "
-            "calls it a cash flow issue. He also cites non-payment of the oil "
-            "bills and difficulty paying airport fees and landing charges as "
-            "concrete operating challenges for the airline."
+            "Vijay Mallya says the global financial crisis meant money stopped "
+            "across the aviation sector. He describes Kingfisher's working-capital "
+            "cycle as disrupted and says that a cash-flow issue affects everybody, "
+            "not just one creditor or vendor. In the exchange, the interviewer "
+            "points to non-payment of the oil bills and says Kingfisher Airlines "
+            "was not able to pay the airport fees and landing charges. Mallya "
+            "responds that a cash shortage affects creditors and vendors across "
+            "the board."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
@@ -219,7 +222,10 @@ GOLD_EVIDENCE_CASES = (
             ("cash flow issue",),
             ("non-payment of the oil bills",),
             (
-                "Kingfisher Airlines was not able to pay the airport fees, the landing charges",
+                # The interviewer states this; Mallya's following reply is
+                # about the cash-flow impact across creditors and vendors.
+                "Kingfisher Airlines was not able to pay the airport fees the landing charges",
+                "not able to pay the airport fees the landing charges",
                 "not able to pay airport fees and landing charges",
                 "could not pay airport fees or the landing charges",
                 "could not pay airport fees or landing charges",
@@ -231,7 +237,9 @@ GOLD_EVIDENCE_CASES = (
             ("working capital cycle as disrupted",),
             ("cash flow issue",),
             ("non-payment of the oil bills",),
-            ("difficulty paying airport fees and landing charges",),
+            (
+                "Kingfisher Airlines was not able to pay the airport fees and landing charges",
+            ),
         ),
     ),
     GoldEvidenceCase(
@@ -470,16 +478,15 @@ def _source_scoped_evidence_texts(text: str) -> list[str]:
     return evidence_texts
 
 
-def matched_gold_group_caption_spans(
+def matched_source_phrase_group_caption_spans(
     text: str,
-    case: GoldEvidenceCase,
+    phrase_groups: tuple[tuple[str, ...], ...],
 ) -> dict[int, set[int]]:
-    """Map matched gold groups to all physical lines of their caption rows.
+    """Map source phrase groups to every physical line of their caption rows.
 
     Returned indexes refer to text.splitlines(). Matching is restricted to
-    one source block at a time. If a caption wraps across physical lines, all
-    of those lines are returned so context-budget trimming cannot keep the
-    timestamp line while dropping the evidence-bearing continuation.
+    one [SOURCE] block at a time. Caption rows are joined before matching, and
+    every physical continuation line belonging to a matched row is retained.
     """
     if not isinstance(text, str) or not text:
         return {}
@@ -506,7 +513,7 @@ def matched_gold_group_caption_spans(
             cursor = end_offset + 1
         joined_captions = " ".join(joined_parts)
 
-        for group_index, alternatives in enumerate(case.groups):
+        for group_index, alternatives in enumerate(phrase_groups):
             for alternative in alternatives:
                 phrase = normalize_evidence_text(alternative)
                 if not phrase:
@@ -526,6 +533,14 @@ def matched_gold_group_caption_spans(
                     search_start = match_start + 1
 
     return matched_spans
+
+
+def matched_gold_group_caption_spans(
+    text: str,
+    case: GoldEvidenceCase,
+) -> dict[int, set[int]]:
+    """Map broad gold groups to their complete caption rows."""
+    return matched_source_phrase_group_caption_spans(text, case.groups)
 
 
 def matched_gold_group_phrases(

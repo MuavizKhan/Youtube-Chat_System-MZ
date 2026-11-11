@@ -8502,6 +8502,9 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "non-payment of the oil bills" in answer.lower()
     assert "airport fees" in answer.lower()
     assert "landing charges" in answer.lower()
+    assert "the interviewer points to" in answer.lower()
+    assert "mallya responds" in answer.lower()
+    assert "not just one creditor or vendor" in answer.lower()
     assert diagnostics["used"] is True
     assert diagnostics["required_fallback_claims"] == list(range(6))
     assert diagnostics["included_fallback_claims"] == list(range(6))
@@ -8515,6 +8518,147 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     }
     assert diagnostics["answer_contract_fallback_claims"] == list(range(6))
     assert diagnostics["included_gold_groups"] == list(range(6))
+
+
+@pytest.mark.regression
+def test_q05_context_packing_reserves_all_six_atomic_fallback_claims():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    evidence_captions = [
+        ["The global financial crisis arrived."],
+        ["Yeah. The money stopped; it got dry."],
+        ["The working capital cycle got disrupted."],
+        ["When a company goes through a cash flow issue, it affects everybody."],
+        ["There was non-payment of the oil bills."],
+        [
+            "Kingfisher Airlines was not able to pay.",
+            "The airport fees, the landing charges.",
+        ],
+    ]
+    evidence_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            9600 + index,
+            4500 + index * 30,
+            captions,
+            0.75 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        evidence_groups.append(group)
+
+    # These high-ranked distractors intentionally outrank the evidence by
+    # retrieval distance. The bounded context must still preserve all six
+    # deterministic-fallback claims, not only the three broad gold groups.
+    distractors = []
+    for index in range(4):
+        long_caption = (
+            f"Unrelated Kingfisher Airlines interview discussion {index}. "
+            + ("Background commentary without a registered Q05 claim. " * 24)
+        )
+        group = _caption_group(
+            9700 + index,
+            index * 120,
+            [long_caption],
+            0.01 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        distractors.append(group)
+
+    result = chain.build_generation_context(
+        distractors + evidence_groups,
+        question=question,
+        max_chars=4200,
+        video_id="MdeQMVBuGgY",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 4200
+    assert diagnostics["reduced"] is True
+    assert diagnostics["registered_fallback_groups_required"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+    assert "The global financial crisis arrived." in result["context"]
+    assert "The money stopped; it got dry." in result["context"]
+    assert "The working capital cycle got disrupted." in result["context"]
+    assert "a cash flow issue" in result["context"]
+    assert "non-payment of the oil bills" in result["context"]
+    assert "Kingfisher Airlines was not able to pay." in result["context"]
+    assert "The airport fees, the landing charges." in result["context"]
+
+
+@pytest.mark.regression
+def test_q05_generation_is_suppressed_when_an_atomic_fallback_claim_was_not_retrieved(
+    monkeypatch,
+):
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    source_captions = [
+        ["The global financial crisis arrived and the money stopped."],
+        ["The working capital cycle got disrupted. There was a cash flow issue."],
+        ["There was non-payment of the oil bills."],
+    ]
+    source_groups = []
+    for index, captions in enumerate(source_captions):
+        group = _caption_group(
+            9800 + index,
+            4500 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [9800, 9801, 9802],
+                "citation_chunk_ids": [9800, 9801, 9802],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    generation_calls = []
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: generation_calls.append(True),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert generation_calls == []
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_context_complete"] is False
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_retrieval"] == [5]
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == [5]
 
 
 @pytest.mark.unit
