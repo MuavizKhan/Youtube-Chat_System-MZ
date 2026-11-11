@@ -205,14 +205,14 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         generation_fallback_answer=(
-            "Vijay Mallya says the global financial crisis meant money stopped "
-            "across the aviation sector. He describes Kingfisher's working capital "
-            "cycle as disrupted and says that a cash flow issue affects everybody, "
-            "not just one creditor or vendor. In the exchange, the interviewer "
-            "points to non-payment of the oil bills and says Kingfisher Airlines "
-            "was not able to pay the airport fees and landing charges. Mallya "
-            "responds that a cash shortage affects creditors and vendors across "
-            "the board."
+            "Vijay Mallya identifies the global financial crisis as a shock that "
+            "affected every sector. The interviewer summarizes the impact by "
+            "saying that money stopped and it got dry. Mallya says Kingfisher's "
+            "working capital cycle got disrupted. The interviewer then points to "
+            "the non-payment of oil bills and Kingfisher Airlines' inability to "
+            "pay airport fees and landing charges. Mallya responds that a cash "
+            "flow issue affects everybody; one creditor or vendor cannot be "
+            "isolated because the cash shortage is across the board."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
