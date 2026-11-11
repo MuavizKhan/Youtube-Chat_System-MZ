@@ -6120,10 +6120,20 @@ def _build_financial_evidence_fallback(
                 + "."
             )
         for item in bank_evidence["account_statement"][:1]:
+            matched_text = str(item.get("text") or "")
+            if re.search(r"\bstatement\s+of\s+account\b", matched_text, re.IGNORECASE):
+                reference_phrase = "statement of account"
+            elif re.search(
+                r"\bstatement\s+in\s+(?:the\s+)?parliament\b",
+                matched_text,
+                re.IGNORECASE,
+            ):
+                reference_phrase = "statement in Parliament"
+            else:
+                reference_phrase = "parliamentary statement"
             lines.append(
-                "- Account/Parliament reference: the transcript states that "
-                + item["text"].rstrip(".")
-                + "."
+                "- Account/Parliament reference: the retrieved transcript "
+                f'includes the phrase "{reference_phrase}".'
             )
         return "\n\n".join(lines)
 
