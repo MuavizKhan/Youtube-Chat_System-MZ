@@ -8504,6 +8504,7 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "landing charges" in answer.lower()
     assert "the interviewer summarizes the impact" in answer.lower()
     assert "the interviewer then points to" in answer.lower()
+    assert "kingfisher airlines was not able to pay the airport fees and landing charges" in answer.lower()
     assert "mallya responds" in answer.lower()
     assert "working capital cycle got disrupted" in answer.lower()
     assert "cash flow issue affects everybody" in answer.lower()

@@ -209,8 +209,9 @@ GOLD_EVIDENCE_CASES = (
             "affected every sector. The interviewer summarizes the impact by "
             "saying that money stopped and it got dry. Mallya says Kingfisher's "
             "working capital cycle got disrupted. The interviewer then points to "
-            "the non-payment of oil bills and Kingfisher Airlines' inability to "
-            "pay airport fees and landing charges. Mallya responds that a cash "
+            "the non-payment of oil bills and says Kingfisher Airlines was not "
+            "able to pay the airport fees and landing charges. Mallya responds "
+            "that a cash "
             "flow issue affects everybody; one creditor or vendor cannot be "
             "isolated because the cash shortage is across the board."
         ),
