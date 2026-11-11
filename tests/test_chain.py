@@ -1355,10 +1355,10 @@ def test_generation_repair_rejects_9000_crore_intro_attribution_for_q05():
         "while running Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "Opening narration: a 9,000-crore loan default scam.\\n"
-        "The global financial crisis meant the money stopped.\\n"
-        "The working capital cycle got disrupted after non-payment of the oil bills.\\n"
+        "[SOURCE 1]\n"
+        "Opening narration: a 9,000-crore loan default scam.\n"
+        "The global financial crisis meant the money stopped.\n"
+        "The working capital cycle got disrupted after non-payment of the oil bills.\n"
         "Kingfisher Airlines was not able to pay the airport fees and landing charges. "
         "Mallya describes the resulting cash-flow issue."
     )
@@ -1366,7 +1366,7 @@ def test_generation_repair_rejects_9000_crore_intro_attribution_for_q05():
         "The global financial crisis stopped the money. The working capital cycle "
         "was disrupted after non-payment of the oil bills. Kingfisher could not pay "
         "airport fees and landing charges, and Mallya described the cash-flow issue. "
-        "The company still defaulted on a ₹9,000\\u202fcrore loan."
+        "The company still defaulted on a ₹9,000\u202fcrore loan."
     )
 
     instruction = chain._generation_repair_instruction(
