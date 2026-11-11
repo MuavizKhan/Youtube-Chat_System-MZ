@@ -304,7 +304,10 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
                     r"\b9\s*[, ]?\s*000\s*[-\s\u2010-\u2015]*"
                     r"(?:cr|crores?)\b.{0,80}\bloan\s+default\b|"
                     r"\bloan\s+default\b.{0,80}\b9\s*[, ]?\s*000\s*"
-                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\b"
+                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\b|"
+                    r"\bdefault(?:ed|ing)?\s+on\s+(?:(?:a|the)\s+)?"
+                    r"(?:₹\s*)?9\s*[, ]?\s*000\s*"
+                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\s+loan\b"
                 ),
             },
             {
