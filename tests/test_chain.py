@@ -1322,13 +1322,13 @@ def test_q09_accepts_two_of_three_answer_groups_when_all_evidence_reaches_prompt
         "in the problems faced by Kingfisher Airlines?"
     )
     context = (
-        "[SOURCE 1]\\nTranscript caption segments:\\n"
+        "[SOURCE 1]\nTranscript caption segments:\n"
         "- [01:17:23–01:18:52] I asked only for policy changes. "
         "The cost of crude increased and aviation turbine fuel prices rose. "
-        "State governments levied ad valorum sales tax on aviation turbine fuel.\\n"
-        "[SOURCE 2]\\n"
-        "- [01:18:00–01:18:20] The banks will support you.\\n"
-        "[SOURCE 3]\\n"
+        "State governments levied ad valorum sales tax on aviation turbine fuel.\n"
+        "[SOURCE 2]\n"
+        "- [01:18:00–01:18:20] The banks will support you.\n"
+        "[SOURCE 3]\n"
         "- [01:18:20–01:18:52] I was told not to downsize Kingfisher; "
         "government policies did not help."
     )
