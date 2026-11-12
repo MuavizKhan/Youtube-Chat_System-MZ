@@ -58,6 +58,9 @@ class GoldEvidenceCase:
     # are aligned by index and must all be present in the fallback text.
     generation_fallback_source_groups: tuple[tuple[str, ...], ...] = ()
     generation_fallback_answer_groups: tuple[tuple[str, ...], ...] = ()
+    # Optional threshold for generated-answer evidence coverage. When unset,
+    # the answer must cover the same groups required in the generation prompt.
+    min_generation_answer_group_coverage: float | None = None
 
 
 GOLD_EVIDENCE_CASES = (
@@ -308,6 +311,9 @@ GOLD_EVIDENCE_CASES = (
         min_group_coverage=2 / 3,
         min_context_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
+        # Keep all three policy evidence groups in the prompt; an answer needs
+        # to cover two of the three registered policy points.
+        min_generation_answer_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q10",

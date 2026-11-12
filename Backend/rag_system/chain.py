@@ -3492,7 +3492,7 @@ def _build_generation_repair_diagnostics(
         if gold_case is not None
         else set()
     )
-    required_groups = (
+    required_prompt_groups = (
         math.ceil(
             len(gold_case.groups)
             * float(gold_case.min_generation_context_group_coverage)
@@ -3500,8 +3500,25 @@ def _build_generation_repair_diagnostics(
         if gold_case is not None
         else 0
     )
+    required_answer_coverage = (
+        gold_case.min_generation_answer_group_coverage
+        if (
+            gold_case is not None
+            and gold_case.min_generation_answer_group_coverage is not None
+        )
+        else (
+            gold_case.min_generation_context_group_coverage
+            if gold_case is not None
+            else 0.0
+        )
+    )
+    required_answer_groups = (
+        math.ceil(len(gold_case.groups) * float(required_answer_coverage))
+        if gold_case is not None
+        else 0
+    )
     prompt_evidence_complete = (
-        len(prompt_groups) >= required_groups
+        len(prompt_groups) >= required_prompt_groups
         if gold_case is not None
         else None
     )
@@ -3518,9 +3535,14 @@ def _build_generation_repair_diagnostics(
             if gold_case is not None
             else set()
         )
+        covered_prompt_groups = prompt_groups & answer_groups
         missing_groups = (
             sorted(prompt_groups - answer_groups)
-            if gold_case is not None and prompt_evidence_complete
+            if (
+                gold_case is not None
+                and prompt_evidence_complete
+                and len(covered_prompt_groups) < required_answer_groups
+            )
             else []
         )
         normalized_draft = unicodedata.normalize("NFKC", draft)
@@ -3612,7 +3634,8 @@ def _build_generation_repair_diagnostics(
         "generation_attempted": generation_attempted,
         "provider_failure_reason": provider_failure_reason,
         "prompt_gold_groups": sorted(prompt_groups),
-        "required_prompt_gold_group_count": required_groups,
+        "required_prompt_gold_group_count": required_prompt_groups,
+        "required_answer_gold_group_count": required_answer_groups,
         "prompt_evidence_complete": prompt_evidence_complete,
         "initial_draft": initial,
         "repaired_draft": repaired,
@@ -3644,19 +3667,35 @@ def _gold_evidence_repair_instruction(
     answer_text = _strip_unverified_timestamp_summary(answer or "")
     context_groups = matched_gold_groups(context_text, gold_case)
     answer_groups = matched_gold_answer_groups(answer_text, gold_case)
-    required_coverage = gold_case.min_generation_context_group_coverage
-    required_groups = math.ceil(
-        len(gold_case.groups) * float(required_coverage)
+    required_prompt_coverage = gold_case.min_generation_context_group_coverage
+    required_prompt_groups = math.ceil(
+        len(gold_case.groups) * float(required_prompt_coverage)
     )
-    if len(context_groups) < required_groups:
+    if len(context_groups) < required_prompt_groups:
         # Do not ask the model to invent evidence the packer did not supply.
         return None
 
+    answer_coverage = (
+        gold_case.min_generation_answer_group_coverage
+        if gold_case.min_generation_answer_group_coverage is not None
+        else required_prompt_coverage
+    )
+    required_answer_groups = math.ceil(
+        len(gold_case.groups) * float(answer_coverage)
+    )
     matched_context_phrases = matched_gold_group_phrases(
         context_text,
         gold_case,
     )
-    missing_groups = sorted(context_groups - answer_groups)
+    covered_answer_groups = context_groups & answer_groups
+    # Prompt completeness and answer completeness are separate contracts:
+    # all required evidence can reach the prompt while the answer contract
+    # intentionally requires only a subset of those groups.
+    missing_groups = (
+        sorted(context_groups - answer_groups)
+        if len(covered_answer_groups) < required_answer_groups
+        else []
+    )
     preserved_groups = sorted(context_groups & answer_groups)
     instructions = []
     if missing_groups:

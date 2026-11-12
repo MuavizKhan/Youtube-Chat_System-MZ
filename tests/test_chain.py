@@ -1316,6 +1316,58 @@ def test_generation_repair_includes_missing_policy_evidence_from_registered_q09_
 
 
 @pytest.mark.unit
+def test_q09_accepts_two_of_three_answer_groups_when_all_evidence_reaches_prompt():
+    question = (
+        "What does Vijay Mallya say about the role of Indian government policy "
+        "in the problems faced by Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\\nTranscript caption segments:\\n"
+        "- [01:17:23–01:18:52] I asked only for policy changes. "
+        "The cost of crude increased and aviation turbine fuel prices rose. "
+        "State governments levied ad valorum sales tax on aviation turbine fuel.\\n"
+        "[SOURCE 2]\\n"
+        "- [01:18:00–01:18:20] The banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [01:18:20–01:18:52] I was told not to downsize Kingfisher; "
+        "government policies did not help."
+    )
+    answer = (
+        "Mallya says he asked only for policy changes. He describes the cost "
+        "of crude, aviation turbine fuel and ad valorum sales tax as important "
+        "factors in the airline's difficulties."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is None
+    assert diagnostics["prompt_gold_groups"] == [0, 1, 2]
+    assert diagnostics["required_prompt_gold_group_count"] == 3
+    assert diagnostics["required_answer_gold_group_count"] == 2
+    assert diagnostics["prompt_evidence_complete"] is True
+    assert diagnostics["initial_draft"]["answer_gold_groups"] == [0, 1]
+    assert diagnostics["initial_draft"]["missing_prompt_gold_groups"] == []
+    assert diagnostics["initial_draft"]["issue_codes"] == []
+    assert diagnostics["failure_reasons"] == []
+
+
+@pytest.mark.unit
 def test_generation_repair_rejects_9000_crore_intro_attribution_for_q04():
     question = (
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
