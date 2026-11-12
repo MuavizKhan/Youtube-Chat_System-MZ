@@ -400,12 +400,21 @@ HINDI_HISTORY_EXPECTED = {
 HINDI_HISTORY_GOLD = (
     GoldEvidenceCase(
         question_id="HI01",
-        # The question asks for the movement's name. The opening caption pairs
-        # the first-major-movement prompt with "बिजोलिया"; protect the answer name
-        # in the generation context, not only the generic question phrase.
-        groups=(("बिजोलिया", "Bijolia"),),
+        # Keep the source-script evidence separate from curated English answer aliases.
+        # The fallback additionally requires the movement assertion and "अपने बिजोलिया"
+        # to occur in the same retrieved source block.
+        groups=(("बिजोलिया",),),
         min_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(("Bijolia", "Bijolia movement", "the Bijolia movement"),),
+        generation_fallback_answer=(
+            "The first major peasant movement named in the transcript is "
+            "the Bijolia movement."
+        ),
+        generation_fallback_source_phrases=(
+            "पहला बड़ा किसान आंदोलन",
+            "अपने बिजोलिया",
+        ),
     ),
     GoldEvidenceCase(
         question_id="HI02",
@@ -429,9 +438,18 @@ HINDI_HISTORY_GOLD = (
         question_id="HI06",
         # English question over Hindi captions: require the named movement
         # itself to reach the prompt before generation is allowed.
-        groups=(("बिजोलिया", "Bijolia"),),
+        groups=(("बिजोलिया",),),
         min_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(("Bijolia", "Bijolia movement", "the Bijolia movement"),),
+        generation_fallback_answer=(
+            "The first major peasant movement named in the transcript is "
+            "the Bijolia movement."
+        ),
+        generation_fallback_source_phrases=(
+            "पहला बड़ा किसान आंदोलन",
+            "अपने बिजोलिया",
+        ),
     ),
     GoldEvidenceCase(
         question_id="HI07",

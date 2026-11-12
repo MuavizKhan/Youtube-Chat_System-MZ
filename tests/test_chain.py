@@ -681,8 +681,8 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
             494,
             4650,
             [
-                "I was told not to downsize Kingfisher; you continue, "
-                "banks will support you."
+                "I was told not to downsize King Fisher at that time; "
+                "you continue, banks will support you."
             ],
             0.76,
         ),
@@ -714,6 +714,12 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
     assert diagnostics["gold_evidence_groups_included"] == [0, 1, 2]
     assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
     assert diagnostics["gold_evidence_context_coverage"] == 1.0
+    assert diagnostics["registered_fallback_groups_required"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(7))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
 
 
 @pytest.mark.regression
@@ -1012,7 +1018,10 @@ def test_registered_generation_gold_case_reads_video_scoped_annotations(
 
     assert question_id == expected_id
     assert gold_case is not None
-    assert gold_case.groups == (("बिजोलिया", "Bijolia"),)
+    assert gold_case.groups == (("बिजोलिया",),)
+    assert gold_case.generation_answer_aliases == (
+        ("Bijolia", "Bijolia movement", "the Bijolia movement"),
+    )
     assert gold_case.min_generation_context_group_coverage == 1.0
 
 
@@ -1079,9 +1088,48 @@ def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
     assert "exact transcript wording" in instruction
     assert "बिजोलिया" in instruction
-    assert "Registered English answer spelling(s)" in instruction
-    assert "Bijolia" in instruction
-    assert "annotation alias" in instruction
+
+    answer_contract_instruction = chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=generic_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert answer_contract_instruction is not None
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in answer_contract_instruction
+    assert "Bijolia movement" in answer_contract_instruction
+    assert "generic category" in answer_contract_instruction
+
+    combined_instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=generic_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert combined_instruction is not None
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in combined_instruction
+
+    source_quote_only_answer = "The speaker says “बिजोलिया” was the first major farmers' movement."
+    assert chain.matched_gold_answer_alias_groups(
+        source_quote_only_answer,
+        chain._registered_generation_gold_case(
+            "INpnuL7qnzY",
+            question,
+        )[1],
+    ) == set()
+    assert chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=source_quote_only_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    ) is not None
+    source_quote_repair = chain._generation_repair_instruction(
+        question=question,
+        answer=source_quote_only_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    )
+    assert "REGISTERED ANSWER-ENTITY REPAIR" in source_quote_repair
 
     grounded_answer = "The first major farmers' movement was the Bijolia movement."
     assert chain._gold_evidence_repair_instruction(
@@ -1090,6 +1138,19 @@ def test_hindi_movement_generation_repair_requires_the_bijolia_name(question):
         context=context,
         video_id="INpnuL7qnzY",
     ) is None
+    assert chain._gold_answer_contract_repair_instruction(
+        question=question,
+        answer=grounded_answer,
+        context=context,
+        video_id="INpnuL7qnzY",
+    ) is None
+    assert chain.matched_gold_answer_alias_groups(
+        grounded_answer,
+        chain._registered_generation_gold_case(
+            "INpnuL7qnzY",
+            question,
+        )[1],
+    ) == {0}
 
 
 @pytest.mark.unit
@@ -1161,7 +1222,7 @@ def test_q05_generation_accepts_cash_flow_paraphrase_without_weakening_context_m
         "- [00:05–00:10] The working capital cycle got disrupted. "
         "There was a cash flow issue.\n"
         "- [00:10–00:15] There was non-payment of the oil bills. "
-        "The airline could not pay airport fees or the landing charges."
+        "Kingfisher Airlines was not able to pay the airport fees, the landing charges."
     )
     answer = (
         "Vijay Mallya says running Kingfisher Airlines was a cash-flow nightmare. "
@@ -1255,6 +1316,58 @@ def test_generation_repair_includes_missing_policy_evidence_from_registered_q09_
 
 
 @pytest.mark.unit
+def test_q09_accepts_two_of_three_answer_groups_when_all_evidence_reaches_prompt():
+    question = (
+        "What does Vijay Mallya say about the role of Indian government policy "
+        "in the problems faced by Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\nTranscript caption segments:\n"
+        "- [01:17:23–01:18:52] I asked only for policy changes. "
+        "The cost of crude increased and aviation turbine fuel prices rose. "
+        "State governments levied ad valorum sales tax on aviation turbine fuel.\n"
+        "[SOURCE 2]\n"
+        "- [01:18:00–01:18:20] The banks will support you.\n"
+        "[SOURCE 3]\n"
+        "- [01:18:20–01:18:52] I was told not to downsize Kingfisher; "
+        "government policies did not help."
+    )
+    answer = (
+        "Mallya says he asked only for policy changes. He describes the cost "
+        "of crude, aviation turbine fuel and ad valorum sales tax as important "
+        "factors in the airline's difficulties."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is None
+    assert diagnostics["prompt_gold_groups"] == [0, 1, 2]
+    assert diagnostics["required_prompt_gold_group_count"] == 3
+    assert diagnostics["required_answer_gold_group_count"] == 2
+    assert diagnostics["prompt_evidence_complete"] is True
+    assert diagnostics["initial_draft"]["answer_gold_groups"] == [0, 1]
+    assert diagnostics["initial_draft"]["missing_prompt_gold_groups"] == []
+    assert diagnostics["initial_draft"]["issue_codes"] == []
+    assert diagnostics["failure_reasons"] == []
+
+
+@pytest.mark.unit
 def test_generation_repair_rejects_9000_crore_intro_attribution_for_q04():
     question = (
         "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
@@ -1285,6 +1398,53 @@ def test_generation_repair_rejects_9000_crore_intro_attribution_for_q04():
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" in instruction
     assert "global financial crisis" in instruction.lower()
     assert "refusal to let etihad invest" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_generation_repair_rejects_9000_crore_intro_attribution_for_q05():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "Opening narration: a 9,000-crore loan default scam.\n"
+        "The global financial crisis meant the money stopped.\n"
+        "The working capital cycle got disrupted after non-payment of the oil bills.\n"
+        "Kingfisher Airlines was not able to pay the airport fees and landing charges. "
+        "Mallya describes the resulting cash-flow issue."
+    )
+    answer = (
+        "The global financial crisis stopped the money. The working capital cycle "
+        "was disrupted after non-payment of the oil bills. Kingfisher could not pay "
+        "airport fees and landing charges, and Mallya described the cash-flow issue. "
+        "The company still defaulted on a ₹9,000\u202fcrore loan."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question,
+        answer,
+        context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=answer,
+        final_answer=answer,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is not None
+    assert "ATTRIBUTION REPAIR" in instruction
+    assert "Do not attribute the opening" in instruction
+    assert diagnostics["initial_draft"]["opening_9000_narrator_claim"] is True
+    assert "opening_9000_narrator_claim" in diagnostics["initial_draft"]["issue_codes"]
+    assert diagnostics["repaired_draft"]["opening_9000_narrator_claim"] is True
 
 
 @pytest.mark.unit
@@ -5936,6 +6096,29 @@ def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provi
 
 
 @pytest.mark.unit
+def test_bank_recovery_fallback_summarizes_truncated_account_statement_caption():
+    context = """[SOURCE 1]
+Transcript caption segments in chronological order:
+- [02:57:10–02:57:20] The Ministry of Finance report acknowledges 14,100 crores recovered from me.
+[SOURCE 2]
+Transcript caption segments in chronological order:
+- [02:57:20–02:57:30] statement of account. That is why I have"""
+
+    fallback = chain._build_financial_evidence_fallback(
+        "What does Vijay Mallya say about banks and the recovery of money?",
+        context,
+    )
+
+    assert fallback is not None
+    assert "14,100 crore" in fallback
+    assert (
+        '- Account/Parliament reference: the retrieved transcript includes '
+        'the phrase "statement of account".'
+    ) in fallback
+    assert "That is why I have" not in fallback
+
+
+@pytest.mark.unit
 def test_rag_chain_uses_source_extractive_financial_answer_when_llm_repair_still_fails(monkeypatch):
     context = (
         "I invested 3,000 crore rupees into Kingfisher Airlines. "
@@ -7869,3 +8052,1507 @@ def test_temporal_location_timestamp_selection_prefers_substantive_answer_sectio
     assert "01:10:38–01:14:34" in result
     assert "01:19:53–01:22:48" in result
     assert "01:58:47–02:01:17" in result
+
+
+@pytest.mark.regression
+def test_ar07_context_packing_preserves_gold_price_evidence_when_caption_metadata_is_incomplete():
+    question = "How much might one hour inside the Orfield room cost?"
+    price_document = doc(
+        905,
+        0,
+        40,
+        "For one hour, the room may cost up to 600 دولار.",
+    )
+    price_document.metadata["video_id"] = "fAd2nKfrDB8"
+    # This metadata is structurally valid but omits the currency word from the
+    # original chunk. The formatter must reject it and retain raw chunk text.
+    price_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 40.0,
+            "text": "For one hour, the room may cost up to 600.",
+        }
+    ]
+    filler_document = doc(
+        906,
+        40,
+        120,
+        "Unrelated transcript discussion. " * 130,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    group = {
+        "documents": [price_document, filler_document],
+        "start": 0,
+        "end": 120,
+        "distance": 0.4,
+    }
+
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert chain._caption_segments_for_documents(
+        [price_document],
+        gold_case=gold_case,
+    ) is None
+    formatted = chain.format_source_group(group, 1, gold_case=gold_case)
+    assert "Original retrieved transcript chunks in chronological order" in formatted
+    assert "600 دولار" in formatted
+
+    result = chain.build_generation_context(
+        [group],
+        question=question,
+        max_chars=1600,
+        video_id="fAd2nKfrDB8",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 1600
+    assert "600 دولار" in result["context"]
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert "905" in diagnostics["included_chunk_ids"]
+
+
+@pytest.mark.regression
+def test_registered_hindi_answer_fallback_requires_movement_and_bijolia_in_same_source_block():
+    question = "Which peasant movement is named as the first major movement?"
+    valid_context = (
+        "[SOURCE 1]\n"
+        "- [00:02–00:08] आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन "
+        "कौन सा हुआ था अपने बिजोलिया"
+    )
+    diagnostics = {}
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=valid_context,
+        video_id="INpnuL7qnzY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer == (
+        "The first major peasant movement named in the transcript is "
+        "the Bijolia movement."
+    )
+    assert diagnostics["used"] is True
+    assert diagnostics["question_id"] == "HI01"
+    assert diagnostics["included_gold_groups"] == [0]
+
+    split_assertion_context = (
+        "[SOURCE 1]\nपहला बड़ा किसान आंदोलन कौन सा हुआ था।\n"
+        "[SOURCE 2]\nअपने बिजोलिया।"
+    )
+    rejected = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=split_assertion_context,
+        video_id="INpnuL7qnzY",
+        diagnostics={},
+    )
+    assert rejected is None
+
+
+@pytest.mark.regression
+def test_hi01_generation_uses_source_bound_named_movement_fallback_after_failed_repair(
+    monkeypatch,
+):
+    question = "Which peasant movement is named as the first major movement?"
+    source_document = doc(
+        907,
+        2,
+        60,
+        "आ गया अपने किसान आंदोलन पहला बड़ा किसान आंदोलन कौन सा हुआ था अपने बिजोलिया",
+    )
+    source_document.metadata["video_id"] = "INpnuL7qnzY"
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(source_document, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [907],
+                "citation_chunk_ids": [907],
+            },
+        ),
+    )
+    generation_calls = []
+
+    def generic_answer(**_kwargs):
+        generation_calls.append(True)
+        return (
+            "The first major peasant movement was a large-scale farmers' protest."
+        )
+
+    monkeypatch.setattr(chain, "generate_with_llm", generic_answer)
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "INpnuL7qnzY"}
+    )
+
+    assert len(generation_calls) == 2
+    assert "Bijolia movement" in result["answer"]
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+
+@pytest.mark.regression
+def test_ar07_preserves_gold_evidence_split_across_overlapping_raw_chunks():
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(
+        905,
+        0,
+        60,
+        "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+    )
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    first_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 60.0,
+            "text": "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+        }
+    ]
+
+    second_document = doc(
+        906,
+        55,
+        120,
+        "دولار",
+    )
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+    # The structurally valid caption metadata has lost the source-script
+    # currency word even though it remains in the original indexed chunk.
+    second_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 906,
+            "start": 55.0,
+            "end": 120.0,
+            "text": "USD per hour",
+        }
+    ]
+
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    filler_document = doc(
+        908,
+        110,
+        300,
+        "معلومات جانبية في الحوار. " * 180,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    filler_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 908,
+            "start": 110.0,
+            "end": 300.0,
+            "text": "معلومات جانبية في الحوار.",
+        }
+    ]
+
+    groups = chain.merge_overlapping_results(
+        [
+            (first_document, 0.2),
+            (second_document, 0.3),
+            (filler_document, 0.6),
+        ]
+    )
+    assert len(groups) == 1
+
+    # Retrieval acceptance and prompt formatting must use the same temporal
+    # source-group boundary. The exact Arabic phrase spans the two raw chunks.
+    matched_groups, retrieval_diagnostics = (
+        chain._match_gold_evidence_by_source_group(
+            [(first_document, 0.2), (second_document, 0.3)],
+            gold_case,
+        )
+    )
+    assert matched_groups == {0}
+    assert len(retrieval_diagnostics) == 1
+    assert retrieval_diagnostics[0]["raw_gold_groups"] == [0]
+    assert retrieval_diagnostics[0]["formatted_gold_groups"] == [0]
+    assert retrieval_diagnostics[0]["raw_chunk_fallback_used"] is True
+
+    # Force reduction inside the same source group. Both raw evidence rows must
+    # survive while the oversized unrelated chunk is excluded from the prompt.
+    result = chain.build_generation_context(
+        groups,
+        question=question,
+        max_chars=1400,
+        video_id="fAd2nKfrDB8",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert diagnostics["reduced"] is True
+    assert len(result["context"]) <= 1400
+    assert "600" in result["context"]
+    assert "دولار" in result["context"]
+    assert chain.matched_gold_groups(result["context"], gold_case) == {0}
+    assert diagnostics["gold_evidence_groups_available"] == [0]
+    assert diagnostics["gold_evidence_groups_included"] == [0]
+    assert diagnostics["gold_evidence_groups_missing_from_prompt"] == []
+    assert {"905", "906"}.issubset(set(diagnostics["included_chunk_ids"]))
+    assert "908" not in diagnostics["included_chunk_ids"]
+
+    source_diagnostic = diagnostics["gold_evidence_source_groups"][0]
+    assert source_diagnostic["chunk_ids"] == ["905", "906", "908"]
+    assert source_diagnostic["raw_gold_groups"] == [0]
+    assert source_diagnostic["caption_metadata_gold_groups"] == []
+    assert source_diagnostic["formatted_gold_groups"] == [0]
+    assert source_diagnostic["raw_chunk_fallback_used"] is True
+
+    fallback_diagnostics = {}
+    fallback_answer = chain._build_ar07_room_cost_evidence_fallback(
+        question=question,
+        context=result["context"],
+        video_id="fAd2nKfrDB8",
+        diagnostics=fallback_diagnostics,
+    )
+    assert fallback_answer is not None
+    assert "600 دولار" in fallback_answer
+    assert "may reach $600" in fallback_answer
+    assert fallback_diagnostics["used"] is True
+    assert fallback_diagnostics["hour_context_present"] is True
+    assert fallback_diagnostics["cost_context_present"] is True
+    assert fallback_diagnostics["upper_bound_qualifier_present"] is True
+
+
+@pytest.mark.regression
+def test_ar07_generation_uses_grounded_fallback_after_failed_repair_with_split_raw_evidence(
+    monkeypatch,
+):
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(
+        905,
+        0,
+        60,
+        "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+    )
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    first_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 905,
+            "start": 0.0,
+            "end": 60.0,
+            "text": "قد تصل تكلفة الغرفة لمدة ساعة إلى 600",
+        }
+    ]
+
+    second_document = doc(906, 55, 120, "دولار")
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+    second_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 906,
+            "start": 55.0,
+            "end": 120.0,
+            "text": "USD per hour",
+        }
+    ]
+
+    filler_document = doc(
+        908,
+        110,
+        300,
+        "معلومات جانبية في الحوار. " * 180,
+    )
+    filler_document.metadata["video_id"] = "fAd2nKfrDB8"
+    filler_document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 908,
+            "start": 110.0,
+            "end": 300.0,
+            "text": "معلومات جانبية في الحوار.",
+        }
+    ]
+
+    retrieved = [
+        (first_document, 0.2),
+        (second_document, 0.3),
+        (filler_document, 0.6),
+    ]
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 1400)
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved,
+            {
+                "recovery_used": True,
+                "final_stage": "deterministic_alias_evidence_recovery",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [905, 906, 908],
+                "citation_chunk_ids": [905, 906, 908],
+            },
+        ),
+    )
+
+    # Preflight the exact source-group/context path used by build_rag_chain.
+    # This proves the test is exercising a registered AR07 generation contract
+    # and that the phrase split across the raw chunks is visible to the repair gate.
+    question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert question_id == "AR07"
+    assert gold_case is not None
+    preflight_context = chain.build_generation_context(
+        chain.merge_overlapping_results(retrieved),
+        question=question,
+        video_id="fAd2nKfrDB8",
+    )["context"]
+    assert chain.matched_gold_groups(preflight_context, gold_case) == {0}
+
+    unsupported_draft_text = "The room may have a price for an hourly visit."
+    repair_instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=unsupported_draft_text,
+        context=preflight_context,
+        video_id="fAd2nKfrDB8",
+    )
+    assert repair_instruction is not None
+    assert "600 دولار" in repair_instruction
+
+    generation_calls = []
+    generation_prompts = []
+
+    def unsupported_draft(**kwargs):
+        generation_calls.append(True)
+        prompt_value = kwargs.get("prompt_value")
+        assert prompt_value is not None
+        generation_prompts.append(prompt_value.to_string())
+        # Keep both drafts incomplete so the deterministic, source-bound
+        # fallback is exercised after the real repair gate has run.
+        return unsupported_draft_text
+
+    monkeypatch.setattr(chain, "generate_with_llm", unsupported_draft)
+
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": "fAd2nKfrDB8"}
+    )
+
+    assert len(generation_calls) == 2
+    assert len(generation_prompts) == 2
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" in generation_prompts[1]
+    assert "600 دولار" in result["answer"]
+    assert "may reach $600" in result["answer"]
+
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_gold_evidence_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["gold_evidence_fallback_diagnostics"]["used"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["hour_context_present"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["cost_context_present"] is True
+    assert trace["gold_evidence_fallback_diagnostics"]["upper_bound_qualifier_present"] is True
+    assert trace["context_budget"]["gold_evidence_groups_available"] == [0]
+    assert trace["context_budget"]["gold_evidence_groups_included"] == [0]
+    assert {"905", "906"}.issubset(
+        set(trace["context_budget"]["included_chunk_ids"])
+    )
+    assert "908" not in trace["context_budget"]["included_chunk_ids"]
+
+
+@pytest.mark.regression
+def test_ar07_gold_evidence_is_not_stitched_across_distant_source_groups():
+    question = "How much might one hour inside the Orfield room cost?"
+    first_document = doc(951, 0, 20, "The amount mentioned is 600.")
+    first_document.metadata["video_id"] = "fAd2nKfrDB8"
+    second_document = doc(952, 300, 320, "دولار is mentioned in a separate passage.")
+    second_document.metadata["video_id"] = "fAd2nKfrDB8"
+
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    matched_groups, diagnostics = chain._match_gold_evidence_by_source_group(
+        [(first_document, 0.2), (second_document, 0.3)],
+        gold_case,
+    )
+
+    assert matched_groups == set()
+    assert len(diagnostics) == 2
+    assert all(item["formatted_gold_groups"] == [] for item in diagnostics)
+    assert all(item["raw_gold_groups"] == [] for item in diagnostics)
+
+    # Caption-aware repair matching may join rows only inside one [SOURCE]
+    # block; it must not combine the price and currency from distant passages.
+    distant_context = "\n".join([
+        "[SOURCE 1]",
+        "- [00:00–00:20] The amount mentioned is 600.",
+        "[SOURCE 2]",
+        "- [05:00–05:20] دولار is mentioned in a separate passage.",
+    ])
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer="The room may have a price for an hourly visit.",
+        context=distant_context,
+        video_id="fAd2nKfrDB8",
+    ) is None
+
+
+
+@pytest.mark.regression
+def test_ar07_gold_matching_preserves_multiline_caption_continuations():
+    question = "How much might one hour inside the Orfield room cost?"
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "fAd2nKfrDB8",
+        question,
+    )
+    assert gold_case is not None
+
+    # This mirrors the live Arabic index: one timestamped caption row wraps
+    # onto a second physical line, and the registered amount appears only
+    # on that continuation line.
+    context = (
+        "[SOURCE 1]\n"
+        "Video ID: fAd2nKfrDB8\n"
+        "Timestamp: 02:09 - 02:15\n"
+        "Transcript caption segments in chronological order:\n"
+        "- [02:09–02:13] هتلاقي نفسك في أوضة ممكن يا\n"
+        "عزيزي تدفع فيها ما يصل إلي 600 دولار.\n"
+        "- [02:13–02:15] ليه؟ عشان تقعد ساعة واحدة جوه!\n"
+    )
+
+    assert chain.matched_gold_groups(context, gold_case) == {0}
+
+    caption_start = next(
+        index
+        for index, line in enumerate(context.splitlines())
+        if line.startswith("- [02:09–02:13]")
+    )
+    spans = chain.matched_gold_group_caption_spans(context, gold_case)
+
+    # Both the timestamped row and its continuation must be retained if the
+    # generation context is shortened to fit its character budget.
+    assert spans == {0: {caption_start, caption_start + 1}}
+
+
+
+@pytest.mark.unit
+def test_q04_registered_fallback_accepts_all_evidence_groups_across_prompt_source_blocks():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] I was told not to downsize King Fisher at that time. "
+        "The banks will support you.\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] Government policies that didn't help and mounting "
+        "losses; the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "global financial crisis" in answer.lower()
+    assert "banks will support you" in answer.lower()
+    assert "refusal to let Etihad invest" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["fallback_contract"] == (
+        "all_registered_fallback_claims_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_fallback_claims"] == list(range(7))
+    assert diagnostics["included_fallback_claims"] == list(range(7))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [2],
+        "3": [2],
+        "4": [3],
+        "5": [3],
+        "6": [3],
+    }
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(7))
+    assert diagnostics["required_gold_groups"] == list(range(7))
+    assert diagnostics["included_gold_groups"] == list(range(7))
+    assert diagnostics["evidence_scope"] == "prompt_visible_context"
+
+
+@pytest.mark.unit
+def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_blocks():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    # Deliberately split each required phrase across adjacent timestamped
+    # caption rows. The full phrase exists within its source block, but a raw
+    # flattened-text matcher sees timestamps inserted between its words.
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "- [00:02–00:04] crisis arrived and the money\n"
+        "- [00:04–00:06] stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:06–00:08] The working capital cycle got\n"
+        "- [00:08–00:10] disrupted.\n"
+        "- [00:10–00:12] There was a cash flow\n"
+        "- [00:12–00:14] issue.\n"
+        "- [00:14–00:16] There was non-payment of the oil\n"
+        "- [00:16–00:18] bills.\n"
+        "- [00:18–00:20] The airline could not pay airport fees or the landing\n"
+        "- [00:20–00:22] charges."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "global financial crisis" in answer.lower()
+    assert "working capital cycle" in answer.lower()
+    assert "non-payment of the oil bills" in answer.lower()
+    assert "airport fees" in answer.lower()
+    assert "landing charges" in answer.lower()
+    assert "the interviewer summarizes the impact" in answer.lower()
+    assert "the interviewer then points to" in answer.lower()
+    assert "kingfisher airlines was not able to pay the airport fees and landing charges" in answer.lower()
+    assert "mallya responds" in answer.lower()
+    assert "working capital cycle got disrupted" in answer.lower()
+    assert "non-payment of the oil bills" in answer.lower()
+    assert "cash flow issue affects everybody" in answer.lower()
+    assert "one creditor or vendor cannot be isolated" in answer.lower()
+    assert diagnostics["used"] is True
+    assert diagnostics["required_fallback_claims"] == list(range(6))
+    assert diagnostics["included_fallback_claims"] == list(range(6))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [2],
+        "3": [2],
+        "4": [2],
+        "5": [2],
+    }
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(6))
+    assert diagnostics["included_gold_groups"] == list(range(6))
+
+
+@pytest.mark.regression
+def test_q05_formatting_preserves_raw_chunk_when_caption_metadata_drops_atomic_claim():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    raw_text = (
+        "The global financial crisis arrived and the money stopped. "
+        "The working capital cycle got disrupted. There was a cash flow issue. "
+        "There was non-payment of the oil bills. "
+        "Kingfisher Airlines was not able to pay. The airport fees, the landing charges."
+    )
+    document = doc(9951, 7655, 7730, raw_text)
+    document.metadata["video_id"] = "MdeQMVBuGgY"
+    # These caption records retain the broad airport-fee topic but omit the
+    # speaker/ability wording required by Q05's sixth atomic fallback claim.
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 995101,
+            "start": 7655.0,
+            "end": 7675.0,
+            "text": "The global financial crisis arrived and the money stopped.",
+        },
+        {
+            "segment_id": 995102,
+            "start": 7675.0,
+            "end": 7695.0,
+            "text": "The working capital cycle got disrupted. There was a cash flow issue.",
+        },
+        {
+            "segment_id": 995103,
+            "start": 7695.0,
+            "end": 7730.0,
+            "text": "There was non-payment of the oil bills. Airport fees, the landing charges.",
+        },
+    ]
+    source_group = {
+        "documents": [document],
+        "start": 7655.0,
+        "end": 7730.0,
+        "distance": 0.2,
+    }
+
+    formatted = chain.format_source_group(
+        source_group,
+        source_number=1,
+        gold_case=chain.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q05"],
+    )
+    assert "Original retrieved transcript chunks in chronological order" in formatted
+    assert "Kingfisher Airlines was not able to pay." in formatted
+    assert "The airport fees, the landing charges." in formatted
+
+    packed = chain.build_generation_context(
+        [source_group],
+        question=question,
+        max_chars=8000,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = packed["diagnostics"]
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+
+
+@pytest.mark.regression
+def test_q05_context_packing_reserves_all_six_atomic_fallback_claims():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    evidence_captions = [
+        ["The global financial crisis arrived."],
+        ["Yeah. The money stopped; it got dry."],
+        ["The working capital cycle got disrupted."],
+        ["When a company goes through a cash flow issue, it affects everybody."],
+        ["There was non-payment of the oil bills."],
+        [
+            "Kingfisher Airlines was not able to pay.",
+            "The airport fees, the landing charges.",
+        ],
+    ]
+    evidence_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            9600 + index,
+            4500 + index * 30,
+            captions,
+            0.75 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        evidence_groups.append(group)
+
+    # These high-ranked distractors intentionally outrank the evidence by
+    # retrieval distance. The bounded context must still preserve all six
+    # deterministic-fallback claims, not only the three broad gold groups.
+    distractors = []
+    for index in range(4):
+        long_caption = (
+            f"Unrelated Kingfisher Airlines interview discussion {index}. "
+            + ("Background commentary without a registered Q05 claim. " * 24)
+        )
+        group = _caption_group(
+            9700 + index,
+            index * 120,
+            [long_caption],
+            0.01 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        distractors.append(group)
+
+    result = chain.build_generation_context(
+        distractors + evidence_groups,
+        question=question,
+        max_chars=4200,
+        video_id="MdeQMVBuGgY",
+    )
+
+    diagnostics = result["diagnostics"]
+    assert len(result["context"]) <= 4200
+    assert diagnostics["reduced"] is True
+    assert diagnostics["registered_fallback_groups_required"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+    assert "The global financial crisis arrived." in result["context"]
+    assert "The money stopped; it got dry." in result["context"]
+    assert "The working capital cycle got disrupted." in result["context"]
+    assert "a cash flow issue" in result["context"]
+    assert "non-payment of the oil bills" in result["context"]
+    assert "Kingfisher Airlines was not able to pay." in result["context"]
+    assert "The airport fees, the landing charges." in result["context"]
+
+
+@pytest.mark.regression
+def test_q05_registered_fallback_rejects_missing_atomic_claim_after_model_repair(
+    monkeypatch,
+):
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    source_captions = [
+        ["The global financial crisis arrived and the money stopped."],
+        ["The working capital cycle got disrupted. There was a cash flow issue."],
+        ["There was non-payment of the oil bills."],
+    ]
+    source_groups = []
+    for index, captions in enumerate(source_captions):
+        group = _caption_group(
+            9800 + index,
+            4500 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [9800, 9801, 9802],
+                "citation_chunk_ids": [9800, 9801, 9802],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return chain.FALLBACK_ANSWER
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    # Broad evidence is sufficient to attempt generation, but the missing
+    # sixth atomic claim prevents the registered deterministic fallback.
+    assert len(generation_calls) == 2
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    trace = result["generation_trace"]
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["missing_fallback_claims"] == [5]
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_retrieval"] == [5]
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == [5]
+
+
+@pytest.mark.unit
+def test_registered_phrase_matcher_joins_caption_rows_but_never_source_blocks():
+    phrase_groups = (
+        ("global financial crisis",),
+        ("money stopped",),
+    )
+    same_source = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "- [00:02–00:04] crisis and the money\n"
+        "- [00:04–00:06] stopped."
+    )
+    assert chain._matched_registered_phrase_group_indices(
+        same_source,
+        phrase_groups,
+    ) == {0, 1}
+
+    split_across_sources = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:02] The global financial\n"
+        "[SOURCE 2]\n"
+        "- [00:02–00:04] crisis and the money\n"
+        "- [00:04–00:06] stopped."
+    )
+    assert chain._matched_registered_phrase_group_indices(
+        split_across_sources,
+        phrase_groups,
+    ) == {1}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "context", "missing_groups"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            (
+                "[SOURCE 1]\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+                "[SOURCE 2]\n"
+                "- [00:05–00:10] The banks will support you.\n"
+                "[SOURCE 3]\n"
+                "- [00:10–00:15] Government policies that didn't help; "
+                "the final straw was the refusal to let Etihad invest."
+            ),
+            [3, 5],
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            (
+                "[SOURCE 1]\n"
+                "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+                "[SOURCE 2]\n"
+                "- [00:05–00:10] The working capital cycle got disrupted.\n"
+                "[SOURCE 3]\n"
+                "- [00:10–00:15] There was non-payment of the oil bills. "
+                "The airline could not pay airport fees."
+            ),
+            [3, 5],
+        ),
+    ],
+)
+def test_registered_multigroup_fallback_rejects_missing_required_prompt_evidence(
+    question, context, missing_groups
+):
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == missing_groups
+
+
+@pytest.mark.unit
+def test_q05_fallback_rejects_airport_fees_and_landing_charges_split_across_sources():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The working capital cycle got disrupted; "
+        "there was a cash flow issue.\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees.\n"
+        "[SOURCE 4]\n"
+        "- [00:15–00:20] The landing charges were overdue."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3, 4]
+    assert diagnostics["missing_fallback_claims"] == [5]
+
+
+@pytest.mark.unit
+def test_q04_fallback_rejects_partial_policy_and_loss_evidence_even_when_old_group_matches():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The banks will support you.\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] Government policies that didn't help; "
+        "the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [3, 5]
+
+
+@pytest.mark.unit
+def test_q05_fallback_rejects_cash_flow_and_combined_airport_charge_subclaims():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The working capital cycle got disrupted.\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] There was non-payment of the oil bills. "
+        "The airline could not pay airport fees."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [3, 5]
+
+
+@pytest.mark.unit
+def test_registered_multigroup_fallback_never_stitches_a_gold_phrase_across_sources():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] crisis\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] I was told not to downsize Kingfisher; "
+        "the banks will support you.\n"
+        "[SOURCE 4]\n"
+        "- [00:15–00:20] Government policies that didn't help and mounting "
+        "losses; the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["included_fallback_claims"] == [2, 3, 4, 5, 6]
+    assert diagnostics["missing_fallback_claims"] == [0, 1]
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_distinguish_abstention_and_incomplete_repair():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] I was told not to downsize Kingfisher; "
+        "the banks will support you.\n"
+        "[SOURCE 3]\n"
+        "- [00:10–00:15] Government policies that didn't help, mounting losses, "
+        "and the refusal to let Etihad invest."
+    )
+    incomplete_repair = (
+        "The global financial crisis meant the money stopped. "
+        "The banks will support you."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=chain.FALLBACK_ANSWER,
+        repaired_draft=incomplete_repair,
+        final_answer=chain.FALLBACK_ANSWER,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["question_id"] == "Q04"
+    assert diagnostics["prompt_gold_groups"] == [0, 1, 2]
+    assert diagnostics["prompt_evidence_complete"] is True
+    assert diagnostics["initial_draft"]["abstained"] is True
+    assert "abstention" in diagnostics["initial_draft"]["issue_codes"]
+    assert diagnostics["repaired_draft"]["abstained"] is False
+    assert diagnostics["repaired_draft"]["missing_prompt_gold_groups"] == [2]
+    assert "initial_abstention" in diagnostics["failure_reasons"]
+    assert "repaired_missing_prompt_evidence_groups" in diagnostics["failure_reasons"]
+    assert "repair_quality_gate_failed" in diagnostics["failure_reasons"]
+    # Observability records only classifications and group IDs, never raw drafts.
+    assert incomplete_repair not in repr(diagnostics)
+    assert chain.FALLBACK_ANSWER not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_report_quota_interrupted_repair_without_draft_text():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\n"
+        "[SOURCE 2]\n"
+        "- [00:05–00:10] The working capital cycle got disrupted. "
+        "There was a cash flow issue.\n"
+        "- [00:10–00:15] There was non-payment of the oil bills and the "
+        "airline could not pay airport fees or landing charges."
+    )
+    initial_draft = "The airline faced financial difficulty."
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=initial_draft,
+        repaired_draft=None,
+        final_answer=chain.FALLBACK_ANSWER,
+        repair_attempted=True,
+        repair_passed=False,
+        repair_aborted_due_quota=True,
+        provider_failure_reason="daily_token_quota_exhausted",
+    )
+
+    assert diagnostics["question_id"] == "Q05"
+    assert diagnostics["repair_aborted_due_quota"] is True
+    assert diagnostics["repaired_draft"] is None
+    assert "repair_aborted_due_quota" in diagnostics["failure_reasons"]
+    assert "provider_quota_interrupted_repair" in diagnostics["failure_reasons"]
+    assert initial_draft not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_q01_answer_correction_separates_decision_date_from_airline_launch():
+    question = "What is Kingfisher Airlines?"
+    answer = (
+        "Kingfisher Airlines was an Indian airline that positioned itself as a "
+        "premium carrier. It was founded in the early 2000s (the interview "
+        "mentions a 2002‑2003 launch and a 2005 vision) and became the country's "
+        "largest airline before facing financial difficulties and a 9,000 "
+        "crore-rupee loan default."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "decided to start the airline around 2002–2003" in corrected
+    assert "launched in May 2005" in corrected
+    assert "founded in the early 2000s" not in corrected
+    assert "9,000" not in corrected
+    assert corrections == [
+        "corrected_decision_date_vs_launch_date",
+        "removed_disputed_intro_default_framing",
+    ]
+
+
+@pytest.mark.unit
+def test_q03_answer_correction_removes_unrelated_lender_and_duplicate_company():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "Vijay Mallya talks about several ventures.\\n"
+        "- United Breweries** – the holding company that owned the beer business.\\n"
+        "- United Spirits** – the spirits arm.\\n"
+        "- Breweries Limited** – the holding company structure managing subsidiaries.\\n"
+        "- A consortium of 17 banks** – the lenders that provided a loan."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "A consortium of 17 banks" not in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "- **United Breweries** —" in corrected
+    assert "- **United Spirits** —" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections
+    assert "removed_duplicate_united_breweries_entry" in corrections
+    assert "normalized_business_list_emphasis" in corrections
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("separator", ["\n", "\r\n"])
+def test_q03_answer_correction_handles_real_line_separators(separator):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = separator.join([
+        "Vijay Mallya talks about several ventures.",
+        "- United Breweries** – the holding company that owned the beer business.",
+        "- United Spirits** – the spirits arm.",
+        "- Breweries Limited** – the holding company structure managing subsidiaries.",
+        "- A consortium of 17 banks** – the lenders that provided a loan.",
+    ])
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "A consortium of 17 banks" not in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "- **United Breweries** —" in corrected
+    assert "- **United Spirits** —" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections
+    assert "removed_duplicate_united_breweries_entry" in corrections
+    assert "normalized_business_list_emphasis" in corrections
+
+
+
+@pytest.mark.unit
+def test_q05_answer_correction_preserves_supported_ub_group_contribution_and_repairs_misattributions():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    answer = (
+        "Vijay Mallya says running Kingfisher Airlines was beset by a series "
+        "of financial and operational crises. The airline was saddled with a "
+        "“9,000 cr loan default scam” and had to raise about 260 crore to stay afloat. "
+        "He himself injected roughly 3,000 crore of UB‑group money into the "
+        "carrier to keep it running, but the company still struggled with "
+        "cash-flow problems: “non-payment of the oil bills…the working-capital "
+        "cycle got disrupted” and it could not pay airport landing charges. "
+        "The global financial crisis of 2008 further tightened credit and "
+        "“the money stopped, it got dry,” compounding the airline’s liquidity woes."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    # The primary source explicitly attributes the 3,000-crore infusion to
+    # UB Group money, so the normalizer must preserve that supported statement.
+    assert "3,000 crore of UB‑group money" in corrected
+    assert "He himself injected roughly" in corrected
+
+    # The opening 9,000-crore-default narration is not Mallya's description;
+    # the 260-crore figure in the transcript is frozen cash, not money raised.
+    assert "9,000" not in corrected
+    assert "loan default" not in corrected
+    assert "had to raise about 260" not in corrected
+    assert (
+        "Karnataka High Court had frozen over ₹260 crore in cash in India"
+        in corrected
+    )
+
+    # The transcript names airport fees and landing charges as separate items.
+    assert "airport fees and landing charges" in corrected
+    assert "working-capital cycle got disrupted" in corrected
+    assert "non-payment of the oil bills" in corrected
+    assert "global financial crisis" in corrected
+    assert "whole aviation sector" in corrected
+    assert "money stopped flowing" in corrected
+
+    assert corrections == [
+        "removed_q05_opening_loan_default_narration",
+        "corrected_q05_260_crore_frozen_cash_context",
+        "reframed_q05_global_financial_crisis_to_transcript_wording",
+        "expanded_q05_airport_fees_and_landing_charges",
+    ]
+
+
+@pytest.mark.unit
+def test_q05_answer_corrections_do_not_apply_to_other_videos_or_questions():
+    answer = (
+        "He had to inject about ₹3,000 crore of UB-group money and the "
+        "9,000-crore loan default forced the airline to shut down."
+    )
+    other_video, other_video_corrections = chain._normalize_registered_transcript_answer(
+        question=(
+            "How does Vijay Mallya describe the challenges he faced "
+            "while running Kingfisher Airlines?"
+        ),
+        answer=answer,
+        video_id="UnregisteredVideo",
+    )
+    other_question, other_question_corrections = chain._normalize_registered_transcript_answer(
+        question="Tell me about Kingfisher Airlines.",
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert other_video == answer
+    assert other_video_corrections == []
+    assert other_question == answer
+    assert other_question_corrections == []
+
+
+@pytest.mark.unit
+def test_q11_answer_correction_normalizes_air_deccan_and_pranab_mukherjee_names():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    answer = (
+        "He talks about the acquisition of Eden for about $137 million. "
+        "He later met Finance Minister Pranav Mukharji, who promised bank support."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "Air Deccan" in corrected
+    assert "Eden" not in corrected
+    assert "Pranab Mukherjee" in corrected
+    assert "Pranav Mukharji" not in corrected
+    assert corrections == [
+        "corrected_asr_entity_eden_to_air_deccan",
+        "corrected_pranab_mukherjee_name",
+    ]
+
+
+@pytest.mark.unit
+def test_registered_answer_corrections_do_not_apply_to_other_videos_or_questions():
+    answer = "Eden and Pranav Mukharji are named in this example."
+
+    other_video, other_video_corrections = (
+        chain._normalize_registered_transcript_answer(
+            question=(
+                "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+                "and what is discussed there?"
+            ),
+            answer=answer,
+            video_id="UnregisteredVideo",
+        )
+    )
+    other_question, other_question_corrections = (
+        chain._normalize_registered_transcript_answer(
+            question="Tell me about Eden.",
+            answer=answer,
+            video_id="MdeQMVBuGgY",
+        )
+    )
+
+    assert other_video == answer
+    assert other_video_corrections == []
+    assert other_question == answer
+    assert other_question_corrections == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "source_groups", "expected_groups"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            [
+                _caption_group(
+                    9401, 4640,
+                    ["The global financial crisis arrived and the money stopped."],
+                    0.2,
+                ),
+                _caption_group(
+                    9402, 12420,
+                    ["I was told not to downsize Kingfisher. The banks will support you."],
+                    0.3,
+                ),
+                _caption_group(
+                    9403, 12020,
+                    [
+                        "Government policies that didn't help and mounting losses; "
+                        "the final straw was the refusal to let Etihad invest."
+                    ],
+                    0.4,
+                ),
+            ],
+            list(range(7)),
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            [
+                _caption_group(
+                    9501, 4640,
+                    ["The global financial crisis arrived and the money stopped."],
+                    0.2,
+                ),
+                _caption_group(
+                    9502, 7650,
+                    ["The working capital cycle got disrupted. There was a cash flow issue."],
+                    0.3,
+                ),
+                _caption_group(
+                    9503, 7725,
+                    [
+                        "There was non-payment of the oil bills. "
+                        "Kingfisher Airlines was not able to pay the airport fees, the landing charges."
+                    ],
+                    0.4,
+                ),
+            ],
+            list(range(6)),
+        ),
+    ],
+)
+def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_repair(
+    monkeypatch, question, source_groups, expected_groups
+):
+    for group in source_groups:
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    chunk_ids = [
+        int(document.metadata["chunk_id"])
+        for group in source_groups
+        for document in group["documents"]
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": chunk_ids,
+                "citation_chunk_ids": chunk_ids,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 8000)
+    calls = []
+
+    def fake_generate_with_llm(**kwargs):
+        calls.append(kwargs)
+        return chain.FALLBACK_ANSWER
+
+    monkeypatch.setattr(chain, "generate_with_llm", fake_generate_with_llm)
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    trace = result["generation_trace"]
+    assert len(calls) == 2
+    assert result["answer"] != chain.FALLBACK_ANSWER
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"]["evidence_scope"] == (
+        "prompt_visible_context"
+    )
+    assert trace["registered_gold_answer_fallback_diagnostics"]["included_fallback_claims"] == expected_groups
+    included_chunks = {
+        int(value) for value in trace["context_budget"]["included_chunk_ids"]
+    }
+    assert set(chunk_ids).issubset(included_chunks)
+
+    selected = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    selected_ids = {
+        int(document.metadata["chunk_id"])
+        for document, _distance in selected
+    }
+    assert selected_ids
+    assert selected_ids.issubset(included_chunks)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("question", "video_id"),
+    [
+        (
+            "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
+            "UnregisteredVideo",
+        ),
+        (
+            "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
+            "UnregisteredVideo",
+        ),
+        (
+            "What does Vijay Mallya say about building the Kingfisher brand?",
+            "MdeQMVBuGgY",
+        ),
+    ],
+)
+def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
+    question, video_id
+):
+    complete_context = (
+        "[SOURCE 1]\\n"
+        "- [00:00–00:05] The global financial crisis arrived and the money stopped.\\n"
+        "[SOURCE 2]\\n"
+        "- [00:05–00:10] I was told not to downsize Kingfisher; the banks will support you.\\n"
+        "[SOURCE 3]\\n"
+        "- [00:10–00:15] Government policies that didn't help and mounting losses; "
+        "the final straw was the refusal to let Etihad invest."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=complete_context,
+        video_id=video_id,
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "no_registered_generation_gold_case"
+    )

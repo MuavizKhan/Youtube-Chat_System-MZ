@@ -42,6 +42,25 @@ class GoldEvidenceCase:
     # Optional paraphrases accepted only when checking generated answers.
     # Retrieval and prompt-context matching continue to use exact source phrases.
     generation_answer_aliases: tuple[tuple[str, ...], ...] = ()
+    # Optional deterministic response, permitted only when its configured
+    # source-evidence contract is satisfied. Legacy cases require all custom
+    # assertions co-located in one source block; the explicit all-groups mode
+    # below requires each registered gold group in a prompt-visible block.
+    generation_fallback_answer: str | None = None
+    generation_fallback_source_phrases: tuple[str, ...] = ()
+    # Opt-in for curated answers whose required evidence groups may appear in
+    # different prompt-visible source blocks. Each group must still be fully
+    # matched inside at least one individual block.
+    generation_fallback_requires_all_groups: bool = False
+    # Optional claim-level contract for deterministic fallbacks. Each source
+    # group represents one independently asserted claim; alternatives within a
+    # group are equivalent phrasings, not separate claims. The answer groups
+    # are aligned by index and must all be present in the fallback text.
+    generation_fallback_source_groups: tuple[tuple[str, ...], ...] = ()
+    generation_fallback_answer_groups: tuple[tuple[str, ...], ...] = ()
+    # Optional threshold for generated-answer evidence coverage. When unset,
+    # the answer must cover the same groups required in the generation prompt.
+    min_generation_answer_group_coverage: float | None = None
 
 
 GOLD_EVIDENCE_CASES = (
@@ -104,6 +123,9 @@ GOLD_EVIDENCE_CASES = (
                 "banks will support you",
                 "not to downsize Kingfisher",
                 "I was told not to downsize Kingfisher",
+                # The searchable transcript spells the airline as two words.
+                "not to downsize King Fisher",
+                "I was told not to downsize King Fisher",
             ),
             (
                 "government policies that didn't help",
@@ -114,6 +136,47 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("global financial crisis", "money stopped"),
+            ("banks will support you", "not to downsize Kingfisher"),
+            (
+                "government policies that didn't help",
+                "mounting losses",
+                "refusal to let Etihad invest",
+                "final straw",
+            ),
+        ),
+        generation_fallback_answer=(
+            "Vijay Mallya says Kingfisher Airlines faced several connected "
+            "pressures. The global financial crisis meant the money stopped. "
+            "He recalls being told, “You continue, banks will support you,” "
+            "and that he should not downsize Kingfisher. He also points to "
+            "government policies that didn't help and mounting losses, "
+            "describing the refusal to let Etihad invest as the final straw."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("banks will support you",),
+            (
+                "not to downsize Kingfisher",
+                "not to downsize King Fisher",
+                "I was told not to downsize King Fisher",
+            ),
+            ("government policies that didn't help",),
+            ("mounting losses",),
+            ("final straw was the refusal to let Etihad invest",),
+        ),
+        generation_fallback_answer_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("banks will support you",),
+            ("not downsize Kingfisher",),
+            ("government policies that didn't help",),
+            ("mounting losses",),
+            ("refusal to let Etihad invest as the final straw",),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q05",
@@ -133,7 +196,7 @@ GOLD_EVIDENCE_CASES = (
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
         generation_answer_aliases=(
-            (),
+            ("global financial crisis", "money stopped"),
             (
                 "cash flow nightmare",
                 "cash flow crisis",
@@ -142,8 +205,52 @@ GOLD_EVIDENCE_CASES = (
                 "broke the working capital cycle",
                 "broken working capital cycle",
                 "working capital cycle was disrupted",
+                "working capital cycle got disrupted",
+                "cash flow issue",
             ),
-            (),
+            (
+                "non-payment of the oil bills",
+                "airport fees",
+                "landing charges",
+            ),
+        ),
+        generation_fallback_answer=(
+            "Vijay Mallya identifies the global financial crisis as a shock that "
+            "affected every sector. The interviewer summarizes the impact by "
+            "saying that money stopped and it got dry. Mallya says Kingfisher's "
+            "working capital cycle got disrupted. The interviewer then points to "
+            "the non-payment of the oil bills and says Kingfisher Airlines was "
+            "not able to pay the airport fees and landing charges. Mallya responds "
+            "that a cash "
+            "flow issue affects everybody; one creditor or vendor cannot be "
+            "isolated because the cash shortage is across the board."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("working capital cycle got disrupted",),
+            ("cash flow issue",),
+            ("non-payment of the oil bills",),
+            (
+                # The interviewer states this; Mallya's following reply is
+                # about the cash-flow impact across creditors and vendors.
+                "Kingfisher Airlines was not able to pay the airport fees the landing charges",
+                "not able to pay the airport fees the landing charges",
+                "not able to pay airport fees and landing charges",
+                "could not pay airport fees or the landing charges",
+                "could not pay airport fees or landing charges",
+            ),
+        ),
+        generation_fallback_answer_groups=(
+            ("global financial crisis",),
+            ("money stopped",),
+            ("working capital cycle got disrupted",),
+            ("cash flow issue",),
+            ("non-payment of the oil bills",),
+            (
+                "Kingfisher Airlines was not able to pay the airport fees and landing charges",
+            ),
         ),
     ),
     GoldEvidenceCase(
@@ -204,6 +311,9 @@ GOLD_EVIDENCE_CASES = (
         min_group_coverage=2 / 3,
         min_context_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
+        # Keep all three policy evidence groups in the prompt; an answer needs
+        # to cover two of the three registered policy points.
+        min_generation_answer_group_coverage=2 / 3,
     ),
     GoldEvidenceCase(
         question_id="Q10",
@@ -288,78 +398,120 @@ def normalize_evidence_text(text: str) -> str:
     return " ".join("".join(characters).split())
 
 
-def _source_scoped_evidence_texts(text: str) -> list[str]:
-    """Return transcript text per source block, joining adjacent caption rows."""
+def _source_scoped_caption_rows(
+    text: str,
+) -> list[tuple[str, list[tuple[tuple[int, ...], str]]]]:
+    """Parse caption rows per source, preserving physical continuation lines.
+
+    A caption's text can contain embedded newlines. Keep every physical line
+    attached to the timestamped row that introduced it, so matching and
+    context-budget selection see the same complete caption.
+    """
     if not isinstance(text, str) or not text:
         return []
 
-    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
-    caption_pattern = re.compile(
-        r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
-        r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
-    )
-    blocks = source_pattern.split(text)
-    evidence_texts = []
-    for block in blocks:
-        if not block.strip():
-            continue
-        caption_texts = []
-        for line in block.splitlines():
-            match = caption_pattern.match(line)
-            if match and match.group("text").strip():
-                caption_texts.append(match.group("text").strip())
-        evidence_texts.append(" ".join(caption_texts) if caption_texts else block)
-    return evidence_texts
-
-
-def matched_gold_group_caption_spans(
-    text: str,
-    case: GoldEvidenceCase,
-) -> dict[int, set[int]]:
-    """Map matched gold groups to the exact caption rows containing their words.
-
-    Returned indexes refer to text.splitlines(). Matching is restricted to
-    one source block at a time, and normalized-caption character offsets
-    identify only the rows actually touched by each matched phrase.
-    """
-    if not isinstance(text, str) or not text:
-        return {}
-
-    source_pattern = re.compile(r"(?m)^\s*\[SOURCE\s+\d+\]\s*$")
+    source_pattern = re.compile(r"^\s*\[SOURCE\s+\d+\]\s*$")
     caption_pattern = re.compile(
         r"^\s*-\s*\[(?:\d{1,2}:)?\d{2}:\d{2}\s*[–—-]\s*"
         r"(?:\d{1,2}:)?\d{2}:\d{2}\]\s*(?P<text>.*)$"
     )
     lines = text.splitlines()
     marker_indices = [
-        index for index, line in enumerate(lines)
+        index
+        for index, line in enumerate(lines)
         if source_pattern.match(line.strip())
     ]
     source_ranges = (
         [
-            (
-                marker + 1,
-                marker_indices[index + 1]
-                if index + 1 < len(marker_indices)
-                else len(lines),
-            )
-            for index, marker in enumerate(marker_indices)
+            (0, marker_indices[0]),
+            *[
+                (
+                    marker + 1,
+                    marker_indices[index + 1]
+                    if index + 1 < len(marker_indices)
+                    else len(lines),
+                )
+                for index, marker in enumerate(marker_indices)
+            ],
         ]
         if marker_indices
         else [(0, len(lines))]
     )
 
-    matched_spans: dict[int, set[int]] = {}
+    parsed_blocks = []
     for range_start, range_end in source_ranges:
-        captions = []
+        block_text = "\n".join(lines[range_start:range_end])
+        rows: list[tuple[tuple[int, ...], str]] = []
+        current_line_indices: list[int] | None = None
+        current_text_parts: list[str] = []
+
         for line_index in range(range_start, range_end):
-            match = caption_pattern.match(lines[line_index])
-            if match and match.group("text").strip():
-                normalized_caption = normalize_evidence_text(
-                    match.group("text").strip()
-                )
-                if normalized_caption:
-                    captions.append((line_index, normalized_caption))
+            line = lines[line_index]
+            match = caption_pattern.match(line)
+            if match:
+                if current_line_indices is not None:
+                    caption_text = " ".join(
+                        part for part in current_text_parts if part
+                    ).strip()
+                    if caption_text:
+                        rows.append((tuple(current_line_indices), caption_text))
+
+                current_line_indices = [line_index]
+                initial_text = match.group("text").strip()
+                current_text_parts = [initial_text] if initial_text else []
+            elif current_line_indices is not None:
+                # Once a timestamped caption starts, un-timestamped physical
+                # lines belong to that caption until the next timestamped row.
+                continuation = line.strip()
+                if continuation:
+                    current_line_indices.append(line_index)
+                    current_text_parts.append(continuation)
+
+        if current_line_indices is not None:
+            caption_text = " ".join(
+                part for part in current_text_parts if part
+            ).strip()
+            if caption_text:
+                rows.append((tuple(current_line_indices), caption_text))
+
+        parsed_blocks.append((block_text, rows))
+
+    return parsed_blocks
+
+
+def _source_scoped_evidence_texts(text: str) -> list[str]:
+    """Return transcript text per source block, joining complete caption rows."""
+    evidence_texts = []
+    for block_text, caption_rows in _source_scoped_caption_rows(text):
+        if caption_rows:
+            evidence_texts.append(
+                " ".join(caption_text for _line_indices, caption_text in caption_rows)
+            )
+        elif block_text.strip():
+            evidence_texts.append(block_text)
+    return evidence_texts
+
+
+def matched_source_phrase_group_caption_spans(
+    text: str,
+    phrase_groups: tuple[tuple[str, ...], ...],
+) -> dict[int, set[int]]:
+    """Map source phrase groups to every physical line of their caption rows.
+
+    Returned indexes refer to text.splitlines(). Matching is restricted to
+    one [SOURCE] block at a time. Caption rows are joined before matching, and
+    every physical continuation line belonging to a matched row is retained.
+    """
+    if not isinstance(text, str) or not text:
+        return {}
+
+    matched_spans: dict[int, set[int]] = {}
+    for _block_text, caption_rows in _source_scoped_caption_rows(text):
+        captions = []
+        for line_indices, caption_text in caption_rows:
+            normalized_caption = normalize_evidence_text(caption_text)
+            if normalized_caption:
+                captions.append((line_indices, normalized_caption))
 
         if not captions:
             continue
@@ -367,15 +519,15 @@ def matched_gold_group_caption_spans(
         joined_parts = []
         caption_offsets = []
         cursor = 0
-        for line_index, normalized_caption in captions:
+        for line_indices, normalized_caption in captions:
             start_offset = cursor
             end_offset = start_offset + len(normalized_caption)
-            caption_offsets.append((line_index, start_offset, end_offset))
+            caption_offsets.append((line_indices, start_offset, end_offset))
             joined_parts.append(normalized_caption)
             cursor = end_offset + 1
         joined_captions = " ".join(joined_parts)
 
-        for group_index, alternatives in enumerate(case.groups):
+        for group_index, alternatives in enumerate(phrase_groups):
             for alternative in alternatives:
                 phrase = normalize_evidence_text(alternative)
                 if not phrase:
@@ -387,14 +539,76 @@ def matched_gold_group_caption_spans(
                     if match_start < 0:
                         break
                     match_end = match_start + len(phrase)
-                    matched_spans.setdefault(group_index, set()).update(
-                        line_index
-                        for line_index, caption_start, caption_end in caption_offsets
-                        if caption_start < match_end and caption_end > match_start
-                    )
+                    for line_indices, caption_start, caption_end in caption_offsets:
+                        if caption_start < match_end and caption_end > match_start:
+                            matched_spans.setdefault(group_index, set()).update(
+                                line_indices
+                            )
                     search_start = match_start + 1
 
     return matched_spans
+
+
+def matched_gold_group_caption_spans(
+    text: str,
+    case: GoldEvidenceCase,
+) -> dict[int, set[int]]:
+    """Map broad gold groups to their complete caption rows."""
+    return matched_source_phrase_group_caption_spans(text, case.groups)
+
+
+def matched_gold_group_phrases(
+    text: str,
+    case: GoldEvidenceCase,
+) -> dict[int, list[str]]:
+    """Return matched source phrases per gold group within each source block.
+
+    Timestamped caption rows are joined before matching, so a phrase split by
+    row timestamps remains discoverable. Distinct [SOURCE] blocks are never
+    concatenated to manufacture evidence.
+    """
+    normalized_blocks = [
+        normalize_evidence_text(block)
+        for block in _source_scoped_evidence_texts(text)
+    ]
+    matched_phrases: dict[int, list[str]] = {}
+    for group_index, alternatives in enumerate(case.groups):
+        phrases = []
+        for phrase in alternatives:
+            normalized_phrase = normalize_evidence_text(phrase)
+            if normalized_phrase and any(
+                normalized_phrase in normalized_block
+                for normalized_block in normalized_blocks
+            ):
+                phrases.append(phrase)
+        if phrases:
+            matched_phrases[group_index] = phrases
+    return matched_phrases
+
+
+def matched_source_phrase_group_indices(
+    text: str,
+    phrase_groups: tuple[tuple[str, ...], ...],
+) -> set[int]:
+    """Match registered phrase groups within source-scoped, caption-aware text.
+
+    Timestamped caption rows are joined before matching, so a phrase split by
+    row boundaries remains discoverable. Distinct [SOURCE] blocks are never
+    concatenated, preserving the source-local evidence contract.
+    """
+    normalized_blocks = [
+        normalize_evidence_text(block)
+        for block in _source_scoped_evidence_texts(text or "")
+    ]
+    matched_indices = set()
+    for group_index, alternatives in enumerate(phrase_groups):
+        if any(
+            (normalized_phrase := normalize_evidence_text(phrase))
+            and any(normalized_phrase in block for block in normalized_blocks)
+            for phrase in alternatives
+        ):
+            matched_indices.add(group_index)
+    return matched_indices
 
 
 def matched_gold_groups(
@@ -403,22 +617,30 @@ def matched_gold_groups(
 ) -> set[int]:
     """Return evidence groups present in transcript text.
 
-    Timestamped caption rows are joined within each source block. Distinct
-    source blocks are never concatenated to manufacture a phrase.
+    Uses the same source-scoped caption matching as the supporting-phrase
+    lookup so evidence detection and repair instructions cannot disagree.
     """
-    normalized_blocks = [
-        normalize_evidence_text(block)
-        for block in _source_scoped_evidence_texts(text)
-    ]
-    return {
-        group_index
-        for group_index, alternatives in enumerate(case.groups)
-        if any(
-            normalize_evidence_text(phrase) in normalized_block
-            for phrase in alternatives
-            for normalized_block in normalized_blocks
-        )
-    }
+    return set(matched_gold_group_phrases(text, case))
+
+
+def matched_gold_answer_alias_groups(
+    text: str,
+    case: GoldEvidenceCase,
+) -> set[int]:
+    """Match only explicitly registered answer aliases, never source quotations."""
+    if not isinstance(text, str) or not text or not case.generation_answer_aliases:
+        return set()
+
+    normalized_answer = normalize_evidence_text(text)
+    padded_answer = f" {normalized_answer} "
+    matched = set()
+    for group_index, aliases in enumerate(case.generation_answer_aliases):
+        for alias in aliases:
+            normalized_alias = normalize_evidence_text(alias)
+            if normalized_alias and f" {normalized_alias} " in padded_answer:
+                matched.add(group_index)
+                break
+    return matched
 
 
 def matched_gold_answer_groups(

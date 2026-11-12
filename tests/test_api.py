@@ -159,6 +159,10 @@ def test_chat_does_not_present_provider_quota_fallback_as_missing_transcript_evi
             "grounded_hindi_movement_location_fallback_used",
             "The speaker locates the first major farmers' movement in Bijolia.",
         ),
+        (
+            "grounded_registered_gold_answer_fallback_used",
+            "The first major peasant movement named in the transcript is the Bijolia movement.",
+        ),
     ],
 )
 def test_chat_returns_verified_hindi_evidence_fallback_during_provider_quota_exhaustion(

@@ -622,6 +622,41 @@ def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
     assert all(check["passed"] for check in checks), checks
 
 
+def test_q08_requires_both_recovery_amount_and_bank_account_reference():
+    case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q08")
+
+    complete = _answer_quality_checks(
+        case,
+        "The Ministry of Finance report attributes 14,100 crore recovered. "
+        'The retrieved transcript includes the phrase "statement of account".',
+    )
+    assert all(check["passed"] for check in complete), complete
+
+    missing_account_reference = _answer_quality_checks(
+        case,
+        "The Ministry of Finance report attributes 14,100 crore recovered.",
+    )
+    missing_account_names = [
+        check["name"] for check in missing_account_reference
+        if not check["passed"]
+    ]
+    assert missing_account_names == [
+        "answer_requirement_bank_account_reference"
+    ]
+
+    missing_recovery_amount = _answer_quality_checks(
+        case,
+        'The retrieved transcript includes the phrase "statement of account".',
+    )
+    missing_amount_names = [
+        check["name"] for check in missing_recovery_amount
+        if not check["passed"]
+    ]
+    assert missing_amount_names == [
+        "answer_requirement_recovery_amount"
+    ]
+
+
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
 def test_hindi_named_movement_quality_gate_requires_bijolia(case_id):
     case = next(
@@ -1314,6 +1349,47 @@ def test_ar10_does_not_mistake_a_guessed_capital_for_arabic_abstention():
     by_name = {check["name"]: check["passed"] for check in checks}
     assert by_name["unanswerable_case_abstained"] is False
     assert by_name["response_language_english"] is False
+
+
+def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributions():
+    case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q05")
+    grounded_answer = (
+        "Mallya says he put 3,000 crore of UB Group money into Kingfisher "
+        "Airlines to keep it afloat. He describes the 2008 global financial "
+        "crisis, when money stopped flowing across the aviation sector. He says "
+        "the working capital cycle was disrupted after non-payment of oil bills, "
+        "and Kingfisher could not pay airport fees and landing charges. He also "
+        "describes a cash-flow issue."
+    )
+
+    grounded_checks = _answer_quality_checks(case, grounded_answer)
+    assert all(check["passed"] for check in grounded_checks), grounded_checks
+    assert not any(
+        check["name"] == "answer_prohibited_ub_group_3000_crore_misattribution"
+        for check in grounded_checks
+    )
+
+    unsupported_answer = (
+        grounded_answer
+        + " The airline was saddled with a 9,000 cr loan default scam and "
+        "had to raise about 260 crore to stay afloat."
+    )
+    unsupported_checks = _answer_quality_checks(case, unsupported_answer)
+    by_name = {check["name"]: check["passed"] for check in unsupported_checks}
+
+    assert by_name["answer_prohibited_loan_default_narrator_framing"] is False
+    assert by_name["answer_prohibited_260_crore_raised_to_stay_afloat"] is False
+    assert not all(check["passed"] for check in unsupported_checks)
+
+    # The live Q05 answer used this grammatical variant, which the earlier
+    # "9,000 crore loan default" pattern did not recognize.
+    grammatical_variant = (
+        grounded_answer
+        + " The company still defaulted on a ₹9,000\u202fcrore loan."
+    )
+    variant_checks = _answer_quality_checks(case, grammatical_variant)
+    variant_by_name = {check["name"]: check["passed"] for check in variant_checks}
+    assert variant_by_name["answer_prohibited_loan_default_narrator_framing"] is False
 
 
 def test_phase10_11_registered_answer_requirements_and_english_response_are_checked():

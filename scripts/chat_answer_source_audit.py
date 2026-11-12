@@ -66,6 +66,7 @@ def _make_audit_case(
     expected_behavior: str,
     answer_language: str | None = None,
     answer_requirements: tuple[dict[str, str], ...] = (),
+    answer_prohibited_patterns: tuple[dict[str, str], ...] = (),
     evidence_groups: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
     if expected_behavior not in {"answerable", "unanswerable"}:
@@ -76,6 +77,7 @@ def _make_audit_case(
         "question": _registry_question(video_id, question_id),
         "expected_behavior": expected_behavior,
         "answer_requirements": list(answer_requirements),
+        "answer_prohibited_patterns": list(answer_prohibited_patterns),
         "evidence_groups": list(evidence_groups),
     }
     benchmark = VIDEO_BENCHMARKS.get(video_id)
@@ -287,7 +289,36 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "Q05", "MdeQMVBuGgY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "operating_challenge", "pattern": r"\b(?:working capital|cash flow|oil bills|airport fees|landing charges)\b"},),
+        answer_requirements=(
+            {"name": "global_financial_crisis", "pattern": r"\bglobal financial crisis\b"},
+            {"name": "working_capital_cycle", "pattern": r"\bworking[- ]capital\b"},
+            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of the )?oil bills\b"},
+            {"name": "airport_fees", "pattern": r"\bairport fees\b"},
+            {"name": "landing_charges", "pattern": r"\blanding charges\b"},
+            {"name": "cash_flow_challenge", "pattern": r"\bcash[- ]flow\b"},
+        ),
+        answer_prohibited_patterns=(
+            {
+                "name": "loan_default_narrator_framing",
+                "pattern": (
+                    r"\b9\s*[, ]?\s*000\s*[-\s\u2010-\u2015]*"
+                    r"(?:cr|crores?)\b.{0,80}\bloan\s+default\b|"
+                    r"\bloan\s+default\b.{0,80}\b9\s*[, ]?\s*000\s*"
+                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\b|"
+                    r"\bdefault(?:ed|ing)?\s+on\s+(?:(?:a|the)\s+)?"
+                    r"(?:₹\s*)?9\s*[, ]?\s*000\s*"
+                    r"[-\s\u2010-\u2015]*(?:cr|crores?)\s+loan\b"
+                ),
+            },
+            {
+                "name": "260_crore_raised_to_stay_afloat",
+                "pattern": (
+                    r"\b(?:raise|raised|raising)\b.{0,60}\b260\s*"
+                    r"[-\u2010-\u2015]?\s*(?:cr|crores?)\b.{0,80}"
+                    r"\b(?:stay|keep)\s+afloat\b"
+                ),
+            },
+        ),
     ),
     _make_audit_case(
         "Q06", "MdeQMVBuGgY",
@@ -297,7 +328,17 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
     _make_audit_case(
         "Q08", "MdeQMVBuGgY",
         expected_behavior="answerable", answer_language="en",
-        answer_requirements=({"name": "bank_recovery", "pattern": r"\b14[, ]?100\b|\bfully paid\b|\bstatement of account\b|\bstatement in parliament\b"},),
+        answer_requirements=(
+            {"name": "recovery_amount", "pattern": r"\b14[, ]?100\b"},
+            {
+                "name": "bank_account_reference",
+                "pattern": (
+                    r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|repaid|settled|"
+                    r"statement\s+of\s+account|statement\s+in\s+parliament|"
+                    r"parliamentary\s+statement)\b"
+                ),
+            },
+        ),
     ),
     _make_audit_case(
         "Q09", "MdeQMVBuGgY",
@@ -946,6 +987,24 @@ def _answer_quality_checks(
                 f"The answer must satisfy the registered {name.replace('_', ' ')} requirement."
                 if passed
                 else f"The answer did not satisfy the registered {name.replace('_', ' ')} requirement."
+            ),
+        ))
+
+    for prohibited in case.get("answer_prohibited_patterns", []):
+        if not isinstance(prohibited, dict):
+            continue
+        name = str(prohibited.get("name", "unsupported_claim"))
+        pattern = prohibited.get("pattern")
+        detected = isinstance(pattern, str) and bool(
+            re.search(pattern, requirement_text, flags=re.IGNORECASE)
+        )
+        checks.append(_quality_check(
+            f"answer_prohibited_{name}",
+            not detected,
+            (
+                f"The answer avoids the registered unsupported {name.replace('_', ' ')} claim."
+                if not detected
+                else f"The answer contains the registered unsupported {name.replace('_', ' ')} claim."
             ),
         ))
 
