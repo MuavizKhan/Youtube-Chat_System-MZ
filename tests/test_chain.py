@@ -7113,7 +7113,7 @@ def test_generation_context_is_bounded_by_configured_character_budget(monkeypatc
 @pytest.mark.unit
 def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
     prompt = chain.SYSTEM_INSTRUCTIONS
-    assert len(prompt) < 5000
+    assert len(prompt) < 4900
     for required_rule in (
         "main answer MUST ALWAYS be written in English",
         "only the supplied transcript context",
@@ -9628,6 +9628,28 @@ def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
     assert instruction is not None
     assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
     assert "Raj Shamani" in instruction
+
+
+@pytest.mark.unit
+def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completeness_repair():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "Raj Shamani said money stopped and it got dry. "
+        "I was told not to downsize Kingfisher; banks will support you."
+    )
+    answer = "Mallya says money stopped and it got dry."
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" not in instruction
 
 
 @pytest.mark.unit
