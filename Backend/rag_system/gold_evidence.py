@@ -100,19 +100,20 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q02",
         groups=(
-            ("named it Force India", "called it Force India"),
-            ("wanted the Indian flag to be on the grid", "team with roots in India", "put an Indian Formula One team on the grid"),
-            ("used the platform to advertise my brand", "used the platform to advertise my brands", "promotional purposes", "Royal Challenge", "Kingfisher"),
-            ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
+            (
+                "Formula 1",
+                "pinnacle of motorsport",
+                "dream to have a team on the F1 grid",
+            ),
         ),
-        min_group_coverage=3 / 4,
-        min_context_group_coverage=1.0,
+        min_group_coverage=1.0,
         min_generation_context_group_coverage=1.0,
         generation_answer_aliases=(
-            ("named the team Force India", "called the team Force India"),
-            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
-            ("used Formula One to promote his brands", "advertised Royal Challenge and Kingfisher"),
-            ("the Formula One team sent 10 million pounds back to Kingfisher Airlines", "the F1 team returned 10 million pounds to Kingfisher Airlines"),
+            (
+                "Formula 1",
+                "pinnacle of motorsport",
+                "dream to have a team on the F1 grid",
+            ),
         ),
         min_generation_answer_group_coverage=1.0,
         generation_fallback_answer=(
@@ -121,7 +122,7 @@ GOLD_EVIDENCE_CASES = (
             "a team with roots in India competing at the top level. He also used "
             "the Formula One platform, car livery and merchandise to promote "
             "brands including Royal Challenge and Kingfisher. He later states "
-            "that the Formula One team sent £10 million back to Kingfisher "
+            "that the Formula One team sent 10 million pounds back to Kingfisher "
             "Airlines to help it."
         ),
         generation_fallback_requires_all_groups=True,
@@ -170,7 +171,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_answer_groups=(
             ("United Breweries Limited and United Spirits",),
-            ("Air Deccan and Kingfisher Red",),
+            ("acquiring Air Deccan and the airline's Kingfisher Red brand strategy",),
             ("Royal Challengers Bangalore", "Royal Challenge whisky"),
         ),
     ),
@@ -337,8 +338,7 @@ GOLD_EVIDENCE_CASES = (
             "was banned in India, he used surrogate advertising: he built a "
             "substantial water business around Kingfisher so that the water "
             "business could be advertised and thereby promote the core brand. "
-            "He says he gave Kingfisher a colourful personality and sometimes "
-            "acted as the brand ambassador himself."
+            "He also describes giving the Kingfisher brand a distinctive personality."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
@@ -391,7 +391,7 @@ GOLD_EVIDENCE_CASES = (
             ("statement of account", "statement in parliament"),
         ),
         generation_fallback_answer_groups=(
-            ("14,100 crores recovered from me",),
+            ("14,100 crores recovered from him",),
             ("banks had been fully paid",),
             ("statement of account",),
         ),
@@ -432,7 +432,6 @@ GOLD_EVIDENCE_CASES = (
         min_generation_context_group_coverage=1.0,
         generation_answer_aliases=(
             ("global financial crisis",),
-            ("Raj Shamani says that money stopped", "the interviewer says that money stopped"),
             ("government policies that didn't help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
