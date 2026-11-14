@@ -5974,7 +5974,7 @@ def _extract_bank_recovery_statement_evidence(
 
     A transcript sentence may be split across adjacent timestamped caption rows.
     Windows are therefore joined only inside one source block and are bounded
-    to five consecutive rows. Different [SOURCE n] blocks are never combined.
+    to twenty consecutive rows. Different [SOURCE n] blocks are never combined.
     Interrogative captions are excluded so a question cannot become payment proof.
     """
     evidence: dict[str, list[dict[str, Any]]] = {
@@ -6035,7 +6035,7 @@ def _extract_bank_recovery_statement_evidence(
             ]
 
         windows: list[tuple[int, int, str]] = []
-        max_window = min(5, len(statements))
+        max_window = min(20, len(statements))
         for window_size in range(1, max_window + 1):
             for window_start in range(0, len(statements) - window_size + 1):
                 parts = statements[window_start:window_start + window_size]
@@ -6105,7 +6105,7 @@ def _extract_bank_recovery_statement_evidence(
             seen[group_name].add(normalized)
             evidence[group_name].append({
                 "source_id": source_id,
-                "text": cleaned[:420],
+                "text": cleaned[:900],
                 "caption_count": window_size,
                 "attribution_present": has_attribution,
                 "missing_submission": missing_submission,
