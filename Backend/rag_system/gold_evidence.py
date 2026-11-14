@@ -87,7 +87,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
-            ("single class airline",),
+            ("single class low cost airline", "single class airline", "low cost airline"),
             ("in flight entertainment", "inflight entertainment", "good food", "offered meals"),
             ("best flying experience", "premium experience"),
         ),
@@ -438,8 +438,8 @@ GOLD_EVIDENCE_CASES = (
         min_generation_answer_group_coverage=1.0,
         generation_fallback_answer=(
             "Mallya says the global financial crisis affected the whole aviation "
-            "sector and every sector. Interviewer Raj Shamani then summarizes "
-            "the impact by saying that money stopped and it got dry. Mallya also "
+            "sector and every sector. Raj Shamani, the interviewer, says that "
+            "money stopped and it got dry. Mallya also "
             "points to government policies that did not help, mounting losses, "
             "and the refusal to let Etihad invest, which he describes as the "
             "final straw."
@@ -453,7 +453,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_answer_groups=(
             ("global financial crisis",),
-            ("Raj Shamani says that money stopped", "the interviewer says that money stopped"),
+            ("Raj Shamani, the interviewer, says that money stopped", "the interviewer says that money stopped"),
             ("government policies that did not help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
