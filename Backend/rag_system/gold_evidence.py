@@ -61,6 +61,9 @@ class GoldEvidenceCase:
     # Optional threshold for generated-answer evidence coverage. When unset,
     # the answer must cover the same groups required in the generation prompt.
     min_generation_answer_group_coverage: float | None = None
+    # Generated-answer claims are independent of deterministic fallbacks.
+    generation_claim_source_groups: tuple[tuple[str, ...], ...] = ()
+    generation_claim_answer_groups: tuple[tuple[str, ...], ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -79,22 +82,15 @@ GOLD_EVIDENCE_CASES = (
             ("inflight entertainment", "in flight entertainment", "good food", "offered meals"),
         ),
         min_generation_answer_group_coverage=2 / 3,
-        generation_fallback_answer=(
-            "Kingfisher Airlines began as a single-class, low-cost airline. "
-            "Mallya says its distinguishing extras were in-flight entertainment "
-            "and good food, while the broader ambition was to offer a premium "
-            "flying experience."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
+        generation_claim_source_groups=(
             ("all the attributes of a low cost carrier", "which is single class, standard fleet", "single class airline", "low cost airline"),
-            ("in flight entertainment", "inflight entertainment", "good food", "offered meals"),
-            ("best flying experience", "premium experience"),
+            ("in flight entertainment", "inflight entertainment", "it had inflight entertainment"),
+            ("good food", "offered meals"),
         ),
-        generation_fallback_answer_groups=(
-            ("single class low cost airline",),
-            ("in flight entertainment and good food",),
-            ("premium flying experience",),
+        generation_claim_answer_groups=(
+            ("single class low cost carrier", "single-class low-cost carrier", "single class low cost airline", "low cost single class carrier"),
+            ("in flight entertainment", "inflight entertainment"),
+            ("good food", "offered meals"),
         ),
     ),
     GoldEvidenceCase(
@@ -116,27 +112,17 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_generation_answer_group_coverage=1.0,
-        generation_fallback_answer=(
-            "Vijay Mallya says he named the Formula One team Force India because "
-            "he wanted the Indian flag on the grid and wanted the world to see "
-            "a team with roots in India competing at the top level. He also used "
-            "the Formula One platform, car livery and merchandise to promote "
-            "brands including Royal Challenge and Kingfisher. He later states "
-            "that the Formula One team sent 10 million pounds back to Kingfisher "
-            "Airlines to help it."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
+        generation_claim_source_groups=(
             ("named it Force India", "called it Force India"),
             ("wanted the Indian flag to be on the grid", "team with roots in India"),
             ("used the platform to advertise my brand", "used the platform to advertise my brands"),
             ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
         ),
-        generation_fallback_answer_groups=(
-            ("named the Formula One team Force India",),
-            ("wanted the Indian flag on the grid",),
-            ("used the Formula One platform, car livery and merchandise to promote brands",),
-            ("Formula One team sent 10 million pounds back to Kingfisher Airlines",),
+        generation_claim_answer_groups=(
+            ("named the Formula One team Force India", "called the team Force India"),
+            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
+            ("used the Formula One platform, car livery and merchandise to promote brands"),
+            ("Formula One team sent 10 million pounds back to Kingfisher Airlines", "F1 team returned 10 million pounds to Kingfisher Airlines"),
         ),
     ),
     GoldEvidenceCase(
@@ -155,24 +141,21 @@ GOLD_EVIDENCE_CASES = (
             ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
         ),
         min_generation_answer_group_coverage=1.0,
-        generation_fallback_answer=(
-            "Mallya discusses United Breweries Limited and United Spirits, as well "
-            "as Kingfisher Airlines. He describes acquiring Air Deccan and the "
-            "airline's Kingfisher Red brand strategy. He also explains that "
-            "Royal Challengers Bangalore was selected to promote the Royal "
-            "Challenge whisky brand. The 17-bank consortium was a group of "
-            "lenders, not a separate operating business."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
+        generation_claim_source_groups=(
             ("United Breweries Limited", "United Breweries"),
-            ("Air Deccan", "Kingfisher Red"),
-            ("Royal Challengers Bangalore", "Royal Challenge"),
+            ("United Spirits"),
+            ("Air Deccan"),
+            ("Kingfisher Red"),
+            ("Royal Challengers Bangalore", "RCB"),
+            ("Royal Challenge"),
         ),
-        generation_fallback_answer_groups=(
-            ("United Breweries Limited and United Spirits",),
-            ("acquiring Air Deccan and the airline's Kingfisher Red brand strategy",),
-            ("Royal Challengers Bangalore",),
+        generation_claim_answer_groups=(
+            ("United Breweries"),
+            ("United Spirits"),
+            ("Air Deccan"),
+            ("Kingfisher Red"),
+            ("Royal Challengers Bangalore"),
+            ("Royal Challenge"),
         ),
     ),
     GoldEvidenceCase(
@@ -333,22 +316,14 @@ GOLD_EVIDENCE_CASES = (
             ("water business around Kingfisher", "built a water business", "advertise the core brand"),
         ),
         min_generation_answer_group_coverage=1.0,
-        generation_fallback_answer=(
-            "Mallya says a brand needs a personality. Because alcohol advertising "
-            "was banned in India, he used surrogate advertising: he built a "
-            "substantial water business around Kingfisher so that the water "
-            "business could be advertised and thereby promote the core brand. "
-            "He also describes giving the Kingfisher brand a distinctive personality."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
+        generation_claim_source_groups=(
             ("a brand needs a personality", "gave brands their personalities"),
             ("authoring surrogate advertising", "surrogate advertising"),
-            ("built a full water business around Kingfisher", "advertise the core brand"),
+            ("built a full water business around Kingfisher", "water business around Kingfisher", "advertise the core brand"),
         ),
-        generation_fallback_answer_groups=(
-            ("a brand needs a personality",),
-            ("surrogate advertising",),
+        generation_claim_answer_groups=(
+            ("a brand needs a personality", "gave Kingfisher a personality"),
+            ("surrogate advertising"),
             ("water business around Kingfisher", "advertise the core brand"),
         ),
     ),
@@ -376,24 +351,15 @@ GOLD_EVIDENCE_CASES = (
             ("statement of account", "statement in Parliament"),
         ),
         min_generation_answer_group_coverage=1.0,
-        generation_fallback_answer=(
-            "Mallya says the Finance Minister's statement in Parliament and the "
-            "Ministry of Finance report showed 14,100 crores recovered from him. "
-            "He says he had not received a statement of account despite repeated "
-            "reminders. He also says the Recovery Officer and Official Liquidator "
-            "had stated in court that the banks had been fully paid, yet the banks "
-            "still had not provided the statement of account."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
-            ("14,100 crores recovered from me", "government has recovered 14,100 crores"),
+        generation_claim_source_groups=(
+            ("14,100 crore rupees were recovered from me", "14,100 crores recovered from me", "government has recovered 14,100 crores"),
             ("banks have been fully paid", "the banks have been fully paid"),
             ("statement of account", "statement in parliament"),
         ),
-        generation_fallback_answer_groups=(
-            ("14,100 crores recovered from him",),
-            ("banks had been fully paid",),
-            ("statement of account",),
+        generation_claim_answer_groups=(
+            ("14,100 crores recovered from him", "14,100 crore rupees recovered from him"),
+            ("banks had been fully paid"),
+            ("statement of account had not been provided", "banks had not provided a statement of account"),
         ),
     ),
     GoldEvidenceCase(
@@ -436,23 +402,14 @@ GOLD_EVIDENCE_CASES = (
             ("refusal to let Etihad invest", "final straw"),
         ),
         min_generation_answer_group_coverage=1.0,
-        generation_fallback_answer=(
-            "Mallya says the global financial crisis affected the whole aviation "
-            "sector and every sector. Raj Shamani, the interviewer, says that "
-            "money stopped and it got dry. Mallya also "
-            "points to government policies that did not help, mounting losses, "
-            "and the refusal to let Etihad invest, which he describes as the "
-            "final straw."
-        ),
-        generation_fallback_requires_all_groups=True,
-        generation_fallback_source_groups=(
-            ("global financial crisis",),
+        generation_claim_source_groups=(
+            ("global financial crisis"),
             ("money stopped", "it got dry"),
             ("government policies that didn't help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
-        generation_fallback_answer_groups=(
-            ("global financial crisis",),
+        generation_claim_answer_groups=(
+            ("global financial crisis"),
             ("Raj Shamani, the interviewer, says that money stopped", "the interviewer says that money stopped"),
             ("government policies that did not help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
