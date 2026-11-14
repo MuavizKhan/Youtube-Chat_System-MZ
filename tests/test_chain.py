@@ -9779,7 +9779,8 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
     context = (
         "[SOURCE 1]\n"
         "United Breweries Limited and United Spirits were discussed. "
-        "The airline was called air deckin, or one Deckan, and was rebranded. "
+        "The airline was called air deckin, or one Deckan. "
+        "It was rebranded Kingfisher Red. "
         "Royal Challenges Bangalore was named after Royal Challenges."
     )
     incomplete_answer = (
@@ -9953,8 +9954,8 @@ def test_q10_diagnostics_expose_missing_interviewer_claim_beyond_broad_groups():
 
     assert diagnostics["prompt_evidence_complete"] is True
     assert diagnostics["repaired_draft"]["answer_gold_groups"] == [0, 1, 2]
-    assert diagnostics["repaired_draft"]["source_atomic_claim_groups_in_prompt"] == [0, 1, 2, 3]
-    assert diagnostics["repaired_draft"]["answer_atomic_claim_groups"] == [0, 2, 3]
+    assert diagnostics["repaired_draft"]["source_atomic_claim_groups_in_prompt"] == [0, 1, 2, 3, 4]
+    assert diagnostics["repaired_draft"]["answer_atomic_claim_groups"] == [0, 2, 3, 4]
     assert diagnostics["repaired_draft"]["missing_source_supported_atomic_claim_groups"] == [1]
     assert "missing_source_supported_atomic_claims" in (
         diagnostics["repaired_draft"]["claim_issue_codes"]
