@@ -407,6 +407,9 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_answer_groups=(
             (
                 "14,100 crores recovered from me",
+                "14,100 crores were recovered from me",
+                "14,100 crores had been recovered from me",
+                "the Ministry of Finance report says 14,100 crores were recovered from me",
                 "14,100 crore recovered from me",
                 "14,100 crore rupees recovered from me",
                 "the Ministry of Finance report says 14,100 crores were recovered",
@@ -417,6 +420,8 @@ GOLD_EVIDENCE_CASES = (
                 "banks have been fully paid",
                 "the banks were fully paid",
                 "the Recovery Officer and Official Liquidator said the banks had been fully paid",
+                "the Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
+                "the Recovery Officer and Official Liquidator stated in judicial proceedings that the banks had been fully paid",
                 "the Recovery Officer said the banks were fully paid",
                 "the Official Liquidator said the banks were fully paid",
             ),
