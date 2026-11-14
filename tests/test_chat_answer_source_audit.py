@@ -2307,7 +2307,7 @@ def test_q08_q10_atomic_answer_aliases_accept_source_attributed_paraphrases_and_
     )
     assert chain_module._matched_registered_phrase_group_indices(
         q10_answer, q10.generation_claim_answer_groups
-    ) == {0, 1, 2, 3}
+    ) == {0, 1, 2, 3, 4}
 
     wrongly_attributed = (
         "The global financial crisis affected every sector. Vijay Mallya said "
