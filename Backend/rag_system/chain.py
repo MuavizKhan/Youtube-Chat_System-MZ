@@ -3484,7 +3484,7 @@ def _normalize_registered_transcript_answer(
             r"9[\s,\u202f]*000[\s\u2010-\u2015-]*"
             r"crore(?:[\s\u2010-\u2015-]*rupee)?\s+loan\s+default"
             r"(?:\s+and\s+the\s+government(?:'s|’s)?\s+intervention)?",
-            " including the later discussion of government policy",
+            "",
             corrected,
             count=1,
             flags=re.IGNORECASE,
