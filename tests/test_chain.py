@@ -9806,9 +9806,9 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
 
     # The old three broad groups all appear satisfied, but two of the six
     # independent source claims are missing from the generated answer.
-    assert diagnostics["answer_gold_groups"] == [0, 1, 2]
-    assert diagnostics["all_source_atomic_claims_in_prompt"] is True
-    assert diagnostics["missing_source_supported_atomic_claim_groups"] == [2, 4]
+    assert diagnostics["initial_draft"]["answer_gold_groups"] == [0, 1, 2]
+    assert diagnostics["initial_draft"]["all_source_atomic_claims_in_prompt"] is True
+    assert diagnostics["initial_draft"]["missing_source_supported_atomic_claim_groups"] == [2, 4]
     assert "missing_source_supported_atomic_claims" in (
         diagnostics["initial_draft"]["claim_issue_codes"]
     )
@@ -9939,10 +9939,10 @@ def test_q10_diagnostics_expose_missing_interviewer_claim_beyond_broad_groups():
     )
 
     assert diagnostics["prompt_evidence_complete"] is True
-    assert diagnostics["answer_gold_groups"] == [0, 1, 2]
-    assert diagnostics["source_atomic_claim_groups_in_prompt"] == [0, 1, 2, 3]
-    assert diagnostics["answer_atomic_claim_groups"] == [0, 2, 3]
-    assert diagnostics["missing_source_supported_atomic_claim_groups"] == [1]
+    assert diagnostics["repaired_draft"]["answer_gold_groups"] == [0, 1, 2]
+    assert diagnostics["repaired_draft"]["source_atomic_claim_groups_in_prompt"] == [0, 1, 2, 3]
+    assert diagnostics["repaired_draft"]["answer_atomic_claim_groups"] == [0, 2, 3]
+    assert diagnostics["repaired_draft"]["missing_source_supported_atomic_claim_groups"] == [1]
     assert "missing_source_supported_atomic_claims" in (
         diagnostics["repaired_draft"]["claim_issue_codes"]
     )
