@@ -87,7 +87,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
-            ("single class low cost airline", "single class airline", "low cost airline"),
+            ("all the attributes of a low cost carrier", "which is single class, standard fleet", "single class airline", "low cost airline"),
             ("in flight entertainment", "inflight entertainment", "good food", "offered meals"),
             ("best flying experience", "premium experience"),
         ),

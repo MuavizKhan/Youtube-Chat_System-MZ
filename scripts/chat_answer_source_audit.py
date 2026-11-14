@@ -1042,15 +1042,15 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         ))
         interviewer_attributed = bool(re.search(
             r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
-            r"\b(?:money stopped|it got dry|money dried up)\b|"
-            r"\b(?:money stopped|it got dry|money dried up)\b.{0,100}"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
             r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
             text,
             re.IGNORECASE,
         ))
         guest_attributed = bool(re.search(
             r"(?:\bMallya\b[^.!?]{0,80}\b(?:money stopped|it got dry|money dried up)\b|"
-            r"\b(?:money stopped|it got dry|money dried up)\b[^.!?]{0,80}\bMallya\b)",
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b[^.!?]{0,80}\bMallya\b)",
             text,
             re.IGNORECASE,
         ))

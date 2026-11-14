@@ -3878,8 +3878,8 @@ def _gold_evidence_repair_instruction(
         ))
         interviewer_attribution = bool(re.search(
             r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
-            r"\b(?:money stopped|it got dry|money dried up)\b|"
-            r"\b(?:money stopped|it got dry|money dried up)\b.{0,100}"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
             r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
             answer_text,
             re.IGNORECASE,
