@@ -3311,7 +3311,7 @@ def _normalize_registered_transcript_answer(
                 if stripped_line.startswith(("-", "*"))
                 else ""
             )
-            folded_item = bullet_item.casefold()
+            folded_item = re.sub(r"[*_]", "", bullet_item).strip().casefold()
 
             if folded_item.startswith("a consortium of 17 banks"):
                 removed_lender_entry = True

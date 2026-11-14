@@ -9681,3 +9681,27 @@ def test_ar06_normalizer_corrects_orville_only_for_registered_arabic_video_case(
     )
     assert unrelated == "The Orville room is mentioned."
     assert unrelated_corrections == []
+
+
+
+@pytest.mark.unit
+def test_q03_normalizer_removes_bold_marked_lender_bullet_without_touching_businesses():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "- **United Breweries** — beer business\n"
+        "- **United Spirits** — spirits business\n"
+        "- **A consortium of 17 banks** — lenders to the company\n"
+        "- **Kingfisher Airlines** — airline"
+    )
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "consortium of 17 banks" not in corrected.casefold()
+    assert "United Breweries" in corrected
+    assert "United Spirits" in corrected
+    assert "Kingfisher Airlines" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections

@@ -1036,7 +1036,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
 
     elif case_id in {"Q04", "Q10"}:
         phrase_present = bool(re.search(
-            r"\b(?:money stopped|it got dry|money dried up)\b",
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
             text,
             re.IGNORECASE,
         ))
