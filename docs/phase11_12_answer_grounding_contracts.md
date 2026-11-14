@@ -96,3 +96,6 @@ required gates.
 - Q08 answer completeness does not block its existing question-scoped financial fallback. The fallback remains responsible for verifying all required source claims before producing an answer.
 - Q04/Q10 interviewer attribution repair is independent of the broader financial gold-group threshold, but only runs when the disputed wording and interviewer speaker marker both appear in the supplied context.
 - Prompt safeguard wording for English translation and financial claim attribution remains compatible with the earlier regression tests.
+
+- Gold completeness repair now requires the case's configured minimum prompt-evidence coverage; independently checked speaker-attribution and fully source-matched claim repairs remain eligible on partial contexts. A regression test protects this separation.
+- The system-prompt contract is tested below 4,900 characters to leave a reserved budget below the 5,000-character ceiling, while retaining the English-output, attribution, timestamp, and financial-figure safeguards.
