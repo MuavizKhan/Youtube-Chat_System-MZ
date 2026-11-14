@@ -822,7 +822,11 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     text = _substantive_answer(answer)
     requirements = [
         ("heartbeat", r"heart\s*beat|heartbeat|\bpulse\b"),
-        ("blood_movement", r"(?:blood.{0,35}veins?|veins?.{0,35}blood)"),
+        (
+            "blood_movement",
+            r"(?:blood.{0,45}(?:veins?|venous circulation)|"
+            r"(?:veins?|venous circulation).{0,45}blood)",
+        ),
         ("lungs_or_breathing", r"lung|breath"),
         ("stomach", r"stomach|rumbl|belly"),
         ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
@@ -835,12 +839,34 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    has_veins = bool(re.search(r"\bveins?\b", text, re.IGNORECASE))
-    has_arteries_only = bool(re.search(r"\barter(?:y|ies)\b", text, re.IGNORECASE)) and not has_veins
+    artery_mentions = list(re.finditer(
+        r"\barter(?:y|ies)\b",
+        text,
+        re.IGNORECASE,
+    ))
+    unnegated_artery_claim = False
+    for mention in artery_mentions:
+        left = text[max(0, mention.start() - 45):mention.start()]
+        right = text[mention.end():min(len(text), mention.end() + 45)]
+        negated_before = bool(re.search(
+            r"\b(?:not|rather than|instead of)\s+(?:(?:flow|flows|flowing)\s+)?"
+            r"(?:through\s+)?(?:the\s+)?$",
+            left,
+            re.IGNORECASE,
+        ))
+        negated_after = bool(re.match(
+            r"\s+(?:are|is|was|were)?\s*(?:not|incorrect|wrong)\b",
+            right,
+            re.IGNORECASE,
+        ))
+        if not (negated_before or negated_after):
+            unnegated_artery_claim = True
+            break
+
     checks.append(_quality_check(
         "blood_movement_not_misattributed_to_arteries",
-        not has_arteries_only,
-        "The transcript-supported reference is to veins; an arteries-only substitution is incorrect.",
+        not unnegated_artery_claim,
+        "The transcript-supported reference is to veins; any positive attribution of the blood-movement sound to arteries is incorrect.",
     ))
     return checks
 
