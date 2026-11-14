@@ -7121,7 +7121,7 @@ def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
         "count distinct concepts or teams separately",
         "preserve that speaker boundary",
         "preserve actor, direction, recipient, purpose",
-        "opening narration or host introduction is framing",
+        "Treat opening narration/host introductions as framing",
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
