@@ -333,8 +333,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
             {
                 "name": "bank_account_reference",
                 "pattern": (
-                    r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|repaid|settled|"
-                    r"statement\s+of\s+account|statement\s+in\s+parliament|"
+                    r"\b(?:statement\s+of\s+account|statement\s+in\s+parliament|"
                     r"parliamentary\s+statement)\b"
                 ),
             },
@@ -1138,6 +1137,28 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             not bool(re.search(r"\bOrville\b", text, re.IGNORECASE)),
             "The room name is Orfield, not Orville; omit the name if uncertain.",
         )
+
+    if case_id in {"Q01", "Q11"} and not any(
+        check["name"] == f"{case_id.lower()}_no_unqualified_9000_crore_default"
+        for check in checks
+    ):
+        normalized = _normalize_answer_requirement_text(answer)
+        has_label = bool(re.search(
+            r"9[\s,\u202f]*000.{0,60}(?:crores?|cr).{0,50}loan[-\s]*default|"
+            r"loan[-\s]*default.{0,60}9[\s,\u202f]*000.{0,50}(?:crores?|cr)",
+            normalized, re.IGNORECASE,
+        ))
+        qualified = bool(re.search(
+            r"(?:opening|introductory|intro|narrator|video opens).{0,100}(?:framing|narration|description|claim)|"
+            r"(?:framing|narration|description|claim).{0,100}(?:opening|introductory|intro|narrator|video opens)|"
+            r"(?:Prime Minister|PM).{0,100}(?:said|stated|mentioned|reported)",
+            normalized, re.IGNORECASE,
+        ))
+        checks.append(_quality_check(
+            f"{case_id.lower()}_no_unqualified_9000_crore_default",
+            not has_label or qualified,
+            "Do not repeat opening 9,000-crore loan-default framing as an established fact; explicitly attribute/qualify it if mentioned.",
+        ))
 
     return checks
 
