@@ -6006,6 +6006,10 @@ def _extract_bank_recovery_statement_evidence(
         r"failed\s+to\s+(?:give|provide|submit)|no\s+statement)\b",
         re.IGNORECASE,
     )
+    named_recovery_actor_pattern = re.compile(
+        r"\b(?:recovery\s+officer|official\s+liquidator)\b",
+        re.IGNORECASE,
+    )
     attribution_pattern = re.compile(
         r"\b(?:recovery\s+officer|official\s+liquidator|court|judicial\s+proceedings)\b",
         re.IGNORECASE,
@@ -6061,12 +6065,18 @@ def _extract_bank_recovery_statement_evidence(
             if group_name == "bank_payment":
                 # Prefer the shortest same-source caption window that also keeps
                 # the court/official attribution with the bank-payment assertion.
+                named_actor_windows = [
+                    item for item in candidates
+                    if named_recovery_actor_pattern.search(item[2])
+                ]
                 attributed = [
                     item for item in candidates
                     if attribution_pattern.search(item[2])
                 ]
+                # Prefer an explicit Recovery Officer / Official Liquidator
+                # reference over a shorter window that contains only "court".
                 selected = min(
-                    attributed or candidates,
+                    named_actor_windows or attributed or candidates,
                     key=lambda item: (item[0], item[1]),
                 )
                 window_size, _window_start, cleaned = selected
