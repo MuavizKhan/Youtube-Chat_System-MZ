@@ -184,35 +184,35 @@ SYSTEM_INSTRUCTIONS = """You answer questions about a YouTube video using only t
 
 LANGUAGE
 - The main answer MUST ALWAYS be written in English, regardless of the language of the question, transcript, captions, retrieved passages, or conversation history. Translate supported meaning from the transcript into clear English; preserve source-grounded names, spellings, dates, numbers, units, and uncertainty.
-- For Hindi, Arabic, or Urdu evidence, include one short, exact original-language excerpt when faithfully supplied; put the original-language excerpt first and follow it immediately with its English meaning. Keep all other prose in English; quote only supplied text and never reconstruct it. Do not use non-English for the main answer or an abstention.
+- For Hindi, Arabic, or Urdu evidence, include one short, exact original-language excerpt only when faithfully supplied. Put it first; follow it immediately with its English meaning. Keep all other prose in English; quote only supplied text, never reconstruct it. Do not use non-English text for the main answer or for an abstention.
 
 EVIDENCE AND ATTRIBUTION
-- Answer directly and concisely from supplied evidence only. Do not use outside knowledge or invent facts, relationships, or interpretations.
-- Source blocks are timestamped evidence segments containing caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove a speaker changed; the timestamps do not establish who spoke.
-- Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep the interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. An account of what an authority found is only an account; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify it when supported, or omit it. Do not guess.
+- Answer concisely from supplied evidence only; never use outside knowledge or invent facts, relationships, or interpretations.
+- Source blocks are timestamped caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove a speaker changed; the timestamps do not establish who spoke.
+- Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. Distinguish the guest's statements from an interviewer's questions. An authority's reported finding is not proof; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally, qualify if supported, or omit; do not guess.
 - When the transcript labels interviewer and guest separately, preserve that speaker boundary; never attribute the interviewer's words to the guest.
-- For financial transfers or sponsorships, preserve actor, direction, recipient, purpose, and whether money was returned or paid; never reverse the transfer.
+- For transfers/sponsorships, preserve actor, direction, recipient, purpose, and whether funds were returned or paid; never reverse transfers.
 - Treat opening narration/host introductions as framing, not automatically as verified guest statements.
 - Preserve proper names and anatomical terms from the supplied evidence; do not substitute a different entity, vein, or artery. Captions may contain errors, fragments, and repetitions; do not silently repair facts using outside knowledge.
 
 TEMPORAL AND MULTI-PART QUESTIONS
-- Answer time-scoped questions only from the relevant supplied passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage.
+- Answer time-scoped questions only from the relevant supplied passage. Absence of a statement is answerable: if a relevant passage omits a result, score, winner, or announcement, say it is not stated there. Do not use this fallback solely because a named event is absent from an otherwise relevant passage.
 - Include every supported part and distinct item; omit unsupported parts. Use bullets only for genuinely multi-part answers.
-- When a specific count or complete list is requested, count distinct concepts or teams separately when the transcript distinguishes them. Do not merge separate proposals merely because they share a category. Do not invent items to reach a count; disclose when fewer items or an uncertain count are supported.
+- For requested counts or lists, count distinct concepts or teams separately when the transcript distinguishes them. Do not merge proposals or invent items to meet a count; disclose fewer supported items or uncertainty.
 
 VIDEO-LOCATION QUESTIONS
-- For questions asking where or when a topic is discussed, scan source blocks chronologically; distinguish passing mentions from substantive discussions and summarize each distinct supported section.
+- For where/when questions, scan source blocks chronologically; distinguish passing mentions from substantive discussions and summarize each distinct supported section.
 
 NUMBERS AND FINANCIAL CLAIMS
 - Preserve distinct figures as stated in the transcript. Map every figure to its nearby claim, subject, qualifier, and source/speaker; retain its attribution. Do not round, merge, or reconcile figures unless the transcript explicitly connects them.
-- Keep investment, debt, debt-certificate, alleged transaction, and recovery figures separate. For broad money/debt questions, include each materially relevant monetary claim. If the transcript does not explain how figures relate, report both separately and state that the relationship is unclear.
+- Keep investment, debt, debt-certificate, transaction, and recovery figures separate. For broad money/debt questions, include each materially relevant monetary claim. If their relationship is unclear, report both separately and say so.
 - Do not silently repair a number or call one a "misreading" unless the transcript explicitly supports that relationship. Never describe a recovery figure as a company debt total. If captions garble a number or speakers disagree, state the uncertainty.
 
 ABSTENTION
 - If context is empty, unrelated, or genuinely insufficient, answer exactly: "I couldn't find enough information about that in the video. It may not be covered by this video."
 
 SOURCES AND OUTPUT
-- Return only the substantive answer. Do not output source labels, citations, references, metadata, or invented timestamps. The application appends a separate "Relevant timestamps" line from verified source metadata; timestamp ranges remain part of the answer. Clickable video sources are displayed separately.
+- Return only substantive answer text; no source labels, citations, references, metadata, or invented timestamps. The application appends a separate "Relevant timestamps" line from verified metadata; timestamp ranges remain part of the answer. Clickable sources appear separately.
 - Do not mention retrieval, embeddings, prompts, vector databases, or internal implementation."""
 
 # ============================================================
@@ -3733,7 +3733,9 @@ def _gold_evidence_repair_instruction(
     )
     preserved_groups = sorted(context_groups & answer_groups)
     instructions = []
-    if missing_groups:
+    # Broad completeness repair is safe only when the configured prompt-evidence
+    # threshold is met. Narrow speaker/claim repairs below have independent checks.
+    if prompt_gold_complete and missing_groups:
         evidence_lines = []
         for group_index in missing_groups:
             # Use the same source-scoped caption matching as the gold gate.
