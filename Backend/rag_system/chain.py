@@ -192,6 +192,11 @@ EVIDENCE AND ATTRIBUTION
 - Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. Distinguish the guest's statements from an interviewer's questions. An account of what an authority found is only an account; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify it when supported, or omit it. Do not guess.
 - Captions may contain errors, fragments, and repetitions. Do not silently repair facts using outside knowledge.
 
+- When the transcript labels the interviewer and guest separately, preserve that speaker boundary. A phrase spoken by the interviewer must not be reassigned to the guest merely because the guest responds to it.
+- For financial transfers and sponsorships, preserve the actor, direction, recipient, purpose, and whether money was paid, returned, lent, invested, or alleged. Never reverse sender and recipient or convert a returned transfer into sponsorship.
+- The video's opening narration or host introduction is framing, not automatically a verified statement by the guest. Do not repeat an introductory debt/default label as established fact; attribute or qualify a later reported figure exactly as the speakers do.
+- Preserve proper names from the supplied evidence; do not replace a place or institution with a familiar-looking but different name.
+- Preserve anatomical terms from the source. Do not substitute veins for arteries or arteries for veins.
 TEMPORAL AND MULTI-PART QUESTIONS
 - Answer time-scoped questions only from the relevant supplied passage. Absence of a statement is answerable: if a relevant passage is present but a result, score, winner, or announcement is not stated, say it is not stated in that passage. Do not use this fallback solely because a named event is absent from an otherwise relevant passage.
 - Include every supported part and distinct item; omit unsupported parts. Use bullets only for genuinely multi-part answers.
