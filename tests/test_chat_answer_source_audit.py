@@ -2125,13 +2125,20 @@ def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case
 
 @pytest.mark.parametrize("case_id", ["AR03", "AR08"])
 def test_ar03_ar08_require_veins_and_reject_artery_misattribution(case_id):
-    for wrong_answer in (
-        "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
-        "A heartbeat, blood flow through both veins and arteries, lungs, stomach and blinking eyes.",
-    ):
+    wrong_answers = (
+        (
+            "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
+            False,
+        ),
+        (
+            "A heartbeat, blood flow through both veins and arteries, lungs, stomach and blinking eyes.",
+            True,
+        ),
+    )
+    for wrong_answer, expected_blood_coverage in wrong_answers:
         wrong = audit_module._bodily_sound_checks(case_id, wrong_answer)
         by_name = {check["name"]: check["passed"] for check in wrong}
-        assert by_name["sound_blood_movement"] is False if "veins" not in wrong_answer else True
+        assert by_name["sound_blood_movement"] is expected_blood_coverage
         assert by_name["blood_movement_not_misattributed_to_arteries"] is False
 
     for correct_answer in (
