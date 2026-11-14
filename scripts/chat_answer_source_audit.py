@@ -170,7 +170,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
             # This direct-fact question asks for the count. Require the number
             # and its unit; don't force the model to restate the question's
             # "express yourself" wording when "Three ways." is a complete answer.
-            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+ways?\b"},
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+(?:different\s+)?ways?\b"},
         ),
     ),
     _make_audit_case(
@@ -974,16 +974,23 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             re.IGNORECASE,
         ))
         returned_to_kingfisher = bool(re.search(
-            r"(?:Formula One|F1)(?:\s+team)?.{0,180}"
+            r"(?:Formula One|Formula 1|F1)(?:\s+team)?.{0,180}"
             r"(?:sent.{0,30}back|returned|repaid).{0,120}"
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
-            r".{0,120}Kingfisher",
+            r".{0,120}King\s?fisher",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r"(?:Formula One|Formula 1|F1)(?:\s+team)?.{0,180}"
+            r"(?:sent|returned|repaid).{0,40}"
+            r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,50}back.{0,100}to\s+King\s?fisher",
             text,
             re.IGNORECASE,
         ) or re.search(
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
             r".{0,100}(?:sent.{0,30}back|returned|repaid).{0,100}"
-            r"to\s+Kingfisher",
+            r"to\s+King\s?fisher",
             text,
             re.IGNORECASE,
         ))
