@@ -9787,10 +9787,16 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
         "Kingfisher Red, and Royal Challenge."
     )
 
+    assert len(gold_case.generation_claim_source_groups) == 6
+    assert len(gold_case.generation_claim_answer_groups) == 6
     source_claims = chain._matched_registered_phrase_group_indices(
         context, gold_case.generation_claim_source_groups
     )
     assert source_claims == set(range(6))
+    answer_claims = chain._matched_registered_phrase_group_indices(
+        incomplete_answer, gold_case.generation_claim_answer_groups
+    )
+    assert answer_claims == {0, 1, 3, 5}, gold_case.generation_claim_answer_groups
 
     diagnostics = chain._build_generation_repair_diagnostics(
         question=question,
@@ -9853,7 +9859,7 @@ def test_q06_repair_removes_black_and_gold_detail_misattributed_from_mcdonalds()
     assert "SOURCE-BOUND NEGATIVE-CLAIM REPAIR" in instruction
     assert "McDonald's, not Kingfisher" in instruction
     assert "black-and-gold" in instruction
-    assert "colorful personality" in instruction
+    assert "colourful personality" in instruction
 
 
 @pytest.mark.unit
