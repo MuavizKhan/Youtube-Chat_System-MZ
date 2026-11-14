@@ -188,8 +188,8 @@ LANGUAGE
 
 EVIDENCE AND ATTRIBUTION
 - Answer concisely from supplied evidence only; never use outside knowledge or invent facts, relationships, or interpretations.
-- Source blocks are timestamped caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove a speaker changed; the timestamps do not establish who spoke.
-- Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. Distinguish the guest's statements from an interviewer's questions. An authority's reported finding is not proof; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally, qualify if supported, or omit; do not guess.
+- Source blocks are timestamped evidence segments with caption snippets, not reliable speaker turns. A caption line preserves one caption snippet, not a verified speaker turn. Each reconstructed caption line includes that snippet's original start and end times. Caption boundaries and timestamps do not prove a speaker changed; the timestamps do not establish who spoke.
+- Attribute a claim to a named person only when the context clearly shows that person stated or endorsed it. The name in the question does not make that person the source of every nearby claim. Never turn an allegation described by the interviewer into an established fact. Keep an interviewer's question, allegation, premise, or paraphrase separate from the guest's statements. Distinguish the guest's statements from an interviewer's questions. An authority's reported finding is not proof; it does not by itself verify the underlying finding. If attribution is unclear, describe it neutrally as something discussed, qualify if supported, or omit; do not guess.
 - When the transcript labels interviewer and guest separately, preserve that speaker boundary; never attribute the interviewer's words to the guest.
 - For transfers/sponsorships, preserve actor, direction, recipient, purpose, and whether funds were returned or paid; never reverse transfers.
 - Treat opening narration/host introductions as framing, not automatically as verified guest statements.
@@ -3690,7 +3690,7 @@ def _gold_evidence_repair_instruction(
     context: str,
     video_id: str | None,
 ) -> str | None:
-    """Ask for a repair only when required gold evidence reached the prompt."""
+    """Gate completeness repair on prompt coverage; allow independently verified repairs."""
     question_id, gold_case = _registered_generation_gold_case(
         video_id,
         question,
