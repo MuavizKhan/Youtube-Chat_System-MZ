@@ -9861,11 +9861,18 @@ def test_q08_bank_recovery_fallback_joins_adjacent_captions_and_preserves_negati
     context = """[SOURCE 1]
 Transcript caption segments in chronological order:
 - [10:12–10:18] The Ministry of Finance report acknowledges 14,100 crores recovered from me.
-- [10:18–10:23] The Recovery Officer and Official Liquidator were responsible for the proceedings.
-- [10:23–10:27] Both these have stated in court in judicial proceedings
-- [10:27–10:32] that the banks have been fully paid.
-- [10:32–10:36] The banks have not submitted any
-- [10:36–10:40] statement of account."""
+- [10:18–10:23] You have the Recovery Officer of the Debt Recovery Tribunal.
+- [10:23–10:27] The tribunal gave the certificate of debt.
+- [10:27–10:32] The recovery officers recover against that certificate.
+- [10:32–10:36] They inform the tribunal about how much has been recovered.
+- [10:36–10:40] The second guarantor United Breweries Holdings Limited is in liquidation.
+- [10:40–10:44] It is in the control of the Official Liquidator.
+- [10:44–10:48] The Official Liquidator is also obliged to give an account to the court.
+- [10:48–10:52] The liquidation includes being a co-guarantor of the Kingfisher Airlines debt.
+- [10:52–10:56] Both these have stated in court in judicial proceedings
+- [10:56–11:00] that the banks have been fully paid.
+- [11:00–11:04] The banks have not submitted any
+- [11:04–11:08] statement of account."""
 
     diagnostics = {}
     fallback = chain._build_financial_evidence_fallback(
@@ -9886,7 +9893,7 @@ Transcript caption segments in chronological order:
     }
     payment_evidence = diagnostics["bank_recovery_statement_evidence"]["bank_payment"]
     assert payment_evidence[0]["attribution_present"] is True
-    assert payment_evidence[0]["caption_count"] >= 2
+    assert payment_evidence[0]["caption_count"] >= 10
     account_evidence = diagnostics["bank_recovery_statement_evidence"]["account_statement"]
     assert account_evidence[0]["missing_submission"] is True
     assert account_evidence[0]["caption_count"] == 2
