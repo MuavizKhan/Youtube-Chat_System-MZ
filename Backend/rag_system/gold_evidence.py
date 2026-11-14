@@ -135,7 +135,7 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer_groups=(
             ("named the Formula One team Force India",),
             ("wanted the Indian flag on the grid",),
-            ("used the Formula One platform to promote brands",),
+            ("used the Formula One platform, car livery and merchandise to promote brands",),
             ("Formula One team sent 10 million pounds back to Kingfisher Airlines",),
         ),
     ),
@@ -172,7 +172,7 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer_groups=(
             ("United Breweries Limited and United Spirits",),
             ("acquiring Air Deccan and the airline's Kingfisher Red brand strategy",),
-            ("Royal Challengers Bangalore", "Royal Challenge whisky"),
+            ("Royal Challengers Bangalore",),
         ),
     ),
     GoldEvidenceCase(

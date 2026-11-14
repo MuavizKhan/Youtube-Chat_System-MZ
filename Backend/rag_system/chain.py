@@ -3872,7 +3872,7 @@ def _gold_evidence_repair_instruction(
 
     if question_id in {"Q04", "Q10"}:
         uses_interviewer_phrase = bool(re.search(
-            r"\b(?:money stopped|it got dry|money dried up)\b",
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
             answer_text,
             re.IGNORECASE,
         ))

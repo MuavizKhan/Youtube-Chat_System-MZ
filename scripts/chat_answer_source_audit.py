@@ -1086,8 +1086,10 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         add(
             "q08_banks_fully_paid_claim_attributed",
             bool(re.search(
-                r"(?:banks|bank).{0,100}(?:fully paid|paid in full)|"
-                r"(?:fully paid|paid in full).{0,100}(?:banks|bank)",
+                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
+                r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
+                r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
+                r"(?:Recovery Officer|Official Liquidator|court)",
                 text,
                 re.IGNORECASE,
             )),
@@ -1098,6 +1100,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             bool(re.search(r"statement of account", text, re.IGNORECASE))
             and bool(re.search(
                 r"not (?:been )?(?:given|provided|submitted|received)|"
+                r"did not (?:receive|get)|had not received|was not provided|"
                 r"failed to (?:give|provide|submit)|no statement",
                 text,
                 re.IGNORECASE,
