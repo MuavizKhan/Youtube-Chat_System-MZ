@@ -6,6 +6,7 @@ from urllib.error import HTTPError
 import pytest
 
 import scripts.chat_answer_source_audit as audit_module
+from Backend.rag_system import chain as chain_module
 from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
@@ -2147,3 +2148,56 @@ def test_ar06_claim_contract_rejects_orville_spelling():
         "AR06", "The room's silence does not provide the expected comfort."
     )
     assert correct[0]["passed"] is True, correct
+
+
+
+def test_q01_rejects_premium_only_answer_that_omits_low_cost_model_and_differentiators():
+    premium_only = (
+        "Kingfisher Airlines was an Indian premium carrier aiming to provide "
+        "the best flying experience in India, with passenger comfort and safety."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q01", premium_only)
+    assert checks[0]["passed"] is False, checks
+
+    grounded = (
+        "Kingfisher began with the attributes of a single-class, low-cost carrier. "
+        "Its differentiators included in-flight entertainment and good food."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q01", grounded)
+    assert checks[0]["passed"] is True, checks
+
+
+def test_q03_requires_both_united_breweries_and_united_spirits():
+    answer = (
+        "The businesses include United Breweries, Air Deccan and Kingfisher Red, "
+        "and Royal Challengers Bangalore and Royal Challenge whisky."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", answer)
+    assert checks[0]["passed"] is False, checks
+
+
+def test_q06_rejects_nonbreaking_hyphen_in_unsupported_color_claim():
+    answer = "The Kingfisher brand used a black‑and‑gold colour scheme."
+    checks = audit_module._claim_level_semantic_checks("Q06", answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q06_avoids_unsupported_visual_identity_details"] is False
+
+
+def test_q03_normalizer_cleans_malformed_business_emphasis_and_lender_bullet():
+    question = "What businesses or companies does Vijay Mallya discuss in the interview?"
+    answer = (
+        "- United Breweries** — beer business\n"
+        "- Breweries Limited** — duplicate group-company entry\n"
+        "- United Spirits** — spirits business\n"
+        "- A **consortium of 17 banks** — lenders to the company\n"
+        "- Kingfisher Airlines** — airline"
+    )
+    corrected, corrections = chain_module._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "- **United Breweries** — beer business" in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "consortium of 17 banks" not in corrected.casefold()
+    assert "removed_lender_consortium_from_business_list" in corrections

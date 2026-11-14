@@ -1074,7 +1074,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             )
         add(
             "q06_avoids_unsupported_visual_identity_details",
-            not bool(re.search(r"black[- ]and[- ]gold", text, re.IGNORECASE)),
+            not bool(re.search(r"black[-‑‒–—− ]and[-‑‒–—− ]gold", text, re.IGNORECASE)),
             "Do not invent a black-and-gold identity or packaging strategy.",
         )
 
