@@ -3316,7 +3316,7 @@ def _normalize_registered_transcript_answer(
             if folded_item.startswith("a consortium of 17 banks"):
                 removed_lender_entry = True
                 continue
-            if folded_item.startswith("breweries limited**"):
+            if folded_item.startswith("breweries limited"):
                 removed_duplicate_entry = True
                 continue
 

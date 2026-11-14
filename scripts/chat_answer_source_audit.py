@@ -1015,7 +1015,8 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
 
     elif case_id == "Q03":
         groups = [
-            bool(re.search(r"\bUnited Breweries\b|\bUnited Spirits\b", text, re.IGNORECASE)),
+            bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE))
+            and bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
             bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE))
             and bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
             bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE))
