@@ -11,6 +11,10 @@ on:
       - main
       - "phase/**"
 
+concurrency:
+  group: backend-ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -333,8 +333,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
             {
                 "name": "bank_account_reference",
                 "pattern": (
-                    r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|repaid|settled|"
-                    r"statement\s+of\s+account|statement\s+in\s+parliament|"
+                    r"\b(?:statement\s+of\s+account|statement\s+in\s+parliament|"
                     r"parliamentary\s+statement)\b"
                 ),
             },
@@ -823,12 +822,12 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     text = _substantive_answer(answer)
     requirements = [
         ("heartbeat", r"heart\s*beat|heartbeat|\bpulse\b"),
-        ("blood_movement", r"blood.{0,35}(?:vein|arter|flow|rush|move)|(?:vein|arter).{0,35}blood"),
+        ("blood_movement", r"(?:blood.{0,35}veins?|veins?.{0,35}blood)"),
         ("lungs_or_breathing", r"lung|breath"),
         ("stomach", r"stomach|rumbl|belly"),
         ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
     ]
-    return [
+    checks = [
         _quality_check(
             f"sound_{name}",
             bool(re.search(pattern, text, re.IGNORECASE)),
@@ -836,6 +835,14 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
+    has_veins = bool(re.search(r"\bveins?\b", text, re.IGNORECASE))
+    has_arteries_only = bool(re.search(r"\barter(?:y|ies)\b", text, re.IGNORECASE)) and not has_veins
+    checks.append(_quality_check(
+        "blood_movement_not_misattributed_to_arteries",
+        not has_arteries_only,
+        "The transcript-supported reference is to veins; an arteries-only substitution is incorrect.",
+    ))
+    return checks
 
 
 _ABSTENTION_PATTERN = re.compile(
@@ -933,6 +940,229 @@ def _answer_language_matches(answer: str, language: str) -> bool:
     return False
 
 
+def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
+    """Check high-risk claims that broad phrase-presence checks cannot validate."""
+    text = _normalize_answer_requirement_text(answer)
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, passed: bool, message: str) -> None:
+        checks.append(_quality_check(name, passed, message))
+
+    if case_id == "Q01":
+        coverage = [
+            bool(re.search(r"\bsingle[- ]class\b|\blow[- ]cost\b", text, re.IGNORECASE)),
+            bool(re.search(r"\bpremium\b|best flying experience", text, re.IGNORECASE)),
+            bool(re.search(r"in[- ]?flight entertainment|\bgood food\b|\bmeals\b", text, re.IGNORECASE)),
+        ]
+        add(
+            "q01_airline_model_and_differentiators",
+            sum(coverage) >= 2,
+            "Cover at least two distinct supported points: single-class/low-cost model, premium experience, and in-flight entertainment/food.",
+        )
+
+    elif case_id == "Q02":
+        force_india_reason = bool(re.search(
+            r"Force India.{0,180}(?:Indian flag|team with roots in India|Indian Formula One team)|"
+            r"(?:Indian flag|team with roots in India|Indian Formula One team).{0,180}Force India",
+            text,
+            re.IGNORECASE,
+        ))
+        brand_promotion = bool(re.search(
+            r"(?:advertis\w*|promot\w*).{0,100}(?:brand|Royal Challenge|Kingfisher)|"
+            r"(?:brand|Royal Challenge|Kingfisher).{0,100}(?:advertis\w*|promot\w*)",
+            text,
+            re.IGNORECASE,
+        ))
+        returned_to_kingfisher = bool(re.search(
+            r"(?:Formula One|F1)(?:\s+team)?.{0,180}"
+            r"(?:sent.{0,30}back|returned|repaid).{0,120}"
+            r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,120}Kingfisher",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,100}(?:sent.{0,30}back|returned|repaid).{0,100}"
+            r"to\s+Kingfisher",
+            text,
+            re.IGNORECASE,
+        ))
+        wrong_force_india_reason = bool(re.search(
+            r"(?:named|called)\s+(?:the\s+team\s+)?Force India.{0,100}"
+            r"(?:after|for)\s+(?:his|Mallya's)\s+(?:own\s+)?brand",
+            text,
+            re.IGNORECASE,
+        ))
+        reverse_transfer = bool(re.search(
+            r"Kingfisher(?: Airlines)? .{0,100}"
+            r"(?:paid|provided|gave|sponsored|funded).{0,100}"
+            r"(?:Formula One|F1)(?:\s+team)?.{0,100}"
+            r"(?:£\s*)?(?:10\s*million|10m)",
+            text,
+            re.IGNORECASE,
+        ))
+        add("q02_force_india_indian_flag_reason", force_india_reason,
+            "Explain that Force India was named to put an Indian team/flag on the F1 grid.")
+        add("q02_f1_platform_brand_promotion", brand_promotion,
+            "Identify the Formula One platform as a way to promote Mallya's brands.")
+        add("q02_f1_team_returned_ten_million_to_kingfisher", returned_to_kingfisher,
+            "Preserve the transfer: the Formula One team sent £10 million back to Kingfisher Airlines.")
+        add("q02_not_named_after_mallya_brand", not wrong_force_india_reason,
+            "Do not claim Force India was named after Mallya's own brand.")
+        add("q02_transfer_direction_not_reversed", not reverse_transfer,
+            "Do not describe Kingfisher as paying or sponsoring the Formula One team with this returned £10 million.")
+
+    elif case_id == "Q03":
+        groups = [
+            bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE))
+            and bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
+            bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE))
+            and bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
+            bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE))
+            and bool(re.search(r"\bRoyal Challenge\b", text, re.IGNORECASE)),
+        ]
+        add(
+            "q03_distinct_business_families",
+            all(groups),
+            "Distinguish United Breweries/United Spirits, Air Deccan/Kingfisher Red, and Royal Challengers Bangalore/Royal Challenge.",
+        )
+        mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
+        classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|financiers?)\b", text, re.IGNORECASE))
+        add(
+            "q03_bank_consortium_not_a_business",
+            not mentions_consortium or classifies_as_lenders,
+            "A 17-bank consortium is a lender group, not a separate operating business.",
+        )
+
+    elif case_id in {"Q04", "Q10"}:
+        phrase_present = bool(re.search(
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
+            text,
+            re.IGNORECASE,
+        ))
+        interviewer_attributed = bool(re.search(
+            r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
+            r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
+            text,
+            re.IGNORECASE,
+        ))
+        guest_attributed = bool(re.search(
+            r"(?:\bMallya\b[^.!?]{0,80}\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b[^.!?]{0,80}\bMallya\b)",
+            text,
+            re.IGNORECASE,
+        ))
+        add(
+            f"{case_id.lower()}_money_stopped_attributed_to_interviewer",
+            not phrase_present or (interviewer_attributed and not guest_attributed),
+            "If repeating 'money stopped / it got dry', attribute those words to interviewer Raj Shamani, not Mallya.",
+        )
+
+    elif case_id == "Q06":
+        for name, pattern in (
+            ("q06_brand_personality", r"brand.{0,60}personalit|personalit.{0,60}brand"),
+            ("q06_surrogate_advertising", r"surrogate advertising"),
+            ("q06_kingfisher_water_business", r"water business.{0,100}Kingfisher|Kingfisher.{0,100}water business"),
+        ):
+            add(
+                name,
+                bool(re.search(pattern, text, re.IGNORECASE)),
+                "Cover brand personality, surrogate advertising, and the Kingfisher water-business strategy.",
+            )
+        add(
+            "q06_avoids_unsupported_visual_identity_details",
+            not bool(re.search(r"black[-‑‒–—− ]and[-‑‒–—− ]gold", text, re.IGNORECASE)),
+            "Do not invent a black-and-gold identity or packaging strategy.",
+        )
+
+    elif case_id == "Q08":
+        add(
+            "q08_ministry_recovery_figure",
+            bool(re.search(r"14[\s,\u202f]*100\s*(?:crores?|cr)\b", text, re.IGNORECASE)),
+            "Include the distinct £/₹14,100-crore recovery figure reported in Parliament.",
+        )
+        add(
+            "q08_banks_fully_paid_claim_attributed",
+            bool(re.search(
+                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
+                r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
+                r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
+                r"(?:Recovery Officer|Official Liquidator|court)",
+                text,
+                re.IGNORECASE,
+            )),
+            "Include the separate claim that the Recovery Officer/Official Liquidator said the banks had been fully paid.",
+        )
+        add(
+            "q08_missing_statement_of_account",
+            bool(re.search(r"statement of account", text, re.IGNORECASE))
+            and bool(re.search(
+                r"not (?:been )?(?:given|provided|submitted|received|rendered)|"
+                r"(?:did|does|do) not (?:receive|get|provide)|"
+                r"(?:had|has|have) not (?:received|provided)|was not provided|"
+                r"failed to (?:give|provide|submit)|no statement",
+                text,
+                re.IGNORECASE,
+            )),
+            "Include Mallya's claim that the banks had not provided a statement of account.",
+        )
+
+    elif case_id in {"Q01", "Q11"}:
+        loan_default_label = bool(re.search(
+            r"9[\s,\u202f]*000.{0,60}(?:crores?|cr).{0,50}loan[-\s]*default|"
+            r"loan[-\s]*default.{0,60}9[\s,\u202f]*000.{0,50}(?:crores?|cr)",
+            text,
+            re.IGNORECASE,
+        ))
+        qualified_as_narration = bool(re.search(
+            r"(?:opening|introductory|intro|narrator|video opens).{0,100}"
+            r"(?:framing|narration|description|claim)|"
+            r"(?:framing|narration|description|claim).{0,100}"
+            r"(?:opening|introductory|intro|narrator|video opens)|"
+            r"(?:Prime Minister|PM).{0,100}(?:said|stated|mentioned|reported)",
+            text,
+            re.IGNORECASE,
+        ))
+        add(
+            f"{case_id.lower()}_no_unqualified_9000_crore_default",
+            not loan_default_label or qualified_as_narration,
+            "Do not repeat opening 9,000-crore loan-default framing as an established fact; explicitly attribute/qualify it if mentioned.",
+        )
+
+    elif case_id == "AR06":
+        add(
+            "ar06_orfield_room_name_spelling",
+            not bool(re.search(r"\bOrville\b", text, re.IGNORECASE)),
+            "The room name is Orfield, not Orville; omit the name if uncertain.",
+        )
+
+    if case_id in {"Q01", "Q11"} and not any(
+        check["name"] == f"{case_id.lower()}_no_unqualified_9000_crore_default"
+        for check in checks
+    ):
+        normalized = _normalize_answer_requirement_text(answer)
+        has_label = bool(re.search(
+            r"9[\s,\u202f]*000.{0,60}(?:crores?|cr).{0,50}loan[-\s]*default|"
+            r"loan[-\s]*default.{0,60}9[\s,\u202f]*000.{0,50}(?:crores?|cr)",
+            normalized, re.IGNORECASE,
+        ))
+        qualified = bool(re.search(
+            r"(?:opening|introductory|intro|narrator|video opens).{0,100}(?:framing|narration|description|claim)|"
+            r"(?:framing|narration|description|claim).{0,100}(?:opening|introductory|intro|narrator|video opens)|"
+            r"(?:Prime Minister|PM).{0,100}(?:said|stated|mentioned|reported)",
+            normalized, re.IGNORECASE,
+        ))
+        checks.append(_quality_check(
+            f"{case_id.lower()}_no_unqualified_9000_crore_default",
+            not has_label or qualified,
+            "Do not repeat opening 9,000-crore loan-default framing as an established fact; explicitly attribute/qualify it if mentioned.",
+        ))
+
+    return checks
+
+
 def _answer_quality_checks(
     case_id: str | dict[str, Any],
     answer: str,
@@ -970,6 +1200,8 @@ def _answer_quality_checks(
         checks.extend(_q07_answer_checks(answer))
     elif normalized_case_id in {"AR03", "AR08"}:
         checks.extend(_bodily_sound_checks(normalized_case_id, answer))
+
+    checks.extend(_claim_level_semantic_checks(normalized_case_id, answer))
 
     requirement_text = _normalize_answer_requirement_text(answer)
     for requirement in case.get("answer_requirements", []):

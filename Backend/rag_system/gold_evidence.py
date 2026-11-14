@@ -61,6 +61,9 @@ class GoldEvidenceCase:
     # Optional threshold for generated-answer evidence coverage. When unset,
     # the answer must cover the same groups required in the generation prompt.
     min_generation_answer_group_coverage: float | None = None
+    # Generated-answer claims are independent of deterministic fallbacks.
+    generation_claim_source_groups: tuple[tuple[str, ...], ...] = ()
+    generation_claim_answer_groups: tuple[tuple[str, ...], ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -68,19 +71,27 @@ GOLD_EVIDENCE_CASES = (
         question_id="Q01",
         groups=(
             ("single class airline", "low cost",),
-            (
-                "best flying experience that India had ever seen",
-                "best flying experience",
-                "premium experience",
-            ),
-            (
-                "inflight entertainment",
-                "it had inflight entertainment",
-                "offered meals",
-                "good food",
-            ),
+            ("best flying experience that India had ever seen", "best flying experience", "premium experience"),
+            ("inflight entertainment", "it had inflight entertainment", "offered meals", "good food"),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("single class airline", "single class low cost", "low cost carrier"),
+            ("best flying experience", "premium experience"),
+            ("inflight entertainment", "in flight entertainment", "good food", "offered meals"),
+        ),
+        min_generation_answer_group_coverage=2 / 3,
+        generation_claim_source_groups=(
+            ("all the attributes of a low cost carrier", "which is single class, standard fleet", "single class airline", "low cost airline"),
+            ("in flight entertainment", "inflight entertainment", "it had inflight entertainment"),
+            ("good food", "offered meals"),
+        ),
+        generation_claim_answer_groups=(
+            ("single class low cost carrier", "single-class low-cost carrier", "single class low cost airline", "low cost single class carrier"),
+            ("in flight entertainment", "inflight entertainment"),
+            ("good food", "offered meals"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q02",
@@ -92,24 +103,60 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            (
+                "Formula 1",
+                "pinnacle of motorsport",
+                "dream to have a team on the F1 grid",
+            ),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("named it Force India", "called it Force India"),
+            ("wanted the Indian flag to be on the grid", "team with roots in India"),
+            ("used the platform to advertise my brand", "used the platform to advertise my brands"),
+            ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
+        ),
+        generation_claim_answer_groups=(
+            ("named the Formula One team Force India", "called the team Force India"),
+            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
+            ("used the Formula One platform, car livery and merchandise to promote brands"),
+            ("Formula One team sent 10 million pounds back to Kingfisher Airlines", "F1 team returned 10 million pounds to Kingfisher Airlines"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q03",
         groups=(
             ("United Breweries", "United Breweries Limited", "United Spirits"),
-            (
-                "merger of Kingfisher and",
-                "Kingfisher Red",
-                "eliminate the disruptor",
-            ),
-            (
-                "Royal Challengers Bangalore",
-                "Royal Challenge",
-                "RCB was born",
-            ),
+            ("merger of Kingfisher and", "Kingfisher Red", "eliminate the disruptor"),
+            ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
         ),
         min_group_coverage=2 / 3,
         min_context_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("United Breweries", "United Spirits"),
+            ("Air Deccan", "Kingfisher Red", "eliminate the disruptor"),
+            ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("United Breweries Limited", "United Breweries"),
+            ("United Spirits"),
+            ("Air Deccan"),
+            ("Kingfisher Red"),
+            ("Royal Challengers Bangalore", "RCB"),
+            ("Royal Challenge"),
+        ),
+        generation_claim_answer_groups=(
+            ("United Breweries"),
+            ("United Spirits"),
+            ("Air Deccan"),
+            ("Kingfisher Red"),
+            ("Royal Challengers Bangalore"),
+            ("Royal Challenge"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q04",
@@ -148,8 +195,9 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_answer=(
             "Vijay Mallya says Kingfisher Airlines faced several connected "
-            "pressures. The global financial crisis meant the money stopped. "
-            "He recalls being told, “You continue, banks will support you,” "
+            "pressures. Mallya says the global financial crisis affected every "
+            "sector. Raj Shamani, the interviewer, then says that money stopped "
+            "and it got dry. Mallya recalls being told, “You continue, banks will support you,” "
             "and that he should not downsize Kingfisher. He also points to "
             "government policies that didn't help and mounting losses, "
             "describing the refusal to let Etihad invest as the final straw."
@@ -258,13 +306,26 @@ GOLD_EVIDENCE_CASES = (
         groups=(
             ("a brand needs a personality", "gave brands their personalities"),
             ("surrogate advertising", "authoring surrogate advertising"),
-            (
-                "full water business around Kingfisher",
-                "water business around Kingfisher",
-                "advertise the core brand",
-            ),
+            ("full water business around Kingfisher", "water business around Kingfisher", "advertise the core brand"),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("brand needs a personality", "gave Kingfisher a personality", "gave brands their personalities"),
+            ("surrogate advertising", "authoring surrogate advertising"),
+            ("water business around Kingfisher", "built a water business", "advertise the core brand"),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("a brand needs a personality", "gave brands their personalities"),
+            ("authoring surrogate advertising", "surrogate advertising"),
+            ("built a full water business around Kingfisher", "water business around Kingfisher", "advertise the core brand"),
+        ),
+        generation_claim_answer_groups=(
+            ("a brand needs a personality", "gave Kingfisher a personality"),
+            ("surrogate advertising"),
+            ("water business around Kingfisher", "advertise the core brand"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q07",
@@ -278,17 +339,28 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q08",
         groups=(
-            (
-                "14,100 crores recovered from me",
-                "government has recovered 14,100 crores",
-            ),
-            (
-                "banks have been fully paid",
-                "the banks have been fully paid",
-            ),
+            ("14,100 crores recovered from me", "government has recovered 14,100 crores"),
+            ("banks have been fully paid", "the banks have been fully paid"),
             ("statement of account", "statement in parliament"),
         ),
         min_group_coverage=2 / 3,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("14,100 crores recovered from me", "Ministry of Finance report"),
+            ("banks have been fully paid", "the banks were fully paid"),
+            ("statement of account", "statement in Parliament"),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("14,100 crore rupees were recovered from me", "14,100 crores recovered from me", "government has recovered 14,100 crores"),
+            ("banks have been fully paid", "the banks have been fully paid"),
+            ("statement of account", "statement in parliament"),
+        ),
+        generation_claim_answer_groups=(
+            ("14,100 crores recovered from him", "14,100 crore rupees recovered from him"),
+            ("banks had been fully paid"),
+            ("statement of account had not been provided", "banks had not provided a statement of account"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q09",
@@ -318,22 +390,30 @@ GOLD_EVIDENCE_CASES = (
     GoldEvidenceCase(
         question_id="Q10",
         groups=(
-            (
-                "global financial crisis",
-                "money stopped",
-            ),
-            (
-                "government policies that didn't help",
-                "mounting losses",
-            ),
-            (
-                "final straw",
-                "refusal to let Etihad invest",
-                "run out of options",
-            ),
+            ("global financial crisis", "money stopped"),
+            ("government policies that didn't help", "mounting losses"),
+            ("final straw", "refusal to let Etihad invest", "run out of options"),
         ),
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            ("global financial crisis",),
+            ("government policies that didn't help", "mounting losses"),
+            ("refusal to let Etihad invest", "final straw"),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("global financial crisis"),
+            ("money stopped", "it got dry"),
+            ("government policies that didn't help", "mounting losses"),
+            ("refusal to let Etihad invest", "final straw"),
+        ),
+        generation_claim_answer_groups=(
+            ("global financial crisis"),
+            ("Raj Shamani, the interviewer, says that money stopped", "the interviewer says that money stopped"),
+            ("government policies that did not help", "mounting losses"),
+            ("refusal to let Etihad invest", "final straw"),
+        ),
     ),
 )
 

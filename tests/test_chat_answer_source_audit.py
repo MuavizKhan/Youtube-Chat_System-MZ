@@ -6,6 +6,7 @@ from urllib.error import HTTPError
 import pytest
 
 import scripts.chat_answer_source_audit as audit_module
+from Backend.rag_system import chain as chain_module
 from Backend.rag_system import chain
 from scripts.chat_answer_source_audit import (
     AUDIT_CASES,
@@ -584,8 +585,9 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
         case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
     )
     answer = (
-        "Vijay Mallya discusses United\u202fBreweries and "
-        "United\u202fSpirits, alongside Kingfisher Airlines."
+        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits, "
+        "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore and "
+        "Royal Challenge."
     )
 
     checks = _answer_quality_checks(case, answer)
@@ -622,39 +624,38 @@ def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
     assert all(check["passed"] for check in checks), checks
 
 
-def test_q08_requires_both_recovery_amount_and_bank_account_reference():
+def test_q08_requires_recovery_amount_court_statement_and_missing_account():
     case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q08")
-
     complete = _answer_quality_checks(
         case,
         "The Ministry of Finance report attributes 14,100 crore recovered. "
-        'The retrieved transcript includes the phrase "statement of account".',
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid, but the banks have not provided a statement "
+        "of account.",
     )
     assert all(check["passed"] for check in complete), complete
-
     missing_account_reference = _answer_quality_checks(
         case,
-        "The Ministry of Finance report attributes 14,100 crore recovered.",
+        "The Ministry of Finance report attributes 14,100 crore recovered. "
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid.",
     )
-    missing_account_names = [
-        check["name"] for check in missing_account_reference
-        if not check["passed"]
-    ]
-    assert missing_account_names == [
-        "answer_requirement_bank_account_reference"
-    ]
-
+    missing_account_names = {c["name"] for c in missing_account_reference if not c["passed"]}
+    assert missing_account_names == {
+        "answer_requirement_bank_account_reference",
+        "q08_missing_statement_of_account",
+    }
     missing_recovery_amount = _answer_quality_checks(
         case,
-        'The retrieved transcript includes the phrase "statement of account".',
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid, but the banks have not provided a statement "
+        "of account.",
     )
-    missing_amount_names = [
-        check["name"] for check in missing_recovery_amount
-        if not check["passed"]
-    ]
-    assert missing_amount_names == [
-        "answer_requirement_recovery_amount"
-    ]
+    missing_amount_names = {c["name"] for c in missing_recovery_amount if not c["passed"]}
+    assert missing_amount_names == {
+        "answer_requirement_recovery_amount",
+        "q08_ministry_recovery_figure",
+    }
 
 
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
@@ -2005,3 +2006,200 @@ def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candida
     assert check is not None
     assert check["passed"] is False
 
+
+
+
+def test_q02_claim_contract_rejects_wrong_force_india_reason_and_reversed_transfer():
+    wrong = (
+        "Mallya named Force India after his own brand. The team then provided "
+        "a £10 million sponsorship to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", wrong)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_force_india_indian_flag_reason"] is False
+    assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is False
+    assert by_name["q02_not_named_after_mallya_brand"] is False
+
+    grounded = (
+        "Mallya named the team Force India because he wanted the Indian flag "
+        "on the grid and a team with roots in India. He used the Formula One "
+        "platform to promote Royal Challenge and Kingfisher. The Formula One "
+        "team sent back 10 million pounds to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_q03_claim_contract_requires_three_distinct_business_families():
+    incomplete = (
+        "He discusses United Breweries, United Spirits and Kingfisher Airlines. "
+        "A consortium of 17 banks provided finance."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", incomplete)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_distinct_business_families"] is False
+
+    complete = (
+        "The businesses include United Breweries and United Spirits, Air Deccan "
+        "and Kingfisher Red, and Royal Challengers Bangalore, selected to promote "
+        "Royal Challenge whisky. The 17-bank consortium was a group of lenders."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", complete)
+    assert all(check["passed"] for check in checks), checks
+
+
+@pytest.mark.parametrize("case_id", ["Q04", "Q10"])
+def test_q04_q10_claim_contract_keeps_interviewer_phrase_attribution(case_id):
+    misattributed = (
+        "Mallya says the global financial crisis meant money stopped and it got dry."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, misattributed)
+    assert checks[0]["passed"] is False, checks
+
+    correctly_attributed = (
+        "Mallya says the crisis affected every sector. Interviewer Raj Shamani "
+        "then says that money stopped and it got dry."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, correctly_attributed)
+    assert checks[0]["passed"] is True, checks
+
+
+def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
+    unsupported = (
+        "The Kingfisher brand had black-and-gold packaging and a bird logo."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q06", unsupported)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q06_brand_personality"] is False
+    assert by_name["q06_surrogate_advertising"] is False
+    assert by_name["q06_kingfisher_water_business"] is False
+    assert by_name["q06_avoids_unsupported_visual_identity_details"] is False
+
+    grounded = (
+        "Mallya says a brand needs a personality. Because alcohol advertising "
+        "was banned, he used surrogate advertising and built a water business "
+        "around Kingfisher so it could be advertised to promote the core brand."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q06", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims():
+    incomplete = (
+        "The Ministry of Finance report showed 14,100 crores recovered from him. "
+        "He says he did not receive a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", incomplete)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_ministry_recovery_figure"] is True
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is False
+    assert by_name["q08_missing_statement_of_account"] is True
+
+    grounded = (
+        "Mallya says the Ministry of Finance report showed 14,100 crores "
+        "recovered from him. He says the Recovery Officer and Official "
+        "Liquidator had stated in court that the banks had been fully paid, "
+        "but the banks had not provided a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+@pytest.mark.parametrize("case_id", ["Q01", "Q11"])
+def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case_id):
+    unsupported = (
+        "The airline faced a 9,000-crore loan default before it collapsed."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, unsupported)
+    by_name = {c["name"]: c["passed"] for c in checks}
+    assert by_name[f"{case_id.lower()}_no_unqualified_9000_crore_default"] is False, checks
+
+    qualified = (
+        "The opening narrator's framing described a 9,000-crore loan-default "
+        "claim; that introduction is not itself a verified statement by Mallya."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, qualified)
+    by_name = {c["name"]: c["passed"] for c in checks}
+    assert by_name[f"{case_id.lower()}_no_unqualified_9000_crore_default"] is True, checks
+
+
+@pytest.mark.parametrize("case_id", ["AR03", "AR08"])
+def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
+    wrong = audit_module._bodily_sound_checks(
+        case_id,
+        "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
+    )
+    by_name = {check["name"]: check["passed"] for check in wrong}
+    assert by_name["sound_blood_movement"] is False
+    assert by_name["blood_movement_not_misattributed_to_arteries"] is False
+
+    correct = audit_module._bodily_sound_checks(
+        case_id,
+        "A heartbeat, blood flow through veins, lungs, stomach and blinking eyes.",
+    )
+    assert all(check["passed"] for check in correct), correct
+
+
+def test_ar06_claim_contract_rejects_orville_spelling():
+    wrong = audit_module._claim_level_semantic_checks(
+        "AR06", "The Orville room is not comfortable."
+    )
+    assert wrong[0]["passed"] is False, wrong
+
+    correct = audit_module._claim_level_semantic_checks(
+        "AR06", "The room's silence does not provide the expected comfort."
+    )
+    assert correct[0]["passed"] is True, correct
+
+
+
+def test_q01_rejects_premium_only_answer_that_omits_low_cost_model_and_differentiators():
+    premium_only = (
+        "Kingfisher Airlines was an Indian premium carrier aiming to provide "
+        "the best flying experience in India, with passenger comfort and safety."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q01", premium_only)
+    assert checks[0]["passed"] is False, checks
+
+    grounded = (
+        "Kingfisher began with the attributes of a single-class, low-cost carrier. "
+        "Its differentiators included in-flight entertainment and good food."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q01", grounded)
+    assert checks[0]["passed"] is True, checks
+
+
+def test_q03_requires_both_united_breweries_and_united_spirits():
+    answer = (
+        "The businesses include United Breweries, Air Deccan and Kingfisher Red, "
+        "and Royal Challengers Bangalore and Royal Challenge whisky."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", answer)
+    assert checks[0]["passed"] is False, checks
+
+
+def test_q06_rejects_nonbreaking_hyphen_in_unsupported_color_claim():
+    answer = "The Kingfisher brand used a black‑and‑gold colour scheme."
+    checks = audit_module._claim_level_semantic_checks("Q06", answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q06_avoids_unsupported_visual_identity_details"] is False
+
+
+def test_q03_normalizer_cleans_malformed_business_emphasis_and_lender_bullet():
+    question = "What businesses or companies does Vijay Mallya discuss in the interview?"
+    answer = (
+        "- United Breweries** — beer business\n"
+        "- Breweries Limited** — duplicate group-company entry\n"
+        "- United Spirits** — spirits business\n"
+        "- A **consortium of 17 banks** — lenders to the company\n"
+        "- Kingfisher Airlines** — airline"
+    )
+    corrected, corrections = chain_module._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "- **United Breweries** — beer business" in corrected
+    assert "Breweries Limited**" not in corrected
+    assert "consortium of 17 banks" not in corrected.casefold()
+    assert "removed_lender_consortium_from_business_list" in corrections

@@ -7113,12 +7113,15 @@ def test_generation_context_is_bounded_by_configured_character_budget(monkeypatc
 @pytest.mark.unit
 def test_system_prompt_is_compact_and_preserves_grounding_safeguards():
     prompt = chain.SYSTEM_INSTRUCTIONS
-    assert len(prompt) < 5000
+    assert len(prompt) < 4900
     for required_rule in (
         "main answer MUST ALWAYS be written in English",
         "only the supplied transcript context",
         "short, exact original-language excerpt",
         "count distinct concepts or teams separately",
+        "preserve that speaker boundary",
+        "preserve actor, direction, recipient, purpose",
+        "Treat opening narration/host introductions as framing",
         "interviewer's question, allegation",
         "Keep investment, debt, debt-certificate",
         "I couldn't find enough information about that in the video.",
@@ -9556,3 +9559,179 @@ def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
     assert diagnostics["rejection_reason"] == (
         "no_registered_generation_gold_case"
     )
+
+
+
+@pytest.mark.unit
+def test_registered_answer_claim_repair_only_runs_when_every_claim_is_in_prompt():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q02"
+    )
+    registered_id, _case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q02"
+    all_claims = (
+        "[SOURCE 1]\n"
+        "Formula 1 is the pinnacle of motorsport. "
+        "I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I used the platform to advertise my brands. "
+        "Formula One team sent back 10 million pounds to Kingfisher Airlines."
+    )
+    incomplete_answer = "Formula 1 was an important part of Mallya's career."
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=all_claims,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "wanted the Indian flag" in instruction
+    assert "10 million pounds" in instruction
+
+    context_missing_transfer = (
+        "[SOURCE 1]\n"
+        "Formula 1 is the pinnacle of motorsport. "
+        "I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I used the platform to advertise my brands."
+    )
+    no_instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context_missing_transfer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert no_instruction is None
+
+
+@pytest.mark.unit
+def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
+    )
+    registered_id, _case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q04"
+    context = (
+        "[SOURCE 1]\nThe global financial crisis affected every sector. "
+        "Raj Shamani said money stopped and it got dry."
+    )
+    answer = "Mallya says the global financial crisis meant money stopped and it got dry."
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
+    )
+    assert instruction is not None
+    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
+    assert "Raj Shamani" in instruction
+
+
+@pytest.mark.unit
+def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completeness_repair():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "Raj Shamani said money stopped and it got dry. "
+        "I was told not to downsize Kingfisher; banks will support you."
+    )
+    answer = "Mallya says money stopped and it got dry."
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
+    assert "CURATED EVIDENCE COMPLETENESS REPAIR" not in instruction
+
+
+@pytest.mark.unit
+def test_q01_normalizer_removes_unicode_hyphenated_intro_default_and_separates_dates():
+    question = "What is Kingfisher Airlines?"
+    answer = (
+        "Mallya decided around 2002–2003 Kingfisher Airlines launched in May 2005. "
+        "It was India's largest airline before facing financial difficulties and "
+        "a 9,000 crore‑rupee loan default."
+    )
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "2002–2003; Kingfisher Airlines launched" in corrected
+    assert "9,000" not in corrected
+    assert "separated_airline_decision_and_launch_dates" in corrections
+    assert "removed_disputed_intro_default_framing" in corrections
+
+
+@pytest.mark.unit
+def test_q11_normalizer_removes_only_intro_loan_default_label():
+    question = (
+        "Where in the video does Vijay Mallya discuss Kingfisher Airlines, "
+        "and what is discussed there?"
+    )
+    answer = (
+        "The opening interviewer mentions the airline, including the 9,000 "
+        "crore-rupee loan default and the government's intervention. "
+        "Later Mallya discusses government policy and the refusal to let Etihad invest."
+    )
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "9,000" not in corrected
+    assert "government policy" in corrected
+    assert "removed_unverified_intro_default_from_q11" in corrections
+
+
+@pytest.mark.unit
+def test_ar06_normalizer_corrects_orville_only_for_registered_arabic_video_case():
+    question = "Does complete silence give people the comfort they expect?"
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer="The Orville room does not provide the expected comfort.",
+        video_id="fAd2nKfrDB8",
+    )
+    assert "Orfield" in corrected
+    assert "Orville" not in corrected
+    assert "corrected_orfield_room_name" in corrections
+
+    unrelated, unrelated_corrections = chain._normalize_registered_transcript_answer(
+        question="What is the Orville room?",
+        answer="The Orville room is mentioned.",
+        video_id="fAd2nKfrDB8",
+    )
+    assert unrelated == "The Orville room is mentioned."
+    assert unrelated_corrections == []
+
+
+
+@pytest.mark.unit
+def test_q03_normalizer_removes_bold_marked_lender_bullet_without_touching_businesses():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "- **United Breweries** — beer business\n"
+        "- **United Spirits** — spirits business\n"
+        "- **A consortium of 17 banks** — lenders to the company\n"
+        "- **Kingfisher Airlines** — airline"
+    )
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "consortium of 17 banks" not in corrected.casefold()
+    assert "United Breweries" in corrected
+    assert "United Spirits" in corrected
+    assert "Kingfisher Airlines" in corrected
+    assert "removed_lender_consortium_from_business_list" in corrections
