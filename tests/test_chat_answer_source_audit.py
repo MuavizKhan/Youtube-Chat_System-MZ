@@ -2124,20 +2124,22 @@ def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case
 
 
 @pytest.mark.parametrize("case_id", ["AR03", "AR08"])
-def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
-    wrong = audit_module._bodily_sound_checks(
-        case_id,
+def test_ar03_ar08_require_veins_and_reject_artery_misattribution(case_id):
+    for wrong_answer in (
         "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
-    )
-    by_name = {check["name"]: check["passed"] for check in wrong}
-    assert by_name["sound_blood_movement"] is False
-    assert by_name["blood_movement_not_misattributed_to_arteries"] is False
+        "A heartbeat, blood flow through both veins and arteries, lungs, stomach and blinking eyes.",
+    ):
+        wrong = audit_module._bodily_sound_checks(case_id, wrong_answer)
+        by_name = {check["name"]: check["passed"] for check in wrong}
+        assert by_name["sound_blood_movement"] is False if "veins" not in wrong_answer else True
+        assert by_name["blood_movement_not_misattributed_to_arteries"] is False
 
-    correct = audit_module._bodily_sound_checks(
-        case_id,
+    for correct_answer in (
         "A heartbeat, blood flow through veins, lungs, stomach and blinking eyes.",
-    )
-    assert all(check["passed"] for check in correct), correct
+        "A heartbeat, blood flows through the veins, not the arteries; lungs, stomach and blinking eyes.",
+    ):
+        correct = audit_module._bodily_sound_checks(case_id, correct_answer)
+        assert all(check["passed"] for check in correct), (correct_answer, correct)
 
 
 def test_ar06_claim_contract_rejects_orville_spelling():
@@ -2266,4 +2268,46 @@ def test_q03_contract_rejects_any_missing_member_of_the_three_business_pairs(par
     checks = audit_module._claim_level_semantic_checks("Q03", partial)
     by_name = {check["name"]: check["passed"] for check in checks}
     assert by_name["q03_distinct_business_families"] is False, (partial, checks)
+
+
+def test_q08_q10_atomic_answer_aliases_accept_source_attributed_paraphrases_and_reject_omissions():
+    q08 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q08"]
+    q08_answer = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The Recovery Officer and Official Liquidator stated in court that the banks "
+        "had been fully paid. The banks have not submitted any statement of account."
+    )
+    q08_claims = chain_module._matched_registered_phrase_group_indices(
+        q08_answer, q08.generation_claim_answer_groups
+    )
+    assert q08_claims == {0, 1, 2}
+
+    q08_without_negative = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The Recovery Officer and Official Liquidator stated in court that the banks "
+        "had been fully paid. A statement of account was discussed."
+    )
+    assert 2 not in chain_module._matched_registered_phrase_group_indices(
+        q08_without_negative, q08.generation_claim_answer_groups
+    )
+
+    q10 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q10"]
+    q10_answer = (
+        "The global financial crisis affected every sector. Raj Shamani, the "
+        "interviewer, said money stopped and it got dry. Government policies "
+        "did not help, losses mounted, and the refusal to let Etihad invest "
+        "was the final straw."
+    )
+    assert chain_module._matched_registered_phrase_group_indices(
+        q10_answer, q10.generation_claim_answer_groups
+    ) == {0, 1, 2, 3}
+
+    wrongly_attributed = (
+        "The global financial crisis affected every sector. Vijay Mallya said "
+        "money stopped and it got dry. Government policies did not help, losses "
+        "mounted, and the refusal to let Etihad invest was the final straw."
+    )
+    assert 1 not in chain_module._matched_registered_phrase_group_indices(
+        wrongly_attributed, q10.generation_claim_answer_groups
+    )
 
