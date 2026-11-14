@@ -565,6 +565,26 @@ ARABIC_SILENCE_GOLD = (
         question_id="AR03",
         groups=(("نبض قلبك حركة الدم",),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            (
+                "blood moving through the veins",
+                "blood movement through the veins",
+                "blood flows through the veins",
+                "blood flowing through the veins",
+                "blood flow through veins",
+            ),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(("حركة الدم في عروقك",),),
+        generation_claim_answer_groups=(
+            (
+                "blood moving through the veins",
+                "blood movement through the veins",
+                "blood flows through the veins",
+                "blood flow through veins",
+            ),
+        ),
     ),
     GoldEvidenceCase(
         question_id="AR04",
