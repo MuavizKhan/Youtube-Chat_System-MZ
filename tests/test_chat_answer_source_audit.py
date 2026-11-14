@@ -2104,6 +2104,15 @@ def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims()
     checks = audit_module._claim_level_semantic_checks("Q08", grounded)
     assert all(check["passed"] for check in checks), checks
 
+    unattributed = (
+        "Mallya says 14,100 crores were recovered from him. "
+        "The banks had been fully paid. The banks had not provided a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", unattributed)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_ministry_recovery_figure"] is False
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is False
+
 
 @pytest.mark.parametrize("case_id", ["Q01", "Q11"])
 def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case_id):
@@ -2297,6 +2306,26 @@ def test_q08_q10_atomic_answer_aliases_accept_source_attributed_paraphrases_and_
     assert 2 not in chain_module._matched_registered_phrase_group_indices(
         q08_without_negative, q08.generation_claim_answer_groups
     )
+
+    unattributed_claims = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The banks had been fully paid. The banks have not submitted a statement of account."
+    )
+    unattributed_groups = chain_module._matched_registered_phrase_group_indices(
+        unattributed_claims, q08.generation_claim_answer_groups
+    )
+    assert 0 in unattributed_groups
+    assert 1 not in unattributed_groups
+
+    unattributed_amount = (
+        "14,100 crores were recovered from me. The Recovery Officer and Official "
+        "Liquidator stated in court that the banks were fully paid. The banks have "
+        "not submitted a statement of account."
+    )
+    amount_groups = chain_module._matched_registered_phrase_group_indices(
+        unattributed_amount, q08.generation_claim_answer_groups
+    )
+    assert 0 not in amount_groups
 
     q10 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q10"]
     q10_answer = (
