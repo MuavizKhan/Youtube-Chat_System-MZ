@@ -434,6 +434,8 @@ GOLD_EVIDENCE_CASES = (
                 "the banks have not submitted a statement of account",
                 "banks have not submitted a statement of account",
                 "the banks have not provided a statement of account",
+                "the banks had not provided a statement of account",
+                "banks had not provided a statement of account",
                 "the banks have not rendered a statement of account",
                 "banks have not given me a statement of account",
                 "the same banks have not given him a statement of account",
