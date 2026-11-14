@@ -2203,3 +2203,67 @@ def test_q03_normalizer_cleans_malformed_business_emphasis_and_lender_bullet():
     assert "Breweries Limited**" not in corrected
     assert "consortium of 17 banks" not in corrected.casefold()
     assert "removed_lender_consortium_from_business_list" in corrections
+
+
+def test_ew01_validator_accepts_different_as_a_modifier_but_still_requires_ways():
+    case = next(
+        item for item in audit_module.PHASE11_0_AUDIT_CASES
+        if item["id"] == "EW01"
+    )
+    for answer in (
+        "The speaker promises three ways to express himself.",
+        "The speaker promises 3 ways to express himself.",
+        "The speaker promises three different ways to express himself.",
+        "The speaker promises 3 different ways to express himself.",
+    ):
+        checks = audit_module._answer_quality_checks(case, answer)
+        by_name = {check["name"]: check["passed"] for check in checks}
+        assert by_name["answer_requirement_three_ways"] is True, (answer, checks)
+
+    checks = audit_module._answer_quality_checks(
+        case,
+        "The speaker promises three different methods to express himself.",
+    )
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["answer_requirement_three_ways"] is False, checks
+
+
+def test_q02_transfer_contract_accepts_amount_between_sent_and_back_without_reversing_direction():
+    correct_answers = (
+        "The Formula One team sent £10 million back to Kingfisher Airlines.",
+        "The Formula 1 team sent 10 million pounds back to King Fisher Airlines.",
+        "The F1 team sent back 10 million pounds to Kingfisher Airlines.",
+    )
+    for answer in correct_answers:
+        checks = audit_module._claim_level_semantic_checks("Q02", answer)
+        by_name = {check["name"]: check["passed"] for check in checks}
+        assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is True, (
+            answer, checks
+        )
+        assert by_name["q02_transfer_direction_not_reversed"] is True, (
+            answer, checks
+        )
+
+    reversed_answer = (
+        "Kingfisher Airlines paid the Formula One team 10 million pounds."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", reversed_answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is False
+    assert by_name["q02_transfer_direction_not_reversed"] is False
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "United Breweries, Air Deccan, and Royal Challengers Bangalore.",
+        "United Spirits, Kingfisher Red, and Royal Challenge.",
+        "United Breweries and United Spirits, Air Deccan, and Royal Challenge.",
+        "United Breweries and United Spirits, Kingfisher Red, and Royal Challengers Bangalore.",
+    ],
+)
+def test_q03_contract_rejects_any_missing_member_of_the_three_business_pairs(partial):
+    checks = audit_module._claim_level_semantic_checks("Q03", partial)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_distinct_business_families"] is False, (partial, checks)
+
