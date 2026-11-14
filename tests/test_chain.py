@@ -9984,3 +9984,37 @@ def test_q10_missing_atomic_claim_repair_names_interviewer_as_speaker():
     assert "Raj Shamani, the interviewer" in instruction
     assert "not to Vijay Mallya" in instruction
 
+
+@pytest.mark.unit
+def test_q02_source_claim_contract_matches_verified_formula_one_transcript_spellings():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert gold_case is not None
+    context = (
+        "[SOURCE 1]\n"
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. I also used the platform to advertise my brands. "
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines."
+    )
+
+    source_claims = chain._matched_registered_phrase_group_indices(
+        context, gold_case.generation_claim_source_groups
+    )
+
+    assert source_claims == set(range(4))
+    answer = (
+        "Mallya said he named the team Force India and used it to promote his brands. "
+        "The Formula One team sent £10 million back to Kingfisher Airlines."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is not None
+    assert "wanted the Indian flag" in instruction
+
