@@ -2005,3 +2005,145 @@ def test_temporal_location_audit_rejects_repair_diagnostics_with_changed_candida
     assert check is not None
     assert check["passed"] is False
 
+
+
+
+def test_q02_claim_contract_rejects_wrong_force_india_reason_and_reversed_transfer():
+    wrong = (
+        "Mallya named Force India after his own brand. The team then provided "
+        "a £10 million sponsorship to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", wrong)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_force_india_indian_flag_reason"] is False
+    assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is False
+    assert by_name["q02_not_named_after_mallya_brand"] is False
+
+    grounded = (
+        "Mallya named the team Force India because he wanted the Indian flag "
+        "on the grid and a team with roots in India. He used the Formula One "
+        "platform to promote Royal Challenge and Kingfisher. The Formula One "
+        "team sent back 10 million pounds to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_q03_claim_contract_requires_three_distinct_business_families():
+    incomplete = (
+        "He discusses United Breweries, United Spirits and Kingfisher Airlines. "
+        "A consortium of 17 banks provided finance."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", incomplete)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_distinct_business_families"] is False
+
+    complete = (
+        "The businesses include United Breweries and United Spirits, Air Deccan "
+        "and Kingfisher Red, and Royal Challengers Bangalore, selected to promote "
+        "Royal Challenge whisky. The 17-bank consortium was a group of lenders."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", complete)
+    assert all(check["passed"] for check in checks), checks
+
+
+@pytest.mark.parametrize("case_id", ["Q04", "Q10"])
+def test_q04_q10_claim_contract_keeps_interviewer_phrase_attribution(case_id):
+    misattributed = (
+        "Mallya says the global financial crisis meant money stopped and it got dry."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, misattributed)
+    assert checks[0]["passed"] is False, checks
+
+    correctly_attributed = (
+        "Mallya says the crisis affected every sector. Interviewer Raj Shamani "
+        "then says that money stopped and it got dry."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, correctly_attributed)
+    assert checks[0]["passed"] is True, checks
+
+
+def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
+    unsupported = (
+        "The Kingfisher brand had black-and-gold packaging and a bird logo."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q06", unsupported)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q06_brand_personality"] is False
+    assert by_name["q06_surrogate_advertising"] is False
+    assert by_name["q06_kingfisher_water_business"] is False
+    assert by_name["q06_avoids_unsupported_visual_identity_details"] is False
+
+    grounded = (
+        "Mallya says a brand needs a personality. Because alcohol advertising "
+        "was banned, he used surrogate advertising and built a water business "
+        "around Kingfisher so it could be advertised to promote the core brand."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q06", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims():
+    incomplete = (
+        "The Ministry of Finance report showed 14,100 crores recovered from him. "
+        "He says he did not receive a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", incomplete)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_ministry_recovery_figure"] is True
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is False
+    assert by_name["q08_missing_statement_of_account"] is True
+
+    grounded = (
+        "Mallya says the Ministry of Finance report showed 14,100 crores "
+        "recovered from him. He says the Recovery Officer and Official "
+        "Liquidator had stated in court that the banks had been fully paid, "
+        "but the banks had not provided a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", grounded)
+    assert all(check["passed"] for check in checks), checks
+
+
+@pytest.mark.parametrize("case_id", ["Q01", "Q11"])
+def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case_id):
+    unsupported = (
+        "The airline faced a 9,000-crore loan default before it collapsed."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, unsupported)
+    assert checks[0]["passed"] is False, checks
+
+    qualified = (
+        "The opening narrator's framing described a 9,000-crore loan-default "
+        "claim; that introduction is not itself a verified statement by Mallya."
+    )
+    checks = audit_module._claim_level_semantic_checks(case_id, qualified)
+    assert checks[0]["passed"] is True, checks
+
+
+@pytest.mark.parametrize("case_id", ["AR03", "AR08"])
+def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
+    wrong = _bodily_sound_checks(
+        case_id,
+        "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
+    )
+    by_name = {check["name"]: check["passed"] for check in wrong}
+    assert by_name["sound_blood_movement_in_veins"] is False
+    assert by_name["blood_movement_not_misattributed_to_arteries"] is False
+
+    correct = _bodily_sound_checks(
+        case_id,
+        "A heartbeat, blood flow through veins, lungs, stomach and blinking eyes.",
+    )
+    assert all(check["passed"] for check in correct), correct
+
+
+def test_ar06_claim_contract_rejects_orville_spelling():
+    wrong = audit_module._claim_level_semantic_checks(
+        "AR06", "The Orville room is not comfortable."
+    )
+    assert wrong[0]["passed"] is False, wrong
+
+    correct = audit_module._claim_level_semantic_checks(
+        "AR06", "The room's silence does not provide the expected comfort."
+    )
+    assert correct[0]["passed"] is True, correct
