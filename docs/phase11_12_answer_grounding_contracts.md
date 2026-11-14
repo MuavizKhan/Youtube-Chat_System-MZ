@@ -89,3 +89,10 @@ Do not re-open resolved problems while addressing answer semantics:
 This PR must not be merged solely because the historical consolidated
 Phase 11.11 report says 43/43. The new tests and fresh live acceptance are
 required gates.
+
+
+## CI remediation note (2026-11-14)
+
+- Q08 answer completeness does not block its existing question-scoped financial fallback. The fallback remains responsible for verifying all required source claims before producing an answer.
+- Q04/Q10 interviewer attribution repair is independent of the broader financial gold-group threshold, but only runs when the disputed wording and interviewer speaker marker both appear in the supplied context.
+- Prompt safeguard wording for English translation and financial claim attribution remains compatible with the earlier regression tests.
