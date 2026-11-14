@@ -3267,7 +3267,7 @@ def _normalize_registered_transcript_answer(
             corrections.append("corrected_decision_date_vs_launch_date")
         corrected, count = re.subn(
             r"before facing financial difficulties and a 9,000\s*"
-            r"crore[-\s]rupee loan default",
+            r"crore[\s\u2010-\u2015-]rupee loan default",
             "before facing severe financial difficulties",
             corrected,
             count=1,
@@ -3276,9 +3276,9 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("removed_disputed_intro_default_framing")
         corrected, count = re.subn(
-            r"(around\\s+2002[\\s\\u2010-\\u2015-]*2003)\\s+"
+            r"(around\s+2002[\s\u2010-\u2015-]*2003)\s+"
             r"(Kingfisher Airlines launched)",
-            r"\\1; \\2",
+            r"\1; \2",
             corrected,
             count=1,
             flags=re.IGNORECASE,
@@ -3480,10 +3480,10 @@ def _normalize_registered_transcript_answer(
         if count:
             corrections.append("corrected_pranab_mukherjee_name")
         corrected, count = re.subn(
-            r",?\\s*(?:including|such as)\\s+(?:the\\s+)?"
-            r"9[\\s,\\u202f]*000[\\s\\u2010-\\u2015-]*"
-            r"crore(?:[\\s\\u2010-\\u2015-]*rupee)?\\s+loan\\s+default"
-            r"(?:\\s+and\\s+the\\s+government(?:'s|’s)?\\s+intervention)?",
+            r",?\s*(?:including|such as)\s+(?:the\s+)?"
+            r"9[\s,\u202f]*000[\s\u2010-\u2015-]*"
+            r"crore(?:[\s\u2010-\u2015-]*rupee)?\s+loan\s+default"
+            r"(?:\s+and\s+the\s+government(?:'s|’s)?\s+intervention)?",
             " including the later discussion of government policy",
             corrected,
             count=1,
@@ -3494,7 +3494,7 @@ def _normalize_registered_transcript_answer(
 
     elif question_id == "AR06":
         corrected, count = re.subn(
-            r"\\bOrville\\b",
+            r"\bOrville\b",
             "Orfield",
             corrected,
             flags=re.IGNORECASE,
@@ -3869,6 +3869,31 @@ def _gold_evidence_repair_instruction(
                         "Do not add timestamps.\nMISSING SOURCE-SUPPORTED CLAIMS:\n"
                         + "\n".join(missing_lines)
                     )
+
+    if question_id in {"Q04", "Q10"}:
+        uses_interviewer_phrase = bool(re.search(
+            r"\b(?:money stopped|it got dry|money dried up)\b",
+            answer_text,
+            re.IGNORECASE,
+        ))
+        interviewer_attribution = bool(re.search(
+            r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
+            r"\b(?:money stopped|it got dry|money dried up)\b|"
+            r"\b(?:money stopped|it got dry|money dried up)\b.{0,100}"
+            r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
+            answer_text,
+            re.IGNORECASE,
+        ))
+        if uses_interviewer_phrase and not interviewer_attribution:
+            instructions.append(
+                "SPEAKER-ATTRIBUTION REPAIR. The supplied speaker-labelled "
+                "passage identifies Raj Shamani, the interviewer, as the speaker "
+                "who says 'Money stopped, it got dry.' Mallya separately says the "
+                "global financial crisis affected the whole aviation sector and "
+                "every sector. Rewrite the answer so the interviewer's phrase is "
+                "attributed to Raj Shamani, not Vijay Mallya. Keep the two speakers' "
+                "statements distinct and use only the supplied transcript."
+            )
 
     if not instructions:
         return None
