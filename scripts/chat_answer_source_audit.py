@@ -823,7 +823,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     text = _substantive_answer(answer)
     requirements = [
         ("heartbeat", r"heart\s*beat|heartbeat|\bpulse\b"),
-        ("blood_movement_in_veins", r"(?:blood.{0,35}veins?|veins?.{0,35}blood)"),
+        ("blood_movement", r"(?:blood.{0,35}veins?|veins?.{0,35}blood)"),
         ("lungs_or_breathing", r"lung|breath"),
         ("stomach", r"stomach|rumbl|belly"),
         ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
@@ -1100,8 +1100,9 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "q08_missing_statement_of_account",
             bool(re.search(r"statement of account", text, re.IGNORECASE))
             and bool(re.search(
-                r"not (?:been )?(?:given|provided|submitted|received)|"
-                r"did not (?:receive|get)|had not received|was not provided|"
+                r"not (?:been )?(?:given|provided|submitted|received|rendered)|"
+                r"(?:did|does|do) not (?:receive|get|provide)|"
+                r"(?:had|has|have) not (?:received|provided)|was not provided|"
                 r"failed to (?:give|provide|submit)|no statement",
                 text,
                 re.IGNORECASE,

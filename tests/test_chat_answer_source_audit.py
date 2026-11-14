@@ -585,8 +585,9 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
         case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
     )
     answer = (
-        "Vijay Mallya discusses United\u202fBreweries and "
-        "United\u202fSpirits, alongside Kingfisher Airlines."
+        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits, "
+        "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore and "
+        "Royal Challenge."
     )
 
     checks = _answer_quality_checks(case, answer)
@@ -623,39 +624,38 @@ def test_ew02_live_requirement_accepts_nonbreaking_hyphen():
     assert all(check["passed"] for check in checks), checks
 
 
-def test_q08_requires_both_recovery_amount_and_bank_account_reference():
+def test_q08_requires_recovery_amount_court_statement_and_missing_account():
     case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q08")
-
     complete = _answer_quality_checks(
         case,
         "The Ministry of Finance report attributes 14,100 crore recovered. "
-        'The retrieved transcript includes the phrase "statement of account".',
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid, but the banks have not provided a statement "
+        "of account.",
     )
     assert all(check["passed"] for check in complete), complete
-
     missing_account_reference = _answer_quality_checks(
         case,
-        "The Ministry of Finance report attributes 14,100 crore recovered.",
+        "The Ministry of Finance report attributes 14,100 crore recovered. "
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid.",
     )
-    missing_account_names = [
-        check["name"] for check in missing_account_reference
-        if not check["passed"]
-    ]
-    assert missing_account_names == [
-        "answer_requirement_bank_account_reference"
-    ]
-
+    missing_account_names = {c["name"] for c in missing_account_reference if not c["passed"]}
+    assert missing_account_names == {
+        "answer_requirement_bank_account_reference",
+        "q08_missing_statement_of_account",
+    }
     missing_recovery_amount = _answer_quality_checks(
         case,
-        'The retrieved transcript includes the phrase "statement of account".',
+        "The Recovery Officer and Official Liquidator said in court that the "
+        "banks had been fully paid, but the banks have not provided a statement "
+        "of account.",
     )
-    missing_amount_names = [
-        check["name"] for check in missing_recovery_amount
-        if not check["passed"]
-    ]
-    assert missing_amount_names == [
-        "answer_requirement_recovery_amount"
-    ]
+    missing_amount_names = {c["name"] for c in missing_recovery_amount if not c["passed"]}
+    assert missing_amount_names == {
+        "answer_requirement_recovery_amount",
+        "q08_ministry_recovery_figure",
+    }
 
 
 @pytest.mark.parametrize("case_id", ["HI01", "HI06"])
@@ -2111,14 +2111,16 @@ def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case
         "The airline faced a 9,000-crore loan default before it collapsed."
     )
     checks = audit_module._claim_level_semantic_checks(case_id, unsupported)
-    assert checks[0]["passed"] is False, checks
+    by_name = {c["name"]: c["passed"] for c in checks}
+    assert by_name[f"{case_id.lower()}_no_unqualified_9000_crore_default"] is False, checks
 
     qualified = (
         "The opening narrator's framing described a 9,000-crore loan-default "
         "claim; that introduction is not itself a verified statement by Mallya."
     )
     checks = audit_module._claim_level_semantic_checks(case_id, qualified)
-    assert checks[0]["passed"] is True, checks
+    by_name = {c["name"]: c["passed"] for c in checks}
+    assert by_name[f"{case_id.lower()}_no_unqualified_9000_crore_default"] is True, checks
 
 
 @pytest.mark.parametrize("case_id", ["AR03", "AR08"])
@@ -2128,7 +2130,7 @@ def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
         "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
     )
     by_name = {check["name"]: check["passed"] for check in wrong}
-    assert by_name["sound_blood_movement_in_veins"] is False
+    assert by_name["sound_blood_movement"] is False
     assert by_name["blood_movement_not_misattributed_to_arteries"] is False
 
     correct = audit_module._bodily_sound_checks(

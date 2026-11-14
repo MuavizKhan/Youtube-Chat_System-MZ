@@ -9564,7 +9564,14 @@ def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
 
 @pytest.mark.unit
 def test_registered_answer_claim_repair_only_runs_when_every_claim_is_in_prompt():
-    question = "What connection does Vijay Mallya discuss with Formula One?"
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q02"
+    )
+    registered_id, _case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q02"
     all_claims = (
         "[SOURCE 1]\n"
         "Formula 1 is the pinnacle of motorsport. "
@@ -9602,20 +9609,21 @@ def test_registered_answer_claim_repair_only_runs_when_every_claim_is_in_prompt(
 
 @pytest.mark.unit
 def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
-    question = (
-        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
     )
-    case = chain.get_gold_evidence_case("Q04")
-    evidence = " ".join(group[0] for group in case.generation_fallback_source_groups)
-    context = "[SOURCE 1]\n" + evidence
-    answer = (
-        "Mallya says the global financial crisis meant money stopped and it got dry."
+    registered_id, _case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
     )
+    assert registered_id == "Q04"
+    context = (
+        "[SOURCE 1]\nThe global financial crisis affected every sector. "
+        "Raj Shamani said money stopped and it got dry."
+    )
+    answer = "Mallya says the global financial crisis meant money stopped and it got dry."
     instruction = chain._gold_evidence_repair_instruction(
-        question=question,
-        answer=answer,
-        context=context,
-        video_id="MdeQMVBuGgY",
+        question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
     )
     assert instruction is not None
     assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
