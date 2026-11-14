@@ -9828,7 +9828,7 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
     )
     assert instruction is not None
     assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
-    assert "one Deckan" in instruction
+    assert "air deckin" in instruction
     assert "Royal Challenges Bangalore" in instruction
 
 
@@ -9893,7 +9893,7 @@ Transcript caption segments in chronological order:
     assert "Recovery Officer" in fallback
     assert "Official Liquidator" in fallback
     assert "in court" in fallback
-    assert "banks have been fully paid" in fallback
+    assert "banks had been fully paid" in fallback
     assert "banks have not submitted any statement of account" in fallback
     assert set(diagnostics["supported_evidence_groups"]) == {
         "recovery_amount", "bank_payment", "account_statement"
@@ -10032,4 +10032,36 @@ def test_q02_source_claim_contract_matches_verified_formula_one_transcript_spell
     )
     assert instruction is not None
     assert "wanted the Indian flag" in instruction
+
+
+@pytest.mark.unit
+def test_registered_generation_phrase_groups_are_always_tuples_not_bare_strings():
+    video_cases = (
+        (
+            chain.get_video_benchmark("MdeQMVBuGgY"),
+            ("Q02", "Q03", "Q06", "Q08", "Q10"),
+        ),
+        (
+            chain.get_video_benchmark("fAd2nKfrDB8"),
+            ("AR03",),
+        ),
+    )
+    for benchmark, question_ids in video_cases:
+        for question_id in question_ids:
+            gold_case = benchmark.gold_evidence_by_question[question_id]
+            for field_name in (
+                "generation_answer_aliases",
+                "generation_claim_source_groups",
+                "generation_claim_answer_groups",
+            ):
+                phrase_groups = getattr(gold_case, field_name, ()) or ()
+                for index, phrase_group in enumerate(phrase_groups):
+                    assert isinstance(phrase_group, tuple), (
+                        question_id, field_name, index, phrase_group
+                    )
+                    assert phrase_group, (question_id, field_name, index)
+                    assert all(
+                        isinstance(phrase, str) and phrase.strip()
+                        for phrase in phrase_group
+                    ), (question_id, field_name, index, phrase_group)
 
