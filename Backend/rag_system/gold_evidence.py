@@ -487,7 +487,8 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_source_groups=(
             ("global financial crisis"),
             ("money stopped", "it got dry"),
-            ("government policies that didn't help", "mounting losses"),
+            ("government policies that didn't help", "government policy that didn't help"),
+            ("mounting losses",),
             ("refusal to let Etihad invest", "final straw"),
         ),
         generation_claim_answer_groups=(
@@ -506,7 +507,14 @@ GOLD_EVIDENCE_CASES = (
                 "the interviewer said the money had stopped and dried up",
                 "the interviewer described money stopping and getting dry",
             ),
-            ("government policies that did not help", "mounting losses"),
+            (
+                "government policies that did not help",
+                "government policies did not help",
+                "government policy did not help",
+                "government policy was not helpful",
+                "policies of the government did not help",
+            ),
+            ("mounting losses", "losses mounted", "losses continued to mount", "losses were mounting"),
             ("refusal to let Etihad invest", "final straw"),
         ),
     ),
