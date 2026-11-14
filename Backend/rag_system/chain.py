@@ -6010,6 +6010,11 @@ def _extract_bank_recovery_statement_evidence(
         r"\b(?:recovery\s+officer|official\s+liquidator)\b",
         re.IGNORECASE,
     )
+    both_recovery_actors_pattern = re.compile(
+        r"\brecovery\s+officer\b.{0,900}\bofficial\s+liquidator\b|"
+        r"\bofficial\s+liquidator\b.{0,900}\brecovery\s+officer\b",
+        re.IGNORECASE,
+    )
     attribution_pattern = re.compile(
         r"\b(?:recovery\s+officer|official\s+liquidator|court|judicial\s+proceedings)\b",
         re.IGNORECASE,
@@ -6065,6 +6070,10 @@ def _extract_bank_recovery_statement_evidence(
             if group_name == "bank_payment":
                 # Prefer the shortest same-source caption window that also keeps
                 # the court/official attribution with the bank-payment assertion.
+                joint_actor_windows = [
+                    item for item in candidates
+                    if both_recovery_actors_pattern.search(item[2])
+                ]
                 named_actor_windows = [
                     item for item in candidates
                     if named_recovery_actor_pattern.search(item[2])
@@ -6073,10 +6082,11 @@ def _extract_bank_recovery_statement_evidence(
                     item for item in candidates
                     if attribution_pattern.search(item[2])
                 ]
-                # Prefer an explicit Recovery Officer / Official Liquidator
-                # reference over a shorter window that contains only "court".
+                # "Both these" in the transcript refers to the two immediately
+                # preceding office-holders. Prefer a window containing both
+                # named actors over one that borrows only a generic court marker.
                 selected = min(
-                    named_actor_windows or attributed or candidates,
+                    joint_actor_windows or named_actor_windows or attributed or candidates,
                     key=lambda item: (item[0], item[1]),
                 )
                 window_size, _window_start, cleaned = selected
