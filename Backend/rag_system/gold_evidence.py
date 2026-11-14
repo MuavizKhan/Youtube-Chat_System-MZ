@@ -113,16 +113,53 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
-            ("named it Force India", "called it Force India"),
-            ("wanted the Indian flag to be on the grid", "team with roots in India"),
-            ("used the platform to advertise my brand", "used the platform to advertise my brands"),
-            ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
+            (
+                "named it Force India",
+                "called it Force India",
+                "named the team Force India",
+                "called the team Force India",
+            ),
+            (
+                "wanted the Indian flag to be on the grid",
+                "wanted the Indian flag on the grid",
+                "team with roots in India",
+                "put an Indian Formula 1 team on the grid",
+            ),
+            (
+                "used the platform to advertise my brand",
+                "used the platform to advertise my brands",
+                "use the platform to advertise my brands",
+                "car and all the merchandise around Formula 1 had a lot of our brands on it",
+            ),
+            (
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent back 10 million pounds to King Fisher Airlines",
+                "Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to Kingfisher Airlines",
+                "F1 team sent back 10 million pounds to Kingfisher Airlines",
+            ),
         ),
         generation_claim_answer_groups=(
-            ("named the Formula One team Force India", "called the team Force India"),
-            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
-            ("used the Formula One platform, car livery and merchandise to promote brands"),
-            ("Formula One team sent 10 million pounds back to Kingfisher Airlines", "F1 team returned 10 million pounds to Kingfisher Airlines"),
+            (
+                "named the Formula One team Force India",
+                "named the team Force India",
+                "called the team Force India",
+            ),
+            (
+                "wanted the Indian flag on the grid",
+                "wanted an Indian team on the F1 grid",
+                "wanted the world to know the team had roots in India",
+            ),
+            (
+                "used the Formula One platform, car livery and merchandise to promote brands",
+                "used the Formula One platform to advertise his brands",
+            ),
+            (
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent £10 million back to Kingfisher Airlines",
+                "F1 team returned 10 million pounds to Kingfisher Airlines",
+            ),
         ),
     ),
     GoldEvidenceCase(
@@ -144,10 +181,22 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_source_groups=(
             ("United Breweries Limited", "United Breweries"),
             ("United Spirits"),
-            ("Air Deccan"),
-            ("Kingfisher Red"),
-            ("Royal Challengers Bangalore", "RCB"),
-            ("Royal Challenge"),
+            (
+                "Air Deccan",
+                "Air Deckan",
+                "air deckin",
+                "air decken",
+                "one Deckan",
+                "one Deccan",
+                "acquired Eden",
+            ),
+            ("Kingfisher Red", "King Fisher Red"),
+            (
+                "Royal Challengers Bangalore",
+                "Royal Challenges Bangalore",
+                "RCB",
+            ),
+            ("Royal Challenge", "Royal Challenges"),
         ),
         generation_claim_answer_groups=(
             ("United Breweries"),
