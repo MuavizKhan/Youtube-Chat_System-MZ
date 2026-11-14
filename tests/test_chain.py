@@ -9779,7 +9779,7 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
     context = (
         "[SOURCE 1]\n"
         "United Breweries Limited and United Spirits were discussed. "
-        "I acquired Eden, and one Deckan was called Kingfisher Red. "
+        "The airline was called air deckin, or one Deckan, and was rebranded. "
         "Royal Challenges Bangalore was named after Royal Challenges."
     )
     incomplete_answer = (
@@ -9827,7 +9827,7 @@ def test_q03_atomic_claim_contract_does_not_treat_one_member_of_each_pair_as_com
     )
     assert instruction is not None
     assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
-    assert "acquired Eden" in instruction
+    assert "one Deckan" in instruction
     assert "Royal Challenges Bangalore" in instruction
 
 
