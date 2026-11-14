@@ -492,7 +492,7 @@ GOLD_EVIDENCE_CASES = (
             ("refusal to let Etihad invest", "final straw"),
         ),
         generation_claim_answer_groups=(
-            ("global financial crisis"),
+            ("global financial crisis",),
             (
                 "Raj Shamani, the interviewer, said money stopped and it got dry",
                 "Raj Shamani said money stopped and it got dry",
