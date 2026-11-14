@@ -397,6 +397,7 @@ GOLD_EVIDENCE_CASES = (
             (
                 "Ministry of Finance report says 14,100 crores were recovered from me",
                 "Ministry of Finance report showed 14,100 crores recovered from him",
+                "the transcript attributes a recovery figure of 14,100 crore to the Ministry of Finance report",
                 "14,100 crores were recovered according to the Ministry of Finance report",
                 "Finance Minister said 14,100 crores had been recovered",
             ),
@@ -418,6 +419,7 @@ GOLD_EVIDENCE_CASES = (
             (
                 "the Ministry of Finance report says 14,100 crores were recovered from me",
                 "the Ministry of Finance report says 14,100 crores were recovered from him",
+                "the transcript attributes a recovery figure of 14,100 crore to the Ministry of Finance report",
                 "the Ministry of Finance report showed 14,100 crores recovered from him",
                 "14,100 crores were recovered according to the Ministry of Finance report",
                 "the finance minister said 14,100 crores had been recovered",
