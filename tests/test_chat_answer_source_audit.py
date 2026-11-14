@@ -2104,6 +2104,15 @@ def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims()
     checks = audit_module._claim_level_semantic_checks("Q08", grounded)
     assert all(check["passed"] for check in checks), checks
 
+    unattributed = (
+        "Mallya says 14,100 crores were recovered from him. "
+        "The banks had been fully paid. The banks had not provided a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", unattributed)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_ministry_recovery_figure"] is False
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is False
+
 
 @pytest.mark.parametrize("case_id", ["Q01", "Q11"])
 def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case_id):
@@ -2124,20 +2133,29 @@ def test_q01_q11_claim_contract_rejects_unqualified_opening_default_framing(case
 
 
 @pytest.mark.parametrize("case_id", ["AR03", "AR08"])
-def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
-    wrong = audit_module._bodily_sound_checks(
-        case_id,
-        "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
+def test_ar03_ar08_require_veins_and_reject_artery_misattribution(case_id):
+    wrong_answers = (
+        (
+            "A heartbeat, blood flow through arteries, lungs, stomach and blinking eyes.",
+            False,
+        ),
+        (
+            "A heartbeat, blood flow through both veins and arteries, lungs, stomach and blinking eyes.",
+            True,
+        ),
     )
-    by_name = {check["name"]: check["passed"] for check in wrong}
-    assert by_name["sound_blood_movement"] is False
-    assert by_name["blood_movement_not_misattributed_to_arteries"] is False
+    for wrong_answer, expected_blood_coverage in wrong_answers:
+        wrong = audit_module._bodily_sound_checks(case_id, wrong_answer)
+        by_name = {check["name"]: check["passed"] for check in wrong}
+        assert by_name["sound_blood_movement"] is expected_blood_coverage
+        assert by_name["blood_movement_not_misattributed_to_arteries"] is False
 
-    correct = audit_module._bodily_sound_checks(
-        case_id,
+    for correct_answer in (
         "A heartbeat, blood flow through veins, lungs, stomach and blinking eyes.",
-    )
-    assert all(check["passed"] for check in correct), correct
+        "A heartbeat, blood flows through the veins, not the arteries; lungs, stomach and blinking eyes.",
+    ):
+        correct = audit_module._bodily_sound_checks(case_id, correct_answer)
+        assert all(check["passed"] for check in correct), (correct_answer, correct)
 
 
 def test_ar06_claim_contract_rejects_orville_spelling():
@@ -2203,3 +2221,139 @@ def test_q03_normalizer_cleans_malformed_business_emphasis_and_lender_bullet():
     assert "Breweries Limited**" not in corrected
     assert "consortium of 17 banks" not in corrected.casefold()
     assert "removed_lender_consortium_from_business_list" in corrections
+
+
+def test_ew01_validator_accepts_different_as_a_modifier_but_still_requires_ways():
+    case = next(
+        item for item in audit_module.PHASE11_0_AUDIT_CASES
+        if item["id"] == "EW01"
+    )
+    for answer in (
+        "The speaker promises three ways to express himself.",
+        "The speaker promises 3 ways to express himself.",
+        "The speaker promises three different ways to express himself.",
+        "The speaker promises 3 different ways to express himself.",
+    ):
+        checks = audit_module._answer_quality_checks(case, answer)
+        by_name = {check["name"]: check["passed"] for check in checks}
+        assert by_name["answer_requirement_three_ways"] is True, (answer, checks)
+
+    checks = audit_module._answer_quality_checks(
+        case,
+        "The speaker promises three different methods to express himself.",
+    )
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["answer_requirement_three_ways"] is False, checks
+
+
+def test_q02_transfer_contract_accepts_amount_between_sent_and_back_without_reversing_direction():
+    correct_answers = (
+        "The Formula One team sent £10 million back to Kingfisher Airlines.",
+        "The Formula 1 team sent 10 million pounds back to King Fisher Airlines.",
+        "The F1 team sent back 10 million pounds to Kingfisher Airlines.",
+    )
+    for answer in correct_answers:
+        checks = audit_module._claim_level_semantic_checks("Q02", answer)
+        by_name = {check["name"]: check["passed"] for check in checks}
+        assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is True, (
+            answer, checks
+        )
+        assert by_name["q02_transfer_direction_not_reversed"] is True, (
+            answer, checks
+        )
+
+    reversed_answer = (
+        "Kingfisher Airlines paid the Formula One team 10 million pounds."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", reversed_answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is False
+    assert by_name["q02_transfer_direction_not_reversed"] is False
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        "United Breweries, Air Deccan, and Royal Challengers Bangalore.",
+        "United Spirits, Kingfisher Red, and Royal Challenge.",
+        "United Breweries and United Spirits, Air Deccan, and Royal Challenge.",
+        "United Breweries and United Spirits, Kingfisher Red, and Royal Challengers Bangalore.",
+    ],
+)
+def test_q03_contract_rejects_any_missing_member_of_the_three_business_pairs(partial):
+    checks = audit_module._claim_level_semantic_checks("Q03", partial)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_distinct_business_families"] is False, (partial, checks)
+
+
+def test_q08_q10_atomic_answer_aliases_accept_source_attributed_paraphrases_and_reject_omissions():
+    q08 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q08"]
+    q08_answer = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The Recovery Officer and Official Liquidator stated in court that the banks "
+        "had been fully paid. The banks have not submitted any statement of account."
+    )
+    q08_claims = chain_module._matched_registered_phrase_group_indices(
+        q08_answer, q08.generation_claim_answer_groups
+    )
+    assert q08_claims == {0, 1, 2}
+
+    q08_without_negative = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The Recovery Officer and Official Liquidator stated in court that the banks "
+        "had been fully paid. A statement of account was discussed."
+    )
+    assert 2 not in chain_module._matched_registered_phrase_group_indices(
+        q08_without_negative, q08.generation_claim_answer_groups
+    )
+
+    unattributed_claims = (
+        "The Ministry of Finance report says 14,100 crores were recovered from me. "
+        "The banks had been fully paid. The banks have not submitted a statement of account."
+    )
+    unattributed_groups = chain_module._matched_registered_phrase_group_indices(
+        unattributed_claims, q08.generation_claim_answer_groups
+    )
+    assert 0 in unattributed_groups
+    assert 1 not in unattributed_groups
+
+    unattributed_amount = (
+        "14,100 crores were recovered from me. The Recovery Officer and Official "
+        "Liquidator stated in court that the banks were fully paid. The banks have "
+        "not submitted a statement of account."
+    )
+    amount_groups = chain_module._matched_registered_phrase_group_indices(
+        unattributed_amount, q08.generation_claim_answer_groups
+    )
+    assert 0 not in amount_groups
+
+    fallback_answer = (
+        "The transcript attributes a recovery figure of 14,100 crore to the "
+        "Ministry of Finance report. The Recovery Officer and Official Liquidator "
+        "stated in court that the banks had been fully paid. The banks have not "
+        "submitted any statement of account."
+    )
+    assert chain_module._matched_registered_phrase_group_indices(
+        fallback_answer, q08.generation_claim_answer_groups
+    ) == {0, 1, 2}
+
+    q10 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q10"]
+    q10_answer = (
+        "The global financial crisis affected every sector. Raj Shamani, the "
+        "interviewer, said money stopped and it got dry. Government policies "
+        "did not help, losses mounted, and the refusal to let Etihad invest "
+        "was the final straw."
+    )
+    assert chain_module._matched_registered_phrase_group_indices(
+        q10_answer, q10.generation_claim_answer_groups
+    ) == {0, 1, 2, 3, 4}
+
+    wrongly_attributed = (
+        "The global financial crisis affected every sector. Vijay Mallya said "
+        "money stopped and it got dry. Government policies did not help, losses "
+        "mounted, and the refusal to let Etihad invest was the final straw."
+    )
+    assert 1 not in chain_module._matched_registered_phrase_group_indices(
+        wrongly_attributed, q10.generation_claim_answer_groups
+    )
+

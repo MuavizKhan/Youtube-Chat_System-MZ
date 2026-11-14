@@ -170,7 +170,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
             # This direct-fact question asks for the count. Require the number
             # and its unit; don't force the model to restate the question's
             # "express yourself" wording when "Three ways." is a complete answer.
-            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+ways?\b"},
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+(?:different\s+)?ways?\b"},
         ),
     ),
     _make_audit_case(
@@ -822,7 +822,11 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     text = _substantive_answer(answer)
     requirements = [
         ("heartbeat", r"heart\s*beat|heartbeat|\bpulse\b"),
-        ("blood_movement", r"(?:blood.{0,35}veins?|veins?.{0,35}blood)"),
+        (
+            "blood_movement",
+            r"(?:blood.{0,45}(?:veins?|venous circulation)|"
+            r"(?:veins?|venous circulation).{0,45}blood)",
+        ),
         ("lungs_or_breathing", r"lung|breath"),
         ("stomach", r"stomach|rumbl|belly"),
         ("eyelids_blinking", r"eyelid|blink|eye.{0,25}(?:blink|lid)"),
@@ -835,12 +839,34 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    has_veins = bool(re.search(r"\bveins?\b", text, re.IGNORECASE))
-    has_arteries_only = bool(re.search(r"\barter(?:y|ies)\b", text, re.IGNORECASE)) and not has_veins
+    artery_mentions = list(re.finditer(
+        r"\barter(?:y|ies)\b",
+        text,
+        re.IGNORECASE,
+    ))
+    unnegated_artery_claim = False
+    for mention in artery_mentions:
+        left = text[max(0, mention.start() - 45):mention.start()]
+        right = text[mention.end():min(len(text), mention.end() + 45)]
+        negated_before = bool(re.search(
+            r"\b(?:not|rather than|instead of)\s+(?:(?:flow|flows|flowing)\s+)?"
+            r"(?:through\s+)?(?:the\s+)?$",
+            left,
+            re.IGNORECASE,
+        ))
+        negated_after = bool(re.match(
+            r"\s+(?:are|is|was|were)?\s*(?:not|incorrect|wrong)\b",
+            right,
+            re.IGNORECASE,
+        ))
+        if not (negated_before or negated_after):
+            unnegated_artery_claim = True
+            break
+
     checks.append(_quality_check(
         "blood_movement_not_misattributed_to_arteries",
-        not has_arteries_only,
-        "The transcript-supported reference is to veins; an arteries-only substitution is incorrect.",
+        not unnegated_artery_claim,
+        "The transcript-supported reference is to veins; any positive attribution of the blood-movement sound to arteries is incorrect.",
     ))
     return checks
 
@@ -974,16 +1000,23 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             re.IGNORECASE,
         ))
         returned_to_kingfisher = bool(re.search(
-            r"(?:Formula One|F1)(?:\s+team)?.{0,180}"
+            r"(?:Formula One|Formula 1|F1)(?:\s+team)?.{0,180}"
             r"(?:sent.{0,30}back|returned|repaid).{0,120}"
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
-            r".{0,120}Kingfisher",
+            r".{0,120}King\s?fisher",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
+            r"(?:Formula One|Formula 1|F1)(?:\s+team)?.{0,180}"
+            r"(?:sent|returned|repaid).{0,40}"
+            r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,50}back.{0,100}to\s+King\s?fisher",
             text,
             re.IGNORECASE,
         ) or re.search(
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
             r".{0,100}(?:sent.{0,30}back|returned|repaid).{0,100}"
-            r"to\s+Kingfisher",
+            r"to\s+King\s?fisher",
             text,
             re.IGNORECASE,
         ))
@@ -1078,22 +1111,32 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         )
 
     elif case_id == "Q08":
+        ministry_figure_attributed = bool(re.search(
+            r"(?:Ministry\s+of\s+Finance\s+report|Finance\s+Minister).{0,140}"
+            r"14[\s,\u202f]*100\s*(?:crores?|cr)\b|"
+            r"14[\s,\u202f]*100\s*(?:crores?|cr).{0,140}"
+            r"(?:Ministry\s+of\s+Finance\s+report|Finance\s+Minister)",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q08_ministry_recovery_figure",
-            bool(re.search(r"14[\s,\u202f]*100\s*(?:crores?|cr)\b", text, re.IGNORECASE)),
-            "Include the distinct £/₹14,100-crore recovery figure reported in Parliament.",
+            ministry_figure_attributed,
+            "Attribute the distinct £/₹14,100-crore recovery figure to the Ministry of Finance report or Finance Minister.",
         )
+        attributed_bank_payment = bool(re.search(
+            r"(?:Recovery Officer.{0,250}Official Liquidator|"
+            r"Official Liquidator.{0,250}Recovery Officer)"
+            r".{0,250}(?:stated|said|reported).{0,100}"
+            r"(?:in court|judicial proceedings).{0,120}"
+            r"(?:banks|bank).{0,60}(?:fully paid|paid in full)",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q08_banks_fully_paid_claim_attributed",
-            bool(re.search(
-                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
-                r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
-                r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
-                r"(?:Recovery Officer|Official Liquidator|court)",
-                text,
-                re.IGNORECASE,
-            )),
-            "Include the separate claim that the Recovery Officer/Official Liquidator said the banks had been fully paid.",
+            attributed_bank_payment,
+            "State that both the Recovery Officer and Official Liquidator said in court/judicial proceedings that the banks had been fully paid.",
         )
         add(
             "q08_missing_statement_of_account",
