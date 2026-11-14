@@ -1111,22 +1111,32 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         )
 
     elif case_id == "Q08":
+        ministry_figure_attributed = bool(re.search(
+            r"(?:Ministry\s+of\s+Finance\s+report|Finance\s+Minister).{0,140}"
+            r"14[\s,\u202f]*100\s*(?:crores?|cr)\b|"
+            r"14[\s,\u202f]*100\s*(?:crores?|cr).{0,140}"
+            r"(?:Ministry\s+of\s+Finance\s+report|Finance\s+Minister)",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q08_ministry_recovery_figure",
-            bool(re.search(r"14[\s,\u202f]*100\s*(?:crores?|cr)\b", text, re.IGNORECASE)),
-            "Include the distinct £/₹14,100-crore recovery figure reported in Parliament.",
+            ministry_figure_attributed,
+            "Attribute the distinct £/₹14,100-crore recovery figure to the Ministry of Finance report or Finance Minister.",
         )
+        attributed_bank_payment = bool(re.search(
+            r"(?:Recovery Officer.{0,250}Official Liquidator|"
+            r"Official Liquidator.{0,250}Recovery Officer)"
+            r".{0,250}(?:stated|said|reported).{0,100}"
+            r"(?:in court|judicial proceedings).{0,120}"
+            r"(?:banks|bank).{0,60}(?:fully paid|paid in full)",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q08_banks_fully_paid_claim_attributed",
-            bool(re.search(
-                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
-                r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
-                r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
-                r"(?:Recovery Officer|Official Liquidator|court)",
-                text,
-                re.IGNORECASE,
-            )),
-            "Include the separate claim that the Recovery Officer/Official Liquidator said the banks had been fully paid.",
+            attributed_bank_payment,
+            "State that both the Recovery Officer and Official Liquidator said in court/judicial proceedings that the banks had been fully paid.",
         )
         add(
             "q08_missing_statement_of_account",
