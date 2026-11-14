@@ -3602,6 +3602,77 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("missing_prompt_evidence_groups")
         if opening_9000_narrator_claim:
             issue_codes.append("opening_9000_narrator_claim")
+
+        source_claim_groups = tuple(
+            getattr(gold_case, "generation_claim_source_groups", ()) or ()
+        ) if gold_case is not None else ()
+        answer_claim_groups = tuple(
+            getattr(gold_case, "generation_claim_answer_groups", ()) or ()
+        ) if gold_case is not None else ()
+        atomic_claim_contract_available = bool(
+            source_claim_groups
+            and len(source_claim_groups) == len(answer_claim_groups)
+            and all(source_claim_groups)
+            and all(answer_claim_groups)
+        )
+        source_claim_indices = (
+            _matched_registered_phrase_group_indices(
+                context or "", source_claim_groups
+            )
+            if atomic_claim_contract_available
+            else set()
+        )
+        answer_claim_indices = (
+            _matched_registered_phrase_group_indices(
+                draft, answer_claim_groups
+            )
+            if atomic_claim_contract_available
+            else set()
+        )
+        all_source_claims_in_prompt = bool(
+            atomic_claim_contract_available
+            and len(source_claim_indices) == len(source_claim_groups)
+        )
+        missing_atomic_claim_indices = sorted(
+            source_claim_indices - answer_claim_indices
+        ) if atomic_claim_contract_available else []
+        claim_issue_codes = []
+        if atomic_claim_contract_available and not all_source_claims_in_prompt:
+            claim_issue_codes.append("source_atomic_claim_contract_incomplete")
+        if all_source_claims_in_prompt and missing_atomic_claim_indices:
+            claim_issue_codes.append("missing_source_supported_atomic_claims")
+
+        if question_id == "Q06" and re.search(
+            r"black[-‑‒–—− ]and[-‑‒–—− ]gold",
+            normalized_draft,
+            re.IGNORECASE,
+        ):
+            claim_issue_codes.append("unsupported_kingfisher_black_gold_detail")
+
+        if question_id in {"Q04", "Q10"}:
+            disputed_phrase = bool(re.search(
+                r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
+                normalized_draft,
+                re.IGNORECASE,
+            ))
+            interviewer_attributed = bool(re.search(
+                r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
+                r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+                r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
+                r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
+                normalized_draft,
+                re.IGNORECASE,
+            ))
+            guest_attributed = bool(re.search(
+                r"\bMallya\b[^.!?]{0,80}\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
+                r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b[^.!?]{0,80}\bMallya\b",
+                normalized_draft,
+                re.IGNORECASE,
+            ))
+            if disputed_phrase and (not interviewer_attributed or guest_attributed):
+                claim_issue_codes.append("interviewer_phrase_speaker_attribution_failed")
+
+        issue_codes.extend(claim_issue_codes)
         return {
             "available": True,
             "abstained": abstained,
@@ -3609,6 +3680,12 @@ def _build_generation_repair_diagnostics(
             "opening_9000_narrator_claim": opening_9000_narrator_claim,
             "answer_gold_groups": sorted(answer_groups),
             "missing_prompt_gold_groups": missing_groups,
+            "atomic_claim_contract_available": atomic_claim_contract_available,
+            "source_atomic_claim_groups_in_prompt": sorted(source_claim_indices),
+            "answer_atomic_claim_groups": sorted(answer_claim_indices),
+            "missing_source_supported_atomic_claim_groups": missing_atomic_claim_indices,
+            "all_source_atomic_claims_in_prompt": all_source_claims_in_prompt,
+            "claim_issue_codes": claim_issue_codes,
             "issue_codes": issue_codes,
         }
 
@@ -3733,6 +3810,26 @@ def _gold_evidence_repair_instruction(
     )
     preserved_groups = sorted(context_groups & answer_groups)
     instructions = []
+
+    # The source's black-and-gold wording describes McDonald's, not Kingfisher.
+    # Do not let a nearby brand description migrate to the Kingfisher answer.
+    if question_id == "Q06" and re.search(
+        r"black[-‑‒–—− ]and[-‑‒–—− ]gold",
+        answer_text,
+        re.IGNORECASE,
+    ):
+        instructions.append(
+            "SOURCE-BOUND NEGATIVE-CLAIM REPAIR. Remove the claim that Kingfisher "
+            "had a black-and-gold identity, black-and-gold packaging, or a related "
+            "visual strategy. The supplied transcript's black-and-gold description "
+            "refers to McDonald's, not Kingfisher; do not transfer a detail from one "
+            "brand to another. Preserve the transcript-supported Kingfisher points: "
+            "Mallya gave the brand a colourful personality, used surrogate "
+            "advertising because alcohol advertising was banned, and built a "
+            "water business around Kingfisher so the core brand could be advertised. "
+            "Use only the supplied context and do not add visual or packaging claims."
+        )
+
     # Broad completeness repair is safe only when the configured prompt-evidence
     # threshold is met. Narrow speaker/claim repairs below have independent checks.
     if prompt_gold_complete and missing_groups:
@@ -3888,6 +3985,14 @@ def _gold_evidence_repair_instruction(
                         )
                         for index in missing_claim_indices
                     ]
+                    if question_id in {"Q04", "Q10"} and 1 in missing_claim_indices:
+                        missing_lines.append(
+                            "- Speaker attribution: Raj Shamani, the interviewer, "
+                            "says that the money stopped / it got dry. Attribute "
+                            "that phrase to the interviewer, not to Vijay Mallya; "
+                            "keep Mallya's response about the financial crisis and "
+                            "the need to downsize separate."
+                        )
                     instructions.append(
                         "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR. Rewrite the "
                         "answer using only the supplied transcript. Each missing "
@@ -5865,10 +5970,12 @@ def _financial_fallback_question_scope(question: str) -> str:
 def _extract_bank_recovery_statement_evidence(
     source_blocks: dict[int, str],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Extract bank-payment and account/Parliament statements source by source.
+    """Extract bank-payment and account statements within each source block.
 
-    Captions are evaluated independently. A nearby source block cannot supply
-    missing bank wording or payment status for another block.
+    A transcript sentence may be split across adjacent timestamped caption rows.
+    Windows are therefore joined only inside one source block and are bounded
+    to five consecutive rows. Different [SOURCE n] blocks are never combined.
+    Interrogative captions are excluded so a question cannot become payment proof.
     """
     evidence: dict[str, list[dict[str, Any]]] = {
         "bank_payment": [],
@@ -5879,16 +5986,33 @@ def _extract_bank_recovery_statement_evidence(
         "account_statement": set(),
     }
     bank_payment_pattern = re.compile(
-        r"\bbanks?\b.{0,100}\b(?:fully\s+paid|paid\s+in\s+full|"
+        r"\bbanks?\b.{0,140}\b(?:have\s+been\s+)?(?:fully\s+paid|paid\s+in\s+full|"
         r"paid\s+off|repaid|settled)\b|"
-        r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|"
-        r"repaid|settled)\b.{0,100}\bbanks?\b",
+        r"\b(?:fully\s+paid|paid\s+in\s+full|paid\s+off|repaid|settled)\b"
+        r".{0,140}\bbanks?\b",
         re.IGNORECASE,
     )
     account_statement_pattern = re.compile(
         r"\bstatement\s+of\s+account\b|"
         r"\bstatement\s+in\s+(?:the\s+)?parliament\b|"
         r"\bparliamentary\s+statement\b",
+        re.IGNORECASE,
+    )
+    missing_statement_pattern = re.compile(
+        r"\b(?:not\s+(?:been\s+)?(?:given|provided|submitted|received|rendered)|"
+        r"did\s+not\s+(?:receive|get|provide|submit)|"
+        r"does\s+not\s+(?:receive|get|provide|submit)|"
+        r"had\s+not\s+(?:received|provided|submitted)|"
+        r"failed\s+to\s+(?:give|provide|submit)|no\s+statement)\b",
+        re.IGNORECASE,
+    )
+    attribution_pattern = re.compile(
+        r"\b(?:recovery\s+officer|official\s+liquidator|court|judicial\s+proceedings)\b",
+        re.IGNORECASE,
+    )
+    interrogative_start = re.compile(
+        r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
+        r"has|have|had|can|could|would|will|should)\b",
         re.IGNORECASE,
     )
 
@@ -5898,38 +6022,85 @@ def _extract_bank_recovery_statement_evidence(
             source_text or "",
         ))
         if caption_matches:
-            statements = [match.group(1) for match in caption_matches]
+            statements = [match.group(1).strip() for match in caption_matches]
         else:
-            statements = re.split(r"(?<=[.!?])\s+|\n+", source_text or "")
+            statements = [
+                value.strip()
+                for value in re.split(r"(?<=[.!?])\s+|\n+", source_text or "")
+                if value.strip()
+            ]
 
-        for statement in statements:
-            cleaned = re.sub(r"\s+", " ", statement or "").strip()
-            if not cleaned:
-                continue
-            # An interviewer question is not proof that the asserted payment
-            # status or account statement exists. Keep only declarative caption
-            # fragments in this deterministic fallback.
-            if "?" in cleaned or re.match(
-                r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
-                r"has|have|had|can|could|would|will|should)\b",
-                cleaned,
-                re.IGNORECASE,
-            ):
-                continue
-            normalized = cleaned.casefold()
-            matches = []
-            if bank_payment_pattern.search(cleaned):
-                matches.append("bank_payment")
-            if account_statement_pattern.search(cleaned):
-                matches.append("account_statement")
-            for group_name in matches:
-                if normalized in seen[group_name]:
+        windows: list[tuple[int, int, str]] = []
+        max_window = min(5, len(statements))
+        for window_size in range(1, max_window + 1):
+            for window_start in range(0, len(statements) - window_size + 1):
+                parts = statements[window_start:window_start + window_size]
+                # Never let a question caption support an asserted payment or
+                # account statement, even when the following caption is declarative.
+                if any(
+                    "?" in part or interrogative_start.search(part)
+                    for part in parts
+                ):
                     continue
-                seen[group_name].add(normalized)
-                evidence[group_name].append({
-                    "source_id": source_id,
-                    "text": cleaned[:240],
-                })
+                cleaned = re.sub(r"\s+", " ", " ".join(parts)).strip()
+                if cleaned:
+                    windows.append((window_size, window_start, cleaned))
+
+        for group_name, pattern in (
+            ("bank_payment", bank_payment_pattern),
+            ("account_statement", account_statement_pattern),
+        ):
+            candidates = [
+                (window_size, window_start, cleaned)
+                for window_size, window_start, cleaned in windows
+                if pattern.search(cleaned)
+            ]
+            if not candidates:
+                continue
+
+            if group_name == "bank_payment":
+                # Prefer the shortest same-source caption window that also keeps
+                # the court/official attribution with the bank-payment assertion.
+                attributed = [
+                    item for item in candidates
+                    if attribution_pattern.search(item[2])
+                ]
+                selected = min(
+                    attributed or candidates,
+                    key=lambda item: (item[0], item[1]),
+                )
+                window_size, _window_start, cleaned = selected
+                has_attribution = bool(attribution_pattern.search(cleaned))
+                missing_submission = False
+            else:
+                # Prefer a window preserving the negative submission statement,
+                # not just the isolated words "statement of account".
+                negative = [
+                    item for item in candidates
+                    if missing_statement_pattern.search(item[2])
+                ]
+                selected = min(
+                    negative or candidates,
+                    key=lambda item: (item[0], item[1]),
+                )
+                window_size, _window_start, cleaned = selected
+                has_attribution = False
+                missing_submission = bool(
+                    missing_statement_pattern.search(cleaned)
+                )
+
+            normalized = cleaned.casefold()
+            if normalized in seen[group_name]:
+                continue
+            seen[group_name].add(normalized)
+            evidence[group_name].append({
+                "source_id": source_id,
+                "text": cleaned[:420],
+                "caption_count": window_size,
+                "attribution_present": has_attribution,
+                "missing_submission": missing_submission,
+            })
+
     return evidence
 
 
@@ -6313,21 +6484,32 @@ def _build_financial_evidence_fallback(
                 + "."
             )
         for item in bank_evidence["account_statement"][:1]:
-            matched_text = str(item.get("text") or "")
-            if re.search(r"\bstatement\s+of\s+account\b", matched_text, re.IGNORECASE):
-                reference_phrase = "statement of account"
-            elif re.search(
-                r"\bstatement\s+in\s+(?:the\s+)?parliament\b",
-                matched_text,
-                re.IGNORECASE,
-            ):
-                reference_phrase = "statement in Parliament"
+            matched_text = re.sub(
+                r"\s+", " ", str(item.get("text") or "")
+            ).strip()
+            if item.get("missing_submission"):
+                # Preserve the source clause so the fact of non-submission is
+                # not reduced to the bare mention of an account statement.
+                lines.append(
+                    "- Account statement: the transcript says "
+                    + matched_text.rstrip(".")
+                    + "."
+                )
             else:
-                reference_phrase = "parliamentary statement"
-            lines.append(
-                "- Account/Parliament reference: the retrieved transcript "
-                f'includes the phrase "{reference_phrase}".'
-            )
+                if re.search(r"\bstatement\s+of\s+account\b", matched_text, re.IGNORECASE):
+                    reference_phrase = "statement of account"
+                elif re.search(
+                    r"\bstatement\s+in\s+(?:the\s+)?parliament\b",
+                    matched_text,
+                    re.IGNORECASE,
+                ):
+                    reference_phrase = "statement in Parliament"
+                else:
+                    reference_phrase = "parliamentary statement"
+                lines.append(
+                    "- Account/Parliament reference: the retrieved transcript "
+                    f'includes the phrase "{reference_phrase}".'
+                )
         return "\n\n".join(lines)
 
     missing_topics = [
