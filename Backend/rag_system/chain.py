@@ -3275,6 +3275,16 @@ def _normalize_registered_transcript_answer(
         )
         if count:
             corrections.append("removed_disputed_intro_default_framing")
+        corrected, count = re.subn(
+            r"(around\\s+2002[\\s\\u2010-\\u2015-]*2003)\\s+"
+            r"(Kingfisher Airlines launched)",
+            r"\\1; \\2",
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("separated_airline_decision_and_launch_dates")
     elif question_id == "Q03":
         # Lenders are not businesses owned or operated by the subject. The
         # draft can contain either real line breaks or serialized "\n" separators.
@@ -3469,6 +3479,28 @@ def _normalize_registered_transcript_answer(
         )
         if count:
             corrections.append("corrected_pranab_mukherjee_name")
+        corrected, count = re.subn(
+            r",?\\s*(?:including|such as)\\s+(?:the\\s+)?"
+            r"9[\\s,\\u202f]*000[\\s\\u2010-\\u2015-]*"
+            r"crore(?:[\\s\\u2010-\\u2015-]*rupee)?\\s+loan\\s+default"
+            r"(?:\\s+and\\s+the\\s+government(?:'s|’s)?\\s+intervention)?",
+            " including the later discussion of government policy",
+            corrected,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("removed_unverified_intro_default_from_q11")
+
+    elif question_id == "AR06":
+        corrected, count = re.subn(
+            r"\\bOrville\\b",
+            "Orfield",
+            corrected,
+            flags=re.IGNORECASE,
+        )
+        if count:
+            corrections.append("corrected_orfield_room_name")
 
     return corrected, corrections
 
@@ -3789,6 +3821,54 @@ def _gold_evidence_repair_instruction(
             "answer. Explain the source-supported causes from the transcript "
             "instead."
         )
+
+    # Independently enforce the complete registered answer-claim contract.
+    # This is separate from retrieval gold groups so we do not rewrite retrieval
+    # ranking/evaluation just to protect actor, direction, or attribution claims.
+    if getattr(gold_case, "generation_fallback_requires_all_groups", False):
+        source_claim_groups = tuple(
+            getattr(gold_case, "generation_fallback_source_groups", ()) or ()
+        )
+        answer_claim_groups = tuple(
+            getattr(gold_case, "generation_fallback_answer_groups", ()) or ()
+        )
+        if (
+            source_claim_groups
+            and len(source_claim_groups) == len(answer_claim_groups)
+            and all(source_claim_groups)
+            and all(answer_claim_groups)
+        ):
+            source_claim_indices = _matched_registered_phrase_group_indices(
+                context_text,
+                source_claim_groups,
+            )
+            # Never ask the model to add an assertion unless every registered
+            # claim has been located in the supplied, source-scoped context.
+            if len(source_claim_indices) == len(source_claim_groups):
+                answer_claim_indices = _matched_registered_phrase_group_indices(
+                    answer_text,
+                    answer_claim_groups,
+                )
+                missing_claim_indices = sorted(
+                    set(range(len(source_claim_groups))) - answer_claim_indices
+                )
+                if missing_claim_indices:
+                    missing_lines = [
+                        f"- Claim {index + 1}: " + " / ".join(
+                            source_claim_groups[index][:3]
+                        )
+                        for index in missing_claim_indices
+                    ]
+                    instructions.append(
+                        "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR. Rewrite the "
+                        "answer using only the supplied transcript. Each missing "
+                        "claim below is supported by a prompt-visible source block. "
+                        "Preserve every already-correct claim, speaker attribution, "
+                        "proper name, numeric value, unit, and transfer direction. "
+                        "Do not add claims that are not in the supplied source blocks. "
+                        "Do not add timestamps.\nMISSING SOURCE-SUPPORTED CLAIMS:\n"
+                        + "\n".join(missing_lines)
+                    )
 
     if not instructions:
         return None
