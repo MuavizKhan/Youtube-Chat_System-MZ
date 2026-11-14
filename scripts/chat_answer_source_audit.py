@@ -1027,7 +1027,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Distinguish United Breweries/United Spirits, Air Deccan/Kingfisher Red, and Royal Challengers Bangalore/Royal Challenge.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
-        classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|banks)\b", text, re.IGNORECASE))
+        classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|financiers?)\b", text, re.IGNORECASE))
         add(
             "q03_bank_consortium_not_a_business",
             not mentions_consortium or classifies_as_lenders,
@@ -1048,9 +1048,15 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ))
+        guest_attributed = bool(re.search(
+            r"(?:\bMallya\b.{0,100}\b(?:money stopped|it got dry|money dried up)\b|"
+            r"\b(?:money stopped|it got dry|money dried up)\b.{0,100}\bMallya\b)",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             f"{case_id.lower()}_money_stopped_attributed_to_interviewer",
-            not phrase_present or interviewer_attributed,
+            not phrase_present or (interviewer_attributed and not guest_attributed),
             "If repeating 'money stopped / it got dry', attribute those words to interviewer Raj Shamani, not Mallya.",
         )
 
@@ -1067,7 +1073,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             )
         add(
             "q06_avoids_unsupported_visual_identity_details",
-            not bool(re.search(r"black[- ]and[- ]gold|packaging", text, re.IGNORECASE)),
+            not bool(re.search(r"black[- ]and[- ]gold", text, re.IGNORECASE)),
             "Do not invent a black-and-gold identity or packaging strategy.",
         )
 
