@@ -2327,6 +2327,16 @@ def test_q08_q10_atomic_answer_aliases_accept_source_attributed_paraphrases_and_
     )
     assert 0 not in amount_groups
 
+    fallback_answer = (
+        "The transcript attributes a recovery figure of 14,100 crore to the "
+        "Ministry of Finance report. The Recovery Officer and Official Liquidator "
+        "stated in court that the banks had been fully paid. The banks have not "
+        "submitted any statement of account."
+    )
+    assert chain_module._matched_registered_phrase_group_indices(
+        fallback_answer, q08.generation_claim_answer_groups
+    ) == {0, 1, 2}
+
     q10 = chain_module.get_video_benchmark("MdeQMVBuGgY").gold_evidence_by_question["Q10"]
     q10_answer = (
         "The global financial crisis affected every sector. Raj Shamani, the "
