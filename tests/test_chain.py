@@ -10019,8 +10019,9 @@ def test_q02_source_claim_contract_matches_verified_formula_one_transcript_spell
 
     assert source_claims == set(range(4))
     answer = (
-        "Mallya said he named the team Force India and used it to promote his brands. "
-        "The Formula One team sent £10 million back to Kingfisher Airlines."
+        "Mallya said he named the team Force India. He used the Formula One "
+        "platform to advertise his brands. The Formula One team sent £10 million "
+        "back to Kingfisher Airlines."
     )
     instruction = chain._gold_evidence_repair_instruction(
         question=question,
