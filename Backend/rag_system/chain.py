@@ -6488,11 +6488,18 @@ def _build_financial_evidence_fallback(
                 )
 
         for item in bank_evidence["bank_payment"][:1]:
-            lines.append(
-                "- Bank-payment status: the transcript states that "
-                + item["text"].rstrip(".")
-                + "."
-            )
+            if item.get("attribution_present"):
+                lines.append(
+                    "- Attributed bank-payment statement: "
+                    + item["text"].rstrip(".")
+                    + "."
+                )
+            else:
+                lines.append(
+                    "- Bank-payment status: the transcript states that "
+                    + item["text"].rstrip(".")
+                    + "."
+                )
         for item in bank_evidence["account_statement"][:1]:
             matched_text = re.sub(
                 r"\s+", " ", str(item.get("text") or "")
@@ -6501,7 +6508,7 @@ def _build_financial_evidence_fallback(
                 # Preserve the source clause so the fact of non-submission is
                 # not reduced to the bare mention of an account statement.
                 lines.append(
-                    "- Account statement: the transcript says "
+                    "- Missing account statement: "
                     + matched_text.rstrip(".")
                     + "."
                 )
