@@ -6090,7 +6090,17 @@ def _extract_bank_recovery_statement_evidence(
                     key=lambda item: (item[0], item[1]),
                 )
                 window_size, _window_start, cleaned = selected
-                has_attribution = bool(attribution_pattern.search(cleaned))
+                both_named_actors_present = bool(
+                    both_recovery_actors_pattern.search(cleaned)
+                )
+                judicial_context_present = bool(re.search(
+                    r"\b(?:court|judicial\s+proceedings)\b",
+                    cleaned,
+                    re.IGNORECASE,
+                ))
+                has_attribution = (
+                    both_named_actors_present and judicial_context_present
+                )
                 missing_submission = False
             else:
                 # Prefer a window preserving the negative submission statement,
@@ -6105,6 +6115,8 @@ def _extract_bank_recovery_statement_evidence(
                 )
                 window_size, _window_start, cleaned = selected
                 has_attribution = False
+                both_named_actors_present = False
+                judicial_context_present = False
                 missing_submission = bool(
                     missing_statement_pattern.search(cleaned)
                 )
@@ -6118,6 +6130,8 @@ def _extract_bank_recovery_statement_evidence(
                 "text": cleaned[:900],
                 "caption_count": window_size,
                 "attribution_present": has_attribution,
+                "both_named_actors_present": both_named_actors_present,
+                "judicial_context_present": judicial_context_present,
                 "missing_submission": missing_submission,
             })
 
@@ -6498,11 +6512,20 @@ def _build_financial_evidence_fallback(
                 )
 
         for item in bank_evidence["bank_payment"][:1]:
-            if item.get("attribution_present"):
+            if (
+                item.get("both_named_actors_present")
+                and item.get("judicial_context_present")
+            ):
+                proceeding_phrase = (
+                    "in court"
+                    if re.search(r"\bcourt\b", item["text"], re.IGNORECASE)
+                    else "in judicial proceedings"
+                )
                 lines.append(
-                    "- Attributed bank-payment statement: "
-                    + item["text"].rstrip(".")
-                    + "."
+                    "- Attributed bank-payment statement: the Recovery Officer "
+                    "and Official Liquidator stated "
+                    + proceeding_phrase
+                    + " that the banks had been fully paid."
                 )
             else:
                 lines.append(
