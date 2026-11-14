@@ -188,7 +188,6 @@ GOLD_EVIDENCE_CASES = (
                 "air decken",
                 "one Deckan",
                 "one Deccan",
-                "acquired Eden",
             ),
             ("Kingfisher Red", "King Fisher Red"),
             (
