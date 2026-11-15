@@ -10006,3 +10006,60 @@ def test_q08_full_financial_fallback_uses_caption_pair_for_bank_payment():
     assert diagnostics["supported_evidence_groups"] == [
         "recovery_amount", "bank_payment", "account_statement"
     ]
+
+
+@pytest.mark.unit
+def test_q05_generation_repair_neutralizes_unsupported_money_stopped_speaker():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q05"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "The money stopped and it got dry. "
+        "The working capital cycle got disrupted."
+    )
+    answer = (
+        "Vijay Mallya says the global financial crisis meant money stopped and it got dry."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "Do not attribute the phrase" in instruction
+    assert "SPEAKER-ATTRIBUTION REPAIR" not in instruction
+
+
+@pytest.mark.unit
+def test_q08_answer_claim_requires_recovery_officer_or_official_liquidator_attribution():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q08"
+    )
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q08"
+    claim_groups = gold_case.generation_claim_answer_groups
+
+    generic_answer = "The banks had been fully paid."
+    attributed_answer = (
+        "The Recovery Officer and Official Liquidator said in court that "
+        "the banks had been fully paid."
+    )
+    generic_claims = chain._matched_registered_phrase_group_indices(
+        generic_answer, claim_groups
+    )
+    attributed_claims = chain._matched_registered_phrase_group_indices(
+        attributed_answer, claim_groups
+    )
+
+    assert 1 not in generic_claims
+    assert 1 in attributed_claims
