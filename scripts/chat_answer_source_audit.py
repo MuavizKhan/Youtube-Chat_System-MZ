@@ -1086,7 +1086,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "A 17-bank consortium is a lender group, not a separate operating business.",
         )
 
-    elif case_id in {"Q04", "Q10"}:
+    elif case_id in {"Q04", "Q05", "Q10"}:
         phrase_present = bool(re.search(
             r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
             text,
