@@ -772,12 +772,11 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
         )
     ]
     second_raw_captions = [
-        "During the Formula 1 discussion, the Formula One team sent back "
-        "10 million pounds to Kingfisher Airlines to help it.",
+        "The Formula One team sent back 10 million pounds to Kingfisher Airlines to help it.",
         *filler,
     ]
     second_metadata_captions = [
-        "Formula 1 was discussed in the interview.",
+        "The sponsorship was discussed in the interview.",
         *filler,
     ]
     second_documents = [
