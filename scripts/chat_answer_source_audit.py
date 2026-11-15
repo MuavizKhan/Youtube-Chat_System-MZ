@@ -1009,21 +1009,29 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ))
-        malaya_counterfactual = bool(re.search(
+        malaya_counterfactual_pattern = re.compile(
             r"\b(?:could|might|would)\s+have\b.{0,80}\b(?:named|called)\b"
             r".{0,35}\bMalaya\s+Formula\s+1\b.{0,100}\b(?:but|instead)\b"
             r".{0,50}\bForce India\b",
-            text,
             re.IGNORECASE,
-        ))
-        wrong_malaya_team_name = (
-            bool(re.search(
-                r"\b(?:the\s+team|it)\s+(?:was\s+)?(?:named|called)\s+Malaya\s+Formula\s+1\b|"
-                r"\b(?:named|called)\s+(?:(?:the\s+team|it)\s+)?Malaya\s+Formula\s+1\b",
-                text,
-                re.IGNORECASE,
-            ))
-            and not malaya_counterfactual
+        )
+        malaya_counterfactual_spans = [
+            match.span()
+            for match in malaya_counterfactual_pattern.finditer(text)
+        ]
+        malaya_actual_name_pattern = re.compile(
+            r"\b(?:the\s+team|it)\s+(?:was\s+)?(?:named|called)\s+[\"“']?Malaya\s+Formula\s+1\b|"
+            r"\b(?:named|called)\s+(?:(?:the\s+team|it)\s+)?[\"“']?Malaya\s+Formula\s+1\b|"
+            r"\bteam\s+(?:that|which)\s+(?:he\s+)?(?:named|called)\s+[\"“']?Malaya\s+Formula\s+1\b",
+            re.IGNORECASE,
+        )
+        wrong_malaya_team_name = any(
+            not any(
+                counterfactual_start <= actual_match.start()
+                and counterfactual_end >= actual_match.end()
+                for counterfactual_start, counterfactual_end in malaya_counterfactual_spans
+            )
+            for actual_match in malaya_actual_name_pattern.finditer(text)
         )
         reverse_transfer = bool(re.search(
             r"Kingfisher(?: Airlines)? .{0,100}"
