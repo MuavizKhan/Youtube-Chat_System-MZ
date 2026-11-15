@@ -157,7 +157,7 @@ GOLD_EVIDENCE_CASES = (
         generation_answer_aliases=(
             ("United Breweries", "United Spirits"),
             ("Air Deccan", "Kingfisher Red", "eliminate the disruptor"),
-            ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
+            ("Royal Challengers Bangalore", "Royal Challenge whisky", "RCB was born"),
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
@@ -166,7 +166,7 @@ GOLD_EVIDENCE_CASES = (
             ("Air Deccan", "air deckin", "one deckan"),
             ("Kingfisher Red"),
             ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
-            ("Royal Challenge"),
+            ("Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
         generation_claim_answer_groups=(
             ("United Breweries"),
@@ -174,7 +174,7 @@ GOLD_EVIDENCE_CASES = (
             ("Air Deccan"),
             ("Kingfisher Red"),
             ("Royal Challengers Bangalore"),
-            ("Royal Challenge"),
+            ("Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
     ),
     GoldEvidenceCase(
@@ -215,8 +215,9 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer=(
             "Vijay Mallya says Kingfisher Airlines faced several connected "
             "pressures. Mallya says the global financial crisis affected every "
-            "sector. The discussion then describes money stopping "
-            "and getting dry. Mallya recalls being told, “You continue, banks will support you,” "
+            "sector. The discussion then describes how money stopped and it got dry, "
+            "without assigning those words to either speaker. Mallya recalls being told, "
+            "“You continue, banks will support you,” "
             "and that he should not downsize Kingfisher. He also points to "
             "government policies that didn't help and mounting losses, "
             "describing the refusal to let Etihad invest as the final straw."
@@ -283,14 +284,14 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_answer=(
             "Vijay Mallya identifies the global financial crisis as a shock that "
-            "affected every sector. The discussion also describes money stopping "
-            "and getting dry. Mallya says Kingfisher's "
-            "working capital cycle got disrupted. The interviewer then points to "
-            "the non-payment of the oil bills and says Kingfisher Airlines was "
-            "not able to pay the airport fees and landing charges. Mallya responds "
-            "that a cash "
-            "flow issue affects everybody; one creditor or vendor cannot be "
-            "isolated because the cash shortage is across the board."
+            "affected every sector. The discussion also describes how money stopped "
+            "and it got dry, without assigning those words to either speaker. "
+            "Mallya says Kingfisher's working capital cycle got disrupted. "
+            "The discussion also refers to the non-payment of the oil bills and "
+            "says Kingfisher Airlines was not able to pay the airport fees and "
+            "landing charges. Mallya responds that a cash flow issue affects "
+            "everybody; one creditor or vendor cannot be isolated because the "
+            "cash shortage is across the board."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
@@ -371,12 +372,24 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
-            ("14,100 crore rupees were recovered from me", "14,100 crores recovered from me", "government has recovered 14,100 crores"),
+            (
+                "14,100 crore rupees were recovered from me",
+                "14,100 crores recovered from me",
+                "government has recovered 14,100 crores",
+                "Ministry of Finance report said 14,100 crores had been recovered",
+                "the Ministry of Finance report said 14,100 crores had been recovered",
+                "Ministry of Finance report showed 14,100 crores had been recovered",
+                "14,100 crores had been recovered",
+            ),
             (
                 "banks have been fully paid",
                 "the banks have been fully paid",
                 "Recovery Officer and Official Liquidator said in court that banks have been fully paid",
                 "Recovery Officer and Official Liquidator stated in court that banks have been fully paid",
+                "banks had been fully paid",
+                "the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
             ),
             ("statement of account", "statement in parliament"),
         ),
@@ -385,6 +398,9 @@ GOLD_EVIDENCE_CASES = (
                 "14,100 crores recovered from him",
                 "14,100 crore rupees recovered from him",
                 "the transcript attributes a recovery figure of 14,100 crore to the Ministry of Finance report",
+                "Ministry of Finance report said 14,100 crores had been recovered",
+                "the Ministry of Finance report said 14,100 crores had been recovered",
+                "Ministry of Finance report showed 14,100 crores had been recovered",
             ),
             (
                 "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
@@ -404,6 +420,7 @@ GOLD_EVIDENCE_CASES = (
                 "banks have not provided a statement of account",
                 "Mallya said the banks had not provided him a statement of account",
                 "banks had not provided him a statement of account",
+                "banks had not provided him with a statement of account",
                 "the statement of account was not provided",
                 "a statement of account had not been provided",
                 "I still have not been provided a statement of account",
