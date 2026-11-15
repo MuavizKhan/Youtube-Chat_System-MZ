@@ -847,6 +847,42 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
     ) == set()
 
 
+@pytest.mark.unit
+def test_q02_registered_claim_matcher_accepts_verified_formula_one_transcript_wording():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert gold_case is not None
+    context = (
+        "[SOURCE 1]\\n"
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. I also used the platform to advertise my brands. "
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines."
+    )
+
+    source_claims = chain._matched_registered_phrase_group_indices(
+        context, gold_case.generation_claim_source_groups
+    )
+    assert source_claims == set(range(4))
+
+    incomplete_answer = (
+        "Mallya said he named the team Force India. He used the Formula One "
+        "platform to advertise his brands. The Formula One team sent £10 million "
+        "back to Kingfisher Airlines."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "wanted the Indian flag" in instruction
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize(
     "question,evidence_caption_groups,required_phrases",
