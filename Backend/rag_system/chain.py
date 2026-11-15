@@ -3504,6 +3504,35 @@ def _normalize_registered_transcript_answer(
     return corrected, corrections
 
 
+def _text_assigns_black_gold_to_kingfisher(text: str) -> bool:
+    """Detect an unsupported black/gold assignment to Kingfisher, not McDowell."""
+    clauses = re.split(
+        r"[.!?;\\n]+|\\b(?:while|whereas|but|although|however|unlike|yet)\\b|"
+        r",\\s*(?=Kingfisher\\b|McDowell\\b)",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    for clause in clauses:
+        if not (
+            re.search(r"\\bKingfisher\\b", clause, re.IGNORECASE)
+            and re.search(
+                r"black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold",
+                clause,
+                re.IGNORECASE,
+            )
+        ):
+            continue
+        if re.search(
+            r"\\b(?:not|never|neither)\\b.{0,45}\\bKingfisher\\b|"
+            r"\\bKingfisher\\b.{0,45}\\b(?:not|never|neither)\\b",
+            clause,
+            re.IGNORECASE,
+        ):
+            continue
+        return True
+    return False
+
+
 def _build_generation_repair_diagnostics(
     *,
     question: str,
@@ -3893,26 +3922,8 @@ def _gold_evidence_repair_instruction(
             )
             for block in visual_source_blocks
         )
-        answer_clauses = re.split(
-            r"[.!?;\n]+|\b(?:while|whereas|but|although|however|unlike|yet)\b|"
-            r",\s*(?=Kingfisher\b|McDowell\b)",
-            answer_text or "",
-            flags=re.IGNORECASE,
-        )
-        answer_assigns_black_gold_to_kingfisher = any(
-            re.search(r"\bKingfisher\b", clause, re.IGNORECASE)
-            and re.search(
-                r"black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold",
-                clause,
-                re.IGNORECASE,
-            )
-            and not re.search(
-                r"\b(?:not|never|neither)\b.{0,45}\bKingfisher\b|"
-                r"\bKingfisher\b.{0,45}\b(?:not|never|neither)\b",
-                clause,
-                re.IGNORECASE,
-            )
-            for clause in answer_clauses
+        answer_assigns_black_gold_to_kingfisher = (
+            _text_assigns_black_gold_to_kingfisher(answer_text)
         )
         if (
             source_distinguishes_mcdowell_and_kingfisher
