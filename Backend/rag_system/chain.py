@@ -6430,7 +6430,14 @@ def _build_financial_evidence_fallback(
             or claims_by_topic.get("recovery")
         )
         supported_evidence_groups = []
-        if recovery_claim is not None:
+        recovery_claim_is_qualified = (
+            recovery_claim is not None
+            and (
+                question_id != "Q08"
+                or recovery_claim.get("topic") == "recovery_report"
+            )
+        )
+        if recovery_claim_is_qualified:
             supported_evidence_groups.append("recovery_amount")
         if bank_evidence["bank_payment"]:
             supported_evidence_groups.append("bank_payment")
