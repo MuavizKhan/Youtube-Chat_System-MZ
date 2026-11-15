@@ -1024,7 +1024,9 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         ))
         wrong_force_india_reason = bool(re.search(
             r"(?:named|called)\s+(?:the\s+team\s+)?Force India.{0,100}"
-            r"(?:after|for)\s+(?:his|Mallya's)\s+(?:own\s+)?brand",
+            r"(?:after|for)\s+(?:his|Mallya's)\s+(?:own\s+)?brand|"
+            r"\bForce India\b.{0,100}\b(?:originally|initially)\s+"
+            r"named\s+after\s+(?:his|Mallya's)\s+(?:own\s+)?brand",
             text,
             re.IGNORECASE,
         ))
