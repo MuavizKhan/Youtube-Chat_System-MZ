@@ -2116,7 +2116,7 @@ def test_q04_q10_claim_contract_requires_speaker_neutral_money_stopped_phrase(ca
 
     neutral = (
         "The financial crisis affected every sector. The discussion describes "
-        "money stopping and getting dry."
+        "money stopped and it got dry."
     )
     neutral_checks = audit_module._claim_level_semantic_checks(case_id, neutral)
     assert neutral_checks[0]["passed"] is True, neutral_checks
