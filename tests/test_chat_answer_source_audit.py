@@ -2212,6 +2212,19 @@ def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims()
     assert by_name["q08_banks_fully_paid_claim_attributed"] is False
     assert by_name["q08_missing_statement_of_account"] is True
 
+    court_only_attribution = (
+        "The Ministry of Finance report showed 14,100 crores recovered from him. "
+        "The court said the banks had been fully paid. The banks had not provided "
+        "a statement of account."
+    )
+    court_only_checks = audit_module._claim_level_semantic_checks(
+        "Q08", court_only_attribution
+    )
+    court_only_by_name = {
+        check["name"]: check["passed"] for check in court_only_checks
+    }
+    assert court_only_by_name["q08_banks_fully_paid_claim_attributed"] is False
+
     grounded = (
         "Mallya says the Ministry of Finance report showed 14,100 crores "
         "recovered from him. He says the Recovery Officer and Official "
@@ -2329,3 +2342,23 @@ def test_q03_normalizer_cleans_malformed_business_emphasis_and_lender_bullet():
     assert "Breweries Limited**" not in corrected
     assert "consortium of 17 banks" not in corrected.casefold()
     assert "removed_lender_consortium_from_business_list" in corrections
+
+
+
+@pytest.mark.parametrize("case_id", ["AR03", "AR08"])
+def test_ar03_ar08_explicit_artery_negation_is_not_rejected(case_id):
+    answer = (
+        "A heartbeat, blood moving through veins rather than arteries, "
+        "lungs, stomach and blinking eyes."
+    )
+    checks = audit_module._bodily_sound_checks(case_id, answer)
+    assert all(check["passed"] for check in checks), checks
+
+
+def test_q06_colour_guard_accepts_explicit_kingfisher_negation():
+    checks = audit_module._claim_level_semantic_checks(
+        "Q06",
+        "Kingfisher was red, not black-and-gold; McDowell was black-and-gold.",
+    )
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q06_avoids_unsupported_visual_identity_details"] is True
