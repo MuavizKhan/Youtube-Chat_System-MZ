@@ -2395,3 +2395,16 @@ def test_q06_colour_guard_accepts_explicit_kingfisher_negation():
     )
     by_name = {check["name"]: check["passed"] for check in checks}
     assert by_name["q06_avoids_unsupported_visual_identity_details"] is True
+
+
+def test_q08_rejects_14100_amount_without_ministry_report_attribution():
+    answer = (
+        "14,100 crores were recovered. The Recovery Officer and Official "
+        "Liquidator said the banks had been fully paid. The banks had not "
+        "provided a statement of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_ministry_recovery_figure"] is False
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is True
+    assert by_name["q08_missing_statement_of_account"] is True
