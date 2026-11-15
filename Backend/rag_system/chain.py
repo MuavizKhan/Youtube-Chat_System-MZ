@@ -5162,27 +5162,6 @@ def build_generation_context(
                 ),
             })
 
-    selected = []
-    for record in priority_records:
-        excerpt = _truncate_formatted_source(
-            record["text"],
-            per_group_budget,
-            question,
-            selection_question=context_selection_question,
-            gold_case=gold_case,
-        )
-        if excerpt:
-            selected.append({
-                **record,
-                "text": excerpt,
-                "included_chunk_ids": _included_chunk_ids_for_excerpt(
-                    record["source_group"],
-                    record["text"],
-                    excerpt,
-                    record["source_chunk_ids"],
-                ),
-            })
-
     selected.sort(key=lambda record: record["index"])
     context = "\n\n".join(record["text"] for record in selected)
     if len(context) > budget:
