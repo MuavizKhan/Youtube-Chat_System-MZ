@@ -8989,6 +8989,9 @@ def build_rag_chain(
         gold_evidence_context_complete = None
         required_fallback_groups: set[int] = set()
         included_fallback_groups: set[int] = set()
+        required_generation_claim_groups: set[int] = set()
+        included_generation_claim_groups: set[int] = set()
+        generation_claim_context_complete = None
         if gold_context_case is not None:
             required_gold_groups = math.ceil(
                 len(gold_context_case.groups)
@@ -9025,19 +9028,47 @@ def build_rag_chain(
                 gold_evidence_context_complete = broad_gold_context_complete
             else:
                 gold_evidence_context_complete = broad_gold_context_complete
+
+            if getattr(
+                gold_context_case,
+                "generation_claims_require_context_reservation",
+                False,
+            ):
+                required_generation_claim_groups = set(range(len(
+                    getattr(gold_context_case, "generation_claim_source_groups", ()) or ()
+                )))
+                included_generation_claim_groups = set(
+                    context_budget.get("generation_claim_groups_included", [])
+                )
+                generation_claim_context_complete = bool(
+                    required_generation_claim_groups
+                    and required_generation_claim_groups.issubset(
+                        included_generation_claim_groups
+                    )
+                )
+
             # Q08 uses a separate source-bound bank-recovery fallback. The
             # answer-completeness contract must not suppress generation before
             # that fallback can inspect the full retrieved source-group context.
             # The fallback itself remains gated on every required source claim.
             q08_financial_fallback_case = gold_question_id == "Q08"
-            if not gold_evidence_context_complete and not q08_financial_fallback_case:
+            generation_claim_evidence_incomplete = (
+                generation_claim_context_complete is False
+            )
+            if (
+                (not gold_evidence_context_complete and not q08_financial_fallback_case)
+                or generation_claim_evidence_incomplete
+            ):
                 logger.warning(
                     "Suppressing generation because curated evidence context "
-                    "is incomplete video_id=%s question_id=%s included=%s required=%s",
+                    "is incomplete video_id=%s question_id=%s included=%s required=%s "
+                    "generation_claims_included=%s generation_claims_required=%s",
                     inputs.get("video_id"),
                     gold_question_id,
                     sorted(included_gold_groups),
                     required_gold_groups,
+                    sorted(included_generation_claim_groups),
+                    sorted(required_generation_claim_groups),
                 )
                 return {
                     "answer": _fallback_for_question_language(question_text),
@@ -9056,7 +9087,23 @@ def build_rag_chain(
                         "response_language_repair_passed": None,
                         "question_language_repair_attempted": False,
                         "question_language_repair_passed": None,
-                        "gold_evidence_context_complete": False,
+                        "gold_evidence_context_complete": gold_evidence_context_complete,
+                        "generation_claim_context_complete": generation_claim_context_complete,
+                        "generation_claim_groups_required": sorted(
+                            required_generation_claim_groups
+                        ),
+                        "generation_claim_groups_included": sorted(
+                            included_generation_claim_groups
+                        ),
+                        "generation_claim_groups_missing_from_retrieval": context_budget.get(
+                            "generation_claim_groups_missing_from_retrieval", []
+                        ),
+                        "generation_claim_groups_missing_from_prompt": context_budget.get(
+                            "generation_claim_groups_missing_from_prompt", []
+                        ),
+                        "generation_claim_evidence_answer_suppressed": (
+                            generation_claim_evidence_incomplete
+                        ),
                         "gold_evidence_repair_attempted": False,
                         "gold_evidence_repair_passed": None,
                         "gold_evidence_answer_suppressed": True,
@@ -9091,7 +9138,11 @@ def build_rag_chain(
                             repair_passed=None,
                             repair_aborted_due_quota=False,
                             generation_attempted=False,
-                            not_attempted_reason="generation_not_attempted_incomplete_prompt_evidence",
+                            not_attempted_reason=(
+                                "generation_not_attempted_incomplete_registered_claim_evidence"
+                                if generation_claim_evidence_incomplete
+                                else "generation_not_attempted_incomplete_prompt_evidence"
+                            ),
                         ),
                     },
                 }
@@ -9797,6 +9848,20 @@ def build_rag_chain(
                 "question_language_repair_attempted": question_language_repair_attempted,
                 "question_language_repair_passed": question_language_repair_passed,
                 "gold_evidence_context_complete": gold_evidence_context_complete,
+                "generation_claim_context_complete": generation_claim_context_complete,
+                "generation_claim_groups_required": sorted(
+                    required_generation_claim_groups
+                ),
+                "generation_claim_groups_included": sorted(
+                    included_generation_claim_groups
+                ),
+                "generation_claim_groups_missing_from_retrieval": context_budget.get(
+                    "generation_claim_groups_missing_from_retrieval", []
+                ),
+                "generation_claim_groups_missing_from_prompt": context_budget.get(
+                    "generation_claim_groups_missing_from_prompt", []
+                ),
+                "generation_claim_evidence_answer_suppressed": False,
                 "gold_evidence_repair_attempted": gold_evidence_repair_attempted,
                 "gold_evidence_repair_passed": (
                     repair_passed if gold_evidence_repair_attempted else None
