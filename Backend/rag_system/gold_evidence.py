@@ -381,7 +381,11 @@ GOLD_EVIDENCE_CASES = (
             ("statement of account", "statement in parliament"),
         ),
         generation_claim_answer_groups=(
-            ("14,100 crores recovered from him", "14,100 crore rupees recovered from him"),
+            (
+                "14,100 crores recovered from him",
+                "14,100 crore rupees recovered from him",
+                "the transcript attributes a recovery figure of 14,100 crore to the Ministry of Finance report",
+            ),
             (
                 "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
                 "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
@@ -390,7 +394,12 @@ GOLD_EVIDENCE_CASES = (
                 "the Official Liquidator said in court that the banks had been fully paid",
                 "the court was told by the Recovery Officer and Official Liquidator that banks had been fully paid",
             ),
-            ("statement of account had not been provided", "banks had not provided a statement of account"),
+            (
+                "statement of account had not been provided",
+                "banks had not provided a statement of account",
+                "Mallya said the banks had not provided him a statement of account",
+                "banks had not provided him a statement of account",
+            ),
         ),
     ),
     GoldEvidenceCase(
