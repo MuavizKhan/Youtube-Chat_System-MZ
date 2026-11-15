@@ -2950,11 +2950,26 @@ def _gold_answer_contract_repair_instruction(
         _strip_unverified_timestamp_summary(answer or ""),
         gold_case,
     )
-    required_groups = math.ceil(
+    required_prompt_groups = math.ceil(
         len(gold_case.groups)
         * float(gold_case.min_generation_context_group_coverage)
     )
-    if len(context_groups) < required_groups:
+    if len(context_groups) < required_prompt_groups:
+        return None
+
+    answer_coverage = (
+        gold_case.min_generation_answer_group_coverage
+        if gold_case.min_generation_answer_group_coverage is not None
+        else gold_case.min_generation_context_group_coverage
+    )
+    required_answer_groups = math.ceil(
+        len(gold_case.groups) * float(answer_coverage)
+    )
+    missing_answer_group_count = max(
+        0,
+        required_answer_groups - len(context_groups & answer_alias_groups),
+    )
+    if missing_answer_group_count == 0:
         return None
 
     missing_alias_groups = [
@@ -2962,8 +2977,7 @@ def _gold_answer_contract_repair_instruction(
         for group_index in sorted(context_groups - answer_alias_groups)
         if group_index < len(gold_case.generation_answer_aliases)
         and gold_case.generation_answer_aliases[group_index]
-        and group_index not in answer_alias_groups
-    ]
+    ][:missing_answer_group_count]
     if not missing_alias_groups:
         return None
 
