@@ -1149,7 +1149,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
                 r"(?:Recovery Officer|Official Liquidator).{0,140}"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
-                r"(?:Recovery Officer|Official Liquidator|court)",
+                r"(?:Recovery Officer|Official Liquidator)",
                 text,
                 re.IGNORECASE,
             )),
