@@ -6052,8 +6052,9 @@ def test_rag_chain_uses_grounded_financial_fallback_when_initial_provider_answer
 def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provider_answer(monkeypatch):
     context = (
         "The Ministry of Finance report records that 14,100 crore rupees "
-        "were recovered from me. The banks have been fully paid. "
-        "The government and banks have not rendered a statement of account."
+        "were recovered from me. The Recovery Officer and Official Liquidator "
+        "said in court that the banks have been fully paid. The government and "
+        "banks have not rendered a statement of account."
     )
     monkeypatch.setattr(
         chain,
@@ -8633,14 +8634,14 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "non-payment of the oil bills" in answer.lower()
     assert "airport fees" in answer.lower()
     assert "landing charges" in answer.lower()
-    assert "the interviewer summarizes the impact" in answer.lower()
-    assert "the interviewer then points to" in answer.lower()
+    assert "the interviewer summarizes the impact" not in answer.lower()
+    assert "the interviewer then points to" not in answer.lower()
     assert "kingfisher airlines was not able to pay the airport fees and landing charges" in answer.lower()
-    assert "mallya responds" in answer.lower()
+    assert "mallya responds" not in answer.lower()
     assert "working capital cycle got disrupted" in answer.lower()
     assert "non-payment of the oil bills" in answer.lower()
-    assert "cash flow issue affects everybody" in answer.lower()
-    assert "one creditor or vendor cannot be isolated" in answer.lower()
+    assert "cash flow issue" in answer.lower()
+    assert "one creditor or vendor cannot be isolated" not in answer.lower()
     assert diagnostics["used"] is True
     assert diagnostics["required_fallback_claims"] == list(range(6))
     assert diagnostics["included_fallback_claims"] == list(range(6))
@@ -10434,3 +10435,31 @@ def test_royal_challenge_phrase_requires_a_token_boundary():
         "The whisky brand was Royal Challenge.",
         phrase_groups,
     ) == {0}
+
+
+@pytest.mark.unit
+def test_q08_missing_statement_accepts_explicit_not_rendered_caption():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report records that 14,100 crore "
+        "rupees were recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] The government and banks have not rendered a statement "
+        "of account."
+    )
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+    assert fallback is not None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+    assert "not rendered a statement of account" in fallback
