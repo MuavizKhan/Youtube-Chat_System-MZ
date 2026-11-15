@@ -823,10 +823,10 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
     assert "I named it Force India." in context
     assert "I wanted the Indian flag to be on the grid." in context
     assert "I used the platform to advertise my brands." in context
-    assert (
+    expected_transfer_caption = (
         "the Formula One team sent back 10 million pounds to Kingfisher Airlines"
-        in context.casefold()
     )
+    assert expected_transfer_caption.casefold() in context.casefold()
     assert diagnostics["generation_claim_groups_required"] == [0, 1, 2, 3]
     assert diagnostics["generation_claim_groups_available"] == [0, 1, 2, 3]
     assert diagnostics["generation_claim_groups_included"] == [0, 1, 2, 3]
