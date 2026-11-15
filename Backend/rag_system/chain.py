@@ -6419,8 +6419,17 @@ def _build_financial_evidence_fallback(
     if question_scope == "bank_recovery":
         bank_evidence = _extract_bank_recovery_statement_evidence(source_blocks)
         question_id, _registered_case = _registered_generation_gold_case(video_id, question)
+        bank_payment_evidence = bank_evidence["bank_payment"]
         account_statement_evidence = bank_evidence["account_statement"]
         if question_id == "Q08":
+            named_official_pattern = re.compile(
+                r"\b(?:Recovery Officer|Official Liquidator)\b",
+                re.IGNORECASE,
+            )
+            bank_payment_evidence = [
+                item for item in bank_payment_evidence
+                if named_official_pattern.search(str(item.get("text") or ""))
+            ]
             account_statement_evidence = [
                 item for item in account_statement_evidence
                 if _is_explicitly_missing_account_statement(str(item.get("text") or ""))
@@ -6439,7 +6448,7 @@ def _build_financial_evidence_fallback(
         )
         if recovery_claim_is_qualified:
             supported_evidence_groups.append("recovery_amount")
-        if bank_evidence["bank_payment"]:
+        if bank_payment_evidence:
             supported_evidence_groups.append("bank_payment")
         if account_statement_evidence:
             supported_evidence_groups.append("account_statement")
@@ -6568,7 +6577,7 @@ def _build_financial_evidence_fallback(
                     "attribute the figure to a specific report."
                 )
 
-        for item in bank_evidence["bank_payment"][:1]:
+        for item in bank_payment_evidence[:1]:
             lines.append(
                 "- Bank-payment status: the transcript states that "
                 + item["text"].rstrip(".")
