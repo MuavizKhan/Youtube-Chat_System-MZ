@@ -10393,3 +10393,30 @@ def test_q08_financial_fallback_rejects_recovery_amount_without_report_attributi
         "bank_payment", "account_statement"
     ]
     assert diagnostics["missing_evidence_groups"] == ["recovery_amount"]
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_requires_named_official_for_bank_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report showed 14,100 crores recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
