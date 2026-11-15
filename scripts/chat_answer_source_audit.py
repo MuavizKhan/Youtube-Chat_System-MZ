@@ -1138,10 +1138,24 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         )
 
     elif case_id == "Q08":
+        q08_recovery_figure = re.compile(
+            r"14[\s,\u202f]*100\s*(?:crores?|cr)\b",
+            re.IGNORECASE,
+        )
+        q08_ministry_report = re.compile(
+            r"\b(?:Ministry of Finance|Finance Ministry)\b.{0,90}\b(?:report|reported)\b|"
+            r"\b(?:report|reported)\b.{0,90}\b(?:Ministry of Finance|Finance Ministry)\b",
+            re.IGNORECASE,
+        )
+        q08_recovery_report_attributed = any(
+            q08_recovery_figure.search(clause)
+            and q08_ministry_report.search(clause)
+            for clause in re.split(r"[.!?;\\n]+", text)
+        )
         add(
             "q08_ministry_recovery_figure",
-            bool(re.search(r"14[\s,\u202f]*100\s*(?:crores?|cr)\b", text, re.IGNORECASE)),
-            "Include the distinct £/₹14,100-crore recovery figure reported in Parliament.",
+            q08_recovery_report_attributed,
+            "Include the 14,100-crore figure and attribute it to the Ministry of Finance report.",
         )
         add(
             "q08_banks_fully_paid_claim_attributed",
