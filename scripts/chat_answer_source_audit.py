@@ -1150,7 +1150,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         q08_recovery_report_attributed = any(
             q08_recovery_figure.search(clause)
             and q08_ministry_report.search(clause)
-            for clause in re.split(r"[.!?;\\n]+", text)
+            for clause in re.split(r"[.!?;\n]+", text)
         )
         add(
             "q08_ministry_recovery_figure",
