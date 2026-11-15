@@ -790,6 +790,12 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
             zip(second_raw_captions, second_metadata_captions)
         )
     ]
+    non_claim_document = make_document(
+        1400,
+        18000,
+        "The interviewer discusses an unrelated career anecdote.",
+        "The interviewer discusses an unrelated career anecdote.",
+    )
     source_groups = [
         {
             "documents": first_documents,
@@ -802,6 +808,12 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
             "start": 15000,
             "end": 15100,
             "distance": 0.55,
+        },
+        {
+            "documents": [non_claim_document],
+            "start": 18000,
+            "end": 18004,
+            "distance": 0.65,
         },
     ]
 
@@ -833,6 +845,8 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
     assert diagnostics["generation_claim_groups_missing_from_retrieval"] == []
     assert diagnostics["generation_claim_groups_missing_from_prompt"] == []
     assert diagnostics["generation_claim_context_complete"] is True
+    assert diagnostics["final_chars"] > 0
+    assert diagnostics["groups_included"] == 2
     assert diagnostics["gold_evidence_source_groups"][0]["raw_chunk_fallback_used"] is True
     assert diagnostics["gold_evidence_source_groups"][1]["raw_chunk_fallback_used"] is True
 
