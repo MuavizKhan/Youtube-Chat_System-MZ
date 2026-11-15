@@ -6032,8 +6032,10 @@ def _extract_bank_recovery_statement_evidence(
         r"^\s*-\s*\[[^\]]+\]\s*(?P<text>.*)$"
     )
     question_lead_pattern = re.compile(
-        r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
-        r"has|have|had|can|could|would|will|should)\b",
+        r"^(?:who|what|when|where|why|how)\b|"
+        r"^(?:is|are|was|were|do|does|did|has|have|had|can|could|would|will|should)\s+"
+        r"(?:the|these|those|they|we|you|he|she|it|all|any|banks?|"
+        r"recovery\s+officer|official\s+liquidator)\b",
         re.IGNORECASE,
     )
 
