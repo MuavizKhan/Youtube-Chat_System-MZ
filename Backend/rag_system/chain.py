@@ -1915,6 +1915,10 @@ def _caption_segments_for_documents(
             evidence_phrase_groups.extend(
                 getattr(gold_case, "generation_fallback_source_groups", ()) or ()
             )
+        if getattr(gold_case, "generation_claims_require_context_reservation", False):
+            evidence_phrase_groups.extend(
+                getattr(gold_case, "generation_claim_source_groups", ()) or ()
+            )
         for alternatives in evidence_phrase_groups:
             if any(
                 (normalized_phrase := normalize_evidence_text(phrase))
@@ -2273,7 +2277,7 @@ def _truncate_formatted_source(
                 for group_index, line_indices in absolute_gold_caption_spans.items()
             }
 
-            # Reserve complete evidence groups before ordinary relevance fill.
+            # Reserve complete broad evidence groups before ordinary relevance fill.
             # If a source is unusually dense, prefer whole evidence groups over
             # partial caption fragments.
             for group_index in sorted(gold_caption_spans):
@@ -2290,6 +2294,40 @@ def _truncate_formatted_source(
                 )
                 if combined_cost <= available:
                     gold_evidence_caption_indices.update(candidate_indices)
+
+            if getattr(gold_case, "generation_claims_require_context_reservation", False):
+                generation_claim_source_groups = (
+                    getattr(gold_case, "generation_claim_source_groups", ()) or ()
+                )
+                absolute_claim_caption_spans = matched_source_phrase_group_caption_spans(
+                    source_text,
+                    generation_claim_source_groups,
+                )
+                claim_caption_spans = {
+                    group_index: {
+                        line_index - caption_start
+                        for line_index in line_indices
+                        if line_index >= caption_start
+                    }
+                    for group_index, line_indices in absolute_claim_caption_spans.items()
+                }
+                # Q02 has four independent answer claims. Keep their complete
+                # caption rows in the prompt instead of retaining only the broad
+                # one-group Formula One anchor.
+                for group_index in sorted(claim_caption_spans):
+                    candidate_indices = (
+                        claim_caption_spans[group_index]
+                        - gold_evidence_caption_indices
+                    )
+                    combined_indices = (
+                        gold_evidence_caption_indices | candidate_indices
+                    )
+                    combined_cost = (
+                        sum(len(captions[index]) for index in combined_indices)
+                        + max(0, len(combined_indices) - 1)
+                    )
+                    if combined_cost <= available:
+                        gold_evidence_caption_indices.update(candidate_indices)
 
             if getattr(gold_case, "generation_fallback_requires_all_groups", False):
                 fallback_source_groups = (
@@ -4273,21 +4311,35 @@ def build_generation_context(
         registered_fallback_source_groups = tuple(
             getattr(gold_case, "generation_fallback_source_groups", ()) or ()
         )
+    registered_generation_claim_source_groups = ()
+    if (
+        gold_case is not None
+        and getattr(gold_case, "generation_claims_require_context_reservation", False)
+    ):
+        registered_generation_claim_source_groups = tuple(
+            getattr(gold_case, "generation_claim_source_groups", ()) or ()
+        )
     if gold_case is not None:
         gold_phrases = " ".join(
             phrase
             for group in gold_case.groups
             for phrase in group
         )
-        # Strict fallback claims are also query-selection hints. This is a
-        # context-packing aid only; it does not alter retrieval rankings.
+        # Strict fallback claims and explicitly reserved answer claims are
+        # context-selection hints only; they do not alter retrieval rankings.
         fallback_phrases = " ".join(
             phrase
             for group in registered_fallback_source_groups
             for phrase in group
         )
+        generation_claim_phrases = " ".join(
+            phrase
+            for group in registered_generation_claim_source_groups
+            for phrase in group
+        )
         context_selection_question = (
-            f"{question or ''} {gold_phrases} {fallback_phrases}".strip()
+            f"{question or ''} {gold_phrases} {fallback_phrases} "
+            f"{generation_claim_phrases}".strip()
         )
 
     if not source_groups:
@@ -4379,6 +4431,31 @@ def build_generation_context(
                     registered_fallback_source_groups,
                 )
             ) if registered_fallback_source_groups else []
+            raw_claim_groups = sorted(
+                _matched_registered_phrase_group_indices(
+                    " ".join(
+                        str(getattr(document, "page_content", "") or "")
+                        for document in source_documents
+                    ),
+                    registered_generation_claim_source_groups,
+                )
+            ) if registered_generation_claim_source_groups else []
+            metadata_claim_groups = (
+                sorted(_matched_registered_phrase_group_indices(
+                    " ".join(segment["text"] for segment in metadata_segments),
+                    registered_generation_claim_source_groups,
+                ))
+                if metadata_segments is not None and registered_generation_claim_source_groups
+                else []
+            )
+            formatted_claim_groups = (
+                sorted(_matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_generation_claim_source_groups,
+                ))
+                if registered_generation_claim_source_groups
+                else []
+            )
             source_gold_diagnostic = {
                 "source_group_index": index + 1,
                 "chunk_ids": source_chunk_ids,
@@ -4386,6 +4463,9 @@ def build_generation_context(
                 "caption_metadata_gold_groups": metadata_gold_groups,
                 "formatted_gold_groups": formatted_gold_groups,
                 "registered_fallback_group_indexes": registered_fallback_group_indexes,
+                "raw_generation_claim_groups": raw_claim_groups,
+                "caption_metadata_generation_claim_groups": metadata_claim_groups,
+                "formatted_generation_claim_groups": formatted_claim_groups,
                 "raw_chunk_fallback_used": bool(
                     raw_gold_groups
                     and "Original retrieved transcript chunks in chronological order" in rendered
@@ -4412,6 +4492,14 @@ def build_generation_context(
                     registered_fallback_source_groups,
                 )
                 if registered_fallback_source_groups
+                else set()
+            ),
+            "generation_claim_group_indexes": (
+                _matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_generation_claim_source_groups,
+                )
+                if registered_generation_claim_source_groups
                 else set()
             ),
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
@@ -4474,6 +4562,47 @@ def build_generation_context(
                 if isinstance(record.get("gold_evidence_diagnostic"), dict)
             ],
         }
+        if registered_generation_claim_source_groups:
+            required_claim_groups = set(
+                range(len(registered_generation_claim_source_groups))
+            )
+            available_claim_groups = {
+                group_index
+                for record in records
+                for group_index in record["generation_claim_group_indexes"]
+            }
+            included_claim_groups: set[int] = set()
+            for text_value in included_texts:
+                included_claim_groups.update(
+                    _matched_registered_phrase_group_indices(
+                        text_value,
+                        registered_generation_claim_source_groups,
+                    )
+                )
+            source_group_indices_by_claim = {
+                str(group_index): [
+                    record["index"] + 1
+                    for record in records
+                    if group_index in record["generation_claim_group_indexes"]
+                ]
+                for group_index in sorted(available_claim_groups)
+            }
+            diagnostics.update({
+                "generation_claim_question_id": gold_question_id,
+                "generation_claim_groups_required": sorted(required_claim_groups),
+                "generation_claim_groups_available": sorted(available_claim_groups),
+                "generation_claim_groups_included": sorted(included_claim_groups),
+                "generation_claim_groups_missing_from_retrieval": sorted(
+                    required_claim_groups - available_claim_groups
+                ),
+                "generation_claim_groups_missing_from_prompt": sorted(
+                    required_claim_groups - included_claim_groups
+                ),
+                "generation_claim_context_complete": (
+                    required_claim_groups.issubset(included_claim_groups)
+                ),
+                "generation_claim_source_group_indices": source_group_indices_by_claim,
+            })
         if registered_fallback_source_groups:
             required_fallback_groups = set(
                 range(len(registered_fallback_source_groups))
@@ -4785,6 +4914,64 @@ def build_generation_context(
         )
         priority_records = (
             reserved_gold_records + remaining_priority_records
+        )[:selected_count]
+
+    if registered_generation_claim_source_groups:
+        available_claim_groups = {
+            group_index
+            for record in records
+            for group_index in record["generation_claim_group_indexes"]
+        }
+        reserved_claim_records = []
+        reserved_claim_indices: set[int] = set()
+        covered_claim_groups: set[int] = set()
+        # Q02's four atomic claims can live in separate transcript regions.
+        # Reserve every retrieved source group that contributes a claim before
+        # ordinary relevance fill; never combine evidence across source groups.
+        while (
+            covered_claim_groups != available_claim_groups
+            and len(reserved_claim_records) < selected_count
+        ):
+            choices = []
+            for record in records:
+                if record["index"] in reserved_claim_indices:
+                    continue
+                new_claims = (
+                    record["generation_claim_group_indexes"] - covered_claim_groups
+                )
+                if not new_claims:
+                    continue
+                choices.append((
+                    len(new_claims),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    -record["index"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            reserved_claim_records.append(chosen)
+            reserved_claim_indices.add(chosen["index"])
+            covered_claim_groups.update(chosen["generation_claim_group_indexes"])
+
+        remaining_priority_records = [
+            record
+            for record in priority_records
+            if record["index"] not in reserved_claim_indices
+        ]
+        remaining_priority_records.extend(
+            record
+            for record in priority_order
+            if record["index"] not in reserved_claim_indices
+            and all(
+                existing["index"] != record["index"]
+                for existing in remaining_priority_records
+            )
+        )
+        priority_records = (
+            reserved_claim_records + remaining_priority_records
         )[:selected_count]
 
     if registered_fallback_source_groups:
