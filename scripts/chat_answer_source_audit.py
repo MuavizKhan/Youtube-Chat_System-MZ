@@ -944,6 +944,31 @@ def _answer_language_matches(answer: str, language: str) -> bool:
     return False
 
 
+def _claims_kingfisher_is_black_and_gold(answer: str) -> bool:
+    """Detect black/gold attribution to Kingfisher without rejecting McDowell contrast."""
+    black_gold_pattern = r"black[-‑‒–—− ]and[-‑‒–—− ]gold"
+    contrast_split = re.compile(
+        r"[.!?;\\n]+|\\b(?:while|whereas|but|although|however|unlike|yet)\\b|"
+        r",\\s*(?=Kingfisher\\b|McDowell\\b)",
+        re.IGNORECASE,
+    )
+    for clause in contrast_split.split(answer or ""):
+        if not (
+            re.search(r"\\bKingfisher\\b", clause, re.IGNORECASE)
+            and re.search(black_gold_pattern, clause, re.IGNORECASE)
+        ):
+            continue
+        if re.search(
+            r"\\b(?:not|never|neither)\\b.{0,45}\\bKingfisher\\b|"
+            r"\\bKingfisher\\b.{0,45}\\b(?:not|never|neither)\\b",
+            clause,
+            re.IGNORECASE,
+        ):
+            continue
+        return True
+    return False
+
+
 def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     """Check high-risk claims that broad phrase-presence checks cannot validate."""
     text = _normalize_answer_requirement_text(answer)
@@ -1117,15 +1142,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
                 bool(re.search(pattern, text, re.IGNORECASE)),
                 "Cover brand personality, surrogate advertising, and the Kingfisher water-business strategy.",
             )
-        kingfisher_black_gold_claim = bool(re.search(
-            r"\bKingfisher(?:\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme))?\b"
-            r"[^.!?;]{0,80}\b(?:was|is|were|are|used|uses|had|has|featured|all)\b"
-            r"[^.!?;]{0,40}black[-‑‒–—− ]and[-‑‒–—− ]gold\b|"
-            r"\bblack[-‑‒–—− ]and[-‑‒–—− ]gold\b[^.!?;]{0,50}"
-            r"\bKingfisher(?:'s)?\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme)\b",
-            text,
-            re.IGNORECASE,
-        ))
+        kingfisher_black_gold_claim = _claims_kingfisher_is_black_and_gold(text)
         add(
             "q06_avoids_unsupported_visual_identity_details",
             not kingfisher_black_gold_claim,
