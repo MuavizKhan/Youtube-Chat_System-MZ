@@ -3533,6 +3533,20 @@ def _text_assigns_black_gold_to_kingfisher(text: str) -> bool:
     return False
 
 
+def _has_named_money_stopped_attribution(text: str) -> bool:
+    disputed_phrase = (
+        r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
+    )
+    return bool(re.search(
+        r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+        r"[^.!?]{0,100}" + disputed_phrase + r"|"
+        + disputed_phrase + r"[^.!?]{0,100}"
+        r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
+        text or "",
+        re.IGNORECASE,
+    ))
+
+
 def _build_generation_repair_diagnostics(
     *,
     question: str,
@@ -3659,6 +3673,14 @@ def _build_generation_repair_diagnostics(
                 re.IGNORECASE,
             ) is not None
         )
+        unsupported_money_speaker_attribution = (
+            question_id in {"Q04", "Q05", "Q10"}
+            and _has_named_money_stopped_attribution(draft)
+        )
+        unsupported_kingfisher_black_gold_attribution = (
+            question_id == "Q06"
+            and _text_assigns_black_gold_to_kingfisher(draft)
+        )
         issue_codes = []
         if abstained:
             issue_codes.append("abstention")
@@ -3672,11 +3694,17 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("missing_registered_answer_claims")
         if opening_9000_narrator_claim:
             issue_codes.append("opening_9000_narrator_claim")
+        if unsupported_money_speaker_attribution:
+            issue_codes.append("unsupported_money_stopped_speaker_attribution")
+        if unsupported_kingfisher_black_gold_attribution:
+            issue_codes.append("unsupported_kingfisher_black_gold_attribution")
         return {
             "available": True,
             "abstained": abstained,
             "language_violation": language_violation,
             "opening_9000_narrator_claim": opening_9000_narrator_claim,
+            "unsupported_money_stopped_speaker_attribution": unsupported_money_speaker_attribution,
+            "unsupported_kingfisher_black_gold_attribution": unsupported_kingfisher_black_gold_attribution,
             "answer_gold_groups": sorted(answer_groups),
             "missing_prompt_gold_groups": missing_groups,
             "registered_claim_contract_available": claim_contract_available,
@@ -3986,31 +4014,19 @@ def _gold_evidence_repair_instruction(
                         + "\n".join(missing_lines)
                     )
 
-    if question_id in {"Q04", "Q05", "Q10"}:
-        disputed_phrase = (
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
+    if (
+        question_id in {"Q04", "Q05", "Q10"}
+        and _has_named_money_stopped_attribution(answer_text)
+    ):
+        instructions.append(
+            "SPEAKER-NEUTRAL ATTRIBUTION REPAIR. The registered caption text "
+            "does not reliably identify whether the money-stopped phrase was "
+            "spoken by Mallya or the interviewer. Rewrite that part neutrally "
+            "(for example, 'the discussion describes money stopping and getting "
+            "dry'). Do not attribute the phrase to Vijay Mallya, Raj Shamani, or "
+            "the interviewer. Preserve the independently supported claims and "
+            "use only the supplied transcript."
         )
-        uses_disputed_phrase = bool(re.search(
-            disputed_phrase, answer_text, re.IGNORECASE
-        ))
-        named_speaker_attribution = bool(re.search(
-            r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
-            r"[^.!?]{0,100}" + disputed_phrase + r"|"
-            + disputed_phrase + r"[^.!?]{0,100}"
-            r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
-            answer_text,
-            re.IGNORECASE,
-        ))
-        if uses_disputed_phrase and named_speaker_attribution:
-            instructions.append(
-                "SPEAKER-NEUTRAL ATTRIBUTION REPAIR. The registered caption text "
-                "does not reliably identify whether the money-stopped phrase was "
-                "spoken by Mallya or the interviewer. Rewrite that part neutrally "
-                "(for example, 'the discussion describes money stopping and getting "
-                "dry'). Do not attribute the phrase to Vijay Mallya, Raj Shamani, or "
-                "the interviewer. Preserve the independently supported claims and "
-                "use only the supplied transcript."
-            )
 
     if not instructions:
         return None
