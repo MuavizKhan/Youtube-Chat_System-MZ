@@ -6319,7 +6319,10 @@ def _build_financial_evidence_fallback(
             group for group in required_evidence_groups
             if group not in supported_evidence_groups
         ]
-        minimum_supported_groups = 2
+        # The registered Q08 answer contract requires all three distinct
+        # claims. Do not emit a partial extractive answer that the audit must
+        # reject as incomplete.
+        minimum_supported_groups = len(required_evidence_groups)
 
         if diagnostics is not None:
             diagnostics.clear()
