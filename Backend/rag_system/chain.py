@@ -2345,7 +2345,8 @@ def _truncate_formatted_source(
                 }
                 # Q02 has four independent answer claims. Keep their complete
                 # caption rows in the prompt instead of retaining only the broad
-                # one-group Formula One anchor.
+                # one-group Formula One anchor. If necessary, displace lower-value
+                # broad-anchor rows to fit the atomic claims, but never split a row.
                 for group_index in sorted(claim_caption_spans):
                     candidate_indices = (
                         claim_caption_spans[group_index]
@@ -2358,6 +2359,27 @@ def _truncate_formatted_source(
                         sum(len(captions[index]) for index in combined_indices)
                         + max(0, len(combined_indices) - 1)
                     )
+                    if combined_cost > available:
+                        removable = sorted(
+                            gold_evidence_caption_indices
+                            - set().union(*claim_caption_spans.values()),
+                            key=lambda index: (
+                                _generation_context_line_overlap(
+                                    captions[index],
+                                    selection_question or question,
+                                ),
+                                len(captions[index]),
+                                index,
+                            ),
+                        )
+                        while removable and combined_cost > available:
+                            removed = removable.pop(0)
+                            gold_evidence_caption_indices.discard(removed)
+                            combined_indices.discard(removed)
+                            combined_cost = (
+                                sum(len(captions[index]) for index in combined_indices)
+                                + max(0, len(combined_indices) - 1)
+                            )
                     if combined_cost <= available:
                         gold_evidence_caption_indices.update(candidate_indices)
 
