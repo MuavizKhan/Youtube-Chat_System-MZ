@@ -4484,7 +4484,7 @@ def build_generation_context(
                 "caption_metadata_generation_claim_groups": metadata_claim_groups,
                 "formatted_generation_claim_groups": formatted_claim_groups,
                 "raw_chunk_fallback_used": bool(
-                    raw_gold_groups
+                    (raw_gold_groups or raw_claim_groups)
                     and "Original retrieved transcript chunks in chronological order" in rendered
                 ),
             }
