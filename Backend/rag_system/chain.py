@@ -5607,6 +5607,38 @@ def _generation_repair_instruction(
                     "the application adds verified timestamps."
                 )
 
+    # The Arabic bodily-sound caption uses عروق (veins). Do not let the
+    # broad bilingual concept matcher treat arteries as an acceptable substitute.
+    if is_bodily_sound_question:
+        bodily_source_blocks = [
+            block for block in re.split(
+                r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$", context_text
+            ) if block.strip()
+        ] or [context_text]
+        source_explicitly_says_veins = any(
+            re.search(
+                r"(?:حركة|جريان|تدفق|سريان).{0,25}الدم.{0,35}عروق|"
+                r"الدم.{0,35}عروق|عروق.{0,25}الدم",
+                block,
+            )
+            and not re.search(r"شرايين", block)
+            for block in bodily_source_blocks
+        )
+        answer_assigns_blood_to_arteries = bool(re.search(
+            r"(?:blood|blood flow|blood movement).{0,45}\barter(?:y|ies)\b|"
+            r"\barter(?:y|ies)\b.{0,45}(?:blood|blood flow|blood movement)",
+            answer_text,
+            re.IGNORECASE,
+        ))
+        if source_explicitly_says_veins and answer_assigns_blood_to_arteries:
+            instructions.append(
+                "ANATOMICAL TERM CORRECTION. The supplied Arabic caption says "
+                "حركة الدم في عروقك: in this passage, عروق means veins. State "
+                "that the blood moves through veins, not arteries. Preserve the "
+                "other source-supported bodily sounds and do not add medical "
+                "explanations or anatomy claims beyond the transcript."
+            )
+
     is_sound_perception_question = bool(
         (
             re.search(r"\bsound\b", question_text, re.IGNORECASE)
