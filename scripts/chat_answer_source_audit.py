@@ -34,7 +34,11 @@ from Backend.rag_system.timestamp_utils import (
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
-from Backend.rag_system.chain import is_temporal_location_question
+from Backend.rag_system.chain import (
+    _blood_movement_attributed_to_arteries,
+    _text_assigns_black_gold_to_kingfisher,
+    is_temporal_location_question,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -835,12 +839,7 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    blood_attributed_to_arteries = bool(re.search(
-        r"(?:blood|blood flow|blood movement).{0,40}\barter(?:y|ies)\b|"
-        r"\barter(?:y|ies)\b.{0,40}(?:blood|blood flow|blood movement)",
-        text,
-        re.IGNORECASE,
-    ))
+    blood_attributed_to_arteries = _blood_movement_attributed_to_arteries(text)
     checks.append(_quality_check(
         "blood_movement_not_misattributed_to_arteries",
         not blood_attributed_to_arteries,
@@ -945,28 +944,8 @@ def _answer_language_matches(answer: str, language: str) -> bool:
 
 
 def _claims_kingfisher_is_black_and_gold(answer: str) -> bool:
-    """Detect black/gold attribution to Kingfisher without rejecting McDowell contrast."""
-    black_gold_pattern = r"black[-‑‒–—− ]and[-‑‒–—− ]gold"
-    contrast_split = re.compile(
-        r"[.!?;\\n]+|\\b(?:while|whereas|but|although|however|unlike|yet)\\b|"
-        r",\\s*(?=Kingfisher\\b|McDowell\\b)",
-        re.IGNORECASE,
-    )
-    for clause in contrast_split.split(answer or ""):
-        if not (
-            re.search(r"\\bKingfisher\\b", clause, re.IGNORECASE)
-            and re.search(black_gold_pattern, clause, re.IGNORECASE)
-        ):
-            continue
-        if re.search(
-            r"\\b(?:not|never|neither)\\b.{0,45}\\bKingfisher\\b|"
-            r"\\bKingfisher\\b.{0,45}\\b(?:not|never|neither)\\b",
-            clause,
-            re.IGNORECASE,
-        ):
-            continue
-        return True
-    return False
+    """Share generation's semantic guard so the audit cannot disagree."""
+    return _text_assigns_black_gold_to_kingfisher(answer)
 
 
 def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
@@ -1167,7 +1146,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         add(
             "q08_banks_fully_paid_claim_attributed",
             bool(re.search(
-                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
+                r"(?:Recovery Officer|Official Liquidator).{0,140}"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
                 r"(?:Recovery Officer|Official Liquidator|court)",
