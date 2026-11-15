@@ -2046,6 +2046,14 @@ def test_q02_claim_contract_rejects_wrong_force_india_reason_and_reversed_transf
     assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is False
     assert by_name["q02_not_named_after_mallya_brand"] is False
 
+    legacy_wrong_reason = (
+        "Mallya founded Force India (originally named after his own brand). "
+        "The team had provided a £10 million sponsorship to Kingfisher Airlines."
+    )
+    legacy_checks = audit_module._claim_level_semantic_checks("Q02", legacy_wrong_reason)
+    legacy_by_name = {check["name"]: check["passed"] for check in legacy_checks}
+    assert legacy_by_name["q02_not_named_after_mallya_brand"] is False, legacy_checks
+
     grounded = (
         "Mallya named the team Force India because he wanted the Indian flag "
         "on the grid and a team with roots in India. He used the Formula One "
