@@ -10364,3 +10364,32 @@ def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_resp
     assert chain._text_assigns_black_gold_to_kingfisher(
         "Kingfisher was red, not black and gold."
     ) is False
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_rejects_recovery_amount_without_report_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] 14,100 crores were recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "bank_payment", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["recovery_amount"]
