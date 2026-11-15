@@ -9957,6 +9957,15 @@ def test_bank_recovery_extractor_joins_only_adjacent_caption_rows_within_source(
     assert same_source["bank_payment"][0]["source_id"] == 11
     assert "banks had been fully paid" in same_source["bank_payment"][0]["text"]
 
+    auxiliary_started_caption = chain._extract_bank_recovery_statement_evidence({
+        13: (
+            "- [00:00–00:04] The banks\n"
+            "- [00:04–00:08] were fully paid."
+        )
+    })
+    assert auxiliary_started_caption["bank_payment"]
+    assert "The banks were fully paid" in auxiliary_started_caption["bank_payment"][0]["text"]
+
     split_across_sources = chain._extract_bank_recovery_statement_evidence({
         11: "- [00:00–00:04] The banks had been fully",
         12: "- [00:04–00:08] paid.",
