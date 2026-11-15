@@ -10420,3 +10420,17 @@ def test_q08_financial_fallback_requires_named_official_for_bank_payment_claim()
         "recovery_amount", "account_statement"
     ]
     assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+
+
+@pytest.mark.unit
+def test_royal_challenge_phrase_requires_a_token_boundary():
+    phrase_groups = (("Royal Challenge",),)
+
+    assert chain._matched_registered_phrase_group_indices(
+        "Royal Challengers Bangalore was the cricket franchise.",
+        phrase_groups,
+    ) == set()
+    assert chain._matched_registered_phrase_group_indices(
+        "The whisky brand was Royal Challenge.",
+        phrase_groups,
+    ) == {0}
