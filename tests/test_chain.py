@@ -9608,7 +9608,7 @@ def test_registered_answer_claim_repair_only_runs_when_every_claim_is_in_prompt(
 
 
 @pytest.mark.unit
-def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
+def test_q04_repair_removes_unsupported_named_speaker_attribution():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
         item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
@@ -9619,19 +9619,19 @@ def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
     assert registered_id == "Q04"
     context = (
         "[SOURCE 1]\nThe global financial crisis affected every sector. "
-        "Raj Shamani said money stopped and it got dry."
+        "The money stopped and it got dry."
     )
     answer = "Mallya says the global financial crisis meant money stopped and it got dry."
     instruction = chain._gold_evidence_repair_instruction(
         question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
     )
     assert instruction is not None
-    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
-    assert "Raj Shamani" in instruction
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "do not attribute the phrase" in instruction.lower()
 
 
 @pytest.mark.unit
-def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completeness_repair():
+def test_q04_partial_context_keeps_neutral_attribution_repair_but_suppresses_gold_completeness_repair():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
         item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
@@ -9639,7 +9639,7 @@ def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completene
     context = (
         "[SOURCE 1]\n"
         "The global financial crisis affected every sector. "
-        "Raj Shamani said money stopped and it got dry. "
+        "The money stopped and it got dry. "
         "I was told not to downsize Kingfisher; banks will support you."
     )
     answer = "Mallya says money stopped and it got dry."
@@ -9648,7 +9648,7 @@ def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completene
     )
 
     assert instruction is not None
-    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" not in instruction
 
 
@@ -9735,3 +9735,125 @@ def test_q03_normalizer_removes_bold_marked_lender_bullet_without_touching_busin
     assert "United Spirits" in corrected
     assert "Kingfisher Airlines" in corrected
     assert "removed_lender_consortium_from_business_list" in corrections
+
+
+@pytest.mark.unit
+def test_ar03_arabic_vein_caption_repairs_arteries_substitution():
+    question = "What sounds might people hear from their own bodies inside the room?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+        "صوت الرئتين أو صوت المعدة.\n"
+        "- [00:08–00:12] حتى عينيك وهي بترمش بقيت بتسمعها."
+    )
+    answer = (
+        "People may hear their heartbeat, blood moving through arteries, "
+        "their lungs and stomach, and their eyelids blinking."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="fAd2nKfrDB8",
+    )
+
+    assert instruction is not None
+    assert "ANATOMICAL TERM CORRECTION" in instruction
+    assert "عروق means veins" in instruction
+    assert "not arteries" in instruction
+
+
+@pytest.mark.unit
+def test_q06_repair_corrects_black_gold_attribution_without_dropping_strategy_claims():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q06"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "A brand needs a personality. He talked about surrogate advertising and "
+        "building a full water business around Kingfisher. There was nothing red "
+        "about McDowell. It was all black and gold. The only one around that is "
+        "red is Kingfisher."
+    )
+    answer = (
+        "A brand needs a personality. He used surrogate advertising and built a "
+        "water business around Kingfisher. Kingfisher's identity was black and gold."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "VISUAL-IDENTITY ATTRIBUTION REPAIR" in instruction
+    assert "black-and-gold description to McDowell's" in instruction
+    assert "Preserve the transcript-supported brand-personality" in instruction
+
+
+@pytest.mark.unit
+def test_q10_generation_repair_uses_neutral_speaker_attribution():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q10"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    misattributed = (
+        "Mallya says the global financial crisis meant money stopped and it got dry. "
+        "Government policies did not help and mounting losses followed. "
+        "The refusal to let Etihad invest was the final straw."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=misattributed,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "do not attribute the phrase" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_expose_atomic_claim_indices_without_draft_text():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q10"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    incomplete_draft = (
+        "The discussion describes the global financial crisis; money stopped and it got dry."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=incomplete_draft,
+        repaired_draft=None,
+        final_answer=incomplete_draft,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1, 2, 3]
+    assert diagnostics["initial_draft"]["missing_answer_claim_indices"] == [2, 3]
+    assert "missing_registered_answer_claims" in diagnostics["initial_draft"]["issue_codes"]
+    assert incomplete_draft not in repr(diagnostics)
