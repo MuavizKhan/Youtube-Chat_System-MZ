@@ -1013,7 +1013,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         wrong_malaya_team_name = (
             bool(re.search(
                 r"\b(?:the\s+team|it)\s+(?:was\s+)?(?:named|called)\s+Malaya\s+Formula\s+1\b|"
-                r"\b(?:named|called)\s+(?:the\s+team\s+)?Malaya\s+Formula\s+1\b",
+                r"\b(?:named|called)\s+(?:(?:the\s+team|it)\s+)?Malaya\s+Formula\s+1\b",
                 text,
                 re.IGNORECASE,
             ))
@@ -1061,8 +1061,8 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Name all six distinct entities: United Breweries, United Spirits, Air Deccan, Kingfisher Red, Royal Challengers Bangalore/RCB, and Royal Challenge.",
         )
         royal_challenge_whisky = bool(re.search(
-            r"\bRoyal Challenge\b.{0,60}\b(?:whisk(?:y|e)y|brand)\b|"
-            r"\b(?:whisk(?:y|e)y|brand)\b.{0,60}\bRoyal Challenge\b",
+            r"\bRoyal Challenge\b.{0,60}\b(?:whisky|whiskey|brand)\b|"
+            r"\b(?:whisky|whiskey|brand)\b.{0,60}\bRoyal Challenge\b",
             text,
             re.IGNORECASE,
         ))
