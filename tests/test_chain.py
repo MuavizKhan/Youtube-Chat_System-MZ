@@ -10128,3 +10128,122 @@ def test_generation_repair_diagnostics_expose_speaker_and_visual_identity_gate_f
     q06_initial = q06_diagnostics["initial_draft"]
     assert q06_initial["unsupported_kingfisher_black_gold_attribution"] is True
     assert "unsupported_kingfisher_black_gold_attribution" in q06_initial["issue_codes"]
+
+
+@pytest.mark.unit
+def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "It had all the attributes of a low cost carrier, which is single class, "
+        "standard fleet. It had in flight entertainment. It had the best flying "
+        "experience that India had ever seen."
+    )
+    answer = "A single-class, low-cost carrier with in-flight entertainment."
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["required_source_claim_count"] == 2
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1]
+    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [0, 1]
+    assert "registered_source_claim_evidence_incomplete" not in (
+        diagnostics["initial_draft"]["issue_codes"]
+    )
+    assert "missing_registered_answer_claims" not in (
+        diagnostics["initial_draft"]["issue_codes"]
+    )
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+@pytest.mark.unit
+def test_q03_royal_challengers_alone_does_not_satisfy_royal_challenge_whisky_claim():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q03"
+    )
+    _, gold_case = chain._registered_generation_gold_case("MdeQMVBuGgY", question)
+
+    franchise_only = (
+        "[SOURCE 1] Royal Challengers Bangalore was the cricket franchise."
+    )
+    matched = chain._matched_registered_phrase_group_indices(
+        franchise_only, gold_case.generation_claim_source_groups
+    )
+
+    assert 4 in matched
+    assert 5 not in matched
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_rejects_positive_statement_of_account_as_missing_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] The banks provided a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["account_statement"]
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+
+
+@pytest.mark.unit
+def test_blood_through_veins_not_arteries_is_not_treated_as_wrong_attribution():
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins, not arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins rather than arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins and arteries."
+    ) is True
+
+
+@pytest.mark.unit
+def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_respects_negation():
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher's identity was black and gold."
+    ) is True
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "McDowell was black and gold, while Kingfisher was red."
+    ) is False
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was red, not black and gold."
+    ) is False
