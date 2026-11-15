@@ -10172,6 +10172,12 @@ def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage()
         context=context,
         video_id="MdeQMVBuGgY",
     ) is None
+    assert chain._generation_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
 
 
 @pytest.mark.unit
