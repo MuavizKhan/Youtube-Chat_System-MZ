@@ -2091,6 +2091,24 @@ def test_q02_claim_contract_rejects_wrong_force_india_reason_and_reversed_transf
     by_name = {check["name"]: check["passed"] for check in checks}
     assert by_name["q02_malaya_formula_one_not_actual_team_name"] is False, checks
 
+    # This reproduces the live failure wording, where a counterfactual name
+    # was incorrectly narrated as the team's actual name.
+    live_misattribution = (
+        "Mallya invested in a team that he named 'Malaya Formula 1'."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", live_misattribution)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_malaya_formula_one_not_actual_team_name"] is False, checks
+
+    # A separate valid counterfactual mention must not mask an actual-name error.
+    mixed_wrong_answer = (
+        "He could have named it Malaya Formula 1, but instead named it Force India. "
+        "Elsewhere he says the team was named Malaya Formula 1."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", mixed_wrong_answer)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_malaya_formula_one_not_actual_team_name"] is False, checks
+
 
 def test_q03_claim_contract_requires_three_distinct_business_families():
     incomplete = (
