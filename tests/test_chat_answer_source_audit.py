@@ -2109,6 +2109,13 @@ def test_q03_claim_contract_requires_three_distinct_business_families():
     checks = audit_module._claim_level_semantic_checks("Q03", complete)
     assert all(check["passed"] for check in checks), checks
 
+    lender_group = (
+        "A consortium of 17 banks provided a loan to the company."
+    )
+    lender_checks = audit_module._claim_level_semantic_checks("Q03", lender_group)
+    lender_by_name = {check["name"]: check["passed"] for check in lender_checks}
+    assert lender_by_name["q03_bank_consortium_not_a_business"] is True
+
     misclassified = (
         "The businesses include United Breweries, United Spirits, Air Deccan, "
         "Kingfisher Red, and Royal Challengers Bangalore. The cricket franchise "
