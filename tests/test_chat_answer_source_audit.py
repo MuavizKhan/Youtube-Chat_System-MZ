@@ -1382,6 +1382,28 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
     assert by_name["answer_prohibited_260_crore_raised_to_stay_afloat"] is False
     assert not all(check["passed"] for check in unsupported_checks)
 
+    speaker_misattributed = _claim_level_semantic_checks(
+        "Q05",
+        "Vijay Mallya says the global financial crisis meant money stopped and it got dry.",
+    )
+    speaker_misattributed_by_name = {
+        check["name"]: check["passed"] for check in speaker_misattributed
+    }
+    assert speaker_misattributed_by_name[
+        "q05_money_stopped_attribution_is_source_supported"
+    ] is False
+
+    speaker_neutral = _claim_level_semantic_checks(
+        "Q05",
+        "The discussion describes the global financial crisis and money stopping.",
+    )
+    speaker_neutral_by_name = {
+        check["name"]: check["passed"] for check in speaker_neutral
+    }
+    assert speaker_neutral_by_name[
+        "q05_money_stopped_attribution_is_source_supported"
+    ] is True
+
     # The live Q05 answer used this grammatical variant, which the earlier
     # "9,000 crore loan default" pattern did not recognize.
     grammatical_variant = (
