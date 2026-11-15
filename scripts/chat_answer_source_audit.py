@@ -1067,7 +1067,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             re.IGNORECASE,
         ))
         royal_challenge_misclassified = bool(re.search(
-            r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+Royal Challenge\b|"
+            r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+(?:(?:is|was|named|called)\s+)?Royal Challenge\b|"
             r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
             r"\bRoyal Challenge\s+(?:is|was)\s+(?:the\s+)?(?:cricket\s+)?franchise\b",
             text,
