@@ -1704,11 +1704,10 @@ def test_q02_generation_abstains_when_any_required_atomic_claim_is_missing(monke
     assert trace["generation_claim_groups_missing_from_retrieval"] == [0, 2, 3]
     assert trace["generation_claim_groups_missing_from_prompt"] == [0, 2, 3]
     assert trace["generation_claim_evidence_answer_suppressed"] is True
-    assert trace["generation_repair_diagnostics"]["not_attempted_reason"] if (
-        "not_attempted_reason" in trace["generation_repair_diagnostics"]
-    ) else "generation_not_attempted_incomplete_registered_claim_evidence" in trace[
-        "generation_repair_diagnostics"
-    ]["failure_reasons"]
+    assert (
+        "generation_not_attempted_incomplete_registered_claim_evidence"
+        in trace["generation_repair_diagnostics"]["failure_reasons"]
+    )
 
 
 @pytest.mark.unit
