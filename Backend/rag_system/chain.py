@@ -3582,9 +3582,20 @@ def _blood_movement_attributed_to_arteries(text: str) -> bool:
                     gap = 0
                 if gap > 55:
                     continue
-                relation = clause[min(blood_match.start(), artery_match.start()):max(blood_match.end(), artery_match.end())]
-                if not negation.search(relation):
-                    return True
+                relation_start = min(blood_match.start(), artery_match.start())
+                relation = clause[
+                    relation_start:max(blood_match.end(), artery_match.end())
+                ]
+                negation_match = negation.search(relation)
+                artery_start_in_relation = artery_match.start() - relation_start
+                # A negator before "arteries" rejects artery attribution; a
+                # contrast after it (arteries rather than veins) does not.
+                if (
+                    negation_match is not None
+                    and negation_match.start() < artery_start_in_relation
+                ):
+                    continue
+                return True
     return False
 
 
