@@ -6614,17 +6614,11 @@ def _build_financial_evidence_fallback(
             # Preserve the actual transcript clause: the Q08 acceptance
             # contract needs the negative "not provided" assertion, not merely
             # evidence that the words "statement of account" appeared.
-            if question_id == "Q08":
-                lines.append(
-                    "- Account/Parliament statement: "
-                    + matched_text.rstrip(".")
-                    + "."
-                )
-            else:
-                lines.append(
-                    '- Account/Parliament reference: the retrieved transcript '
-                    'includes the phrase "statement of account".'
-                )
+            lines.append(
+                "- Account/Parliament statement: "
+                + matched_text.rstrip(".")
+                + "."
+            )
         return "\n\n".join(lines)
 
     missing_topics = [
