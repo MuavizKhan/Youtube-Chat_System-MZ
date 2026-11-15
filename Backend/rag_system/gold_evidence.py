@@ -157,7 +157,7 @@ GOLD_EVIDENCE_CASES = (
         generation_answer_aliases=(
             ("United Breweries", "United Spirits"),
             ("Air Deccan", "Kingfisher Red", "eliminate the disruptor"),
-            ("Royal Challengers Bangalore", "Royal Challenge whisky", "RCB was born"),
+            ("Royal Challengers Bangalore", "Royal Challenge", "Royal Challenge whisky", "RCB was born"),
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
@@ -166,7 +166,7 @@ GOLD_EVIDENCE_CASES = (
             ("Air Deccan", "air deckin", "one deckan"),
             ("Kingfisher Red"),
             ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
-            ("Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
         generation_claim_answer_groups=(
             ("United Breweries"),
@@ -174,7 +174,7 @@ GOLD_EVIDENCE_CASES = (
             ("Air Deccan"),
             ("Kingfisher Red"),
             ("Royal Challengers Bangalore"),
-            ("Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
     ),
     GoldEvidenceCase(
@@ -777,7 +777,14 @@ def matched_source_phrase_group_indices(
     for group_index, alternatives in enumerate(phrase_groups):
         if any(
             (normalized_phrase := normalize_evidence_text(phrase))
-            and any(normalized_phrase in block for block in normalized_blocks)
+            and any(
+                re.search(
+                    rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+                    block,
+                )
+                is not None
+                for block in normalized_blocks
+            )
             for phrase in alternatives
         ):
             matched_indices.add(group_index)
@@ -826,17 +833,8 @@ def matched_gold_answer_groups(
     strict transcript/context matcher used by retrieval and prompt packing.
     """
     matched = matched_gold_groups(text, case)
-    if not isinstance(text, str) or not text or not case.generation_answer_aliases:
-        return matched
-
-    normalized_answer = normalize_evidence_text(text)
-    for group_index, aliases in enumerate(case.generation_answer_aliases):
-        if group_index >= len(case.groups):
-            break
-        if any(
-            normalize_evidence_text(alias) in normalized_answer
-            for alias in aliases
-        ):
-            matched.add(group_index)
-
+    # Use the same whole-phrase matching semantics for transcript phrases and
+    # curated English answer aliases. Substring matches can conflate distinct
+    # named entities (for example, "Royal Challenge" inside "Royal Challengers").
+    matched.update(matched_gold_answer_alias_groups(text, case))
     return matched
