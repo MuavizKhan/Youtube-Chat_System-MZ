@@ -5990,10 +5990,11 @@ def _financial_fallback_question_scope(question: str) -> str:
 def _extract_bank_recovery_statement_evidence(
     source_blocks: dict[int, str],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Extract bank-payment and account/Parliament statements source by source.
+    """Extract bank-payment and account/Parliament claims without crossing sources.
 
-    Captions are evaluated independently. A nearby source block cannot supply
-    missing bank wording or payment status for another block.
+    A claim may be split across adjacent timestamped caption rows. Inspect both
+    each row and two-row windows within the same source block; never join across
+    source IDs, skip question rows, or borrow wording from an unrelated passage.
     """
     evidence: dict[str, list[dict[str, Any]]] = {
         "bank_payment": [],
@@ -6016,30 +6017,71 @@ def _extract_bank_recovery_statement_evidence(
         r"\bparliamentary\s+statement\b",
         re.IGNORECASE,
     )
+    caption_pattern = re.compile(
+        r"^\s*-\s*\[[^\]]+\]\s*(?P<text>.*)$"
+    )
+    question_lead_pattern = re.compile(
+        r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
+        r"has|have|had|can|could|would|will|should)\b",
+        re.IGNORECASE,
+    )
 
     for source_id, source_text in source_blocks.items():
-        caption_matches = list(re.finditer(
-            r"(?m)^\s*-\s*\[[^\]]+\]\s*(.+)$",
-            source_text or "",
-        ))
-        if caption_matches:
-            statements = [match.group(1) for match in caption_matches]
-        else:
-            statements = re.split(r"(?<=[.!?])\s+|\n+", source_text or "")
+        rows: list[str] = []
+        current_parts: list[str] | None = None
 
-        for statement in statements:
-            cleaned = re.sub(r"\s+", " ", statement or "").strip()
-            if not cleaned:
+        # Retain physical continuation lines as part of the caption that
+        # introduced them, matching the context parser's source-row semantics.
+        for line in (source_text or "").splitlines():
+            match = caption_pattern.match(line)
+            if match:
+                if current_parts is not None:
+                    caption_text = " ".join(
+                        part for part in current_parts if part
+                    ).strip()
+                    if caption_text:
+                        rows.append(caption_text)
+                initial = match.group("text").strip()
+                current_parts = [initial] if initial else []
+            elif current_parts is not None and line.strip():
+                current_parts.append(line.strip())
+
+        if current_parts is not None:
+            caption_text = " ".join(
+                part for part in current_parts if part
+            ).strip()
+            if caption_text:
+                rows.append(caption_text)
+
+        # When there are no timestamped caption rows, retain the previous
+        # sentence/newline split so plain-text diagnostic contexts still work.
+        if not rows:
+            rows = [
+                re.sub(r"\s+", " ", item or "").strip()
+                for item in re.split(r"(?<=[.!?])\s+|\n+", source_text or "")
+                if re.sub(r"\s+", " ", item or "").strip()
+            ]
+
+        eligible_rows: list[tuple[int, str]] = []
+        for row_index, row in enumerate(rows):
+            cleaned = re.sub(r"\s+", " ", row or "").strip()
+            if not cleaned or "?" in cleaned or question_lead_pattern.match(cleaned):
                 continue
-            # An interviewer question is not proof that the asserted payment
-            # status or account statement exists. Keep only declarative caption
-            # fragments in this deterministic fallback.
-            if "?" in cleaned or re.match(
-                r"^(?:who|what|when|where|why|how|is|are|was|were|do|does|did|"
-                r"has|have|had|can|could|would|will|should)\b",
-                cleaned,
-                re.IGNORECASE,
-            ):
+            eligible_rows.append((row_index, cleaned))
+
+        # Evaluate each caption and each pair of immediately adjacent captions.
+        # The original row indexes ensure a question/irrelevant row cannot be
+        # silently skipped to combine two non-adjacent statements.
+        candidates: list[str] = [row for _, row in eligible_rows]
+        eligible_by_index = dict(eligible_rows)
+        for row_index, row in eligible_rows:
+            next_row = eligible_by_index.get(row_index + 1)
+            if next_row:
+                candidates.append(f"{row} {next_row}")
+
+        for candidate in candidates:
+            cleaned = re.sub(r"\s+", " ", candidate or "").strip()
+            if not cleaned:
                 continue
             normalized = cleaned.casefold()
             matches = []
@@ -6056,7 +6098,6 @@ def _extract_bank_recovery_statement_evidence(
                     "text": cleaned[:240],
                 })
     return evidence
-
 
 def _build_financial_evidence_fallback(
     question: str,
