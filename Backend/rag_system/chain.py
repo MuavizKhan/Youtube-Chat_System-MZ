@@ -3545,9 +3545,21 @@ def _text_assigns_black_gold_to_kingfisher(text: str) -> bool:
             nearest = min(brands, key=distance)
             if distance(nearest) > 120 or not nearest.group(0).casefold().startswith("kingfisher"):
                 continue
-            relation = clause[min(nearest.start(), colour.start()):max(nearest.end(), colour.end())]
-            if not negation.search(relation):
-                return True
+            relation_start = min(nearest.start(), colour.start())
+            relation = clause[
+                relation_start:max(nearest.end(), colour.end())
+            ]
+            negation_match = negation.search(relation)
+            colour_start_in_relation = colour.start() - relation_start
+            # Negation before "black and gold" rejects that attribution. A
+            # contrast after the colour phrase does not ("black and gold
+            # rather than red" still positively assigns black and gold).
+            if (
+                negation_match is not None
+                and negation_match.start() < colour_start_in_relation
+            ):
+                continue
+            return True
     return False
 
 
