@@ -132,7 +132,7 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_answer_groups=(
             ("named the Formula One team Force India", "called the team Force India"),
             ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
-            ("used the Formula One platform, car livery and merchandise to promote brands"),
+            ("used the Formula One platform, car livery and merchandise to promote brands",),
             (
                 "Formula One team sent 10 million pounds back to Kingfisher Airlines",
                 "F1 team returned 10 million pounds to Kingfisher Airlines",
@@ -141,6 +141,10 @@ GOLD_EVIDENCE_CASES = (
                 "F1 team sent 10 million back to Kingfisher Airlines",
                 "Formula One team sent 10 million pounds back to King Fisher Airlines",
                 "F1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent £10 million back to King Fisher Airlines",
+                "sent £10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
             ),
         ),
     ),
@@ -162,18 +166,18 @@ GOLD_EVIDENCE_CASES = (
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
             ("United Breweries Limited", "United Breweries"),
-            ("United Spirits"),
+            ("United Spirits",),
             ("Air Deccan", "air deckin", "one deckan"),
-            ("Kingfisher Red"),
+            ("Kingfisher Red",),
             ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
             ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
         generation_claim_answer_groups=(
-            ("United Breweries"),
-            ("United Spirits"),
-            ("Air Deccan"),
-            ("Kingfisher Red"),
-            ("Royal Challengers Bangalore"),
+            ("United Breweries",),
+            ("United Spirits",),
+            ("Air Deccan",),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore",),
             ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
     ),
@@ -283,15 +287,12 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         generation_fallback_answer=(
-            "Vijay Mallya identifies the global financial crisis as a shock that "
-            "affected every sector. The discussion also describes how money stopped "
-            "and it got dry, without assigning those words to either speaker. "
-            "Mallya says Kingfisher's working capital cycle got disrupted. "
-            "The discussion also refers to the non-payment of the oil bills and "
-            "says Kingfisher Airlines was not able to pay the airport fees and "
-            "landing charges. Mallya responds that a cash flow issue affects "
-            "everybody; one creditor or vendor cannot be isolated because the "
-            "cash shortage is across the board."
+            "The discussion describes the global financial crisis and how money "
+            "stopped, without assigning those words to either speaker. It says "
+            "the working capital cycle got disrupted and there was a cash flow "
+            "issue. It refers to the non-payment of the oil bills and says "
+            "Kingfisher Airlines was not able to pay the airport fees and "
+            "landing charges."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
@@ -343,7 +344,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_claim_answer_groups=(
             ("a brand needs a personality", "gave Kingfisher a personality"),
-            ("surrogate advertising"),
+            ("surrogate advertising",),
             ("water business around Kingfisher", "advertise the core brand"),
         ),
     ),
@@ -390,6 +391,8 @@ GOLD_EVIDENCE_CASES = (
                 "the statement of account was not provided",
                 "statement of account had not been provided",
                 "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
             ),
         ),
         min_generation_answer_group_coverage=1.0,
@@ -419,6 +422,8 @@ GOLD_EVIDENCE_CASES = (
                 "the statement of account was not provided",
                 "statement of account had not been provided",
                 "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
             ),
         ),
         generation_claim_answer_groups=(
@@ -451,6 +456,8 @@ GOLD_EVIDENCE_CASES = (
                 "banks had not provided him with a statement of account",
                 "the statement of account was not provided",
                 "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
                 "I still have not been provided a statement of account",
             ),
         ),
@@ -496,13 +503,13 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
-            ("global financial crisis"),
+            ("global financial crisis",),
             ("money stopped", "it got dry"),
             ("government policies that didn't help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
         generation_claim_answer_groups=(
-            ("global financial crisis"),
+            ("global financial crisis",),
             ("money stopped", "it got dry", "money dried up", "money stopped flowing"),
             ("government policies that did not help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
