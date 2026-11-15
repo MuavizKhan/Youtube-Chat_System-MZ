@@ -1106,7 +1106,14 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Royal Challengers Bangalore/RCB is the cricket franchise; Royal Challenge is the whisky brand.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
-        classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|financiers?)\b", text, re.IGNORECASE))
+        classifies_as_lenders = bool(re.search(
+            r"\b(?:lenders?|creditors?|financiers?)\b|"
+            r"\b(?:provided|extended|offered|gave)\s+(?:a\s+)?"
+            r"(?:loan|credit|financing)\b|"
+            r"\b(?:lent|financed)\b.{0,45}\b(?:company|business|airline)\b",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q03_bank_consortium_not_a_business",
             not mentions_consortium or classifies_as_lenders,
