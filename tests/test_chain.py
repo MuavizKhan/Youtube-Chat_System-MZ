@@ -825,7 +825,7 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
     assert "I used the platform to advertise my brands." in context
     assert (
         "the Formula One team sent back 10 million pounds to Kingfisher Airlines"
-        in context
+        in context.casefold()
     )
     assert diagnostics["generation_claim_groups_required"] == [0, 1, 2, 3]
     assert diagnostics["generation_claim_groups_available"] == [0, 1, 2, 3]
