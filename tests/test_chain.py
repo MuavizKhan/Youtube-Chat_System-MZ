@@ -723,6 +723,132 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
 
 
 @pytest.mark.regression
+def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omits_them():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    benchmark = chain.get_video_benchmark(video_id)
+    gold_case = benchmark.gold_evidence_by_question["Q02"]
+    assert gold_case.generation_claims_require_context_reservation is True
+
+    def make_document(chunk_id, start, raw_text, metadata_text):
+        document = doc(chunk_id, start, start + 4, raw_text)
+        document.metadata["video_id"] = video_id
+        document.metadata["transcript_segments"] = [{
+            "segment_id": chunk_id * 100,
+            "start": start,
+            "end": start + 3.5,
+            "text": metadata_text,
+        }]
+        return document
+
+    filler = [
+        "Unrelated interview narration describes another topic without Formula One evidence. "
+        * 3
+        for _ in range(10)
+    ]
+    first_raw_captions = [
+        "Formula 1 is the pinnacle of motorsport, and it was a dream to have a team on the F1 grid.",
+        "I named it Force India.",
+        "I wanted the Indian flag to be on the grid.",
+        "I used the platform to advertise my brands.",
+        *filler,
+    ]
+    first_metadata_captions = [
+        "Formula 1 was discussed as a motorsport.",
+        "The guest discussed an earlier decision.",
+        "The guest described the team.",
+        "The guest discussed a promotional opportunity.",
+        *filler,
+    ]
+    first_documents = [
+        make_document(
+            1200 + index,
+            6000 + index * 5,
+            raw_caption,
+            metadata_caption,
+        )
+        for index, (raw_caption, metadata_caption) in enumerate(
+            zip(first_raw_captions, first_metadata_captions)
+        )
+    ]
+    second_raw_captions = [
+        "During the Formula 1 discussion, the Formula One team sent back "
+        "10 million pounds to Kingfisher Airlines to help it.",
+        *filler,
+    ]
+    second_metadata_captions = [
+        "Formula 1 was discussed in the interview.",
+        *filler,
+    ]
+    second_documents = [
+        make_document(
+            1300 + index,
+            15000 + index * 5,
+            raw_caption,
+            metadata_caption,
+        )
+        for index, (raw_caption, metadata_caption) in enumerate(
+            zip(second_raw_captions, second_metadata_captions)
+        )
+    ]
+    source_groups = [
+        {
+            "documents": first_documents,
+            "start": 6000,
+            "end": 6100,
+            "distance": 0.45,
+        },
+        {
+            "documents": second_documents,
+            "start": 15000,
+            "end": 15100,
+            "distance": 0.55,
+        },
+    ]
+
+    # Caption metadata retains the broad Formula One topic but drops each
+    # precise claim. The formatter must reject that lossy reconstruction.
+    assert chain._caption_segments_for_documents(first_documents, gold_case) is None
+    assert chain._caption_segments_for_documents(second_documents, gold_case) is None
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=1800,
+        video_id=video_id,
+    )
+    context = result["context"]
+    diagnostics = result["diagnostics"]
+
+    assert len(context) <= 1800
+    assert "I named it Force India." in context
+    assert "I wanted the Indian flag to be on the grid." in context
+    assert "I used the platform to advertise my brands." in context
+    assert (
+        "the Formula One team sent back 10 million pounds to Kingfisher Airlines"
+        in context
+    )
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_available"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_included"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_claim_context_complete"] is True
+    assert diagnostics["gold_evidence_source_groups"][0]["raw_chunk_fallback_used"] is True
+    assert diagnostics["gold_evidence_source_groups"][1]["raw_chunk_fallback_used"] is True
+
+    # Two source blocks cannot be stitched together to manufacture a claim.
+    split_source_claim = (
+        "[SOURCE 1]\\nI named it\\n"
+        "[SOURCE 2]\\nForce India."
+    )
+    assert chain._matched_registered_phrase_group_indices(
+        split_source_claim,
+        gold_case.generation_claim_source_groups,
+    ) == set()
+
+
+@pytest.mark.regression
 @pytest.mark.parametrize(
     "question,evidence_caption_groups,required_phrases",
     [
