@@ -10000,8 +10000,9 @@ def test_q08_full_financial_fallback_uses_caption_pair_for_bank_payment():
 
     assert fallback is not None
     assert "14,100" in fallback
+    assert "Recovery Officer and Official Liquidator" in fallback
     assert "banks had been fully paid" in fallback
-    assert "statement of account" in fallback
+    assert "Mallya said the banks had not provided him a statement of account" in fallback
     assert diagnostics["minimum_supported_evidence_groups"] == 3
     assert diagnostics["supported_evidence_groups"] == [
         "recovery_amount", "bank_payment", "account_statement"
@@ -10063,3 +10064,58 @@ def test_q08_answer_claim_requires_recovery_officer_or_official_liquidator_attri
 
     assert 1 not in generic_claims
     assert 1 in attributed_claims
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_expose_speaker_and_visual_identity_gate_failures():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    q10 = next(item["question"] for item in benchmark.question_cases if item["id"] == "Q10")
+    q10_context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    q10_answer = (
+        "Mallya says the global financial crisis meant money stopped and it got dry. "
+        "Government policies did not help and mounting losses followed. "
+        "The refusal to let Etihad invest was the final straw."
+    )
+    q10_diagnostics = chain._build_generation_repair_diagnostics(
+        question=q10,
+        video_id="MdeQMVBuGgY",
+        context=q10_context,
+        initial_draft=q10_answer,
+        repaired_draft=None,
+        final_answer=q10_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    q10_initial = q10_diagnostics["initial_draft"]
+    assert q10_initial["unsupported_money_stopped_speaker_attribution"] is True
+    assert "unsupported_money_stopped_speaker_attribution" in q10_initial["issue_codes"]
+
+    q06 = next(item["question"] for item in benchmark.question_cases if item["id"] == "Q06")
+    q06_context = (
+        "[SOURCE 1]\n"
+        "There was nothing red about McDowell. It was all black and gold. "
+        "The only one around that is red is Kingfisher."
+    )
+    q06_answer = (
+        "Kingfisher's brand identity and logo used a black-and-gold colour scheme."
+    )
+    q06_diagnostics = chain._build_generation_repair_diagnostics(
+        question=q06,
+        video_id="MdeQMVBuGgY",
+        context=q06_context,
+        initial_draft=q06_answer,
+        repaired_draft=None,
+        final_answer=q06_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    q06_initial = q06_diagnostics["initial_draft"]
+    assert q06_initial["unsupported_kingfisher_black_gold_attribution"] is True
+    assert "unsupported_kingfisher_black_gold_attribution" in q06_initial["issue_codes"]
