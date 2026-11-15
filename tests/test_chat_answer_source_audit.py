@@ -2163,6 +2163,22 @@ def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
     checks = audit_module._claim_level_semantic_checks("Q06", grounded)
     assert all(check["passed"] for check in checks), checks
 
+    incorrect_identity = (
+        "Kingfisher's name, bird logo, and black-and-gold colour scheme were memorable."
+    )
+    incorrect_identity_checks = audit_module._claim_level_semantic_checks(
+        "Q06", incorrect_identity
+    )
+    assert incorrect_identity_checks[-1]["passed"] is False, incorrect_identity_checks
+
+    incorrect_colour = (
+        "Kingfisher was presented in black and gold rather than red."
+    )
+    incorrect_colour_checks = audit_module._claim_level_semantic_checks(
+        "Q06", incorrect_colour
+    )
+    assert incorrect_colour_checks[-1]["passed"] is False, incorrect_colour_checks
+
     correct_contrast = (
         "McDowell was described as black-and-gold, while Kingfisher was the red brand."
     )
