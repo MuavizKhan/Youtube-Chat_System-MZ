@@ -283,8 +283,8 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_fallback_answer=(
             "Vijay Mallya identifies the global financial crisis as a shock that "
-            "affected every sector. The interviewer summarizes the impact by "
-            "saying that money stopped and it got dry. Mallya says Kingfisher's "
+            "affected every sector. The discussion also describes money stopping "
+            "and getting dry. Mallya says Kingfisher's "
             "working capital cycle got disrupted. The interviewer then points to "
             "the non-payment of the oil bills and says Kingfisher Airlines was "
             "not able to pay the airport fees and landing charges. Mallya responds "
@@ -300,8 +300,8 @@ GOLD_EVIDENCE_CASES = (
             ("cash flow issue",),
             ("non-payment of the oil bills",),
             (
-                # The interviewer states this; Mallya's following reply is
-                # about the cash-flow impact across creditors and vendors.
+                # The caption does not establish a speaker boundary here;
+                # keep the oil-bill and airport-fee facts speaker-neutral.
                 "Kingfisher Airlines was not able to pay the airport fees the landing charges",
                 "not able to pay the airport fees the landing charges",
                 "not able to pay airport fees and landing charges",
@@ -372,12 +372,24 @@ GOLD_EVIDENCE_CASES = (
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
             ("14,100 crore rupees were recovered from me", "14,100 crores recovered from me", "government has recovered 14,100 crores"),
-            ("banks have been fully paid", "the banks have been fully paid"),
+            (
+                "banks have been fully paid",
+                "the banks have been fully paid",
+                "Recovery Officer and Official Liquidator said in court that banks have been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that banks have been fully paid",
+            ),
             ("statement of account", "statement in parliament"),
         ),
         generation_claim_answer_groups=(
             ("14,100 crores recovered from him", "14,100 crore rupees recovered from him"),
-            ("banks had been fully paid"),
+            (
+                "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said that the banks had been fully paid",
+                "the Recovery Officer said in court that the banks had been fully paid",
+                "the Official Liquidator said in court that the banks had been fully paid",
+                "the court was told by the Recovery Officer and Official Liquidator that banks had been fully paid",
+            ),
             ("statement of account had not been provided", "banks had not provided a statement of account"),
         ),
     ),
