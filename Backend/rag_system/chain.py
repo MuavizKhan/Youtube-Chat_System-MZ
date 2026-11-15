@@ -3505,31 +3505,57 @@ def _normalize_registered_transcript_answer(
 
 
 def _text_assigns_black_gold_to_kingfisher(text: str) -> bool:
-    """Detect an unsupported black/gold assignment to Kingfisher, not McDowell."""
-    clauses = re.split(
-        r"[.!?;\\n]+|\\b(?:while|whereas|but|although|however|unlike|yet)\\b|"
-        r",\\s*(?=Kingfisher\\b|McDowell\\b)",
-        text or "",
-        flags=re.IGNORECASE,
+    """Detect black/gold attribution to Kingfisher, not to a nearby brand."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    black_gold = re.compile(r"\bblack[-‐‑‒–—− ]and[-‐‑‒–—− ]gold\b", re.IGNORECASE)
+    brand = re.compile(r"\bKingfisher(?:\s+Airlines)?\b|\bMcDowell(?:'s)?\b", re.IGNORECASE)
+    negation = re.compile(
+        r"\b(?:not(?!\s+only)|never|neither|rather\s+than|instead\s+of|opposite\s+of)\b|"
+        r"\b(?:isn't|wasn't|weren't|isnt|wasnt|werent)\b",
+        re.IGNORECASE,
     )
-    for clause in clauses:
-        if not (
-            re.search(r"\\bKingfisher\\b", clause, re.IGNORECASE)
-            and re.search(
-                r"black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold",
-                clause,
-                re.IGNORECASE,
-            )
-        ):
-            continue
-        if re.search(
-            r"\\b(?:not|never|neither)\\b.{0,45}\\bKingfisher\\b|"
-            r"\\bKingfisher\\b.{0,45}\\b(?:not|never|neither)\\b",
-            clause,
-            re.IGNORECASE,
-        ):
-            continue
-        return True
+    for clause in re.split(r"[.!?;\n]+", normalized):
+        brands = list(brand.finditer(clause))
+        for colour in black_gold.finditer(clause):
+            def distance(match: re.Match[str]) -> int:
+                if match.end() <= colour.start():
+                    return colour.start() - match.end()
+                if colour.end() <= match.start():
+                    return match.start() - colour.end()
+                return 0
+            if not brands:
+                continue
+            nearest = min(brands, key=distance)
+            if distance(nearest) > 120 or not nearest.group(0).casefold().startswith("kingfisher"):
+                continue
+            relation = clause[min(nearest.start(), colour.start()):max(nearest.end(), colour.end())]
+            if not negation.search(relation):
+                return True
+    return False
+
+
+def _blood_movement_attributed_to_arteries(text: str) -> bool:
+    """Detect positive blood/artery assertions without flagging explicit denials."""
+    blood = re.compile(r"\bblood(?:\s+(?:flow|movement|circulation))?\b", re.IGNORECASE)
+    artery = re.compile(r"\barter(?:y|ies)\b", re.IGNORECASE)
+    negation = re.compile(
+        r"\b(?:not(?!\s+only)|never|rather\s+than|instead\s+of|other\s+than|except)\b",
+        re.IGNORECASE,
+    )
+    for clause in re.split(r"[.!?;\n]+", text or ""):
+        for blood_match in blood.finditer(clause):
+            for artery_match in artery.finditer(clause):
+                if blood_match.end() <= artery_match.start():
+                    gap = artery_match.start() - blood_match.end()
+                elif artery_match.end() <= blood_match.start():
+                    gap = blood_match.start() - artery_match.end()
+                else:
+                    gap = 0
+                if gap > 55:
+                    continue
+                relation = clause[min(blood_match.start(), artery_match.start()):max(blood_match.end(), artery_match.end())]
+                if not negation.search(relation):
+                    return True
     return False
 
 
@@ -3622,6 +3648,11 @@ def _build_generation_repair_diagnostics(
         if claim_contract_available
         else set()
     )
+    required_source_claim_count = (
+        math.ceil(len(source_claim_groups) * float(required_answer_coverage))
+        if claim_contract_available
+        else 0
+    )
 
     def inspect_draft(draft: str | None) -> dict[str, Any] | None:
         if draft is None:
@@ -3660,6 +3691,14 @@ def _build_generation_repair_diagnostics(
             if claim_contract_available
             else []
         )
+        source_claim_evidence_incomplete = (
+            claim_contract_available
+            and len(prompt_source_claim_indices) < required_source_claim_count
+        )
+        answer_claim_evidence_incomplete = (
+            claim_contract_available
+            and len(prompt_source_claim_indices & answer_claim_indices) < required_source_claim_count
+        )
         normalized_draft = unicodedata.normalize("NFKC", draft)
         opening_9000_narrator_claim = (
             question_id in {"Q04", "Q05", "Q10"}
@@ -3688,9 +3727,9 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("language_contract_violation")
         if missing_groups:
             issue_codes.append("missing_prompt_evidence_groups")
-        if missing_source_claim_indices:
+        if source_claim_evidence_incomplete:
             issue_codes.append("registered_source_claim_evidence_incomplete")
-        if missing_answer_claim_indices:
+        if answer_claim_evidence_incomplete:
             issue_codes.append("missing_registered_answer_claims")
         if opening_9000_narrator_claim:
             issue_codes.append("opening_9000_narrator_claim")
@@ -3776,7 +3815,7 @@ def _build_generation_repair_diagnostics(
         "required_answer_gold_group_count": required_answer_groups,
         "prompt_evidence_complete": prompt_evidence_complete,
         "registered_claim_contract_available": claim_contract_available,
-        "required_source_claim_count": len(source_claim_groups) if claim_contract_available else 0,
+        "required_source_claim_count": required_source_claim_count,
         "prompt_source_claim_indices": sorted(prompt_source_claim_indices),
         "missing_prompt_source_claim_indices": (
             sorted(required_source_claim_indices - prompt_source_claim_indices)
@@ -3977,33 +4016,33 @@ def _gold_evidence_repair_instruction(
         getattr(gold_case, "generation_claim_answer_groups", ()) or ()
     )
     if (
-            source_claim_groups
-            and len(source_claim_groups) == len(answer_claim_groups)
-            and all(source_claim_groups)
-            and all(answer_claim_groups)
-        ):
-            source_claim_indices = _matched_registered_phrase_group_indices(
-                context_text,
-                source_claim_groups,
-            )
-            # Never ask the model to add an assertion unless every registered
-            # claim has been located in the supplied, source-scoped context.
-            if len(source_claim_indices) == len(source_claim_groups):
-                answer_claim_indices = _matched_registered_phrase_group_indices(
-                    answer_text,
-                    answer_claim_groups,
-                )
-                missing_claim_indices = sorted(
-                    set(range(len(source_claim_groups))) - answer_claim_indices
-                )
-                if missing_claim_indices:
-                    missing_lines = [
-                        f"- Claim {index + 1}: " + " / ".join(
-                            source_claim_groups[index][:3]
-                        )
-                        for index in missing_claim_indices
-                    ]
-                    instructions.append(
+        source_claim_groups
+        and len(source_claim_groups) == len(answer_claim_groups)
+        and all(source_claim_groups)
+        and all(answer_claim_groups)
+    ):
+        required_claim_coverage = (
+            gold_case.min_generation_answer_group_coverage
+            if gold_case.min_generation_answer_group_coverage is not None
+            else required_prompt_coverage
+        )
+        required_claim_count = math.ceil(len(source_claim_groups) * float(required_claim_coverage))
+        source_claim_indices = _matched_registered_phrase_group_indices(context_text, source_claim_groups)
+        # Only repair missing assertions when the prompt holds enough registered
+        # evidence for the configured answer-coverage contract.
+        if len(source_claim_indices) >= required_claim_count:
+            answer_claim_indices = _matched_registered_phrase_group_indices(answer_text, answer_claim_groups)
+            missing_claim_indices = sorted(source_claim_indices - answer_claim_indices)
+            deficit = max(0, required_claim_count - len(source_claim_indices & answer_claim_indices))
+            missing_claim_indices = missing_claim_indices[:deficit]
+            if missing_claim_indices:
+                missing_lines = [
+                    f"- Claim {index + 1}: " + " / ".join(
+                        source_claim_groups[index][:3]
+                    )
+                    for index in missing_claim_indices
+                ]
+                instructions.append(
                         "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR. Rewrite the "
                         "answer using only the supplied transcript. Each missing "
                         "claim below is supported by a prompt-visible source block. "
@@ -5635,12 +5674,9 @@ def _generation_repair_instruction(
             and not re.search(r"شرايين", block)
             for block in bodily_source_blocks
         )
-        answer_assigns_blood_to_arteries = bool(re.search(
-            r"(?:blood|blood flow|blood movement).{0,45}\barter(?:y|ies)\b|"
-            r"\barter(?:y|ies)\b.{0,45}(?:blood|blood flow|blood movement)",
-            answer_text,
-            re.IGNORECASE,
-        ))
+        answer_assigns_blood_to_arteries = (
+            _blood_movement_attributed_to_arteries(answer_text)
+        )
         if source_explicitly_says_veins and answer_assigns_blood_to_arteries:
             instructions.append(
                 "ANATOMICAL TERM CORRECTION. The supplied Arabic caption says "
@@ -6112,6 +6148,20 @@ def _extract_bank_recovery_statement_evidence(
                 })
     return evidence
 
+def _is_explicitly_missing_account_statement(text: str) -> bool:
+    """Recognize an explicit missing/not-provided statement-of-account claim."""
+    return bool(re.search(
+        r"\bno\s+(?:bank\s+)?statement\s+of\s+account\b|"
+        r"\b(?:not|never)\b.{0,60}\b(?:provided|given|submitted|furnished|received|produced)\b"
+        r".{0,60}\bstatement\s+of\s+account\b|"
+        r"\bstatement\s+of\s+account\b.{0,60}"
+        r"\b(?:was|is|has\s+been|had\s+been|have\s+been|were|are)?\s*"
+        r"(?:not|never)\s+(?:provided|given|submitted|furnished|received|produced)\b",
+        text or "",
+        re.IGNORECASE,
+    ))
+
+
 def _build_financial_evidence_fallback(
     question: str,
     context: str,
@@ -6354,6 +6404,13 @@ def _build_financial_evidence_fallback(
 
     if question_scope == "bank_recovery":
         bank_evidence = _extract_bank_recovery_statement_evidence(source_blocks)
+        question_id, _registered_case = _registered_generation_gold_case(video_id, question)
+        account_statement_evidence = bank_evidence["account_statement"]
+        if question_id == "Q08":
+            account_statement_evidence = [
+                item for item in account_statement_evidence
+                if _is_explicitly_missing_account_statement(str(item.get("text") or ""))
+            ]
         recovery_claim = (
             claims_by_topic.get("recovery_report")
             or claims_by_topic.get("recovery")
@@ -6363,7 +6420,7 @@ def _build_financial_evidence_fallback(
             supported_evidence_groups.append("recovery_amount")
         if bank_evidence["bank_payment"]:
             supported_evidence_groups.append("bank_payment")
-        if bank_evidence["account_statement"]:
+        if account_statement_evidence:
             supported_evidence_groups.append("account_statement")
         required_evidence_groups = [
             "recovery_amount",
@@ -6374,9 +6431,6 @@ def _build_financial_evidence_fallback(
             group for group in required_evidence_groups
             if group not in supported_evidence_groups
         ]
-        question_id, _registered_case = _registered_generation_gold_case(
-            video_id, question
-        )
         # The registered Q08 audit requires all three distinct claims. Keep the
         # established two-family threshold for other generic bank-recovery queries.
         minimum_supported_groups = (
@@ -6499,7 +6553,7 @@ def _build_financial_evidence_fallback(
                 + item["text"].rstrip(".")
                 + "."
             )
-        for item in bank_evidence["account_statement"][:1]:
+        for item in account_statement_evidence[:1]:
             matched_text = str(item.get("text") or "")
             # Preserve the actual transcript clause: the Q08 acceptance
             # contract needs the negative "not provided" assertion, not merely
