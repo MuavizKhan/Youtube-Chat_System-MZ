@@ -1067,8 +1067,7 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Name all six distinct entities: United Breweries, United Spirits, Air Deccan, Kingfisher Red, Royal Challengers Bangalore/RCB, and Royal Challenge.",
         )
         royal_challenge_whisky = bool(re.search(
-            r"\bRoyal Challenge\b.{0,60}\b(?:whisky|whiskey|brand)\b|"
-            r"\b(?:whisky|whiskey|brand)\b.{0,60}\bRoyal Challenge\b",
+            r"\bRoyal Challenge\b",
             text,
             re.IGNORECASE,
         ))
