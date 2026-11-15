@@ -2408,3 +2408,23 @@ def test_q08_rejects_14100_amount_without_ministry_report_attribution():
     assert by_name["q08_ministry_recovery_figure"] is False
     assert by_name["q08_banks_fully_paid_claim_attributed"] is True
     assert by_name["q08_missing_statement_of_account"] is True
+
+
+def test_q08_requires_named_official_for_bank_payment_in_answer_claim():
+    unsupported = (
+        "The Ministry of Finance report showed 14,100 crores recovered. "
+        "The banks had been fully paid. The banks had not provided a statement "
+        "of account."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q08", unsupported)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q08_banks_fully_paid_claim_attributed"] is False
+
+    supported = (
+        "The Ministry of Finance report showed 14,100 crores recovered. "
+        "The Recovery Officer and Official Liquidator said the banks had been "
+        "fully paid. The banks had not provided a statement of account."
+    )
+    supported_checks = audit_module._claim_level_semantic_checks("Q08", supported)
+    supported_by_name = {check["name"]: check["passed"] for check in supported_checks}
+    assert supported_by_name["q08_banks_fully_paid_claim_attributed"] is True
