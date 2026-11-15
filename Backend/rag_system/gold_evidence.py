@@ -64,6 +64,9 @@ class GoldEvidenceCase:
     # Generated-answer claims are independent of deterministic fallbacks.
     generation_claim_source_groups: tuple[tuple[str, ...], ...] = ()
     generation_claim_answer_groups: tuple[tuple[str, ...], ...] = ()
+    # Opt in when every registered generated-answer claim must be preserved
+    # through caption reconstruction and bounded generation-context packing.
+    generation_claims_require_context_reservation: bool = False
 
 
 GOLD_EVIDENCE_CASES = (
@@ -112,6 +115,7 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_generation_answer_group_coverage=1.0,
+        generation_claims_require_context_reservation=True,
         generation_claim_source_groups=(
             ("named it Force India", "called it Force India"),
             ("wanted the Indian flag to be on the grid", "team with roots in India"),
