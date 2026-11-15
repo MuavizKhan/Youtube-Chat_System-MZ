@@ -9871,7 +9871,11 @@ def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_enti
         "The merger of Kingfisher and Air Deckin created Kingfisher Red. "
         "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
     )
-    source_claims = chain.get_gold_evidence_case("Q03").generation_claim_source_groups
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q03"
+    source_claims = gold_case.generation_claim_source_groups
     matched_source_claims = chain._matched_registered_phrase_group_indices(
         context, source_claims
     )
@@ -9895,7 +9899,15 @@ def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_enti
 
 @pytest.mark.unit
 def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced_airline():
-    source_groups = chain.get_gold_evidence_case("Q02").generation_claim_source_groups
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q02"
+    )
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q02"
+    source_groups = gold_case.generation_claim_source_groups
     context = (
         "[SOURCE 1]\n"
         "The Formula One team sent £10 million back to King Fisher Airlines."
