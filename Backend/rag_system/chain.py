@@ -1928,6 +1928,21 @@ def _caption_segments_for_documents(
             ):
                 return None
 
+        if getattr(gold_case, "generation_claims_require_context_reservation", False):
+            claim_source_groups = (
+                getattr(gold_case, "generation_claim_source_groups", ()) or ()
+            )
+            raw_claims = matched_source_phrase_group_indices(
+                raw_group_text,
+                claim_source_groups,
+            )
+            caption_claims = matched_source_phrase_group_indices(
+                " ".join(segment["text"] for segment in ordered_segments),
+                claim_source_groups,
+            )
+            if not raw_claims.issubset(caption_claims):
+                return None
+
     return ordered_segments
 
 
