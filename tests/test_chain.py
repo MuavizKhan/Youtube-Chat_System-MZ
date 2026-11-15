@@ -1653,6 +1653,65 @@ def test_rag_chain_abstains_when_registered_required_gold_context_is_incomplete(
 
 
 @pytest.mark.unit
+def test_q02_generation_abstains_when_any_required_atomic_claim_is_missing(monkeypatch):
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    source = _caption_group(
+        611,
+        6300,
+        [
+            "Formula 1 is the pinnacle of motorsport and it was a dream to have a team on the grid. "
+            "I wanted the Indian flag to be on the grid."
+        ],
+        0.2,
+    )["documents"][0]
+    source.metadata["video_id"] = video_id
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(source, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [611],
+                "citation_chunk_ids": [611],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: pytest.fail(
+            "Q02 generation must not run without all four source-backed claims"
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": video_id,
+    })
+
+    trace = result["generation_trace"]
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert trace["generated"] is False
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["generation_claim_context_complete"] is False
+    assert trace["generation_claim_groups_required"] == [0, 1, 2, 3]
+    assert trace["generation_claim_groups_included"] == [1]
+    assert trace["generation_claim_groups_missing_from_retrieval"] == [0, 2, 3]
+    assert trace["generation_claim_groups_missing_from_prompt"] == [0, 2, 3]
+    assert trace["generation_claim_evidence_answer_suppressed"] is True
+    assert trace["generation_repair_diagnostics"]["not_attempted_reason"] if (
+        "not_attempted_reason" in trace["generation_repair_diagnostics"]
+    ) else "generation_not_attempted_incomplete_registered_claim_evidence" in trace[
+        "generation_repair_diagnostics"
+    ]["failure_reasons"]
+
+
+@pytest.mark.unit
 def test_build_generation_context_keeps_all_groups_when_within_budget():
     groups = [
         {
