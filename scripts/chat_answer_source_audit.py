@@ -170,7 +170,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
             # This direct-fact question asks for the count. Require the number
             # and its unit; don't force the model to restate the question's
             # "express yourself" wording when "Three ways." is a complete answer.
-            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+ways?\b"},
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+(?:different\s+)?ways?\b"},
         ),
     ),
     _make_audit_case(
@@ -835,12 +835,16 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    has_veins = bool(re.search(r"\bveins?\b", text, re.IGNORECASE))
-    has_arteries_only = bool(re.search(r"\barter(?:y|ies)\b", text, re.IGNORECASE)) and not has_veins
+    blood_attributed_to_arteries = bool(re.search(
+        r"(?:blood|blood flow|blood movement).{0,40}\barter(?:y|ies)\b|"
+        r"\barter(?:y|ies)\b.{0,40}(?:blood|blood flow|blood movement)",
+        text,
+        re.IGNORECASE,
+    ))
     checks.append(_quality_check(
         "blood_movement_not_misattributed_to_arteries",
-        not has_arteries_only,
-        "The transcript-supported reference is to veins; an arteries-only substitution is incorrect.",
+        not blood_attributed_to_arteries,
+        "The registered Arabic caption describes blood moving through veins, not arteries.",
     ))
     return checks
 
@@ -981,6 +985,12 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ) or re.search(
+            r"(?:Formula One|F1)(?:\s+team)?.{0,180}"
+            r"\bsent\b.{0,35}(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,35}\bback\b.{0,120}(?:to\s+)?King\s?fisher",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
             r".{0,100}(?:sent.{0,30}back|returned|repaid).{0,100}"
             r"to\s+Kingfisher",
@@ -993,6 +1003,22 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ))
+        malaya_counterfactual = bool(re.search(
+            r"\b(?:could|might|would)\s+have\b.{0,80}\b(?:named|called)\b"
+            r".{0,35}\bMalaya\s+Formula\s+1\b.{0,100}\b(?:but|instead)\b"
+            r".{0,50}\bForce India\b",
+            text,
+            re.IGNORECASE,
+        ))
+        wrong_malaya_team_name = (
+            bool(re.search(
+                r"\b(?:the\s+team|it)\s+(?:was\s+)?(?:named|called)\s+Malaya\s+Formula\s+1\b|"
+                r"\b(?:named|called)\s+(?:the\s+team\s+)?Malaya\s+Formula\s+1\b",
+                text,
+                re.IGNORECASE,
+            ))
+            and not malaya_counterfactual
+        )
         reverse_transfer = bool(re.search(
             r"Kingfisher(?: Airlines)? .{0,100}"
             r"(?:paid|provided|gave|sponsored|funded).{0,100}"
@@ -1009,22 +1035,48 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Preserve the transfer: the Formula One team sent £10 million back to Kingfisher Airlines.")
         add("q02_not_named_after_mallya_brand", not wrong_force_india_reason,
             "Do not claim Force India was named after Mallya's own brand.")
+        add("q02_malaya_formula_one_not_actual_team_name", not wrong_malaya_team_name,
+            "Malaya Formula 1 was a counterfactual name; the team was named Force India.")
         add("q02_transfer_direction_not_reversed", not reverse_transfer,
             "Do not describe Kingfisher as paying or sponsoring the Formula One team with this returned £10 million.")
 
     elif case_id == "Q03":
-        groups = [
-            bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
-            bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
-            bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bRoyal Challenge\b", text, re.IGNORECASE)),
-        ]
+        entity_checks = {
+            "united_breweries": bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE)),
+            "united_spirits": bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
+            "air_deccan": bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE)),
+            "kingfisher_red": bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
+            "royal_challengers_bangalore": bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE)),
+            "royal_challenge": bool(re.search(r"\bRoyal Challenge\b", text, re.IGNORECASE)),
+        }
+        for name, passed in entity_checks.items():
+            add(
+                f"q03_{name}",
+                passed,
+                f"The answer must separately identify {name.replace('_', ' ')}.",
+            )
         add(
             "q03_distinct_business_families",
-            all(groups),
-            "Distinguish United Breweries/United Spirits, Air Deccan/Kingfisher Red, and Royal Challengers Bangalore/Royal Challenge.",
+            all(entity_checks.values()),
+            "Name all six distinct entities: United Breweries, United Spirits, Air Deccan, Kingfisher Red, Royal Challengers Bangalore/RCB, and Royal Challenge.",
+        )
+        royal_challenge_whisky = bool(re.search(
+            r"\bRoyal Challenge\b.{0,60}\b(?:whisk(?:y|e)y|brand)\b|"
+            r"\b(?:whisk(?:y|e)y|brand)\b.{0,60}\bRoyal Challenge\b",
+            text,
+            re.IGNORECASE,
+        ))
+        royal_challenge_misclassified = bool(re.search(
+            r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+Royal Challenge\b|"
+            r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
+            r"\bRoyal Challenge\s+(?:is|was)\s+(?:the\s+)?(?:cricket\s+)?franchise\b",
+            text,
+            re.IGNORECASE,
+        ))
+        add(
+            "q03_royal_challenge_is_whisky_brand_not_franchise",
+            royal_challenge_whisky and not royal_challenge_misclassified,
+            "Royal Challengers Bangalore/RCB is the cricket franchise; Royal Challenge is the whisky brand.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
         classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|financiers?)\b", text, re.IGNORECASE))
@@ -1040,24 +1092,18 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ))
-        interviewer_attributed = bool(re.search(
-            r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
+        named_speaker_attribution = bool(re.search(
+            r"(?:\b(?:Mallya|Vijay Mallya|Raj Shamani|the interviewer|interviewer)\b.{0,100}"
             r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
             r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
-            r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
-            text,
-            re.IGNORECASE,
-        ))
-        guest_attributed = bool(re.search(
-            r"(?:\bMallya\b[^.!?]{0,80}\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b[^.!?]{0,80}\bMallya\b)",
+            r"\b(?:Mallya|Vijay Mallya|Raj Shamani|the interviewer|interviewer)\b)",
             text,
             re.IGNORECASE,
         ))
         add(
-            f"{case_id.lower()}_money_stopped_attributed_to_interviewer",
-            not phrase_present or (interviewer_attributed and not guest_attributed),
-            "If repeating 'money stopped / it got dry', attribute those words to interviewer Raj Shamani, not Mallya.",
+            f"{case_id.lower()}_money_stopped_attribution_is_source_supported",
+            not phrase_present or not named_speaker_attribution,
+            "The registered captions do not establish who said the money-stopped phrase; describe it neutrally rather than assigning it to Mallya or the interviewer.",
         )
 
     elif case_id == "Q06":
@@ -1071,10 +1117,19 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
                 bool(re.search(pattern, text, re.IGNORECASE)),
                 "Cover brand personality, surrogate advertising, and the Kingfisher water-business strategy.",
             )
+        kingfisher_black_gold_claim = bool(re.search(
+            r"\bKingfisher(?:\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme))?\b"
+            r"[^.!?;]{0,80}\b(?:was|is|were|are|used|uses|had|has|featured|all)\b"
+            r"[^.!?;]{0,40}black[-‑‒–—− ]and[-‑‒–—− ]gold\b|"
+            r"\bblack[-‑‒–—− ]and[-‑‒–—− ]gold\b[^.!?;]{0,50}"
+            r"\bKingfisher(?:'s)?\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme)\b",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q06_avoids_unsupported_visual_identity_details",
-            not bool(re.search(r"black[-‑‒–—− ]and[-‑‒–—− ]gold", text, re.IGNORECASE)),
-            "Do not invent a black-and-gold identity or packaging strategy.",
+            not kingfisher_black_gold_claim,
+            "Do not assign McDowell's black-and-gold identity to Kingfisher; the source distinguishes Kingfisher as red.",
         )
 
     elif case_id == "Q08":
