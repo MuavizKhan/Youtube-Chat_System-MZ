@@ -6611,14 +6611,38 @@ def _build_financial_evidence_fallback(
             )
         for item in account_statement_evidence[:1]:
             matched_text = str(item.get("text") or "")
-            # Preserve the actual transcript clause: the Q08 acceptance
-            # contract needs the negative "not provided" assertion, not merely
-            # evidence that the words "statement of account" appeared.
-            lines.append(
-                "- Account/Parliament statement: "
-                + matched_text.rstrip(".")
-                + "."
+            truncated_tail = re.search(
+                r"\\b(?:that is why|which is why|because)\\s+"
+                r"(?:i|we|they|he|she|it|you)\\s+"
+                r"(?:have|has|had|am|is|are|was|were|do|does|did|"
+                r"will|would|can|could|should|must)\\s*$",
+                matched_text,
+                re.IGNORECASE,
             )
+            statement_phrase = re.search(
+                r"\\bstatement\\s+(?:of\\s+account|in\\s+(?:the\\s+)?parliament)\\b|"
+                r"\\bparliamentary\\s+statement\\b",
+                matched_text,
+                re.IGNORECASE,
+            )
+            if truncated_tail and statement_phrase and question_id != "Q08":
+                # A caption may end with a dangling auxiliary ("That is why I
+                # have"). Keep the source-supported reference, but do not echo
+                # the incomplete clause as if it were a complete assertion.
+                lines.append(
+                    "- Account/Parliament reference: the retrieved transcript "
+                    "includes the phrase \\""
+                    + statement_phrase.group(0)
+                    + '\\".'
+                )
+            else:
+                # For complete clauses, and especially Q08's explicit negative
+                # evidence contract, preserve the exact source wording.
+                lines.append(
+                    "- Account/Parliament statement: "
+                    + matched_text.rstrip(".")
+                    + "."
+                )
         return "\n\n".join(lines)
 
     missing_topics = [
