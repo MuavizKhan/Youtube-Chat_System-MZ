@@ -1438,6 +1438,10 @@ def test_ew01_accepts_concise_direct_count_answer_but_requires_count_and_unit():
     )
     assert all(check["passed"] for check in formatted_answer), formatted_answer
 
+    for wording in ("three different ways.", "3 different ways."):
+        different_ways = _answer_quality_checks(case, wording)
+        assert all(check["passed"] for check in different_ways), different_ways
+
     incomplete = _answer_quality_checks(case, "Three.")
     by_name = {check["name"]: check["passed"] for check in incomplete}
     assert by_name["answer_requirement_three_ways"] is False
@@ -2029,6 +2033,34 @@ def test_q02_claim_contract_rejects_wrong_force_india_reason_and_reversed_transf
     checks = audit_module._claim_level_semantic_checks("Q02", grounded)
     assert all(check["passed"] for check in checks), checks
 
+    sent_amount_before_back = (
+        "Mallya named the team Force India to put the Indian flag on the grid. "
+        "He used Formula One to promote his brands. The Formula One team sent "
+        "£10 million back to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", sent_amount_before_back)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_f1_team_returned_ten_million_to_kingfisher"] is True, checks
+
+    counterfactual_name = (
+        "Mallya could have named the team Malaya Formula 1, but instead named it "
+        "Force India to put the Indian flag on the grid. He used Formula One to "
+        "promote his brands. The Formula One team sent £10 million back to "
+        "Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", counterfactual_name)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_malaya_formula_one_not_actual_team_name"] is True, checks
+
+    wrong_actual_name = (
+        "Mallya named the team Malaya Formula 1. He wanted the Indian flag on "
+        "the grid and used Formula One to promote his brands. The Formula One "
+        "team sent £10 million back to Kingfisher Airlines."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q02", wrong_actual_name)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q02_malaya_formula_one_not_actual_team_name"] is False, checks
+
 
 def test_q03_claim_contract_requires_three_distinct_business_families():
     incomplete = (
@@ -2047,21 +2079,47 @@ def test_q03_claim_contract_requires_three_distinct_business_families():
     checks = audit_module._claim_level_semantic_checks("Q03", complete)
     assert all(check["passed"] for check in checks), checks
 
+    misclassified = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and Royal Challengers Bangalore. The cricket franchise "
+        "was Royal Challenge."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", misclassified)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_royal_challenge_is_whisky_brand_not_franchise"] is False
+
+    missing_air_deccan = (
+        "The businesses include United Breweries, United Spirits, Kingfisher Red, "
+        "Royal Challengers Bangalore, and Royal Challenge whisky."
+    )
+    checks = audit_module._claim_level_semantic_checks("Q03", missing_air_deccan)
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_air_deccan"] is False
+    assert by_name["q03_distinct_business_families"] is False
+
 
 @pytest.mark.parametrize("case_id", ["Q04", "Q10"])
-def test_q04_q10_claim_contract_keeps_interviewer_phrase_attribution(case_id):
-    misattributed = (
+def test_q04_q10_claim_contract_requires_speaker_neutral_money_stopped_phrase(case_id):
+    misattributed_guest = (
         "Mallya says the global financial crisis meant money stopped and it got dry."
     )
-    checks = audit_module._claim_level_semantic_checks(case_id, misattributed)
-    assert checks[0]["passed"] is False, checks
+    guest_checks = audit_module._claim_level_semantic_checks(case_id, misattributed_guest)
+    assert guest_checks[0]["passed"] is False, guest_checks
 
-    correctly_attributed = (
-        "Mallya says the crisis affected every sector. Interviewer Raj Shamani "
-        "then says that money stopped and it got dry."
+    misattributed_interviewer = (
+        "The interviewer Raj Shamani says that money stopped and it got dry."
     )
-    checks = audit_module._claim_level_semantic_checks(case_id, correctly_attributed)
-    assert checks[0]["passed"] is True, checks
+    interviewer_checks = audit_module._claim_level_semantic_checks(
+        case_id, misattributed_interviewer
+    )
+    assert interviewer_checks[0]["passed"] is False, interviewer_checks
+
+    neutral = (
+        "The financial crisis affected every sector. The discussion describes "
+        "money stopping and getting dry."
+    )
+    neutral_checks = audit_module._claim_level_semantic_checks(case_id, neutral)
+    assert neutral_checks[0]["passed"] is True, neutral_checks
 
 
 def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
@@ -2082,6 +2140,12 @@ def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
     )
     checks = audit_module._claim_level_semantic_checks("Q06", grounded)
     assert all(check["passed"] for check in checks), checks
+
+    correct_contrast = (
+        "McDowell was described as black-and-gold, while Kingfisher was the red brand."
+    )
+    contrast_checks = audit_module._claim_level_semantic_checks("Q06", correct_contrast)
+    assert contrast_checks[-1]["passed"] is True, contrast_checks
 
 
 def test_q08_claim_contract_requires_separate_recovery_bank_and_account_claims():
@@ -2139,6 +2203,13 @@ def test_ar03_ar08_require_veins_and_reject_arteries_only_substitution(case_id):
     )
     assert all(check["passed"] for check in correct), correct
 
+    mixed = audit_module._bodily_sound_checks(
+        case_id,
+        "A heartbeat, blood movement through veins and arteries, lungs, stomach and blinking eyes.",
+    )
+    mixed_by_name = {check["name"]: check["passed"] for check in mixed}
+    assert mixed_by_name["blood_movement_not_misattributed_to_arteries"] is False, mixed
+
 
 def test_ar06_claim_contract_rejects_orville_spelling():
     wrong = audit_module._claim_level_semantic_checks(
@@ -2175,7 +2246,9 @@ def test_q03_requires_both_united_breweries_and_united_spirits():
         "and Royal Challengers Bangalore and Royal Challenge whisky."
     )
     checks = audit_module._claim_level_semantic_checks("Q03", answer)
-    assert checks[0]["passed"] is False, checks
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_united_spirits"] is False
+    assert by_name["q03_distinct_business_families"] is False, checks
 
 
 def test_q06_rejects_nonbreaking_hyphen_in_unsupported_color_claim():
