@@ -9915,3 +9915,30 @@ def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced
 
     matched = chain._matched_registered_phrase_group_indices(context, source_groups)
     assert 3 in matched
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_requires_all_three_registered_claims():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report showed 14,100 crores recovered.\n"
+        "- [00:05–00:10] The banks had not provided a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["scope"] == "bank_recovery"
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
