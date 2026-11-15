@@ -1382,7 +1382,7 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
     assert by_name["answer_prohibited_260_crore_raised_to_stay_afloat"] is False
     assert not all(check["passed"] for check in unsupported_checks)
 
-    speaker_misattributed = _claim_level_semantic_checks(
+    speaker_misattributed = audit_module._claim_level_semantic_checks(
         "Q05",
         "Vijay Mallya says the global financial crisis meant money stopped and it got dry.",
     )
@@ -1393,7 +1393,7 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
         "q05_money_stopped_attribution_is_source_supported"
     ] is False
 
-    speaker_neutral = _claim_level_semantic_checks(
+    speaker_neutral = audit_module._claim_level_semantic_checks(
         "Q05",
         "The discussion describes the global financial crisis and money stopping.",
     )
