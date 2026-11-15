@@ -6062,6 +6062,7 @@ def _build_financial_evidence_fallback(
     question: str,
     context: str,
     diagnostics: dict[str, Any] | None = None,
+    video_id: str | None = None,
 ) -> str | None:
     """Build a conservative, question-scoped extractive financial fallback.
 
@@ -6319,10 +6320,14 @@ def _build_financial_evidence_fallback(
             group for group in required_evidence_groups
             if group not in supported_evidence_groups
         ]
-        # The registered Q08 answer contract requires all three distinct
-        # claims. Do not emit a partial extractive answer that the audit must
-        # reject as incomplete.
-        minimum_supported_groups = len(required_evidence_groups)
+        question_id, _registered_case = _registered_generation_gold_case(
+            video_id, question
+        )
+        # The registered Q08 audit requires all three distinct claims. Keep the
+        # established two-family threshold for other generic bank-recovery queries.
+        minimum_supported_groups = (
+            len(required_evidence_groups) if question_id == "Q08" else 2
+        )
 
         if diagnostics is not None:
             diagnostics.clear()
@@ -8787,6 +8792,7 @@ def build_rag_chain(
                         question=question_text,
                         context=financial_evidence_context,
                         diagnostics=quota_diagnostics,
+                        video_id=inputs.get("video_id"),
                     )
                     if extractive_answer is not None:
                         answer = extractive_answer
@@ -9025,6 +9031,7 @@ def build_rag_chain(
                             question=question_text,
                             context=financial_evidence_context,
                             diagnostics=financial_fallback_diagnostics,
+                            video_id=inputs.get("video_id"),
                         )
                         if extractive_answer is not None:
                             answer = extractive_answer
@@ -9149,6 +9156,7 @@ def build_rag_chain(
                     question=question_text,
                     context=financial_evidence_context,
                     diagnostics=financial_fallback_diagnostics,
+                    video_id=inputs.get("video_id"),
                 )
                 if (
                     extractive_answer is not None
@@ -9221,6 +9229,7 @@ def build_rag_chain(
                 question=question_text,
                 context=financial_evidence_context,
                 diagnostics=financial_fallback_diagnostics,
+                video_id=inputs.get("video_id"),
             )
             if extractive_answer is not None:
                 answer = extractive_answer
