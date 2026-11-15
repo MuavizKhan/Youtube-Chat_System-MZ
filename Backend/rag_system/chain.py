@@ -3877,35 +3877,6 @@ def _gold_evidence_repair_instruction(
             "instead."
         )
 
-    # Q04/Q10 captions preserve the phrase but do not diarize it. A draft
-    # assigning it to Mallya or Raj Shamani invents a speaker boundary. Require
-    # a neutral description unless the registered source itself establishes one.
-    if question_id in {"Q04", "Q05", "Q10"}:
-        disputed_phrase = (
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
-        )
-        uses_disputed_phrase = bool(re.search(
-            disputed_phrase, answer_text, re.IGNORECASE
-        ))
-        named_speaker_attribution = bool(re.search(
-            r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
-            r"[^.!?]{0,100}" + disputed_phrase + r"|"
-            + disputed_phrase + r"[^.!?]{0,100}"
-            r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
-            answer_text,
-            re.IGNORECASE,
-        ))
-        if uses_disputed_phrase and named_speaker_attribution:
-            instructions.append(
-                "SPEAKER-NEUTRAL ATTRIBUTION REPAIR. The supplied registered "
-                "captions do not identify whether the phrase about money stopping "
-                "or getting dry was spoken by the interviewer or the guest. Rewrite "
-                "that part neutrally (for example, 'the discussion describes money "
-                "stopping and getting dry'). Do not attribute the phrase to Vijay "
-                "Mallya, Raj Shamani, or the interviewer. Preserve the separately "
-                "supported facts and do not add timestamps."
-            )
-
     if question_id == "Q06":
         visual_source_blocks = [
             block for block in re.split(
