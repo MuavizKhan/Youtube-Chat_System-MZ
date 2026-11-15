@@ -9857,3 +9857,49 @@ def test_generation_repair_diagnostics_expose_atomic_claim_indices_without_draft
     assert diagnostics["initial_draft"]["missing_answer_claim_indices"] == [2, 3]
     assert "missing_registered_answer_claims" in diagnostics["initial_draft"]["issue_codes"]
     assert incomplete_draft not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_entities():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q03"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits. "
+        "The merger of Kingfisher and Air Deckin created Kingfisher Red. "
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    source_claims = chain.get_gold_evidence_case("Q03").generation_claim_source_groups
+    matched_source_claims = chain._matched_registered_phrase_group_indices(
+        context, source_claims
+    )
+    assert matched_source_claims == set(range(6))
+
+    answer = "The companies include United Breweries and United Spirits."
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "Air Deccan" in instruction
+    assert "Kingfisher Red" in instruction
+    assert "Royal Challengers Bangalore" in instruction
+    assert "Royal Challenge" in instruction
+
+
+@pytest.mark.unit
+def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced_airline():
+    source_groups = chain.get_gold_evidence_case("Q02").generation_claim_source_groups
+    context = (
+        "[SOURCE 1]\n"
+        "The Formula One team sent £10 million back to King Fisher Airlines."
+    )
+
+    matched = chain._matched_registered_phrase_group_indices(context, source_groups)
+    assert 3 in matched
