@@ -116,13 +116,26 @@ GOLD_EVIDENCE_CASES = (
             ("named it Force India", "called it Force India"),
             ("wanted the Indian flag to be on the grid", "team with roots in India"),
             ("used the platform to advertise my brand", "used the platform to advertise my brands"),
-            ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
+            (
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "sent 10 million pounds back to King Fisher Airlines",
+            ),
         ),
         generation_claim_answer_groups=(
             ("named the Formula One team Force India", "called the team Force India"),
             ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
             ("used the Formula One platform, car livery and merchandise to promote brands"),
-            ("Formula One team sent 10 million pounds back to Kingfisher Airlines", "F1 team returned 10 million pounds to Kingfisher Airlines"),
+            (
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "F1 team returned 10 million pounds to Kingfisher Airlines",
+                "F1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million pounds back to King Fisher Airlines",
+            ),
         ),
     ),
     GoldEvidenceCase(
