@@ -2046,13 +2046,30 @@ def format_source_group(
         )
     else:
         raw_gold_groups = _raw_gold_groups_for_documents(documents, gold_case)
+        raw_generation_claim_groups = (
+            _matched_registered_phrase_group_indices(
+                " ".join(
+                    str(getattr(document, "page_content", "") or "")
+                    for document in documents
+                ),
+                getattr(gold_case, "generation_claim_source_groups", ()) or (),
+            )
+            if (
+                gold_case is not None
+                and getattr(gold_case, "generation_claims_require_context_reservation", False)
+            )
+            else set()
+        )
+        # A precise atomic claim may be retrieved in a separate source group
+        # that does not contain the broad question anchor. Preserve its original
+        # timestamped chunk rows on its own registered-claim evidence too.
         raw_chunk_rows = (
             _format_raw_chunk_caption_rows(
                 documents,
                 fallback_start=start,
                 fallback_end=end,
             )
-            if raw_gold_groups
+            if raw_gold_groups or raw_generation_claim_groups
             else []
         )
         if raw_chunk_rows:
