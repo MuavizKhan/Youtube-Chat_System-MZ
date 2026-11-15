@@ -6612,16 +6612,16 @@ def _build_financial_evidence_fallback(
         for item in account_statement_evidence[:1]:
             matched_text = str(item.get("text") or "")
             truncated_tail = re.search(
-                r"\\b(?:that is why|which is why|because)\\s+"
-                r"(?:i|we|they|he|she|it|you)\\s+"
+                r"\b(?:that is why|which is why|because)\s+"
+                r"(?:i|we|they|he|she|it|you)\s+"
                 r"(?:have|has|had|am|is|are|was|were|do|does|did|"
-                r"will|would|can|could|should|must)\\s*$",
+                r"will|would|can|could|should|must)\s*$",
                 matched_text,
                 re.IGNORECASE,
             )
             statement_phrase = re.search(
-                r"\\bstatement\\s+(?:of\\s+account|in\\s+(?:the\\s+)?parliament)\\b|"
-                r"\\bparliamentary\\s+statement\\b",
+                r"\bstatement\s+(?:of\s+account|in\s+(?:the\s+)?parliament)\b|"
+                r"\bparliamentary\s+statement\b",
                 matched_text,
                 re.IGNORECASE,
             )
@@ -6630,10 +6630,7 @@ def _build_financial_evidence_fallback(
                 # have"). Keep the source-supported reference, but do not echo
                 # the incomplete clause as if it were a complete assertion.
                 lines.append(
-                    "- Account/Parliament reference: the retrieved transcript "
-                    "includes the phrase \\""
-                    + statement_phrase.group(0)
-                    + '\\".'
+                    f'- Account/Parliament reference: the retrieved transcript includes the phrase "{statement_phrase.group(0)}".'
                 )
             else:
                 # For complete clauses, and especially Q08's explicit negative
