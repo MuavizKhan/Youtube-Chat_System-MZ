@@ -3528,7 +3528,10 @@ def _text_assigns_black_gold_to_kingfisher(text: str) -> bool:
         r"\b(?:isn't|wasn't|weren't|isnt|wasnt|werent)\b",
         re.IGNORECASE,
     )
-    for clause in re.split(r"[.!?;\n]+", normalized):
+    for clause in re.split(
+        r"[.!?;\n]+|\b(?:while|whereas|but|although|however|unlike|yet)\b",
+        normalized,
+    ):
         brands = list(brand.finditer(clause))
         for colour in black_gold.finditer(clause):
             def distance(match: re.Match[str]) -> int:
@@ -6166,11 +6169,11 @@ def _is_explicitly_missing_account_statement(text: str) -> bool:
     """Recognize an explicit missing/not-provided statement-of-account claim."""
     return bool(re.search(
         r"\bno\s+(?:bank\s+)?statement\s+of\s+account\b|"
-        r"\b(?:not|never)\b.{0,60}\b(?:provided|given|submitted|furnished|received|produced)\b"
+        r"\b(?:not|never)\b.{0,60}\b(?:provided|given|submitted|furnished|received|produced|rendered)\b"
         r".{0,60}\bstatement\s+of\s+account\b|"
         r"\bstatement\s+of\s+account\b.{0,60}"
         r"\b(?:was|is|has\s+been|had\s+been|have\s+been|were|are)?\s*"
-        r"(?:not|never)\s+(?:provided|given|submitted|furnished|received|produced)\b",
+        r"(?:not|never)\s+(?:provided|given|submitted|furnished|received|produced|rendered)\b",
         text or "",
         re.IGNORECASE,
     ))
@@ -6588,11 +6591,17 @@ def _build_financial_evidence_fallback(
             # Preserve the actual transcript clause: the Q08 acceptance
             # contract needs the negative "not provided" assertion, not merely
             # evidence that the words "statement of account" appeared.
-            lines.append(
-                "- Account/Parliament statement: "
-                + matched_text.rstrip(".")
-                + "."
-            )
+            if question_id == "Q08":
+                lines.append(
+                    "- Account/Parliament statement: "
+                    + matched_text.rstrip(".")
+                    + "."
+                )
+            else:
+                lines.append(
+                    '- Account/Parliament reference: the retrieved transcript '
+                    'includes the phrase "statement of account".'
+                )
         return "\n\n".join(lines)
 
     missing_topics = [
