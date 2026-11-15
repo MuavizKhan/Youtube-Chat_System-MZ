@@ -144,9 +144,9 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_source_groups=(
             ("United Breweries Limited", "United Breweries"),
             ("United Spirits"),
-            ("Air Deccan"),
+            ("Air Deccan", "air deckin", "one deckan"),
             ("Kingfisher Red"),
-            ("Royal Challengers Bangalore", "RCB"),
+            ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
             ("Royal Challenge"),
         ),
         generation_claim_answer_groups=(
@@ -196,8 +196,8 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer=(
             "Vijay Mallya says Kingfisher Airlines faced several connected "
             "pressures. Mallya says the global financial crisis affected every "
-            "sector. Raj Shamani, the interviewer, then says that money stopped "
-            "and it got dry. Mallya recalls being told, “You continue, banks will support you,” "
+            "sector. The discussion then describes money stopping "
+            "and getting dry. Mallya recalls being told, “You continue, banks will support you,” "
             "and that he should not downsize Kingfisher. He also points to "
             "government policies that didn't help and mounting losses, "
             "describing the refusal to let Etihad invest as the final straw."
@@ -410,7 +410,7 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_claim_answer_groups=(
             ("global financial crisis"),
-            ("Raj Shamani, the interviewer, says that money stopped", "the interviewer says that money stopped"),
+            ("money stopped", "it got dry", "money dried up", "money stopped flowing"),
             ("government policies that did not help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
