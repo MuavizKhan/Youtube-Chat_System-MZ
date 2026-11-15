@@ -10241,6 +10241,9 @@ def test_blood_through_veins_not_arteries_is_not_treated_as_wrong_attribution():
     assert chain._blood_movement_attributed_to_arteries(
         "Blood moves through veins and arteries."
     ) is True
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood flows through arteries rather than veins."
+    ) is True
 
 
 @pytest.mark.unit
