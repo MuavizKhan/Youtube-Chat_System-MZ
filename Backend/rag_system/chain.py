@@ -3880,7 +3880,7 @@ def _gold_evidence_repair_instruction(
     # Q04/Q10 captions preserve the phrase but do not diarize it. A draft
     # assigning it to Mallya or Raj Shamani invents a speaker boundary. Require
     # a neutral description unless the registered source itself establishes one.
-    if question_id in {"Q04", "Q10"}:
+    if question_id in {"Q04", "Q05", "Q10"}:
         disputed_phrase = (
             r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
         )
@@ -3992,29 +3992,30 @@ def _gold_evidence_repair_instruction(
                         + "\n".join(missing_lines)
                     )
 
-    if question_id in {"Q04", "Q10"}:
-        uses_interviewer_phrase = bool(re.search(
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
+    if question_id in {"Q04", "Q05", "Q10"}:
+        disputed_phrase = (
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
+        )
+        uses_disputed_phrase = bool(re.search(
+            disputed_phrase, answer_text, re.IGNORECASE
+        ))
+        named_speaker_attribution = bool(re.search(
+            r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+            r"[^.!?]{0,100}" + disputed_phrase + r"|"
+            + disputed_phrase + r"[^.!?]{0,100}"
+            r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
             answer_text,
             re.IGNORECASE,
         ))
-        interviewer_attribution = bool(re.search(
-            r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
-            r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
-            answer_text,
-            re.IGNORECASE,
-        ))
-        if uses_interviewer_phrase and not interviewer_attribution:
+        if uses_disputed_phrase and named_speaker_attribution:
             instructions.append(
-                "SPEAKER-ATTRIBUTION REPAIR. The supplied speaker-labelled "
-                "passage identifies Raj Shamani, the interviewer, as the speaker "
-                "who says 'Money stopped, it got dry.' Mallya separately says the "
-                "global financial crisis affected the whole aviation sector and "
-                "every sector. Rewrite the answer so the interviewer's phrase is "
-                "attributed to Raj Shamani, not Vijay Mallya. Keep the two speakers' "
-                "statements distinct and use only the supplied transcript."
+                "SPEAKER-NEUTRAL ATTRIBUTION REPAIR. The registered caption text "
+                "does not reliably identify whether the money-stopped phrase was "
+                "spoken by Mallya or the interviewer. Rewrite that part neutrally "
+                "(for example, 'the discussion describes money stopping and getting "
+                "dry'). Do not attribute the phrase to Vijay Mallya, Raj Shamani, or "
+                "the interviewer. Preserve the independently supported claims and "
+                "use only the supplied transcript."
             )
 
     if not instructions:
