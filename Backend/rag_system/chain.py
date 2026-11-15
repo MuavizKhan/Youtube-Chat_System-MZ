@@ -6482,9 +6482,13 @@ def _build_financial_evidence_fallback(
                 reference_phrase = "statement in Parliament"
             else:
                 reference_phrase = "parliamentary statement"
+            # Preserve the actual transcript clause: the Q08 acceptance
+            # contract needs the negative "not provided" assertion, not merely
+            # evidence that the words "statement of account" appeared.
             lines.append(
-                "- Account/Parliament reference: the retrieved transcript "
-                f'includes the phrase "{reference_phrase}".'
+                "- Account/Parliament statement: "
+                + matched_text.rstrip(".")
+                + "."
             )
         return "\n\n".join(lines)
 
