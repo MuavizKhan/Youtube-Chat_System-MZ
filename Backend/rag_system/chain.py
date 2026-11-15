@@ -3557,6 +3557,28 @@ def _build_generation_repair_diagnostics(
         if gold_case is not None
         else None
     )
+    source_claim_groups = tuple(
+        getattr(gold_case, "generation_claim_source_groups", ()) or ()
+    ) if gold_case is not None else ()
+    answer_claim_groups = tuple(
+        getattr(gold_case, "generation_claim_answer_groups", ()) or ()
+    ) if gold_case is not None else ()
+    claim_contract_available = bool(
+        source_claim_groups
+        and len(source_claim_groups) == len(answer_claim_groups)
+        and all(source_claim_groups)
+        and all(answer_claim_groups)
+    )
+    prompt_source_claim_indices = (
+        _matched_registered_phrase_group_indices(context or "", source_claim_groups)
+        if claim_contract_available
+        else set()
+    )
+    required_source_claim_indices = (
+        set(range(len(source_claim_groups)))
+        if claim_contract_available
+        else set()
+    )
 
     def inspect_draft(draft: str | None) -> dict[str, Any] | None:
         if draft is None:
@@ -3580,6 +3602,21 @@ def _build_generation_repair_diagnostics(
             )
             else []
         )
+        answer_claim_indices = (
+            _matched_registered_phrase_group_indices(draft, answer_claim_groups)
+            if claim_contract_available
+            else set()
+        )
+        missing_source_claim_indices = (
+            sorted(required_source_claim_indices - prompt_source_claim_indices)
+            if claim_contract_available
+            else []
+        )
+        missing_answer_claim_indices = (
+            sorted(prompt_source_claim_indices - answer_claim_indices)
+            if claim_contract_available
+            else []
+        )
         normalized_draft = unicodedata.normalize("NFKC", draft)
         opening_9000_narrator_claim = (
             question_id in {"Q04", "Q05", "Q10"}
@@ -3600,6 +3637,10 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("language_contract_violation")
         if missing_groups:
             issue_codes.append("missing_prompt_evidence_groups")
+        if missing_source_claim_indices:
+            issue_codes.append("registered_source_claim_evidence_incomplete")
+        if missing_answer_claim_indices:
+            issue_codes.append("missing_registered_answer_claims")
         if opening_9000_narrator_claim:
             issue_codes.append("opening_9000_narrator_claim")
         return {
@@ -3609,6 +3650,11 @@ def _build_generation_repair_diagnostics(
             "opening_9000_narrator_claim": opening_9000_narrator_claim,
             "answer_gold_groups": sorted(answer_groups),
             "missing_prompt_gold_groups": missing_groups,
+            "registered_claim_contract_available": claim_contract_available,
+            "prompt_source_claim_indices": sorted(prompt_source_claim_indices),
+            "answer_source_claim_indices": sorted(answer_claim_indices),
+            "missing_source_claim_indices": missing_source_claim_indices,
+            "missing_answer_claim_indices": missing_answer_claim_indices,
             "issue_codes": issue_codes,
         }
 
@@ -3672,6 +3718,14 @@ def _build_generation_repair_diagnostics(
         "required_prompt_gold_group_count": required_prompt_groups,
         "required_answer_gold_group_count": required_answer_groups,
         "prompt_evidence_complete": prompt_evidence_complete,
+        "registered_claim_contract_available": claim_contract_available,
+        "required_source_claim_count": len(source_claim_groups) if claim_contract_available else 0,
+        "prompt_source_claim_indices": sorted(prompt_source_claim_indices),
+        "missing_prompt_source_claim_indices": (
+            sorted(required_source_claim_indices - prompt_source_claim_indices)
+            if claim_contract_available
+            else []
+        ),
         "initial_draft": initial,
         "repaired_draft": repaired,
         "repair_attempted": repair_attempted,
@@ -3823,33 +3877,72 @@ def _gold_evidence_repair_instruction(
             "instead."
         )
 
-    # Repair interviewer/guest attribution independently of unrelated gold groups.
-    # Require both the disputed wording and speaker marker in the actual supplied
-    # context; never infer a speaker from adjacency or timestamps alone.
+    # Q04/Q10 captions preserve the phrase but do not diarize it. A draft
+    # assigning it to Mallya or Raj Shamani invents a speaker boundary. Require
+    # a neutral description unless the registered source itself establishes one.
     if question_id in {"Q04", "Q10"}:
-        speaker_patterns = (
-            r"(?:Raj Shamani|the interviewer|interviewer).{0,140}(?:money stopped|it got dry|money dried up)|"
-            r"(?:money stopped|it got dry|money dried up).{0,140}(?:Raj Shamani|the interviewer|interviewer)"
+        disputed_phrase = (
+            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
         )
-        disputed_wording = re.search(
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
-            context_text,
-            re.IGNORECASE,
-        )
-        interviewer_marker = re.search(speaker_patterns, context_text, re.IGNORECASE)
-        guest_misattribution = re.search(
-            r"\bMallya\b[^.!?]{0,100}\b(?:money stopped|it got dry|money dried up)\b|"
-            r"\b(?:money stopped|it got dry|money dried up)\b[^.!?]{0,100}\bMallya\b",
+        uses_disputed_phrase = bool(re.search(
+            disputed_phrase, answer_text, re.IGNORECASE
+        ))
+        named_speaker_attribution = bool(re.search(
+            r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+            r"[^.!?]{0,100}" + disputed_phrase + r"|"
+            + disputed_phrase + r"[^.!?]{0,100}"
+            r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
             answer_text,
             re.IGNORECASE,
-        )
-        if disputed_wording and interviewer_marker and guest_misattribution:
+        ))
+        if uses_disputed_phrase and named_speaker_attribution:
             instructions.append(
-                "SPEAKER-ATTRIBUTION REPAIR. The supplied transcript explicitly "
-                "attributes the wording about money stopping/it getting dry to "
-                "interviewer Raj Shamani. Do not attribute those words to Vijay "
-                "Mallya. Preserve the interviewer/guest boundary and state only "
-                "what each speaker actually says. Do not add a timestamp line."
+                "SPEAKER-NEUTRAL ATTRIBUTION REPAIR. The supplied registered "
+                "captions do not identify whether the phrase about money stopping "
+                "or getting dry was spoken by the interviewer or the guest. Rewrite "
+                "that part neutrally (for example, 'the discussion describes money "
+                "stopping and getting dry'). Do not attribute the phrase to Vijay "
+                "Mallya, Raj Shamani, or the interviewer. Preserve the separately "
+                "supported facts and do not add timestamps."
+            )
+
+    if question_id == "Q06":
+        visual_source_blocks = [
+            block for block in re.split(
+                r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$", context_text
+            ) if block.strip()
+        ] or [context_text]
+        source_distinguishes_mcdowell_and_kingfisher = any(
+            re.search(r"\bMcDowell\b", block, re.IGNORECASE)
+            and re.search(r"black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold", block, re.IGNORECASE)
+            and re.search(
+                r"\bKingfisher\b[^.!?]{0,140}\bred\b|\bred\b[^.!?]{0,140}\bKingfisher\b",
+                block,
+                re.IGNORECASE,
+            )
+            for block in visual_source_blocks
+        )
+        answer_assigns_black_gold_to_kingfisher = bool(re.search(
+            r"\bKingfisher(?:\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme))?\b"
+            r"[^.!?;]{0,80}\b(?:was|is|were|are|used|uses|had|has|featured|all)\b"
+            r"[^.!?;]{0,40}black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold\b|"
+            r"\bblack[-‐‑‒–—− ]and[-‐‑‒–—− ]gold\b[^.!?;]{0,50}"
+            r"\bKingfisher(?:'s)?\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme)\b",
+            answer_text,
+            re.IGNORECASE,
+        ))
+        if (
+            source_distinguishes_mcdowell_and_kingfisher
+            and answer_assigns_black_gold_to_kingfisher
+        ):
+            instructions.append(
+                "VISUAL-IDENTITY ATTRIBUTION REPAIR. The supplied source block "
+                "assigns the black-and-gold description to McDowell's, while "
+                "explicitly describing Kingfisher as red. Correct the subject: "
+                "do not describe Kingfisher as black-and-gold. Preserve the "
+                "transcript-supported brand-personality, surrogate-advertising, "
+                "and Kingfisher water-business points. Do not add unsupported "
+                "packaging or logo details."
             )
 
     # Independently enforce the complete registered answer-claim contract.
