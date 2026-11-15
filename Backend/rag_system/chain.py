@@ -3922,15 +3922,27 @@ def _gold_evidence_repair_instruction(
             )
             for block in visual_source_blocks
         )
-        answer_assigns_black_gold_to_kingfisher = bool(re.search(
-            r"\bKingfisher(?:\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme))?\b"
-            r"[^.!?;]{0,80}\b(?:was|is|were|are|used|uses|had|has|featured|all)\b"
-            r"[^.!?;]{0,40}black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold\b|"
-            r"\bblack[-‐‑‒–—− ]and[-‐‑‒–—− ]gold\b[^.!?;]{0,50}"
-            r"\bKingfisher(?:'s)?\s+(?:brand|identity|packaging|logo|livery|colour|color|scheme)\b",
-            answer_text,
-            re.IGNORECASE,
-        ))
+        answer_clauses = re.split(
+            r"[.!?;\n]+|\b(?:while|whereas|but|although|however|unlike|yet)\b|"
+            r",\s*(?=Kingfisher\b|McDowell\b)",
+            answer_text or "",
+            flags=re.IGNORECASE,
+        )
+        answer_assigns_black_gold_to_kingfisher = any(
+            re.search(r"\bKingfisher\b", clause, re.IGNORECASE)
+            and re.search(
+                r"black[-‐‑‒–—− ]and[-‐‑‒–—− ]gold",
+                clause,
+                re.IGNORECASE,
+            )
+            and not re.search(
+                r"\b(?:not|never|neither)\b.{0,45}\bKingfisher\b|"
+                r"\bKingfisher\b.{0,45}\b(?:not|never|neither)\b",
+                clause,
+                re.IGNORECASE,
+            )
+            for clause in answer_clauses
+        )
         if (
             source_distinguishes_mcdowell_and_kingfisher
             and answer_assigns_black_gold_to_kingfisher
