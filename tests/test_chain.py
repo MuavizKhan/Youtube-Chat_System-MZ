@@ -10254,6 +10254,12 @@ def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_resp
     assert chain._text_assigns_black_gold_to_kingfisher(
         "Kingfisher was red, not black and gold."
     ) is False
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was presented in black and gold rather than red."
+    ) is True
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was red rather than black and gold."
+    ) is False
 
 
 @pytest.mark.unit
