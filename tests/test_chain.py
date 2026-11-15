@@ -9942,3 +9942,67 @@ def test_q08_financial_fallback_requires_all_three_registered_claims():
     ]
     assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
     assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+
+
+@pytest.mark.unit
+def test_bank_recovery_extractor_joins_only_adjacent_caption_rows_within_source():
+    same_source = chain._extract_bank_recovery_statement_evidence({
+        11: (
+            "- [00:00–00:04] The Recovery Officer and Official Liquidator said in court "
+            "that the banks had been fully\n"
+            "- [00:04–00:08] paid."
+        )
+    })
+    assert same_source["bank_payment"]
+    assert same_source["bank_payment"][0]["source_id"] == 11
+    assert "banks had been fully paid" in same_source["bank_payment"][0]["text"]
+
+    split_across_sources = chain._extract_bank_recovery_statement_evidence({
+        11: "- [00:00–00:04] The banks had been fully",
+        12: "- [00:04–00:08] paid.",
+    })
+    assert split_across_sources["bank_payment"] == []
+
+
+@pytest.mark.unit
+def test_bank_recovery_extractor_does_not_join_across_question_caption():
+    evidence = chain._extract_bank_recovery_statement_evidence({
+        1: (
+            "- [00:00–00:04] The banks had been fully\n"
+            "- [00:04–00:08] Were the banks fully paid?\n"
+            "- [00:08–00:12] The next topic is the recovery report."
+        )
+    })
+    assert evidence["bank_payment"] == []
+
+
+@pytest.mark.unit
+def test_q08_full_financial_fallback_uses_caption_pair_for_bank_payment():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully\n"
+        "- [00:14–00:18] paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is not None
+    assert "14,100" in fallback
+    assert "banks had been fully paid" in fallback
+    assert "statement of account" in fallback
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
