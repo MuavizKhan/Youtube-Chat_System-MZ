@@ -5092,12 +5092,76 @@ def build_generation_context(
             reserved_fallback_records + remaining_priority_records
         )[:selected_count]
 
-    # Reserve two characters for each separator so the final concatenation
-    # can never exceed the budget due to inter-group whitespace.
-    per_group_budget = max(
-        1,
-        (budget - 2 * max(0, selected_count - 1)) // selected_count,
-    )
+    # Keep the total generation context budget as a hard ceiling, but do not
+    # split it evenly when a registered answer depends on multiple claim-bearing
+    # source blocks. Q02 needs its exact transfer caption retained even when the
+    # other Formula One source block also carries several valid claims.
+    separator_budget = 2 * max(0, selected_count - 1)
+    usable_budget = max(0, budget - separator_budget)
+    group_budgets = {
+        record["index"]: 0
+        for record in priority_records
+    }
+
+    if registered_generation_claim_source_groups:
+        claim_bearing_records = [
+            record
+            for record in priority_records
+            if record["generation_claim_group_indexes"]
+        ]
+        non_claim_records = [
+            record
+            for record in priority_records
+            if not record["generation_claim_group_indexes"]
+        ]
+
+        # Give each claim-bearing source a protected equal share before allowing
+        # non-claim sources to consume the remaining budget.
+        if claim_bearing_records:
+            claim_share, claim_extra = divmod(
+                usable_budget,
+                len(claim_bearing_records),
+            )
+            for position, record in enumerate(claim_bearing_records):
+                group_budgets[record["index"]] = claim_share + (
+                    1 if position < claim_extra else 0
+                )
+        remaining = max(0, usable_budget - sum(group_budgets.values()))
+        if non_claim_records and remaining:
+            share, extra = divmod(remaining, len(non_claim_records))
+            for position, record in enumerate(non_claim_records):
+                group_budgets[record["index"]] = share + (
+                    1 if position < extra else 0
+                )
+    else:
+        share, extra = divmod(usable_budget, max(1, selected_count))
+        for position, record in enumerate(priority_records):
+            group_budgets[record["index"]] = share + (
+                1 if position < extra else 0
+            )
+
+    selected = []
+    for record in priority_records:
+        per_group_budget = group_budgets.get(record["index"], 0)
+        excerpt = _truncate_formatted_source(
+            record["text"],
+            per_group_budget,
+            question,
+            selection_question=context_selection_question,
+            gold_case=gold_case,
+        )
+        if excerpt:
+            selected.append({
+                **record,
+                "text": excerpt,
+                "included_chunk_ids": _included_chunk_ids_for_excerpt(
+                    record["source_group"],
+                    record["text"],
+                    excerpt,
+                    record["source_chunk_ids"],
+                ),
+            })
+
     selected = []
     for record in priority_records:
         excerpt = _truncate_formatted_source(
