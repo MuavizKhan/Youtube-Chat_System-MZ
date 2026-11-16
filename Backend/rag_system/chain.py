@@ -3149,7 +3149,7 @@ def _build_registered_gold_answer_fallback(
         reject("retrieved_source_context_empty")
         return None
 
-    # Q04/Q05 opt into an all-claims contract. A claim is checked against
+    # Q02/Q04/Q05 opt into an all-claims contract. A claim is checked against
     # the exact prompt-visible source blocks, independently of the broader
     # retrieval-quality groups. Different claims may live in different blocks,
     # but alternatives within one claim are not treated as cumulative evidence.
