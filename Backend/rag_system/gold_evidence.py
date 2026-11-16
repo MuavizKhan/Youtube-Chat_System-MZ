@@ -119,7 +119,7 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_source_groups=(
             ("named it Force India", "called it Force India"),
             ("wanted the Indian flag to be on the grid", "team with roots in India"),
-            ("used the platform to advertise my brand", "used the platform to advertise my brands"),
+            ("use the platform to advertise my brands", "used the platform to advertise my brand", "used the platform to advertise my brands"),
             (
                 "Formula One team sent back 10 million pounds to Kingfisher Airlines",
                 "sent back 10 million pounds to Kingfisher Airlines",
