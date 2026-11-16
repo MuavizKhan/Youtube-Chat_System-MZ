@@ -1357,10 +1357,10 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
     grounded_answer = (
         "Mallya says he put 3,000 crore of UB Group money into Kingfisher "
         "Airlines to keep it afloat. He describes the 2008 global financial "
-        "crisis, when money stopped flowing across the aviation sector. He says "
-        "the working capital cycle was disrupted after non-payment of oil bills, "
-        "and Kingfisher could not pay airport fees and landing charges. He also "
-        "describes a cash-flow issue."
+        "crisis, when money stopped flowing across the aviation sector. He "
+        "describes the working-capital disruption and cash-flow issue. The "
+        "discussion refers to non-payment of oil bills and says Kingfisher "
+        "could not pay airport fees and landing charges."
     )
 
     grounded_checks = _answer_quality_checks(case, grounded_answer)
@@ -1403,6 +1403,41 @@ def test_q05_audit_requires_operational_points_and_rejects_unsupported_attributi
     assert speaker_neutral_by_name[
         "q05_money_stopped_attribution_is_source_supported"
     ] is True
+
+    live_q05_answer = (
+        "Vijay Mallya says the airline's collapse was driven by a cash-flow "
+        "nightmare: the global financial crisis made money stop flowing, which "
+        "in turn broke the working-capital cycle and led to a cascade of unpaid "
+        "bills—oil invoices, airport fees and landing charges—ultimately "
+        "crippling the airline."
+    )
+    live_q05_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, live_q05_answer)
+    }
+    assert live_q05_checks["answer_requirement_oil_bill_nonpayment"] is True
+    assert live_q05_checks["q05_operational_claims_speaker_neutral"] is False
+
+    neutral_q05_answer = (
+        "Mallya describes the global financial crisis, working-capital cycle "
+        "and cash-flow issue. The discussion refers to unpaid bills—oil invoices, "
+        "airport fees and landing charges."
+    )
+    neutral_q05_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, neutral_q05_answer)
+    }
+    assert neutral_q05_checks["answer_requirement_oil_bill_nonpayment"] is True
+    assert neutral_q05_checks["q05_operational_claims_speaker_neutral"] is True
+
+    incomplete_oil_claim = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(
+            case,
+            "The discussion lists oil invoices, airport fees and landing charges.",
+        )
+    }
+    assert incomplete_oil_claim["answer_requirement_oil_bill_nonpayment"] is False
 
     # The live Q05 answer used this grammatical variant, which the earlier
     # "9,000 crore loan default" pattern did not recognize.
@@ -2176,6 +2211,19 @@ def test_q04_q10_claim_contract_requires_speaker_neutral_money_stopped_phrase(ca
     neutral_checks = audit_module._claim_level_semantic_checks(case_id, neutral)
     assert neutral_checks[0]["passed"] is True, neutral_checks
 
+    # A speaker named in a separate sentence must not be attributed the
+    # following speaker-neutral money-stopped phrase.
+    live_q04_fallback_style = (
+        "Mallya says the global financial crisis affected every sector. "
+        "The discussion then describes how money stopped and it got dry, "
+        "without assigning those words to either speaker. Mallya recalls "
+        "being told that banks would support him."
+    )
+    fallback_checks = audit_module._claim_level_semantic_checks(
+        case_id, live_q04_fallback_style
+    )
+    assert fallback_checks[0]["passed"] is True, fallback_checks
+
 
 def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
     unsupported = (
@@ -2195,6 +2243,15 @@ def test_q06_claim_contract_requires_personality_surrogate_and_water_business():
     )
     checks = audit_module._claim_level_semantic_checks("Q06", grounded)
     assert all(check["passed"] for check in checks), checks
+
+    hyphenated_water_business = (
+        "Mallya says a brand needs a personality. He used surrogate advertising "
+        "and built a full water-business around Kingfisher to advertise the core brand."
+    )
+    hyphenated_checks = audit_module._claim_level_semantic_checks(
+        "Q06", hyphenated_water_business
+    )
+    assert all(check["passed"] for check in hyphenated_checks), hyphenated_checks
 
     incorrect_identity = (
         "Kingfisher's name, bird logo, and black-and-gold colour scheme were memorable."

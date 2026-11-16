@@ -3705,6 +3705,27 @@ def _has_named_money_stopped_attribution(text: str) -> bool:
     ))
 
 
+def _has_named_q05_operational_attribution(text: str) -> bool:
+    """Reject named-speaker attribution of the Q05 oil-bill/airport-fee passage."""
+    operational_claim = (
+        r"\b(?:oil bills?|oil invoices?|airport fees?|landing charges?)\b"
+    )
+    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+    return any(
+        re.search(
+            speaker + r"[^.!?]{0,220}" + operational_claim,
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            operational_claim + r"[^.!?]{0,120}" + speaker,
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
+    )
+
+
 def _build_generation_repair_diagnostics(
     *,
     question: str,
@@ -3848,6 +3869,10 @@ def _build_generation_repair_diagnostics(
             question_id in {"Q04", "Q05", "Q10"}
             and _has_named_money_stopped_attribution(draft)
         )
+        unsupported_q05_operational_speaker_attribution = (
+            question_id == "Q05"
+            and _has_named_q05_operational_attribution(draft)
+        )
         unsupported_kingfisher_black_gold_attribution = (
             question_id == "Q06"
             and _text_assigns_black_gold_to_kingfisher(draft)
@@ -3867,6 +3892,8 @@ def _build_generation_repair_diagnostics(
             issue_codes.append("opening_9000_narrator_claim")
         if unsupported_money_speaker_attribution:
             issue_codes.append("unsupported_money_stopped_speaker_attribution")
+        if unsupported_q05_operational_speaker_attribution:
+            issue_codes.append("unsupported_q05_operational_speaker_attribution")
         if unsupported_kingfisher_black_gold_attribution:
             issue_codes.append("unsupported_kingfisher_black_gold_attribution")
         return {
@@ -3875,6 +3902,7 @@ def _build_generation_repair_diagnostics(
             "language_violation": language_violation,
             "opening_9000_narrator_claim": opening_9000_narrator_claim,
             "unsupported_money_stopped_speaker_attribution": unsupported_money_speaker_attribution,
+            "unsupported_q05_operational_speaker_attribution": unsupported_q05_operational_speaker_attribution,
             "unsupported_kingfisher_black_gold_attribution": unsupported_kingfisher_black_gold_attribution,
             "answer_gold_groups": sorted(answer_groups),
             "missing_prompt_gold_groups": missing_groups,
@@ -4197,6 +4225,21 @@ def _gold_evidence_repair_instruction(
             "dry'). Do not attribute the phrase to Vijay Mallya, Raj Shamani, or "
             "the interviewer. Preserve the independently supported claims and "
             "use only the supplied transcript."
+        )
+
+    if (
+        question_id == "Q05"
+        and _has_named_q05_operational_attribution(answer_text)
+    ):
+        instructions.append(
+            "SPEAKER-NEUTRAL OPERATIONAL-CLAIM REPAIR. The registered caption "
+            "evidence does not establish which speaker stated the oil-bill "
+            "non-payment and airport-fee/landing-charge details. Rewrite those "
+            "details neutrally (for example, 'the discussion refers to non-payment "
+            "of oil bills and the inability to pay airport fees and landing charges'). "
+            "Do not attribute these operational claims to Vijay Mallya, Raj Shamani, "
+            "or the interviewer. Preserve the independently supported global-crisis, "
+            "working-capital-cycle, and cash-flow points. Use only the supplied transcript."
         )
 
     if not instructions:

@@ -296,7 +296,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
         answer_requirements=(
             {"name": "global_financial_crisis", "pattern": r"\bglobal financial crisis\b"},
             {"name": "working_capital_cycle", "pattern": r"\bworking[- ]capital\b"},
-            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of the )?oil bills\b"},
+            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of (?:the )?oil bills?|unpaid bills?[^.!?]{0,45}oil invoices?|unpaid oil invoices?|oil invoices?[^.!?]{0,45}(?:were|remained) unpaid)\b"},
             {"name": "airport_fees", "pattern": r"\bairport fees\b"},
             {"name": "landing_charges", "pattern": r"\blanding charges\b"},
             {"name": "cash_flow_challenge", "pattern": r"\bcash[- ]flow\b"},
@@ -948,6 +948,48 @@ def _claims_kingfisher_is_black_and_gold(answer: str) -> bool:
     return _text_assigns_black_gold_to_kingfisher(answer)
 
 
+def _has_named_money_stopped_attribution(text: str) -> bool:
+    """Match generation's sentence-scoped speaker-attribution contract."""
+    disputed_phrase = (
+        r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
+    )
+    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+    return any(
+        re.search(
+            speaker + r"[^.!?]{0,100}" + disputed_phrase,
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            disputed_phrase + r"[^.!?]{0,100}" + speaker,
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
+    )
+
+
+def _has_named_q05_operational_attribution(text: str) -> bool:
+    """Detect named-speaker attribution of Q05 oil-bill/airport-fee claims."""
+    operational_claim = (
+        r"\b(?:oil bills?|oil invoices?|airport fees?|landing charges?)\b"
+    )
+    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+    return any(
+        re.search(
+            speaker + r"[^.!?]{0,220}" + operational_claim,
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            operational_claim + r"[^.!?]{0,120}" + speaker,
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
+    )
+
+
 def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     """Check high-risk claims that broad phrase-presence checks cannot validate."""
     text = _normalize_answer_requirement_text(answer)
@@ -1112,25 +1154,24 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ))
-        named_speaker_attribution = bool(re.search(
-            r"(?:\b(?:Mallya|Vijay Mallya|Raj Shamani|the interviewer|interviewer)\b.{0,100}"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
-            r"\b(?:Mallya|Vijay Mallya|Raj Shamani|the interviewer|interviewer)\b)",
-            text,
-            re.IGNORECASE,
-        ))
+        named_speaker_attribution = _has_named_money_stopped_attribution(text)
         add(
             f"{case_id.lower()}_money_stopped_attribution_is_source_supported",
             not phrase_present or not named_speaker_attribution,
             "The registered captions do not establish who said the money-stopped phrase; describe it neutrally rather than assigning it to Mallya or the interviewer.",
         )
+        if case_id == "Q05":
+            add(
+                "q05_operational_claims_speaker_neutral",
+                not _has_named_q05_operational_attribution(text),
+                "The registered captions do not establish a speaker for the oil-bill non-payment and airport-fee/landing-charge passage; describe those operational claims neutrally.",
+            )
 
     elif case_id == "Q06":
         for name, pattern in (
             ("q06_brand_personality", r"brand.{0,60}personalit|personalit.{0,60}brand"),
             ("q06_surrogate_advertising", r"surrogate advertising"),
-            ("q06_kingfisher_water_business", r"water business.{0,100}Kingfisher|Kingfisher.{0,100}water business"),
+            ("q06_kingfisher_water_business", r"water[- ]business.{0,100}Kingfisher|Kingfisher.{0,100}water[- ]business"),
         ):
             add(
                 name,

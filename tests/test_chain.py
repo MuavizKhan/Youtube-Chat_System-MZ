@@ -9865,6 +9865,61 @@ def test_q04_repair_removes_unsupported_named_speaker_attribution():
 
 
 @pytest.mark.unit
+def test_q05_oil_bill_and_airport_fee_claims_receive_speaker_neutral_repair():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "The working capital cycle got disrupted and there was a cash flow issue. "
+        "The transcript refers to non-payment of the oil bills and says "
+        "Kingfisher Airlines was not able to pay airport fees and landing charges."
+    )
+    misattributed_answer = (
+        "Vijay Mallya says the global financial crisis affected every sector "
+        "and that the working capital cycle got disrupted after non-payment "
+        "of oil bills, airport fees and landing charges, causing a cash-flow issue."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=misattributed_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=misattributed_answer,
+        repaired_draft=None,
+        final_answer=misattributed_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL OPERATIONAL-CLAIM REPAIR" in instruction
+    assert "do not attribute these operational claims" in instruction.lower()
+    assert diagnostics["initial_draft"]["unsupported_q05_operational_speaker_attribution"] is True
+    assert (
+        "unsupported_q05_operational_speaker_attribution"
+        in diagnostics["initial_draft"]["issue_codes"]
+    )
+
+    neutral_answer = (
+        "Vijay Mallya describes the global financial crisis, the disrupted "
+        "working-capital cycle and a cash-flow issue. Separately, the discussion "
+        "refers to non-payment of oil bills and the inability to pay airport fees "
+        "and landing charges."
+    )
+    assert chain._has_named_q05_operational_attribution(neutral_answer) is False
+
+
+@pytest.mark.unit
 def test_q04_partial_context_keeps_neutral_attribution_repair_but_suppresses_gold_completeness_repair():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
