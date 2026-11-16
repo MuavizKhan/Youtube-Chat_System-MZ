@@ -10141,7 +10141,7 @@ def test_q02_registered_fallback_requires_all_four_source_claims_across_prompt_b
         "I wanted the world to know that the team with roots in India was at the "
         "pinnacle of motorsport. Of course I also use the platform to advertise "
         "my brands. The car and all the merchandise around Formula 1 had a lot "
-        "of our brands on it for promotional purposes.\\n"
+        "of our brands on it for promotional purposes.\n"
         "[SOURCE 2]\n"
         "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
         "to help it."
