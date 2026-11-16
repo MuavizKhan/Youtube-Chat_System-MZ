@@ -161,7 +161,7 @@ GOLD_EVIDENCE_CASES = (
                 "Formula One team sent 10 million back to King Fisher Airlines",
                 "sent 10 million back to King Fisher Airlines",
             ),
-
+        ),
         generation_fallback_answer=(
             "Vijay Mallya says he named the Formula One team Force India because "
             "he wanted the Indian flag on the grid and wanted the world to know "
@@ -217,7 +217,6 @@ GOLD_EVIDENCE_CASES = (
                 "Formula One team sent 10 million back to King Fisher Airlines",
                 "sent 10 million back to King Fisher Airlines",
             ),
-        ),
         ),
     ),
     GoldEvidenceCase(
