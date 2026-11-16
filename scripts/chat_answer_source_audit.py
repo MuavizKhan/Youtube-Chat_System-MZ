@@ -36,6 +36,7 @@ from Backend.rag_system.timestamp_utils import (
 )
 from Backend.rag_system.chain import (
     _blood_movement_attributed_to_arteries,
+    _has_named_money_stopped_attribution as _chain_has_named_money_stopped_attribution,
     _text_assigns_black_gold_to_kingfisher,
     is_temporal_location_question,
 )
@@ -949,24 +950,8 @@ def _claims_kingfisher_is_black_and_gold(answer: str) -> bool:
 
 
 def _has_named_money_stopped_attribution(text: str) -> bool:
-    """Match generation's sentence-scoped speaker-attribution contract."""
-    disputed_phrase = (
-        r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
-    )
-    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
-    return any(
-        re.search(
-            speaker + r"[^.!?]{0,100}" + disputed_phrase,
-            sentence,
-            re.IGNORECASE,
-        )
-        or re.search(
-            disputed_phrase + r"[^.!?]{0,100}" + speaker,
-            sentence,
-            re.IGNORECASE,
-        )
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
-    )
+    """Use the generation module's canonical speaker-attribution contract."""
+    return _chain_has_named_money_stopped_attribution(text)
 
 
 def _has_named_q05_operational_attribution(text: str) -> bool:

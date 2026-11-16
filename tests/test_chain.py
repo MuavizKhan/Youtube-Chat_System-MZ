@@ -9865,6 +9865,70 @@ def test_q04_repair_removes_unsupported_named_speaker_attribution():
 
 
 @pytest.mark.unit
+def test_q04_generation_money_stopped_attribution_is_sentence_scoped():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    fallback_style_answer = (
+        "Vijay Mallya says Kingfisher Airlines faced several connected pressures. "
+        "Mallya says the global financial crisis affected every sector. "
+        "The discussion then describes how money stopped and it got dry, "
+        "without assigning those words to either speaker. Mallya recalls being "
+        "told, “You continue, banks will support you,” and being told not to "
+        "downsize Kingfisher. He also points to government policies that didn't "
+        "help and mounting losses, describing the refusal to let Etihad invest "
+        "as the final straw."
+    )
+
+    # A nearby speaker mention in another sentence must not become attribution.
+    assert chain._has_named_money_stopped_attribution(fallback_style_answer) is False
+
+    # Explicit attribution in the same sentence must still be detected in
+    # either word order.
+    assert chain._has_named_money_stopped_attribution(
+        "Mallya says money stopped and it got dry."
+    ) is True
+    assert chain._has_named_money_stopped_attribution(
+        "Money stopped and it got dry, Mallya says."
+    ) is True
+
+    context = (
+        "[SOURCE 1] The global financial crisis affected every sector. "
+        "The money stopped and it got dry. "
+        "I was told, 'You continue, banks will support you,' and not to "
+        "downsize Kingfisher. "
+        "Government policies that didn't help and mounting losses; "
+        "the refusal to let Etihad invest was the final straw."
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=fallback_style_answer,
+        repaired_draft=None,
+        final_answer=fallback_style_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    assert diagnostics["initial_draft"][
+        "unsupported_money_stopped_speaker_attribution"
+    ] is False
+    assert (
+        "unsupported_money_stopped_speaker_attribution"
+        not in diagnostics["initial_draft"]["issue_codes"]
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=fallback_style_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is None or "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" not in instruction
+
+
+@pytest.mark.unit
 def test_q05_oil_bill_and_airport_fee_claims_receive_speaker_neutral_repair():
     question = (
         "How does Vijay Mallya describe the challenges he faced "

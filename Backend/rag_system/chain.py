@@ -3692,17 +3692,24 @@ def _blood_movement_attributed_to_arteries(text: str) -> bool:
 
 
 def _has_named_money_stopped_attribution(text: str) -> bool:
+    """Detect a named-speaker attribution only within the same sentence."""
     disputed_phrase = (
         r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b"
     )
-    return bool(re.search(
-        r"(?:\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
-        r"[^.!?]{0,100}" + disputed_phrase + r"|"
-        + disputed_phrase + r"[^.!?]{0,100}"
-        r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b)",
-        text or "",
-        re.IGNORECASE,
-    ))
+    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+    return any(
+        re.search(
+            speaker + r"[^.!?]{0,100}" + disputed_phrase,
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            disputed_phrase + r"[^.!?]{0,100}" + speaker,
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
+    )
 
 
 def _has_named_q05_operational_attribution(text: str) -> bool:
