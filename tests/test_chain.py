@@ -10194,6 +10194,106 @@ def test_q02_registered_fallback_requires_all_four_source_claims_across_prompt_b
     assert rejected["missing_fallback_claims"] == [2]
 
 
+
+@pytest.mark.regression
+def test_q02_generation_uses_source_bound_fallback_after_failed_claim_repair(monkeypatch):
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    first_document = doc(
+        94,
+        6359.92,
+        6497.28,
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. Of course I also use the platform to advertise "
+        "my brands. The car and all the merchandise around Formula 1 had a lot "
+        "of our brands on it for promotional purposes.",
+    )
+    second_document = doc(
+        215,
+        14541.399,
+        14636.64,
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
+        "to help it.",
+    )
+    first_document.metadata["video_id"] = video_id
+    second_document.metadata["video_id"] = video_id
+    source_groups = [
+        {
+            "documents": [first_document],
+            "start": 6359.92,
+            "end": 6497.28,
+            "distance": 0.4,
+        },
+        {
+            "documents": [second_document],
+            "start": 14541.399,
+            "end": 14636.64,
+            "distance": 0.5,
+        },
+    ]
+    retrieved_results = [
+        (first_document, 0.4),
+        (second_document, 0.5),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [94, 215],
+                "citation_chunk_ids": [94, 215],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 8000)
+    generation_calls = []
+
+    def incomplete_answer(**kwargs):
+        generation_calls.append(kwargs)
+        return "Formula 1 was an important motorsport interest discussed by Mallya."
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_answer)
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": video_id}
+    )
+
+    trace = result["generation_trace"]
+    registered_case = chain.get_video_benchmark(video_id).gold_evidence_by_question[
+        "Q02"
+    ]
+    assert len(generation_calls) == 2
+    assert result["answer"] == registered_case.generation_fallback_answer
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"][
+        "included_fallback_claims"
+    ] == [0, 1, 2, 3]
+    assert trace["generation_claim_groups_included"] == [0, 1, 2, 3]
+
+    selected = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    selected_ids = {
+        int(document.metadata["chunk_id"])
+        for document, _distance in selected
+    }
+    assert selected_ids == {94, 215}
+
+
 @pytest.mark.unit
 def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced_airline():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
