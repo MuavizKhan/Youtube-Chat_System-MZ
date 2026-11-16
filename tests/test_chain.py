@@ -750,7 +750,7 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
         "Formula 1 is the pinnacle of motorsport, and it was a dream to have a team on the F1 grid.",
         "I named it Force India.",
         "I wanted the Indian flag to be on the grid.",
-        "I used the platform to advertise my brands.",
+        "Of course I also use the platform to advertise my brands.",
         *filler,
     ]
     first_metadata_captions = [
@@ -834,7 +834,7 @@ def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omit
     assert len(context) <= 1800
     assert "I named it Force India." in context
     assert "I wanted the Indian flag to be on the grid." in context
-    assert "I used the platform to advertise my brands." in context
+    assert "Of course I also use the platform to advertise my brands." in context
     expected_transfer_caption = (
         "the Formula One team sent back 10 million pounds to Kingfisher Airlines"
     )
@@ -872,7 +872,7 @@ def test_q02_registered_claim_matcher_accepts_verified_formula_one_transcript_wo
         "[SOURCE 1]\\n"
         "Now I named it Force India. I wanted the Indian flag to be on the grid. "
         "I wanted the world to know that the team with roots in India was at the "
-        "pinnacle of motorsport. I also used the platform to advertise my brands. "
+        "pinnacle of motorsport. Of course I also use the platform to advertise my brands. "
         "The Formula 1 team sent back 10 million pounds to King Fisher Airlines."
     )
 
