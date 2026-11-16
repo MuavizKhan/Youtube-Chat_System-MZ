@@ -147,7 +147,7 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_answer_groups=(
             ("named the Formula One team Force India", "called the team Force India"),
             ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
-            ("used the Formula One platform, car livery and merchandise to promote brands",),
+            ("used the Formula One platform to promote his brands", "used the Formula One platform, car livery and merchandise to promote brands"),
             (
                 "Formula One team sent 10 million pounds back to Kingfisher Airlines",
                 "F1 team returned 10 million pounds to Kingfisher Airlines",
@@ -161,6 +161,63 @@ GOLD_EVIDENCE_CASES = (
                 "Formula One team sent 10 million back to King Fisher Airlines",
                 "sent 10 million back to King Fisher Airlines",
             ),
+
+        generation_fallback_answer=(
+            "Vijay Mallya says he named the Formula One team Force India because "
+            "he wanted the Indian flag on the grid and wanted the world to know "
+            "that a team with roots in India was at the pinnacle of motorsport. "
+            "He also says he used the Formula One platform to promote his brands, "
+            "which appeared on the car and Formula One merchandise. He says the "
+            "Formula One team sent 10 million pounds back to Kingfisher Airlines "
+            "to help it."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("named it Force India", "called it Force India"),
+            ("wanted the Indian flag to be on the grid", "team with roots in India"),
+            ("use the platform to advertise my brands", "used the platform to advertise my brand", "used the platform to advertise my brands"),
+            (
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "sent 10 million pounds back to Kingfisher Airlines",
+                "Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "the Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "the Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
+        ),
+        generation_fallback_answer_groups=(
+            ("named the Formula One team Force India", "called the team Force India"),
+            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
+            ("used the Formula One platform to promote his brands", "used the Formula One platform, car livery and merchandise to promote brands"),
+            (
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "F1 team returned 10 million pounds to Kingfisher Airlines",
+                "F1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent £10 million back to King Fisher Airlines",
+                "sent £10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
+        ),
         ),
     ),
     GoldEvidenceCase(
