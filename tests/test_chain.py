@@ -10136,13 +10136,13 @@ def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_enti
 def test_q02_registered_fallback_requires_all_four_source_claims_across_prompt_blocks():
     question = "What connection does Vijay Mallya discuss with Formula One?"
     source_context = (
-        "[SOURCE 1]\\n"
+        "[SOURCE 1]\n"
         "Now I named it Force India. I wanted the Indian flag to be on the grid. "
         "I wanted the world to know that the team with roots in India was at the "
         "pinnacle of motorsport. Of course I also use the platform to advertise "
         "my brands. The car and all the merchandise around Formula 1 had a lot "
         "of our brands on it for promotional purposes.\\n"
-        "[SOURCE 2]\\n"
+        "[SOURCE 2]\n"
         "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
         "to help it."
     )
