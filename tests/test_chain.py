@@ -10131,6 +10131,69 @@ def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_enti
     assert "Royal Challenge" in instruction
 
 
+
+@pytest.mark.regression
+def test_q02_registered_fallback_requires_all_four_source_claims_across_prompt_blocks():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    source_context = (
+        "[SOURCE 1]\\n"
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. Of course I also use the platform to advertise "
+        "my brands. The car and all the merchandise around Formula 1 had a lot "
+        "of our brands on it for promotional purposes.\\n"
+        "[SOURCE 2]\\n"
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
+        "to help it."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=source_context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "Force India" in answer
+    assert "Indian flag" in answer
+    assert "pinnacle of motorsport" in answer
+    assert "used the Formula One platform to promote his brands" in answer
+    assert "Formula One team sent 10 million pounds back to Kingfisher Airlines" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["fallback_contract"] == (
+        "all_registered_fallback_claims_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [1],
+        "3": [2],
+    }
+    assert diagnostics["answer_contract_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["evidence_scope"] == "prompt_visible_context"
+
+    missing_brand_context = source_context.replace(
+        "Of course I also use the platform to advertise my brands.",
+        "The interviewer asks about the team's racing history.",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_brand_context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert rejected["missing_fallback_claims"] == [2]
+
+
 @pytest.mark.unit
 def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced_airline():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
