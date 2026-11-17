@@ -3735,7 +3735,7 @@ def _has_q03_entity_distinction(text: str) -> bool:
     )
     royal_challenge_misclassified = bool(re.search(
         r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+"
-        r"(?:(?:is|was|named|called)\s+)?Royal Challenge\b|"
+        r"(?:is|was|named|called)\s+Royal Challenge\b|"
         r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
         r"\bRoyal Challenge\s+(?:is|was)\s+"
         r"(?:(?:the|a|an)\s+)?(?:(?:cricket|IPL)\s+)?"

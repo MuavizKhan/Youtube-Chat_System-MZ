@@ -11007,6 +11007,15 @@ def test_q03_entity_distinction_requires_both_correct_roles():
         "Royal Challenge is a cricket team and also a whisky brand."
     ) is False
 
+    # Timestamp sanitization removes semicolons and joins answer fragments.
+    # That adjacency must not create a false cricket-franchise attribution.
+    correctly_distinguished = (
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+    sanitized = chain._strip_unverified_timestamp_summary(correctly_distinguished)
+    assert chain._has_q03_entity_distinction(sanitized) is True
+
 
 @pytest.mark.unit
 def test_q03_missing_role_receives_explicit_entity_repair_instruction():
