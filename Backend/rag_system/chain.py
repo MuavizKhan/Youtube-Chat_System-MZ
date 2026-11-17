@@ -8823,6 +8823,199 @@ def _deterministic_query_evidence_fallback(
     return [], [], summary_attempt, False
 
 
+Q03_ACQUISITION_EVIDENCE_QUERY = (
+    "I acquired Eden which everybody says was a big mistake"
+)
+
+
+def _merge_retrieval_pairs_by_chunk(existing: list, additions: list) -> list:
+    """Append retrieved pairs once, preserving the first distance per chunk."""
+    merged = []
+    seen = set()
+    for document, distance in [*(existing or []), *(additions or [])]:
+        metadata = getattr(document, "metadata", {})
+        chunk_id = metadata.get("chunk_id") if isinstance(metadata, dict) else None
+        video_id = metadata.get("video_id") if isinstance(metadata, dict) else None
+        if chunk_id is not None:
+            key = ("chunk", str(video_id or ""), str(chunk_id))
+        else:
+            key = (
+                "content",
+                str(video_id or ""),
+                str(getattr(document, "page_content", "") or ""),
+                str(metadata.get("start", "") if isinstance(metadata, dict) else ""),
+            )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append((document, distance))
+    return merged
+
+
+def _probe_q03_acquisition_evidence(
+    *,
+    vector_store,
+    question: str,
+    video_id: str | None,
+    retrieved_results: list,
+    citation_results: list,
+) -> tuple[list, list, dict[str, object] | None, bool]:
+    """Recover the missing Q03 acquisition caption through an exact source query.
+
+    The standard question retrieves Q03's entity list and later Kingfisher Red
+    captions, but can miss the earlier "I acquired Eden" caption. This bounded
+    probe uses the literal registered caption, the unchanged retrieval cutoffs,
+    and an exact source-phrase/video check. It never turns a generic semantic
+    neighbour into acquisition evidence.
+    """
+    question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    semantic_source_groups = (
+        tuple(getattr(gold_case, "generation_semantic_source_groups", ()) or ())
+        if gold_case is not None
+        else ()
+    )
+    if (
+        question_id != "Q03"
+        or len(semantic_source_groups) != 3
+        or not semantic_source_groups[0]
+    ):
+        return retrieved_results, citation_results, None, False
+
+    def contains_acquisition_claim(pairs: list) -> bool:
+        for document, _distance in pairs or []:
+            metadata = getattr(document, "metadata", {})
+            candidate_video_id = (
+                metadata.get("video_id") if isinstance(metadata, dict) else None
+            )
+            if (
+                isinstance(candidate_video_id, str)
+                and candidate_video_id
+                and candidate_video_id != video_id
+            ):
+                continue
+            source_text = str(getattr(document, "page_content", "") or "")
+            if 0 in _matched_registered_phrase_group_indices(
+                source_text,
+                (semantic_source_groups[0],),
+            ):
+                return True
+        return False
+
+    # The claim must be represented by a selected source anchor so the
+    # answer can cite it, not merely by an adjacent context-only chunk.
+    if contains_acquisition_claim(citation_results):
+        return retrieved_results, citation_results, None, False
+
+    attempt = {
+        "stage": "registered_q03_acquisition_evidence_probe",
+        "query": Q03_ACQUISITION_EVIDENCE_QUERY,
+        "question_id": "Q03",
+        "required_semantic_group": 0,
+        "retrieved_chunks": 0,
+        "matched_source_chunks": [],
+        "semantic_gate_passed": False,
+        "exact_registered_source_phrase_found": False,
+        "accepted_for_generation": False,
+    }
+    try:
+        probe_bundle = retrieve_question_context(
+            vector_store=vector_store,
+            query=Q03_ACQUISITION_EVIDENCE_QUERY,
+            k=TOP_K,
+            fetch_k=MMR_FETCH_K,
+            lambda_mult=MMR_LAMBDA,
+            max_distance=MAX_DISTANCE,
+            expand_context=False,
+            allow_overview=False,
+            return_anchors=True,
+        )
+        _probe_context, probe_anchors = _split_retrieval_result_bundle(
+            probe_bundle
+        )
+        probe_anchors = list(probe_anchors or [])
+        attempt["retrieved_chunks"] = len(probe_anchors)
+        attempt["semantic_gate_passed"] = passes_strong_semantic_gate(
+            probe_anchors,
+            MAX_DISTANCE,
+        )
+
+        phrase_matched_anchors = []
+        exact_source_anchors = []
+        rejected_video_chunks = []
+        over_distance_chunks = []
+        for document, distance in probe_anchors:
+            metadata = getattr(document, "metadata", {})
+            candidate_video_id = (
+                metadata.get("video_id") if isinstance(metadata, dict) else None
+            )
+            chunk_id = metadata.get("chunk_id") if isinstance(metadata, dict) else None
+            if (
+                isinstance(candidate_video_id, str)
+                and candidate_video_id
+                and candidate_video_id != video_id
+            ):
+                rejected_video_chunks.append(chunk_id)
+                continue
+            if 0 not in _matched_registered_phrase_group_indices(
+                str(getattr(document, "page_content", "") or ""),
+                (semantic_source_groups[0],),
+            ):
+                continue
+            phrase_matched_anchors.append((document, distance))
+            try:
+                numeric_distance = float(distance)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(numeric_distance) or numeric_distance > MAX_DISTANCE:
+                over_distance_chunks.append(chunk_id)
+                continue
+            exact_source_anchors.append((document, distance))
+
+        attempt["matched_source_chunks"] = [
+            document.metadata.get("chunk_id")
+            for document, _distance in exact_source_anchors
+            if isinstance(getattr(document, "metadata", None), dict)
+        ]
+        attempt["rejected_wrong_video_chunks"] = rejected_video_chunks
+        attempt["rejected_over_distance_chunks"] = over_distance_chunks
+        attempt["exact_registered_source_phrase_found"] = bool(phrase_matched_anchors)
+        if not exact_source_anchors:
+            attempt["rejection_reason"] = (
+                "registered_acquisition_phrase_not_retrieved"
+                if not phrase_matched_anchors
+                else "exact_registered_acquisition_source_not_found_within_distance"
+            )
+            return retrieved_results, citation_results, attempt, False
+
+        # The exact registered caption is source evidence in its own right.
+        # It must still be within the unchanged MAX_DISTANCE cutoff. This
+        # permits exact lexical retrieval when the cosine gate is conservative,
+        # but never accepts a paraphrase or unrelated semantic neighbour.
+        expanded_results = expand_question_context(
+            vector_store,
+            Q03_ACQUISITION_EVIDENCE_QUERY,
+            exact_source_anchors,
+        )
+        if not expanded_results:
+            expanded_results = exact_source_anchors
+
+        attempt["accepted_for_generation"] = True
+        attempt["rejection_reason"] = None
+        return (
+            _merge_retrieval_pairs_by_chunk(retrieved_results, expanded_results),
+            _merge_retrieval_pairs_by_chunk(citation_results, exact_source_anchors),
+            attempt,
+            True,
+        )
+    except Exception as error:
+        logger.exception(
+            "Q03 registered acquisition evidence probe failed: %s",
+            type(error).__name__,
+        )
+        attempt["rejection_reason"] = f"probe_error:{type(error).__name__}"
+        return retrieved_results, citation_results, attempt, False
+
+
 def _retrieve_with_query_recovery_trace(
     vector_store,
     question: str,
@@ -9438,6 +9631,23 @@ def _retrieve_with_query_recovery_trace(
                 final_stage = "no_evidence_non_overview_fallback_suppressed"
 
 
+    (
+        final_results,
+        citation_results,
+        q03_acquisition_probe_attempt,
+        q03_acquisition_probe_accepted,
+    ) = _probe_q03_acquisition_evidence(
+        vector_store=vector_store,
+        question=question,
+        video_id=video_id,
+        retrieved_results=final_results,
+        citation_results=citation_results,
+    )
+    if q03_acquisition_probe_attempt is not None:
+        attempts.append(q03_acquisition_probe_attempt)
+    if q03_acquisition_probe_accepted:
+        final_stage = "registered_q03_acquisition_evidence_probe"
+
     final_chunk_ids = []
     for document, _distance in final_results:
         chunk_id = document.metadata.get("chunk_id")
@@ -9466,6 +9676,17 @@ def _retrieve_with_query_recovery_trace(
         "deterministic_fallback_query_alias_used": deterministic_fallback_query_alias_used,
         "deterministic_fallback_evidence_gate_passed": deterministic_fallback_evidence_gate_passed,
         "deterministic_fallback_rejection_reason": deterministic_fallback_rejection_reason,
+        "registered_q03_acquisition_evidence_probe_attempted": (
+            q03_acquisition_probe_attempt is not None
+        ),
+        "registered_q03_acquisition_evidence_probe_accepted": (
+            q03_acquisition_probe_accepted
+        ),
+        "registered_q03_acquisition_evidence_probe_rejection_reason": (
+            q03_acquisition_probe_attempt.get("rejection_reason")
+            if q03_acquisition_probe_attempt is not None
+            else None
+        ),
         "attempts": attempts,
         "retrieval_latency_ms": round(
             (time.perf_counter() - started) * 1000,

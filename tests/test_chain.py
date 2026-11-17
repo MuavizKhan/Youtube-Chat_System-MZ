@@ -9529,6 +9529,148 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
 
 
 @pytest.mark.unit
+def test_q03_retrieval_probes_exact_acquisition_caption_when_semantic_group_is_missing(
+    monkeypatch,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    base = doc(
+        20001,
+        4000,
+        4010,
+        "United Breweries and United Spirits. We just called it King Fisher Red. "
+        "King Fisher Red stood for low cost.",
+    )
+    acquisition = doc(
+        20002,
+        2100,
+        2110,
+        "I acquired Eden which everybody says was a big mistake.",
+    )
+    for document in (base, acquisition):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    retrieval_queries = []
+
+    base_pair = (base, 0.2)
+    acquisition_pair = (acquisition, 0.2)
+
+    def fake_retrieve(**kwargs):
+        retrieval_queries.append(kwargs["query"])
+        if len(retrieval_queries) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [acquisition_pair], [acquisition_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or list(anchors)
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert retrieval_queries == [
+        question,
+        chain.Q03_ACQUISITION_EVIDENCE_QUERY,
+    ]
+    assert {item[0].metadata["chunk_id"] for item in results} == {20001, 20002}
+    assert trace["citation_chunk_ids"] == [20001, 20002]
+    assert trace["final_stage"] == "registered_q03_acquisition_evidence_probe"
+    assert trace["registered_q03_acquisition_evidence_probe_attempted"] is True
+    assert trace["registered_q03_acquisition_evidence_probe_accepted"] is True
+    assert trace["attempts"][-1]["exact_registered_source_phrase_found"] is True
+    assert trace["attempts"][-1]["accepted_for_generation"] is True
+    assert expansion_calls == [
+        (chain.Q03_ACQUISITION_EVIDENCE_QUERY, [acquisition_pair])
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_text", "distance", "expected_rejection"),
+    [
+        (
+            "Air Deccan was discussed as an airline, but no acquisition is stated.",
+            0.2,
+            "registered_acquisition_phrase_not_retrieved",
+        ),
+        (
+            "I acquired Eden which everybody says was a big mistake.",
+            chain.MAX_DISTANCE + 0.01,
+            "exact_registered_acquisition_source_not_found_within_distance",
+        ),
+    ],
+)
+def test_q03_acquisition_probe_fails_closed_without_exact_in_range_source(
+    monkeypatch,
+    source_text,
+    distance,
+    expected_rejection,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    base = doc(
+        20101,
+        4000,
+        4010,
+        "United Breweries and United Spirits. We just called it King Fisher Red. "
+        "King Fisher Red stood for low cost.",
+    )
+    probe_document = doc(20102, 2100, 2110, source_text)
+    for document in (base, probe_document):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    calls = []
+
+    base_pair = (base, 0.2)
+    probe_pair = (probe_document, distance)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs["query"])
+        if len(calls) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [probe_pair], [probe_pair], {"weak_native_query_rejected": False}
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Rejected acquisition evidence must not be expanded or added."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [20101]
+    assert trace["final_stage"] == "initial_strict"
+    assert trace["registered_q03_acquisition_evidence_probe_attempted"] is True
+    assert trace["registered_q03_acquisition_evidence_probe_accepted"] is False
+    assert trace["registered_q03_acquisition_evidence_probe_rejection_reason"] == (
+        expected_rejection
+    )
+
+
+
+@pytest.mark.unit
 def test_q03_gold_contract_keeps_six_entities_and_three_semantic_relations_separate():
     from Backend.rag_system.gold_evidence import get_gold_evidence_case
     case = get_gold_evidence_case("Q03")
