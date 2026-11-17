@@ -9629,8 +9629,14 @@ def test_q03_airline_relationship_matcher_rejects_the_observed_false_claims():
         "Kingfisher Red was the premium beer brand."
     )
 
+    misattributed_acquisition = (
+        "Air Deccan was an existing low-cost airline acquired by Captain Gopinath. "
+        "Kingfisher Red was the low-cost airline created through rebranding of Air Deccan."
+    )
+
     assert chain._has_q03_air_deccan_kingfisher_red_relationship(correct) is True
     assert chain._has_q03_air_deccan_kingfisher_red_relationship(incorrect) is False
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(misattributed_acquisition) is False
 
 
 
