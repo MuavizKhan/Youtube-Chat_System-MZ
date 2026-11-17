@@ -9184,6 +9184,51 @@ def test_registered_multigroup_fallback_rejects_missing_required_prompt_evidence
     assert diagnostics["missing_fallback_claims"] == missing_groups
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("missing_semantic_claim", [0, 1, 2])
+def test_q03_fallback_rejects_each_missing_airline_relationship_claim(
+    missing_semantic_claim,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    semantic_claims = (
+        "I acquired Eden as part of industry consolidation.",
+        "The interviewer asked whether it was the wrong decision to rebrand it to King Fisher Red. "
+        "So we just called it King Fisher Red.",
+        "King Fisher Red stood for low cost.",
+    )
+    source_blocks = (
+        "[SOURCE 1]\\nUnited Breweries Limited and United Spirits.",
+        "[SOURCE 2]\\nAir Deccan and Kingfisher Red. "
+        + " ".join(
+            phrase for index, phrase in enumerate(semantic_claims)
+            if index != missing_semantic_claim
+        ),
+        "[SOURCE 3]\\nRoyal Challengers Bangalore and Royal Challenge whisky.",
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context="\\n".join(source_blocks),
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_semantic_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_semantic_fallback_claims"] == [
+        missing_semantic_claim
+    ]
+
+
+
+
+
 @pytest.mark.unit
 def test_q05_fallback_rejects_airport_fees_and_landing_charges_split_across_sources():
     question = (
