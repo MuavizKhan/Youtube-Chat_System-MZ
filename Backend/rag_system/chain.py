@@ -5692,7 +5692,10 @@ def build_generation_context(
         non_claim_records = [
             record
             for record in priority_records
-            if not record["generation_claim_group_indexes"]
+            if (
+                not record["generation_claim_group_indexes"]
+                and not record["generation_semantic_group_indexes"]
+            )
         ]
 
         # Give each claim-bearing source a protected equal share before allowing
