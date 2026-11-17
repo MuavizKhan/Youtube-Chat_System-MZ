@@ -227,17 +227,7 @@ GOLD_EVIDENCE_CASES = (
         question_id="Q03",
         groups=(
             ("United Breweries", "United Breweries Limited", "United Spirits"),
-            (
-                "merger of Kingfisher and",
-                "Kingfisher Red",
-                "eliminate the disruptor",
-                "I acquired Air Deccan",
-                "I acquired Eden",
-                "rebrand it to Kingfisher Red",
-                "rebrand it to King Fisher Red",
-                "Kingfisher Red stood for low cost",
-                "King Fisher Red stood for low cost",
-            ),
+            ("merger of Kingfisher and", "Kingfisher Red", "eliminate the disruptor"),
             ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
         ),
         min_group_coverage=2 / 3,
@@ -282,14 +272,11 @@ GOLD_EVIDENCE_CASES = (
             ("Air Deccan was rebranded as Kingfisher Red", "rebranding of Air Deccan as Kingfisher Red", "the Deccan operation was rebranded as Kingfisher Red"),
             ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier", "Kingfisher Red, the low-cost airline offering"),
         ),
-        # Source-bound fallback: the six existing entities plus the three
-        # additional source assertions must all be visible in prompt blocks.
+        # Preserve the established six-entity deterministic fallback contract.
         generation_fallback_answer=(
             "The businesses, brands, and teams discussed are United Breweries, "
             "United Spirits, Air Deccan, Kingfisher Red, Royal Challengers "
-            "Bangalore (RCB), and Royal Challenge. Mallya says he acquired Air "
-            "Deccan. He explains that Air Deccan was rebranded as Kingfisher Red, "
-            "the low-cost airline offering. Royal Challengers Bangalore "
+            "Bangalore (RCB), and Royal Challenge. Royal Challengers Bangalore "
             "is the cricket franchise; Royal Challenge is the whisky brand."
         ),
         generation_fallback_requires_all_groups=True,
