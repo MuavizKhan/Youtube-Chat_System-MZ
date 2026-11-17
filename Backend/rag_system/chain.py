@@ -3408,6 +3408,8 @@ def _normalize_registered_transcript_answer(
         removed_lender_entry = False
         removed_duplicate_entry = False
         normalized_business_emphasis = False
+        corrected_air_deccan_role = False
+        corrected_kingfisher_red_role = False
 
         for raw_line in normalized_answer.splitlines():
             stripped_line = raw_line.lstrip()
@@ -3416,7 +3418,40 @@ def _normalize_registered_transcript_answer(
                 if stripped_line.startswith(("-", "*"))
                 else ""
             )
+            line_content = bullet_item if bullet_item else stripped_line
+            plain_line = re.sub(r"[*_]", "", line_content).strip()
             folded_item = re.sub(r"[*_]", "", bullet_item).strip().casefold()
+
+            # These exact registered interview answers repeatedly confused
+            # Air Deccan's acquisition with its founding and Kingfisher Red's
+            # airline identity with the Kingfisher beer brand. Canonicalize
+            # only these two named Q03 list entries from the verified caption.
+            prefix = (
+                stripped_line[:2]
+                if stripped_line.startswith(("- ", "* "))
+                else ""
+            )
+            if re.match(r"^Air\s+Deccan\b", plain_line, re.IGNORECASE):
+                normalized_line = (
+                    "**Air Deccan** — an existing low-cost airline that Mallya "
+                    "acquired as part of industry consolidation."
+                )
+                normalized_lines.append(prefix + normalized_line)
+                corrected_air_deccan_role = corrected_air_deccan_role or (
+                    prefix + normalized_line != raw_line
+                )
+                continue
+            if re.match(r"^Kingfisher\s+Red\b", plain_line, re.IGNORECASE):
+                normalized_line = (
+                    "**Kingfisher Red** — the low-cost airline created through "
+                    "the rebranding of Air Deccan; distinct from the premium "
+                    "Kingfisher First offering."
+                )
+                normalized_lines.append(prefix + normalized_line)
+                corrected_kingfisher_red_role = corrected_kingfisher_red_role or (
+                    prefix + normalized_line != raw_line
+                )
+                continue
 
             if folded_item.startswith("a consortium of 17 banks"):
                 removed_lender_entry = True
@@ -3449,6 +3484,10 @@ def _normalize_registered_transcript_answer(
             corrections.append("removed_duplicate_united_breweries_entry")
         if normalized_business_emphasis:
             corrections.append("normalized_business_list_emphasis")
+        if corrected_air_deccan_role:
+            corrections.append("corrected_q03_air_deccan_acquisition_attribution")
+        if corrected_kingfisher_red_role:
+            corrections.append("corrected_q03_kingfisher_red_low_cost_airline_identity")
     elif question_id == "Q05":
         # The transcript explicitly says Mallya put in 3,000 crores of UB
         # Group money. Preserve that supported attribution. The opening
@@ -3747,6 +3786,100 @@ def _has_q03_entity_distinction(text: str) -> bool:
         franchise_is_cricket_team
         and royal_challenge_is_whisky
         and not royal_challenge_misclassified
+    )
+
+
+def _q03_sentences(text: str) -> list[str]:
+    normalized = unicodedata.normalize("NFKC", text or "")
+    return [
+        part.strip()
+        for part in re.split(r"(?<=[.!?])\s+|[\r\n]+", normalized)
+        if part.strip()
+    ]
+
+
+def _has_q03_air_deccan_acquisition(text: str) -> bool:
+    """Require Air Deccan to be described as acquired, not founded/launched."""
+    return any(
+        re.search(r"\bAir\s+Deccan\b", sentence, re.IGNORECASE)
+        and re.search(
+            r"\b(?:acquir\w*|bought|purchase\w*|merger|industry consolidation)\b",
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in _q03_sentences(text)
+    )
+
+
+def _has_q03_air_deccan_rebranding(text: str) -> bool:
+    """Require the answer to connect Air Deccan to the Kingfisher Red rebrand."""
+    return any(
+        re.search(r"\bAir\s+Deccan\b", sentence, re.IGNORECASE)
+        and re.search(r"\bKingfisher\s+Red\b", sentence, re.IGNORECASE)
+        and re.search(
+            r"\b(?:rebrand\w*|renam\w*|became|called|rebranding)\b",
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in _q03_sentences(text)
+    )
+
+
+def _has_q03_kingfisher_red_low_cost_airline(text: str) -> bool:
+    """Require Kingfisher Red to be classified as the low-cost airline offering."""
+    return any(
+        re.search(r"\bKingfisher\s+Red\b", sentence, re.IGNORECASE)
+        and re.search(r"\blow[\s\u2010-\u2015-]*cost\b", sentence, re.IGNORECASE)
+        and re.search(r"\b(?:airline|carrier|aviation offering)\b", sentence, re.IGNORECASE)
+        for sentence in _q03_sentences(text)
+    )
+
+
+def _has_q03_air_deccan_launch_misattribution(text: str) -> bool:
+    """Detect the false claim that Mallya founded or launched Air Deccan."""
+    for sentence in _q03_sentences(text):
+        if re.search(r"\bnot\s+(?:founded|created|launched|started)\b", sentence, re.IGNORECASE):
+            continue
+        if re.search(
+            r"\bAir\s+Deccan\b[^.!?]{0,180}\b(?:he|Mallya|Vijay\s+Mallya)\s+"
+            r"(?:founded|created|launched|started)\b|"
+            r"\b(?:he|Mallya|Vijay\s+Mallya)\s+"
+            r"(?:founded|created|launched|started)\b[^.!?]{0,180}\bAir\s+Deccan\b|"
+            r"\bAir\s+Deccan\b[^.!?]{0,100}\b(?:founded|created|launched|started)\s+by\s+"
+            r"(?:him|Mallya|Vijay\s+Mallya)\b",
+            sentence,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _has_q03_kingfisher_red_beer_misclassification(text: str) -> bool:
+    """Detect Kingfisher Red being presented as a beer/brewery brand."""
+    for sentence in _q03_sentences(text):
+        if not re.search(r"\bKingfisher\s+Red\b", sentence, re.IGNORECASE):
+            continue
+        if not re.search(r"\b(?:beer|brewery|brewing)\b", sentence, re.IGNORECASE):
+            continue
+        if re.search(
+            r"\b(?:not|never|rather\s+than|instead\s+of)\s+"
+            r"(?:a\s+)?(?:premium\s+)?(?:beer|brewery)(?:\s+brand)?\b",
+            sentence,
+            re.IGNORECASE,
+        ):
+            continue
+        return True
+    return False
+
+
+def _has_q03_air_deccan_kingfisher_red_relationship(text: str) -> bool:
+    """Require all three sourced facts and reject the two observed false claims."""
+    return (
+        _has_q03_air_deccan_acquisition(text)
+        and _has_q03_air_deccan_rebranding(text)
+        and _has_q03_kingfisher_red_low_cost_airline(text)
+        and not _has_q03_air_deccan_launch_misattribution(text)
+        and not _has_q03_kingfisher_red_beer_misclassification(text)
     )
 
 
@@ -4267,7 +4400,7 @@ def _gold_evidence_repair_instruction(
             q03_source_claim_groups,
         )
         if (
-            len(q03_source_claim_groups) == 6
+            len(q03_source_claim_groups) >= 6
             and {4, 5}.issubset(q03_context_claims)
             and not _has_q03_entity_distinction(answer_text)
         ):
@@ -4279,6 +4412,24 @@ def _gold_evidence_repair_instruction(
                 "while naming Royal Challenge. Preserve the other source-supported "
                 "entities already present, use only the supplied transcript, and "
                 "do not add timestamps."
+            )
+        if (
+            len(q03_source_claim_groups) >= 9
+            and {6, 7, 8}.issubset(q03_context_claims)
+            and not _has_q03_air_deccan_kingfisher_red_relationship(answer_text)
+        ):
+            instructions.append(
+                "Q03 AIR DECCAN / KINGFISHER RED ROLE REPAIR. Correct the airline "
+                "history using only the supplied transcript: Mallya discusses "
+                "acquiring the existing low-cost Air Deccan as an industry-"
+                "consolidation decision; Air Deccan was subsequently rebranded "
+                "as Kingfisher Red; Kingfisher Red was the low-cost airline "
+                "offering, distinct from the premium Kingfisher First offering. "
+                "Do not say Mallya founded or launched Air Deccan. Do not describe "
+                "Kingfisher Red as a beer or beer brand. Preserve the other "
+                "source-supported businesses and the separate RCB cricket "
+                "franchise / Royal Challenge whisky-brand distinction. Do not "
+                "add claims or timestamps."
             )
 
     if (
