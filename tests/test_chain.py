@@ -11293,7 +11293,7 @@ def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missin
         "[SOURCE 2]\n" + " ".join(
             [claims[index] for index in (2, 3) if index != missing_claim]
             + [
-                "rebrand it to King Fisher Red.",
+                "We just called it King Fisher Red.",
                 "King Fisher Red stood for low cost.",
             ]
         ),
