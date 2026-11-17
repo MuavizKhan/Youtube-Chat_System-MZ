@@ -5705,6 +5705,7 @@ def build_generation_context(
 
     if (
         registered_generation_claim_source_groups
+        or registered_fallback_source_groups
         or registered_generation_semantic_source_groups
     ):
         claim_bearing_records = [
@@ -5712,6 +5713,7 @@ def build_generation_context(
             for record in priority_records
             if (
                 record["generation_claim_group_indexes"]
+                or record["registered_fallback_group_indexes"]
                 or record["generation_semantic_group_indexes"]
             )
         ]
@@ -5720,6 +5722,7 @@ def build_generation_context(
             for record in priority_records
             if (
                 not record["generation_claim_group_indexes"]
+                and not record["registered_fallback_group_indexes"]
                 and not record["generation_semantic_group_indexes"]
             )
         ]
