@@ -3583,7 +3583,7 @@ def _normalize_registered_transcript_answer(
                 and re.match(r"^Air\s+Deccan\b", plain_line, re.IGNORECASE)
             ):
                 normalized_line = (
-                    "**Air Deccan** — an existing low-cost airline that Mallya acquired."
+                    "**Air Deccan** — the airline Mallya acquired."
                 )
                 normalized_lines.append(prefix + normalized_line)
                 corrected_air_deccan_role = corrected_air_deccan_role or (
@@ -3596,8 +3596,7 @@ def _normalize_registered_transcript_answer(
             ):
                 normalized_line = (
                     "**Kingfisher Red** — the low-cost airline created through "
-                    "the rebranding of Air Deccan, distinct from the premium "
-                    "Kingfisher First offering."
+                    "the rebranding of Air Deccan."
                 )
                 normalized_lines.append(prefix + normalized_line)
                 corrected_kingfisher_red_role = corrected_kingfisher_red_role or (

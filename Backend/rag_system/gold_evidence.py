@@ -276,7 +276,9 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer=(
             "The businesses, brands, and teams discussed are United Breweries, "
             "United Spirits, Air Deccan, Kingfisher Red, Royal Challengers "
-            "Bangalore (RCB), and Royal Challenge. Royal Challengers Bangalore "
+            "Bangalore (RCB), and Royal Challenge. Mallya says he acquired Air "
+            "Deccan. He explains that Air Deccan was rebranded as Kingfisher Red, "
+            "the low-cost airline offering. Royal Challengers Bangalore "
             "is the cricket franchise; Royal Challenge is the whisky brand."
         ),
         generation_fallback_requires_all_groups=True,

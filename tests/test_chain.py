@@ -9530,7 +9530,8 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
 
 @pytest.mark.unit
 def test_q03_gold_contract_keeps_six_entities_and_three_semantic_relations_separate():
-    case = chain.get_gold_evidence_case("Q03")
+    from Backend.rag_system.gold_evidence import get_gold_evidence_case
+    case = get_gold_evidence_case("Q03")
     assert len(case.generation_claim_source_groups) == 6
     assert len(case.generation_claim_answer_groups) == 6
     assert len(case.generation_fallback_source_groups) == 6
@@ -11267,6 +11268,8 @@ def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks()
     assert chain._has_q03_air_deccan_kingfisher_red_relationship(answer) is True
     assert "Mallya says he acquired Air Deccan" in answer
     assert "Air Deccan was rebranded as Kingfisher Red" in answer
+    assert "Kingfisher Red, the low-cost airline offering" in answer
+    assert "Kingfisher First" not in answer
     assert diagnostics["required_semantic_fallback_claims"] == [0, 1, 2]
     assert diagnostics["included_semantic_fallback_claims"] == [0, 1, 2]
     assert diagnostics["answer_contract_semantic_fallback_claims"] == [0, 1, 2]
