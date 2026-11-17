@@ -270,7 +270,7 @@ GOLD_EVIDENCE_CASES = (
         generation_semantic_answer_groups=(
             ("Mallya acquired the existing low-cost Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
             ("Air Deccan was rebranded as Kingfisher Red", "rebranding of Air Deccan as Kingfisher Red", "the Deccan operation was rebranded as Kingfisher Red"),
-            ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier"),
+            ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier", "Kingfisher Red, the low-cost airline offering"),
         ),
         # Source-bound fallback: the six existing entities plus the three
         # additional source assertions must all be visible in prompt blocks.
