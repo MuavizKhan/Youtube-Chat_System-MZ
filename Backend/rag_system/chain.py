@@ -3453,6 +3453,7 @@ def _normalize_registered_transcript_answer(
     question: str,
     answer: str,
     video_id: str | None,
+    source_context: str | None = None,
 ) -> tuple[str, list[str]]:
     """Correct audited ASR/answer defects only for exact registered questions."""
     if not isinstance(video_id, str) or not video_id.strip():
@@ -3532,6 +3533,24 @@ def _normalize_registered_transcript_answer(
         if normalized_answer != corrected:
             corrections.append("normalized_escaped_business_list_newlines")
 
+        _semantic_question_id, q03_gold_case = _registered_generation_gold_case(
+            video_id,
+            question,
+        )
+        q03_semantic_source_groups = tuple(
+            getattr(q03_gold_case, "generation_semantic_source_groups", ()) or ()
+        ) if q03_gold_case is not None else ()
+        q03_semantic_context_complete = bool(
+            source_context
+            and len(q03_semantic_source_groups) == 3
+            and set(range(3)).issubset(
+                _matched_registered_phrase_group_indices(
+                    source_context,
+                    q03_semantic_source_groups,
+                )
+            )
+        )
+
         normalized_lines = []
         removed_lender_entry = False
         removed_duplicate_entry = False
@@ -3559,7 +3578,10 @@ def _normalize_registered_transcript_answer(
                 if stripped_line.startswith(("- ", "* "))
                 else ""
             )
-            if re.match(r"^Air\s+Deccan\b", plain_line, re.IGNORECASE):
+            if (
+                q03_semantic_context_complete
+                and re.match(r"^Air\s+Deccan\b", plain_line, re.IGNORECASE)
+            ):
                 normalized_line = (
                     "**Air Deccan** — an existing low-cost airline that Mallya "
                     "acquired as part of industry consolidation."
@@ -3569,7 +3591,10 @@ def _normalize_registered_transcript_answer(
                     prefix + normalized_line != raw_line
                 )
                 continue
-            if re.match(r"^Kingfisher\s+Red\b", plain_line, re.IGNORECASE):
+            if (
+                q03_semantic_context_complete
+                and re.match(r"^Kingfisher\s+Red\b", plain_line, re.IGNORECASE)
+            ):
                 normalized_line = (
                     "**Kingfisher Red** — the low-cost airline created through "
                     "the rebranding of Air Deccan; distinct from the premium "
@@ -10292,6 +10317,7 @@ def build_rag_chain(
                 question=question_text,
                 answer=answer,
                 video_id=inputs.get("video_id"),
+                source_context=inputs.get("context", ""),
             )
         )
         temporal_location_coverage_final = _temporal_location_answer_coverage(
