@@ -263,8 +263,8 @@ GOLD_EVIDENCE_CASES = (
         # Keep them separate from the six entity-name claims because they are
         # semantic relationships, not additional companies or brands.
         generation_semantic_source_groups=(
-            ("I acquired Air Deccan", "acquired Air Deccan"),
-            ("rebrand it to Kingfisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
+            ("I acquired Air Deccan", "acquired Air Deccan", "I acquired Eden", "logic of buying Dean", "buying Dean"),
+            ("rebrand it to Kingfisher Red", "rebrand it to King Fisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
             ("Kingfisher Red stood for low cost", "King Fisher Red stood for low cost"),
         ),
         generation_semantic_answer_groups=(
