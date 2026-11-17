@@ -3952,16 +3952,32 @@ def _q03_sentences(text: str) -> list[str]:
 
 
 def _has_q03_air_deccan_acquisition(text: str) -> bool:
-    """Require Air Deccan to be described as acquired, not founded/launched."""
-    return any(
-        re.search(r"\bAir\s+Deccan\b", sentence, re.IGNORECASE)
-        and re.search(
-            r"\b(?:acquir\w*|bought|purchase\w*|merger|industry consolidation)\b",
+    """Require Mallya to be the acquirer of Air Deccan, not merely a nearby acquisition mention."""
+    actor = r"\b(?:Vijay\s+Mallya|Mallya|he|I)\b"
+    acquisition = r"\b(?:acquir\w*|bought|purchas\w*)\b"
+    target = r"\bAir\s+Deccan\b"
+    for sentence in _q03_sentences(text):
+        active_attribution = bool(re.search(
+            actor + r"[^.!?]{0,100}" + acquisition + r"[^.!?]{0,100}" + target,
             sentence,
             re.IGNORECASE,
-        )
-        for sentence in _q03_sentences(text)
-    )
+        ))
+        passive_attribution = bool(re.search(
+            target + r"[^.!?]{0,100}(?:was|were)\s+"
+            r"(?:acquir\w*|bought|purchas\w*)\s+by\s+"
+            r"(?:Vijay\s+Mallya|Mallya|him)\b",
+            sentence,
+            re.IGNORECASE,
+        ))
+        possessive_attribution = bool(re.search(
+            r"\b(?:Mallya's|Vijay\s+Mallya's)\s+"
+            r"(?:acquisition|purchase)\s+of\s+" + target,
+            sentence,
+            re.IGNORECASE,
+        ))
+        if active_attribution or passive_attribution or possessive_attribution:
+            return True
+    return False
 
 
 def _has_q03_air_deccan_rebranding(text: str) -> bool:
