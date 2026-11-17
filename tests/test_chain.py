@@ -9543,10 +9543,19 @@ def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
         "- Royal Challenge** — the whisky brand."
     )
 
+    source_context = (
+        "[SOURCE 1]\\n"
+        "Mallya says, I acquired Eden as part of industry consolidation.\\n"
+        "[SOURCE 2]\\n"
+        "So we just called it King Fisher Red.\\n"
+        "[SOURCE 3]\\n"
+        "King Fisher Red stood for low cost."
+    )
     corrected, corrections = chain._normalize_registered_transcript_answer(
         question=question,
         answer=answer,
         video_id="MdeQMVBuGgY",
+        source_context=source_context,
     )
 
     assert "Air Deccan (also called" not in corrected
@@ -9558,6 +9567,18 @@ def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
     assert "premium Kingfisher First offering" in corrected
     assert "corrected_q03_air_deccan_acquisition_attribution" in corrections
     assert "corrected_q03_kingfisher_red_low_cost_airline_identity" in corrections
+
+    # The normalizer must not inject a role correction when the corresponding
+    # transcript assertions are absent from the prompt-visible context.
+    ungrounded, ungrounded_corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "low-cost airline he launched" in ungrounded
+    assert "premium beer brand he created" in ungrounded
+    assert "corrected_q03_air_deccan_acquisition_attribution" not in ungrounded_corrections
+    assert "corrected_q03_kingfisher_red_low_cost_airline_identity" not in ungrounded_corrections
 
 
 @pytest.mark.regression
