@@ -10437,6 +10437,52 @@ def test_ar03_arabic_vein_caption_repairs_arteries_substitution():
 
 
 @pytest.mark.unit
+def test_ar03_registered_fallback_requires_all_five_arabic_bodily_sound_claims():
+    benchmark = chain.get_video_benchmark("fAd2nKfrDB8")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "AR03"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+        "صوت الرئتين أو صوت المعدة.\n"
+        "- [00:08–00:12] حتى عينيك وهي بترمش بقيت بتسمعها."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="fAd2nKfrDB8",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "heartbeat" in answer
+    assert "blood moving through their veins" in answer
+    assert "sound of their lungs" in answer
+    assert "stomach sounds" in answer
+    assert "eyelids blinking" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2, 3, 4]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3, 4]
+
+    missing_eyelid_caption = context.replace(
+        "عينيك وهي بترمش",
+        "عينيك",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_eyelid_caption,
+        video_id="fAd2nKfrDB8",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["missing_fallback_claims"] == [4]
+
+
+@pytest.mark.unit
 def test_q06_repair_corrects_black_gold_attribution_without_dropping_strategy_claims():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
@@ -10465,6 +10511,51 @@ def test_q06_repair_corrects_black_gold_attribution_without_dropping_strategy_cl
     assert "VISUAL-IDENTITY ATTRIBUTION REPAIR" in instruction
     assert "black-and-gold description to McDowell's" in instruction
     assert "Preserve the transcript-supported brand-personality" in instruction
+
+
+@pytest.mark.unit
+def test_q06_registered_fallback_requires_all_three_brand_strategy_claims():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q06"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "A brand needs a personality. I gave Kingfisher a very colorful "
+        "personality. I went into authoring surrogate advertising. We built "
+        "a full water business around Kingfisher, large enough that we could "
+        "advertise the core brand."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "brand needs a personality" in answer
+    assert "surrogate advertising" in answer
+    assert "water business around Kingfisher" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2]
+
+    missing_personality = context.replace(
+        "A brand needs a personality.",
+        "Brand identity was discussed.",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_personality,
+        video_id="MdeQMVBuGgY",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["missing_fallback_claims"] == [0]
 
 
 @pytest.mark.unit
@@ -11032,6 +11123,99 @@ def test_q03_royal_challengers_alone_does_not_satisfy_royal_challenge_whisky_cla
 
     assert 4 in matched
     assert 5 not in matched
+
+
+@pytest.mark.unit
+def test_q08_generation_source_claims_match_the_registered_caption_wording():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q08"
+    )
+    _, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "For the first time, it is through the statement in parliament of the "
+        "finance minister and the printed report of the ministry of finance "
+        "that they have shown 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "official liquidator is also obliged to give an account to the court. "
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid. Despite 15 reminders, the same banks have not "
+        "given me a statement of account."
+    )
+
+    assert chain._matched_registered_phrase_group_indices(
+        context,
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_uses_same_source_block_for_joint_official_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] For the first time, it is through the statement in "
+        "parliament of the finance minister and the printed report of the "
+        "ministry of finance that they have shown 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal.\n"
+        "- [00:14–00:18] The official liquidator is also obliged to give an account to the court.\n"
+        "- [00:18–00:28] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid yet the banks have not submitted "
+        "a statement of account."
+    )
+    diagnostics = {}
+
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is not None
+    assert "14,100" in answer
+    assert "Ministry of Finance" in answer
+    assert "Recovery Officer and Official Liquidator" in answer
+    assert "banks had been fully paid" in answer
+    assert "not submitted a statement of account" in answer
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_does_not_borrow_official_attribution_from_another_source():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] The printed report of the Ministry of Finance showed "
+        "14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal. "
+        "The official liquidator is also obliged to give an account to the court.\n"
+        "[SOURCE 3]\n"
+        "- [00:18–00:28] Both these have stated in court that the banks have "
+        "been fully paid, yet the banks have not submitted a statement of account."
+    )
+    diagnostics = {}
+
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
 
 
 @pytest.mark.unit

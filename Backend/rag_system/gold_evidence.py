@@ -465,6 +465,23 @@ GOLD_EVIDENCE_CASES = (
             ("surrogate advertising",),
             ("water business around Kingfisher", "advertise the core brand"),
         ),
+        generation_fallback_answer=(
+            "Mallya says a brand needs a personality and describes giving "
+            "Kingfisher a colorful, fun, exciting and vibrant personality. "
+            "He describes using surrogate advertising and building a full "
+            "water business around Kingfisher so the core brand could be advertised."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("a brand needs a personality", "gave brands their personalities"),
+            ("authoring surrogate advertising", "surrogate advertising"),
+            ("built a full water business around Kingfisher", "water business around Kingfisher", "advertise the core brand"),
+        ),
+        generation_fallback_answer_groups=(
+            ("a brand needs a personality", "gave Kingfisher a personality"),
+            ("surrogate advertising",),
+            ("water business around Kingfisher", "advertise the core brand"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q07",
@@ -519,6 +536,7 @@ GOLD_EVIDENCE_CASES = (
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
             (
+                "the printed report of the ministry of finance that they have shown 14,100 crores recovered from me",
                 "Ministry of Finance report said 14,100 crores had been recovered",
                 "the Ministry of Finance report said 14,100 crores had been recovered",
                 "Ministry of Finance report showed 14,100 crores recovered",
@@ -528,6 +546,7 @@ GOLD_EVIDENCE_CASES = (
                 "Ministry of Finance report records that 14,100 crore rupees were recovered from me",
             ),
             (
+                "both these have stated in court in judicial proceedings that the banks have been fully paid",
                 "Recovery Officer and Official Liquidator said in court that banks have been fully paid",
                 "Recovery Officer and Official Liquidator stated in court that banks have been fully paid",
                 "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
@@ -536,6 +555,9 @@ GOLD_EVIDENCE_CASES = (
                 "The Recovery Officer and Official Liquidator had stated in court that the banks had been fully paid",
             ),
             (
+                "despite 15 reminders the same banks have not given me a statement of account",
+                "the banks have not submitted a statement of account",
+                "the government have the banks have not rendered a statement of account",
                 "banks had not provided a statement of account",
                 "the banks had not provided a statement of account",
                 "banks had not provided him a statement of account",

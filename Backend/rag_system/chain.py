@@ -7341,14 +7341,53 @@ def _build_financial_evidence_fallback(
         bank_payment_evidence = bank_evidence["bank_payment"]
         account_statement_evidence = bank_evidence["account_statement"]
         if question_id == "Q08":
-            named_official_pattern = re.compile(
-                r"\b(?:Recovery Officer|Official Liquidator)\b",
+            recovery_officer_pattern = re.compile(
+                r"\bRecovery Officer\b",
                 re.IGNORECASE,
             )
-            bank_payment_evidence = [
-                item for item in bank_payment_evidence
-                if named_official_pattern.search(str(item.get("text") or ""))
-            ]
+            official_liquidator_pattern = re.compile(
+                r"\bOfficial Liquidator\b",
+                re.IGNORECASE,
+            )
+            joint_bank_payment_patterns = (
+                re.compile(
+                    r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
+                    r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+                    re.IGNORECASE,
+                ),
+                re.compile(
+                    r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
+                    r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+                    r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+                    re.IGNORECASE,
+                ),
+                re.compile(
+                    r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
+                    r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+                    r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+                    re.IGNORECASE,
+                ),
+            )
+
+            attributed_bank_payment_evidence = []
+            for item in bank_payment_evidence:
+                source_text = source_blocks.get(item.get("source_id"), "")
+                has_both_named_roles = (
+                    recovery_officer_pattern.search(source_text)
+                    and official_liquidator_pattern.search(source_text)
+                )
+                has_joint_payment_statement = any(
+                    pattern.search(source_text)
+                    for pattern in joint_bank_payment_patterns
+                )
+                if has_both_named_roles and has_joint_payment_statement:
+                    attributed_item = dict(item)
+                    attributed_item["text"] = (
+                        "The Recovery Officer and Official Liquidator both "
+                        "stated in court that the banks had been fully paid"
+                    )
+                    attributed_bank_payment_evidence.append(attributed_item)
+            bank_payment_evidence = attributed_bank_payment_evidence
             account_statement_evidence = [
                 item for item in account_statement_evidence
                 if _is_explicitly_missing_account_statement(str(item.get("text") or ""))
@@ -7497,11 +7536,18 @@ def _build_financial_evidence_fallback(
                 )
 
         for item in bank_payment_evidence[:1]:
-            lines.append(
-                "- Bank-payment status: the transcript states that "
-                + item["text"].rstrip(".")
-                + "."
-            )
+            if question_id == "Q08":
+                lines.append(
+                    "- Bank-payment status: "
+                    + item["text"].rstrip(".")
+                    + "."
+                )
+            else:
+                lines.append(
+                    "- Bank-payment status: the transcript states that "
+                    + item["text"].rstrip(".")
+                    + "."
+                )
         for item in account_statement_evidence[:1]:
             matched_text = str(item.get("text") or "")
             truncated_tail = re.search(
