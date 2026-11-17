@@ -9525,8 +9525,9 @@ def test_q03_generation_repair_requires_acquisition_rebrand_and_low_cost_roles()
     [SOURCE 2]
     Air Deccan was discussed as a low-cost airline. I acquired Eden, and the logic of buying Dean was industry consolidation.
     [SOURCE 3]
+    The interviewer asked whether it was the wrong decision to rebrand it to King Fisher Red.
     You cannot start operating one Deccan and one Kingfisher. So we just called it King Fisher Red.
-    Kingfisher red stood for low cost. Kingfisher First was the premium offering.
+    King Fisher Red stood for low cost. Kingfisher First was the premium offering.
     [SOURCE 4]
     Royal Challengers Bangalore was the cricket franchise. Royal Challenge was the whisky brand."""
     incorrect_answer = (
@@ -11153,7 +11154,11 @@ def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks()
         "[SOURCE 1]\n"
         "United Breweries Limited and United Spirits.\n"
         "[SOURCE 2]\n"
-        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red. "
+        "I acquired Air Deccan as part of industry consolidation. "
+        "The interviewer asked if it was the wrong decision to rebrand it to Kingfisher Red; "
+        "Mallya replied, so we just called it Kingfisher Red. "
+        "Kingfisher Red stood for low cost.\n"
         "[SOURCE 3]\n"
         "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
     )
@@ -11176,6 +11181,12 @@ def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks()
         "Royal Challenge",
     ))
     assert chain._has_q03_entity_distinction(answer) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(answer) is True
+    assert "Mallya says he acquired the existing low-cost Air Deccan" in answer
+    assert "Air Deccan was rebranded as Kingfisher Red" in answer
+    assert diagnostics["required_semantic_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["included_semantic_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["answer_contract_semantic_fallback_claims"] == [0, 1, 2]
     assert diagnostics["used"] is True
     assert diagnostics["question_id"] == "Q03"
     assert diagnostics["fallback_contract"] == (
@@ -11210,10 +11221,15 @@ def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missin
     )
     source_blocks = (
         "[SOURCE 1]\n" + " ".join(
-            claims[index] for index in (0, 1) if index != missing_claim
+            [claims[index] for index in (0, 1) if index != missing_claim]
+            + ["I acquired Eden."]
         ),
         "[SOURCE 2]\n" + " ".join(
-            claims[index] for index in (2, 3) if index != missing_claim
+            [claims[index] for index in (2, 3) if index != missing_claim]
+            + [
+                "rebrand it to King Fisher Red.",
+                "King Fisher Red stood for low cost.",
+            ]
         ),
         "[SOURCE 3]\n" + " ".join(
             claims[index] for index in (4, 5) if index != missing_claim
@@ -11242,8 +11258,14 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
         "What businesses or companies does Vijay Mallya discuss in the interview?"
     )
     evidence_captions = [
-        ["United Breweries Limited and United Spirits are discussed."],
-        ["Air Deccan and Kingfisher Red are discussed."],
+        [
+            "United Breweries Limited and United Spirits are discussed. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        [
+            "Air Deccan and Kingfisher Red are discussed. "
+            "We just called it King Fisher Red. King Fisher Red stood for low cost."
+        ],
         [
             "Royal Challenges Bangalore was selected to promote "
             "Royal Challenge whisky."
@@ -11309,8 +11331,14 @@ def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(mo
         "What businesses or companies does Vijay Mallya discuss in the interview?"
     )
     evidence_captions = [
-        ["United Breweries Limited and United Spirits."],
-        ["The merger of Kingfisher and Air Deccan created Kingfisher Red."],
+        [
+            "United Breweries Limited and United Spirits. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        [
+            "The merger of Kingfisher and Air Deccan created Kingfisher Red. "
+            "We just called it King Fisher Red. King Fisher Red stood for low cost."
+        ],
         [
             "Royal Challenges Bangalore was selected to promote "
             "Royal Challenge whisky."
