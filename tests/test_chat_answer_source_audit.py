@@ -585,9 +585,9 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
         case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
     )
     answer = (
-        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits, "
-        "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore and "
-        "Royal Challenge."
+        "Vijay Mallya discusses United\\u202fBreweries and United\\u202fSpirits, "
+        "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore (RCB), "
+        "the cricket franchise, alongside Royal Challenge, the whisky brand."
     )
 
     checks = _answer_quality_checks(case, answer)
@@ -2156,11 +2156,22 @@ def test_q03_claim_contract_requires_three_distinct_business_families():
 
     complete = (
         "The businesses include United Breweries and United Spirits, Air Deccan "
-        "and Kingfisher Red, and Royal Challengers Bangalore, selected to promote "
-        "Royal Challenge whisky. The 17-bank consortium was a group of lenders."
+        "and Kingfisher Red, and Royal Challengers Bangalore (RCB), the cricket "
+        "franchise selected to promote the Royal Challenge whisky brand. "
+        "The 17-bank consortium was a group of lenders."
     )
     checks = audit_module._claim_level_semantic_checks("Q03", complete)
     assert all(check["passed"] for check in checks), checks
+
+    names_without_role_distinction = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, Royal Challengers Bangalore, and Royal Challenge."
+    )
+    checks = audit_module._claim_level_semantic_checks(
+        "Q03", names_without_role_distinction
+    )
+    by_name = {check["name"]: check["passed"] for check in checks}
+    assert by_name["q03_royal_challenge_is_whisky_brand_not_franchise"] is False
 
     lender_group = (
         "A consortium of 17 banks provided a loan to the company."
@@ -2397,7 +2408,7 @@ def test_q01_rejects_premium_only_answer_that_omits_low_cost_model_and_different
 def test_q03_requires_both_united_breweries_and_united_spirits():
     answer = (
         "The businesses include United Breweries, Air Deccan and Kingfisher Red, "
-        "and Royal Challengers Bangalore and Royal Challenge whisky."
+        "and Royal Challengers Bangalore, the cricket franchise, and Royal Challenge, the whisky brand."
     )
     checks = audit_module._claim_level_semantic_checks("Q03", answer)
     by_name = {check["name"]: check["passed"] for check in checks}

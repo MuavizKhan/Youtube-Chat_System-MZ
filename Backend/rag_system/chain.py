@@ -3712,6 +3712,43 @@ def _has_named_money_stopped_attribution(text: str) -> bool:
     )
 
 
+def _has_q03_entity_distinction(text: str) -> bool:
+    """Require RCB as the cricket franchise and Royal Challenge as whisky."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    sentences = [
+        part for part in re.split(r"[.!?;\\r\\n]+", normalized) if part.strip()
+    ]
+    franchise_name = r"\\b(?:Royal Challengers Bangalore|Royal Challenges Bangalore|RCB)\\b"
+    cricket_role = r"\\b(?:cricket|IPL)\\s+(?:team|franchise)\\b"
+    royal_challenge = r"\\bRoyal Challenge\\b"
+    whisky_role = r"\\b(?:whisky|whiskey)(?:\\s+brand)?\\b"
+
+    franchise_is_cricket_team = any(
+        re.search(franchise_name, sentence, re.IGNORECASE)
+        and re.search(cricket_role, sentence, re.IGNORECASE)
+        for sentence in sentences
+    )
+    royal_challenge_is_whisky = any(
+        re.search(royal_challenge, sentence, re.IGNORECASE)
+        and re.search(whisky_role, sentence, re.IGNORECASE)
+        for sentence in sentences
+    )
+    royal_challenge_misclassified = bool(re.search(
+        r"\\b(?:cricket|ipl)\\s+(?:team|franchise)\\s+"
+        r"(?:(?:is|was|named|called)\\s+)?Royal Challenge\\b|"
+        r"\\bRoyal Challenge\\s+(?:cricket|ipl)\\s+(?:team|franchise)\\b|"
+        r"\\bRoyal Challenge\\s+(?:is|was)\\s+(?:the\\s+)?"
+        r"(?:cricket\\s+)?franchise\\b",
+        normalized,
+        re.IGNORECASE,
+    ))
+    return (
+        franchise_is_cricket_team
+        and royal_challenge_is_whisky
+        and not royal_challenge_misclassified
+    )
+
+
 def _has_named_q05_operational_attribution(text: str) -> bool:
     """Reject named-speaker attribution of the Q05 oil-bill/airport-fee passage."""
     operational_claim = (
@@ -4219,6 +4256,29 @@ def _gold_evidence_repair_instruction(
                         "Do not add timestamps.\nMISSING SOURCE-SUPPORTED CLAIMS:\n"
                         + "\n".join(missing_lines)
                     )
+
+    if question_id == "Q03":
+        q03_source_claim_groups = tuple(
+            getattr(gold_case, "generation_claim_source_groups", ()) or ()
+        )
+        q03_context_claims = _matched_registered_phrase_group_indices(
+            context_text,
+            q03_source_claim_groups,
+        )
+        if (
+            len(q03_source_claim_groups) == 6
+            and {4, 5}.issubset(q03_context_claims)
+            and not _has_q03_entity_distinction(answer_text)
+        ):
+            instructions.append(
+                "Q03 ENTITY-ROLE REPAIR. State both entities and their roles "
+                "explicitly: Royal Challengers Bangalore (RCB) is the cricket "
+                "franchise; Royal Challenge is the whisky brand. Do not describe "
+                "Royal Challenge as a cricket team or franchise. Do not omit RCB "
+                "while naming Royal Challenge. Preserve the other source-supported "
+                "entities already present, use only the supplied transcript, and "
+                "do not add timestamps."
+            )
 
     if (
         question_id in {"Q04", "Q05", "Q10"}

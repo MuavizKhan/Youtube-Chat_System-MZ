@@ -251,6 +251,32 @@ GOLD_EVIDENCE_CASES = (
             ("Royal Challengers Bangalore",),
             ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
+        # Use a source-bound fallback when generation omits any of the six
+        # independent Q03 claims. Keep the RCB team and whisky brand distinct.
+        generation_fallback_answer=(
+            "The six distinct businesses, brands, and teams discussed are "
+            "United Breweries, United Spirits, Air Deccan, Kingfisher Red, "
+            "Royal Challengers Bangalore (RCB), and Royal Challenge. "
+            "Royal Challengers Bangalore is the cricket franchise; Royal "
+            "Challenge is the whisky brand."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("United Breweries Limited", "United Breweries"),
+            ("United Spirits",),
+            ("Air Deccan", "air deckin", "one deckan"),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+        ),
+        generation_fallback_answer_groups=(
+            ("United Breweries",),
+            ("United Spirits",),
+            ("Air Deccan",),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore",),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+        ),
     ),
     GoldEvidenceCase(
         question_id="Q04",

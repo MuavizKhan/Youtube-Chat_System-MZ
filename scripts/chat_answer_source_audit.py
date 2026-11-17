@@ -36,6 +36,7 @@ from Backend.rag_system.timestamp_utils import (
 )
 from Backend.rag_system.chain import (
     _blood_movement_attributed_to_arteries,
+    _has_q03_entity_distinction,
     _has_named_money_stopped_attribution as _chain_has_named_money_stopped_attribution,
     _text_assigns_black_gold_to_kingfisher,
     is_temporal_location_question,
@@ -1101,22 +1102,10 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             all(entity_checks.values()),
             "Name all six distinct entities: United Breweries, United Spirits, Air Deccan, Kingfisher Red, Royal Challengers Bangalore/RCB, and Royal Challenge.",
         )
-        royal_challenge_whisky = bool(re.search(
-            r"\bRoyal Challenge\b",
-            text,
-            re.IGNORECASE,
-        ))
-        royal_challenge_misclassified = bool(re.search(
-            r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+(?:(?:is|was|named|called)\s+)?Royal Challenge\b|"
-            r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
-            r"\bRoyal Challenge\s+(?:is|was)\s+(?:the\s+)?(?:cricket\s+)?franchise\b",
-            text,
-            re.IGNORECASE,
-        ))
         add(
             "q03_royal_challenge_is_whisky_brand_not_franchise",
-            royal_challenge_whisky and not royal_challenge_misclassified,
-            "Royal Challengers Bangalore/RCB is the cricket franchise; Royal Challenge is the whisky brand.",
+            _has_q03_entity_distinction(text),
+            "Explicitly identify Royal Challengers Bangalore/RCB as the cricket franchise and Royal Challenge as the whisky brand.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
         classifies_as_lenders = bool(re.search(

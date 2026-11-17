@@ -10987,3 +10987,266 @@ def test_q08_missing_statement_accepts_explicit_not_rendered_caption():
         "recovery_amount", "bank_payment", "account_statement"
     ]
     assert "not rendered a statement of account" in fallback
+
+
+@pytest.mark.unit
+def test_q03_entity_distinction_requires_both_correct_roles():
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    ) is True
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore and Royal Challenge whisky."
+    ) is False
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore is the cricket franchise; "
+        "the cricket franchise was Royal Challenge."
+    ) is False
+
+
+@pytest.mark.unit
+def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = (
+        "[SOURCE 1]\\n"
+        "United Breweries Limited and United Spirits.\\n"
+        "[SOURCE 2]\\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\\n"
+        "[SOURCE 3]\\n"
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert all(name in answer for name in (
+        "United Breweries",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge",
+    ))
+    assert chain._has_q03_entity_distinction(answer) is True
+    assert diagnostics["used"] is True
+    assert diagnostics["question_id"] == "Q03"
+    assert diagnostics["fallback_contract"] == (
+        "all_registered_fallback_claims_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_fallback_claims"] == list(range(6))
+    assert diagnostics["included_fallback_claims"] == list(range(6))
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(6))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [2],
+        "3": [2],
+        "4": [3],
+        "5": [3],
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_claim", range(6))
+def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missing_claim):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    claims = (
+        "United Breweries Limited",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge whisky",
+    )
+    source_blocks = (
+        "[SOURCE 1]\\n" + " ".join(
+            claims[index] for index in (0, 1) if index != missing_claim
+        ),
+        "[SOURCE 2]\\n" + " ".join(
+            claims[index] for index in (2, 3) if index != missing_claim
+        ),
+        "[SOURCE 3]\\n" + " ".join(
+            claims[index] for index in (4, 5) if index != missing_claim
+        ),
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context="\\n".join(source_blocks),
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [missing_claim]
+
+
+@pytest.mark.regression
+def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    evidence_captions = [
+        ["United Breweries Limited and United Spirits are discussed."],
+        ["Air Deccan and Kingfisher Red are discussed."],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky."
+        ],
+    ]
+    evidence_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            11200 + index,
+            4500 + index * 30,
+            captions,
+            0.7 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        evidence_groups.append(group)
+
+    distractors = []
+    for index in range(4):
+        long_caption = (
+            f"Unrelated Kingfisher interview discussion {index}. "
+            + ("Background commentary without a Q03 entity claim. " * 24)
+        )
+        group = _caption_group(
+            11300 + index,
+            index * 120,
+            [long_caption],
+            0.01 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        distractors.append(group)
+
+    packed = chain.build_generation_context(
+        distractors + evidence_groups,
+        question=question,
+        max_chars=4200,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = packed["diagnostics"]
+
+    assert len(packed["context"]) <= 4200
+    assert diagnostics["registered_fallback_groups_required"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+    for phrase in (
+        "United Breweries Limited",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challenges Bangalore",
+        "Royal Challenge whisky",
+    ):
+        assert phrase in packed["context"]
+
+
+@pytest.mark.regression
+def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(monkeypatch):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    evidence_captions = [
+        ["United Breweries Limited and United Spirits."],
+        ["The merger of Kingfisher and Air Deccan created Kingfisher Red."],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky."
+        ],
+    ]
+    source_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            11400 + index,
+            5200 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [11400, 11401, 11402],
+                "citation_chunk_ids": [11400, 11401, 11402],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    incomplete_answer = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and the Royal Challenge whisky brand."
+    )
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return incomplete_answer
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert len(generation_calls) == 2
+    assert all(name in result["answer"] for name in (
+        "United Breweries",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge",
+    ))
+    assert chain._has_q03_entity_distinction(result["answer"]) is True
+
+    trace = result["generation_trace"]
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"][
+        "answer_contract_fallback_claims"
+    ] == list(range(6))
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == []
+
