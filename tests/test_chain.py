@@ -11010,11 +11010,11 @@ def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks()
         "What businesses or companies does Vijay Mallya discuss in the interview?"
     )
     context = (
-        "[SOURCE 1]\\n"
-        "United Breweries Limited and United Spirits.\\n"
-        "[SOURCE 2]\\n"
-        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\\n"
-        "[SOURCE 3]\\n"
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits.\n"
+        "[SOURCE 2]\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\n"
+        "[SOURCE 3]\n"
         "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
     )
     diagnostics = {}
@@ -11069,13 +11069,13 @@ def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missin
         "Royal Challenge whisky",
     )
     source_blocks = (
-        "[SOURCE 1]\\n" + " ".join(
+        "[SOURCE 1]\n" + " ".join(
             claims[index] for index in (0, 1) if index != missing_claim
         ),
-        "[SOURCE 2]\\n" + " ".join(
+        "[SOURCE 2]\n" + " ".join(
             claims[index] for index in (2, 3) if index != missing_claim
         ),
-        "[SOURCE 3]\\n" + " ".join(
+        "[SOURCE 3]\n" + " ".join(
             claims[index] for index in (4, 5) if index != missing_claim
         ),
     )
@@ -11083,7 +11083,7 @@ def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missin
 
     answer = chain._build_registered_gold_answer_fallback(
         question=question,
-        context="\\n".join(source_blocks),
+        context="\n".join(source_blocks),
         video_id="MdeQMVBuGgY",
         diagnostics=diagnostics,
     )

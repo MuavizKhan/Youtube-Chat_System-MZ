@@ -585,7 +585,7 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
         case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
     )
     answer = (
-        "Vijay Mallya discusses United\\u202fBreweries and United\\u202fSpirits, "
+        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits, "
         "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore (RCB), "
         "the cricket franchise, alongside Royal Challenge, the whisky brand."
     )
