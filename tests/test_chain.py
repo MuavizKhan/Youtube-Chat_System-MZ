@@ -11398,6 +11398,95 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
 
 
 @pytest.mark.regression
+def test_q03_generation_is_suppressed_when_rebranding_evidence_is_not_prompt_visible(
+    monkeypatch,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    source_captions = [
+        [
+            "United Breweries Limited and United Spirits are discussed. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        ["Air Deccan and Kingfisher Red are discussed."],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky. King Fisher Red stood for low cost."
+        ],
+    ]
+    source_groups = []
+    for index, captions in enumerate(source_captions):
+        group = _caption_group(
+            11600 + index,
+            5200 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    chunk_ids = [
+        int(document.metadata["chunk_id"])
+        for group in source_groups
+        for document in group["documents"]
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": chunk_ids,
+                "citation_chunk_ids": chunk_ids,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 9000)
+
+    generation_calls = []
+
+    def forbidden_generation(**_kwargs):
+        generation_calls.append(True)
+        return "This answer must not be generated from incomplete airline evidence."
+
+    monkeypatch.setattr(chain, "generate_with_llm", forbidden_generation)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert generation_calls == []
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["generation_semantic_context_complete"] is False
+    assert trace["generation_semantic_groups_required"] == [0, 1, 2]
+    assert trace["generation_semantic_groups_included"] == [0, 2]
+    assert (
+        trace["generation_repair_diagnostics"]["not_attempted_reason"]
+        == "generation_not_attempted_incomplete_semantic_evidence"
+    )
+    assert "Kingfisher Red" not in result["answer"]
+
+
+
+
+
+@pytest.mark.regression
 def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(monkeypatch):
     question = (
         "What businesses or companies does Vijay Mallya discuss in the interview?"
