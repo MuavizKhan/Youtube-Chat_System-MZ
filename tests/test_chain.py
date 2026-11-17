@@ -10070,24 +10070,27 @@ def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_r
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("question", "video_id"),
+    ("question", "video_id", "expected_rejection"),
     [
         (
             "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
             "UnregisteredVideo",
+            "no_registered_generation_gold_case",
         ),
         (
             "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
             "UnregisteredVideo",
+            "no_registered_generation_gold_case",
         ),
         (
             "What does Vijay Mallya say about building the Kingfisher brand?",
             "MdeQMVBuGgY",
+            "required_fallback_claims_missing_from_source_blocks",
         ),
     ],
 )
-def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
-    question, video_id
+def test_registered_fallback_rejects_unregistered_questions_or_missing_claims(
+    question, video_id, expected_rejection
 ):
     complete_context = (
         "[SOURCE 1]\\n"
@@ -10109,9 +10112,7 @@ def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
 
     assert answer is None
     assert diagnostics["used"] is False
-    assert diagnostics["rejection_reason"] == (
-        "no_registered_generation_gold_case"
-    )
+    assert diagnostics["rejection_reason"] == expected_rejection
 
 
 
@@ -10918,9 +10919,10 @@ def test_q08_full_financial_fallback_uses_caption_pair_for_bank_payment():
         "[SOURCE 1]\n"
         "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
         "[SOURCE 2]\n"
-        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
-        "that the banks had been fully\n"
-        "- [00:14–00:18] paid.\n"
+        "- [00:10–00:14] The Recovery Officer of the Debt Recovery Tribunal "
+        "and the Official Liquidator are referenced in this passage.\n"
+        "- [00:14–00:18] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid.\n"
         "[SOURCE 3]\n"
         "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
     )
@@ -11126,6 +11128,135 @@ def test_q03_royal_challengers_alone_does_not_satisfy_royal_challenge_whisky_cla
 
 
 @pytest.mark.unit
+def test_q08_retrieval_probes_exact_joint_official_bank_payment_caption(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    base = doc(
+        30001,
+        1000,
+        1010,
+        "The government of India ministry of finance published a report "
+        "acknowledging 14,100 crores recovered. The banks have not given me "
+        "a statement of account.",
+    )
+    attribution = doc(
+        30002,
+        1060,
+        1070,
+        "The Recovery Officer of the Debt Recovery Tribunal and the Official "
+        "Liquidator are referenced here. Both these have stated in court in "
+        "judicial proceedings that the banks have been fully paid.",
+    )
+    for document in (base, attribution):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    calls = []
+    base_pair = (base, 0.2)
+    attribution_pair = (attribution, 0.2)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [attribution_pair], [attribution_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or list(anchors)
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [call["query"] for call in calls] == [
+        question,
+        chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+    ]
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is True
+    assert trace["final_stage"] == "registered_q08_bank_payment_attribution_probe"
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {30001, 30002}
+    assert trace["citation_chunk_ids"] == [30001, 30002]
+    assert expansion_calls == [
+        (chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY, [attribution_pair])
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_text", "distance", "candidate_video_id", "expected_reason"),
+    [
+        (
+            "Banks have been fully paid, but the transcript does not name the officials.",
+            0.2,
+            "MdeQMVBuGgY",
+            "registered_bank_payment_attribution_phrase_not_retrieved",
+        ),
+        (
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            chain.MAX_DISTANCE + 0.01,
+            "MdeQMVBuGgY",
+            "exact_bank_payment_attribution_source_not_found_within_distance",
+        ),
+        (
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            0.2,
+            "OtherVideo",
+            "bank_payment_attribution_source_only_found_for_wrong_video",
+        ),
+    ],
+)
+def test_q08_attribution_probe_fails_closed_without_exact_in_video_source(
+    monkeypatch, source_text, distance, candidate_video_id, expected_reason
+):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    base = doc(30101, 1000, 1010, "The Ministry report shows 14,100 crores recovered.")
+    candidate = doc(30102, 1060, 1070, source_text)
+    base.metadata["video_id"] = "MdeQMVBuGgY"
+    candidate.metadata["video_id"] = candidate_video_id
+    base_pair = (base, 0.2)
+    candidate_pair = (candidate, distance)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [candidate_pair], [candidate_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Unverified Q08 attribution must not be expanded or added."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [30101]
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is False
+    assert trace["registered_q08_bank_payment_attribution_probe_rejection_reason"] == expected_reason
+
+
+@pytest.mark.unit
 def test_q08_generation_source_claims_match_the_registered_caption_wording():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
@@ -11136,9 +11267,8 @@ def test_q08_generation_source_claims_match_the_registered_caption_wording():
     )
     context = (
         "[SOURCE 1]\n"
-        "For the first time, it is through the statement in parliament of the "
-        "finance minister and the printed report of the ministry of finance "
-        "that they have shown 14,100 crores recovered from me.\n"
+        "The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
         "[SOURCE 2]\n"
         "You have the Recovery Officer of the Debt Recovery Tribunal. The "
         "official liquidator is also obliged to give an account to the court. "
@@ -11158,9 +11288,8 @@ def test_q08_financial_fallback_uses_same_source_block_for_joint_official_attrib
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     context = (
         "[SOURCE 1]\n"
-        "- [00:00–00:08] For the first time, it is through the statement in "
-        "parliament of the finance minister and the printed report of the "
-        "ministry of finance that they have shown 14,100 crores recovered from me.\n"
+        "- [00:00–00:08] The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
         "[SOURCE 2]\n"
         "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal.\n"
         "- [00:14–00:18] The official liquidator is also obliged to give an account to the court.\n"

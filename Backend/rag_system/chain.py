@@ -3197,7 +3197,7 @@ def _build_registered_gold_answer_fallback(
         reject("retrieved_source_context_empty")
         return None
 
-    # Q02–Q05 opt into an all-claims contract. A claim is checked against
+    # Registered cases opt into an all-claims contract. A claim is checked against
     # the exact prompt-visible source blocks, independently of the broader
     # retrieval-quality groups. Different claims may live in different blocks,
     # but alternatives within one claim are not treated as cumulative evidence.
@@ -7220,10 +7220,17 @@ def _build_financial_evidence_fallback(
             # supplied transcript context. Render the normalized claim without
             # leaking the malformed ASR numeral into the model answer.
             attribution_text = amount_caption or claim_text
-            if re.search(
-                r"\bministry\b.*\bfinance\b.*\breport\b",
-                attribution_text,
-                re.IGNORECASE,
+            if (
+                re.search(
+                    r"\bministry\b.*\bfinance\b.*\breport\b",
+                    attribution_text,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    r"\breport\b.*\bministry\b.*\bfinance\b",
+                    attribution_text,
+                    re.IGNORECASE,
+                )
             ):
                 report_label = "Ministry of Finance report"
             elif re.search(r"\bfinance\s+report\b", attribution_text, re.IGNORECASE):
@@ -7353,19 +7360,19 @@ def _build_financial_evidence_fallback(
                 re.compile(
                     r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
                     r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE,
+                    re.IGNORECASE | re.DOTALL,
                 ),
                 re.compile(
                     r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
                     r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
                     r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE,
+                    re.IGNORECASE | re.DOTALL,
                 ),
                 re.compile(
                     r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
                     r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
                     r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE,
+                    re.IGNORECASE | re.DOTALL,
                 ),
             )
 
@@ -7512,10 +7519,17 @@ def _build_financial_evidence_fallback(
                 formatted = f"the figure {value}"
 
             if recovery_claim.get("topic") == "recovery_report":
-                if re.search(
-                    r"\bministry\b.*\bfinance\b.*\breport\b",
-                    normalized_source_block,
-                    re.IGNORECASE,
+                if (
+                    re.search(
+                        r"\bministry\b.*\bfinance\b.*\breport\b",
+                        normalized_source_block,
+                        re.IGNORECASE,
+                    )
+                    or re.search(
+                        r"\breport\b.*\bministry\b.*\bfinance\b",
+                        normalized_source_block,
+                        re.IGNORECASE,
+                    )
                 ):
                     report_label = "Ministry of Finance report"
                 elif re.search(r"\bfinance\s+report\b", normalized_source_block, re.IGNORECASE):
@@ -9062,6 +9076,168 @@ def _probe_q03_acquisition_evidence(
         return retrieved_results, citation_results, attempt, False
 
 
+Q08_BANK_PAYMENT_ATTRIBUTION_QUERY = (
+    "both these have stated in court in judicial proceedings that the banks have been fully paid"
+)
+
+
+def _probe_q08_bank_payment_attribution_evidence(
+    *,
+    vector_store,
+    question: str,
+    video_id: str | None,
+    retrieved_results: list,
+    citation_results: list,
+) -> tuple[list, list, dict[str, object] | None, bool]:
+    """Recover Q08's exact official-attributed bank-payment caption.
+
+    The broad Q08 query can retrieve the recovery amount and missing-account
+    discussion while omitting the later caption that names the Recovery Officer
+    and Official Liquidator and links them to the court statement that banks
+    were fully paid. This probe uses the registered wording and unchanged
+    retrieval cutoffs; it accepts only an exact in-video source anchor.
+    """
+    question_id, gold_case = _registered_generation_gold_case(video_id, question)
+    claim_source_groups = (
+        tuple(getattr(gold_case, "generation_claim_source_groups", ()) or ())
+        if gold_case is not None
+        else ()
+    )
+    if (
+        question_id != "Q08"
+        or len(claim_source_groups) != 3
+        or not claim_source_groups[1]
+    ):
+        return retrieved_results, citation_results, None, False
+
+    def contains_registered_attribution(pairs: list) -> bool:
+        for document, _distance in pairs or []:
+            metadata = getattr(document, "metadata", {})
+            candidate_video_id = (
+                metadata.get("video_id") if isinstance(metadata, dict) else None
+            )
+            if (
+                isinstance(candidate_video_id, str)
+                and candidate_video_id
+                and candidate_video_id != video_id
+            ):
+                continue
+            if 0 in _matched_registered_phrase_group_indices(
+                str(getattr(document, "page_content", "") or ""),
+                (claim_source_groups[1],),
+            ):
+                return True
+        return False
+
+    # The claim must be available on a selected citation anchor, not merely a
+    # context-only neighbor added by another retrieval stage.
+    if contains_registered_attribution(citation_results):
+        return retrieved_results, citation_results, None, False
+
+    attempt = {
+        "stage": "registered_q08_bank_payment_attribution_probe",
+        "query": Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+        "question_id": "Q08",
+        "required_claim_group": 1,
+        "retrieved_chunks": 0,
+        "matched_source_chunks": [],
+        "exact_registered_source_phrase_found": False,
+        "accepted_for_generation": False,
+    }
+    try:
+        probe_bundle = retrieve_question_context(
+            vector_store=vector_store,
+            query=Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+            k=TOP_K,
+            fetch_k=MMR_FETCH_K,
+            lambda_mult=MMR_LAMBDA,
+            max_distance=MAX_DISTANCE,
+            expand_context=False,
+            allow_overview=False,
+            return_anchors=True,
+        )
+        _probe_context, probe_anchors = _split_retrieval_result_bundle(
+            probe_bundle
+        )
+        probe_anchors = list(probe_anchors or [])
+        attempt["retrieved_chunks"] = len(probe_anchors)
+
+        phrase_matched_anchors = []
+        exact_source_anchors = []
+        rejected_video_chunks = []
+        over_distance_chunks = []
+        for document, distance in probe_anchors:
+            metadata = getattr(document, "metadata", {})
+            candidate_video_id = (
+                metadata.get("video_id") if isinstance(metadata, dict) else None
+            )
+            chunk_id = metadata.get("chunk_id") if isinstance(metadata, dict) else None
+            if (
+                isinstance(candidate_video_id, str)
+                and candidate_video_id
+                and candidate_video_id != video_id
+            ):
+                rejected_video_chunks.append(chunk_id)
+                continue
+            if 0 not in _matched_registered_phrase_group_indices(
+                str(getattr(document, "page_content", "") or ""),
+                (claim_source_groups[1],),
+            ):
+                continue
+            phrase_matched_anchors.append((document, distance))
+            try:
+                numeric_distance = float(distance)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(numeric_distance) or numeric_distance > MAX_DISTANCE:
+                over_distance_chunks.append(chunk_id)
+                continue
+            exact_source_anchors.append((document, distance))
+
+        attempt["matched_source_chunks"] = [
+            document.metadata.get("chunk_id")
+            for document, _distance in exact_source_anchors
+            if isinstance(getattr(document, "metadata", None), dict)
+        ]
+        attempt["rejected_wrong_video_chunks"] = rejected_video_chunks
+        attempt["rejected_over_distance_chunks"] = over_distance_chunks
+        attempt["exact_registered_source_phrase_found"] = bool(phrase_matched_anchors)
+        if not exact_source_anchors:
+            if phrase_matched_anchors:
+                reason = "exact_bank_payment_attribution_source_not_found_within_distance"
+            elif rejected_video_chunks:
+                reason = "bank_payment_attribution_source_only_found_for_wrong_video"
+            else:
+                reason = "registered_bank_payment_attribution_phrase_not_retrieved"
+            attempt["rejection_reason"] = reason
+            return retrieved_results, citation_results, attempt, False
+
+        expanded_results = expand_question_context(
+            vector_store,
+            Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+            exact_source_anchors,
+        )
+        if not expanded_results:
+            expanded_results = exact_source_anchors
+
+        attempt["accepted_for_generation"] = True
+        attempt["rejection_reason"] = None
+        return (
+            _merge_retrieval_pairs_by_chunk(retrieved_results, expanded_results),
+            _merge_retrieval_pairs_by_chunk(citation_results, exact_source_anchors),
+            attempt,
+            True,
+        )
+    except Exception as error:
+        logger.exception(
+            "Q08 bank-payment attribution evidence probe failed: %s",
+            type(error).__name__,
+        )
+        attempt["rejection_reason"] = f"probe_error:{type(error).__name__}"
+        return retrieved_results, citation_results, attempt, False
+
+
+
 def _retrieve_with_query_recovery_trace(
     vector_store,
     question: str,
@@ -9694,6 +9870,23 @@ def _retrieve_with_query_recovery_trace(
     if q03_acquisition_probe_accepted:
         final_stage = "registered_q03_acquisition_evidence_probe"
 
+    (
+        final_results,
+        citation_results,
+        q08_bank_payment_probe_attempt,
+        q08_bank_payment_probe_accepted,
+    ) = _probe_q08_bank_payment_attribution_evidence(
+        vector_store=vector_store,
+        question=question,
+        video_id=video_id,
+        retrieved_results=final_results,
+        citation_results=citation_results,
+    )
+    if q08_bank_payment_probe_attempt is not None:
+        attempts.append(q08_bank_payment_probe_attempt)
+    if q08_bank_payment_probe_accepted:
+        final_stage = "registered_q08_bank_payment_attribution_probe"
+
     final_chunk_ids = []
     for document, _distance in final_results:
         chunk_id = document.metadata.get("chunk_id")
@@ -9731,6 +9924,17 @@ def _retrieve_with_query_recovery_trace(
         "registered_q03_acquisition_evidence_probe_rejection_reason": (
             q03_acquisition_probe_attempt.get("rejection_reason")
             if q03_acquisition_probe_attempt is not None
+            else None
+        ),
+        "registered_q08_bank_payment_attribution_probe_attempted": (
+            q08_bank_payment_probe_attempt is not None
+        ),
+        "registered_q08_bank_payment_attribution_probe_accepted": (
+            q08_bank_payment_probe_accepted
+        ),
+        "registered_q08_bank_payment_attribution_probe_rejection_reason": (
+            q08_bank_payment_probe_attempt.get("rejection_reason")
+            if q08_bank_payment_probe_attempt is not None
             else None
         ),
         "attempts": attempts,

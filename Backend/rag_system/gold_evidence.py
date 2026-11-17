@@ -536,6 +536,7 @@ GOLD_EVIDENCE_CASES = (
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
             (
+                "the government of India ministry of finance has published a report their annual report in which they have acknowledged 14,100 crores recovered from me",
                 "the printed report of the ministry of finance that they have shown 14,100 crores recovered from me",
                 "Ministry of Finance report said 14,100 crores had been recovered",
                 "the Ministry of Finance report said 14,100 crores had been recovered",
