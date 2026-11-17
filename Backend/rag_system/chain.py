@@ -3351,6 +3351,7 @@ def _build_registered_gold_answer_fallback(
                 )
                 return None
         else:
+            semantic_source_indices_by_group = {}
             required_semantic_indices = set()
             included_semantic_indices = set()
             semantic_answer_indices = set()
