@@ -4942,6 +4942,33 @@ def build_generation_context(
                 if registered_generation_claim_source_groups
                 else []
             )
+            raw_semantic_groups = (
+                sorted(_matched_registered_phrase_group_indices(
+                    " ".join(
+                        str(getattr(document, "page_content", "") or "")
+                        for document in source_documents
+                    ),
+                    registered_generation_semantic_source_groups,
+                ))
+                if registered_generation_semantic_source_groups
+                else []
+            )
+            metadata_semantic_groups = (
+                sorted(_matched_registered_phrase_group_indices(
+                    " ".join(segment["text"] for segment in metadata_segments),
+                    registered_generation_semantic_source_groups,
+                ))
+                if metadata_segments is not None and registered_generation_semantic_source_groups
+                else []
+            )
+            formatted_semantic_groups = (
+                sorted(_matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_generation_semantic_source_groups,
+                ))
+                if registered_generation_semantic_source_groups
+                else []
+            )
             source_gold_diagnostic = {
                 "source_group_index": index + 1,
                 "chunk_ids": source_chunk_ids,
@@ -4952,8 +4979,11 @@ def build_generation_context(
                 "raw_generation_claim_groups": raw_claim_groups,
                 "caption_metadata_generation_claim_groups": metadata_claim_groups,
                 "formatted_generation_claim_groups": formatted_claim_groups,
+                "raw_generation_semantic_groups": raw_semantic_groups,
+                "caption_metadata_generation_semantic_groups": metadata_semantic_groups,
+                "formatted_generation_semantic_groups": formatted_semantic_groups,
                 "raw_chunk_fallback_used": bool(
-                    (raw_gold_groups or raw_claim_groups)
+                    (raw_gold_groups or raw_claim_groups or raw_semantic_groups)
                     and "Original retrieved transcript chunks in chronological order" in rendered
                 ),
             }
@@ -4986,6 +5016,14 @@ def build_generation_context(
                     registered_generation_claim_source_groups,
                 )
                 if registered_generation_claim_source_groups
+                else set()
+            ),
+            "generation_semantic_group_indexes": (
+                _matched_registered_phrase_group_indices(
+                    rendered,
+                    registered_generation_semantic_source_groups,
+                )
+                if registered_generation_semantic_source_groups
                 else set()
             ),
             "amounts": _relevant_financial_amounts(rendered) if financial_question else set(),
@@ -5088,6 +5126,47 @@ def build_generation_context(
                     required_claim_groups.issubset(included_claim_groups)
                 ),
                 "generation_claim_source_group_indices": source_group_indices_by_claim,
+            })
+        if registered_generation_semantic_source_groups:
+            required_semantic_groups = set(
+                range(len(registered_generation_semantic_source_groups))
+            )
+            available_semantic_groups = {
+                group_index
+                for record in records
+                for group_index in record["generation_semantic_group_indexes"]
+            }
+            included_semantic_groups: set[int] = set()
+            for text_value in included_texts:
+                included_semantic_groups.update(
+                    _matched_registered_phrase_group_indices(
+                        text_value,
+                        registered_generation_semantic_source_groups,
+                    )
+                )
+            semantic_source_group_indices = {
+                str(group_index): [
+                    record["index"] + 1
+                    for record in records
+                    if group_index in record["generation_semantic_group_indexes"]
+                ]
+                for group_index in sorted(available_semantic_groups)
+            }
+            diagnostics.update({
+                "generation_semantic_question_id": gold_question_id,
+                "generation_semantic_groups_required": sorted(required_semantic_groups),
+                "generation_semantic_groups_available": sorted(available_semantic_groups),
+                "generation_semantic_groups_included": sorted(included_semantic_groups),
+                "generation_semantic_groups_missing_from_retrieval": sorted(
+                    required_semantic_groups - available_semantic_groups
+                ),
+                "generation_semantic_groups_missing_from_prompt": sorted(
+                    required_semantic_groups - included_semantic_groups
+                ),
+                "generation_semantic_context_complete": (
+                    required_semantic_groups.issubset(included_semantic_groups)
+                ),
+                "generation_semantic_source_group_indices": semantic_source_group_indices,
             })
         if registered_fallback_source_groups:
             required_fallback_groups = set(
@@ -5524,6 +5603,69 @@ def build_generation_context(
             reserved_fallback_records + remaining_priority_records
         )[:selected_count]
 
+    if registered_generation_semantic_source_groups:
+        available_semantic_groups = {
+            group_index
+            for record in records
+            for group_index in record["generation_semantic_group_indexes"]
+        }
+        reserved_semantic_records = []
+        reserved_semantic_indices: set[int] = set()
+        covered_semantic_groups: set[int] = set()
+        # The three Q03 role assertions can be in transcript regions other than
+        # the six named-entity captions. Reserve every available semantic source
+        # group before generic relevance fill. If they cannot all fit, the
+        # downstream completeness gate reports the missing group and suppresses
+        # generation rather than allowing an unsupported relationship.
+        while (
+            covered_semantic_groups != available_semantic_groups
+            and len(reserved_semantic_records) < selected_count
+        ):
+            choices = []
+            for record in records:
+                if record["index"] in reserved_semantic_indices:
+                    continue
+                new_groups = (
+                    record["generation_semantic_group_indexes"]
+                    - covered_semantic_groups
+                )
+                if not new_groups:
+                    continue
+                choices.append((
+                    len(new_groups),
+                    -record["priority"],
+                    -record["distance"],
+                    -record["start"],
+                    -record["index"],
+                    record,
+                ))
+            if not choices:
+                break
+            chosen = max(choices, key=lambda item: item[:-1])[-1]
+            reserved_semantic_records.append(chosen)
+            reserved_semantic_indices.add(chosen["index"])
+            covered_semantic_groups.update(
+                chosen["generation_semantic_group_indexes"]
+            )
+
+        remaining_priority_records = [
+            record
+            for record in priority_records
+            if record["index"] not in reserved_semantic_indices
+        ]
+        remaining_priority_records.extend(
+            record
+            for record in priority_order
+            if record["index"] not in reserved_semantic_indices
+            and all(
+                existing["index"] != record["index"]
+                for existing in remaining_priority_records
+            )
+        )
+        priority_records = (
+            reserved_semantic_records + remaining_priority_records
+        )[:selected_count]
+
     # Keep the total generation context budget as a hard ceiling, but do not
     # split it evenly when a registered answer depends on multiple claim-bearing
     # source blocks. Q02 needs its exact transfer caption retained even when the
@@ -5535,11 +5677,17 @@ def build_generation_context(
         for record in priority_records
     }
 
-    if registered_generation_claim_source_groups:
+    if (
+        registered_generation_claim_source_groups
+        or registered_generation_semantic_source_groups
+    ):
         claim_bearing_records = [
             record
             for record in priority_records
-            if record["generation_claim_group_indexes"]
+            if (
+                record["generation_claim_group_indexes"]
+                or record["generation_semantic_group_indexes"]
+            )
         ]
         non_claim_records = [
             record
@@ -9521,6 +9669,9 @@ def build_rag_chain(
         required_generation_claim_groups: set[int] = set()
         included_generation_claim_groups: set[int] = set()
         generation_claim_context_complete = None
+        required_generation_semantic_groups: set[int] = set()
+        included_generation_semantic_groups: set[int] = set()
+        generation_semantic_context_complete = None
         if gold_context_case is not None:
             required_gold_groups = math.ceil(
                 len(gold_context_case.groups)
@@ -9576,6 +9727,22 @@ def build_rag_chain(
                     )
                 )
 
+            semantic_source_groups = tuple(
+                getattr(gold_context_case, "generation_semantic_source_groups", ()) or ()
+            )
+            if semantic_source_groups:
+                required_generation_semantic_groups = set(
+                    range(len(semantic_source_groups))
+                )
+                included_generation_semantic_groups = set(
+                    context_budget.get("generation_semantic_groups_included", [])
+                )
+                generation_semantic_context_complete = (
+                    required_generation_semantic_groups.issubset(
+                        included_generation_semantic_groups
+                    )
+                )
+
             # Q08 uses a separate source-bound bank-recovery fallback. The
             # answer-completeness contract must not suppress generation before
             # that fallback can inspect the full retrieved source-group context.
@@ -9584,9 +9751,13 @@ def build_rag_chain(
             generation_claim_evidence_incomplete = (
                 generation_claim_context_complete is False
             )
+            generation_semantic_evidence_incomplete = (
+                generation_semantic_context_complete is False
+            )
             if (
                 (not gold_evidence_context_complete and not q08_financial_fallback_case)
                 or generation_claim_evidence_incomplete
+                or generation_semantic_evidence_incomplete
             ):
                 logger.warning(
                     "Suppressing generation because curated evidence context "
@@ -9618,6 +9789,19 @@ def build_rag_chain(
                         "question_language_repair_passed": None,
                         "gold_evidence_context_complete": gold_evidence_context_complete,
                         "generation_claim_context_complete": generation_claim_context_complete,
+                        "generation_semantic_context_complete": generation_semantic_context_complete,
+                        "generation_semantic_groups_required": sorted(
+                            required_generation_semantic_groups
+                        ),
+                        "generation_semantic_groups_included": sorted(
+                            included_generation_semantic_groups
+                        ),
+                        "generation_semantic_groups_missing_from_retrieval": context_budget.get(
+                            "generation_semantic_groups_missing_from_retrieval", []
+                        ),
+                        "generation_semantic_groups_missing_from_prompt": context_budget.get(
+                            "generation_semantic_groups_missing_from_prompt", []
+                        ),
                         "generation_claim_groups_required": sorted(
                             required_generation_claim_groups
                         ),
@@ -9668,9 +9852,13 @@ def build_rag_chain(
                             repair_aborted_due_quota=False,
                             generation_attempted=False,
                             not_attempted_reason=(
-                                "generation_not_attempted_incomplete_registered_claim_evidence"
-                                if generation_claim_evidence_incomplete
-                                else "generation_not_attempted_incomplete_prompt_evidence"
+                                "generation_not_attempted_incomplete_semantic_evidence"
+                                if generation_semantic_evidence_incomplete
+                                else (
+                                    "generation_not_attempted_incomplete_registered_claim_evidence"
+                                    if generation_claim_evidence_incomplete
+                                    else "generation_not_attempted_incomplete_prompt_evidence"
+                                )
                             ),
                         ),
                     },
