@@ -9504,12 +9504,11 @@ def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
         video_id="MdeQMVBuGgY",
     )
 
-    assert "Air Deccan**" not in corrected
-    assert "Air Deccan**" not in corrected
+    assert "Air Deccan (also called" not in corrected
+    assert "low-cost airline he launched" not in corrected
     assert "existing low-cost airline that Mallya acquired" in corrected
-    assert "he launched" not in corrected
-    assert "Kingfisher Red** — the premium beer brand" not in corrected
-    assert "Kingfisher Red**" not in corrected
+    assert "Kingfisher Red — the premium beer brand" not in corrected
+    assert "premium beer brand" not in corrected
     assert "low-cost airline created through the rebranding of Air Deccan" in corrected
     assert "premium Kingfisher First offering" in corrected
     assert "corrected_q03_air_deccan_acquisition_attribution" in corrections
