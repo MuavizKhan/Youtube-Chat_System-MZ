@@ -273,12 +273,12 @@ GOLD_EVIDENCE_CASES = (
         # Keep them separate from the six entity-name claims because they are
         # semantic relationships, not additional companies or brands.
         generation_semantic_source_groups=(
-            ("I acquired Air Deccan", "acquired Air Deccan", "I acquired Eden", "logic of buying Dean", "buying Dean"),
+            ("I acquired Air Deccan", "acquired Air Deccan", "I acquired Eden"),
             ("we just called it Kingfisher Red", "we just called it King Fisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
             ("Kingfisher Red stood for low cost", "King Fisher Red stood for low cost"),
         ),
         generation_semantic_answer_groups=(
-            ("Mallya acquired the existing low-cost Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
+            ("Mallya says he acquired the existing low-cost Air Deccan", "Mallya acquired the existing low-cost Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
             ("Air Deccan was rebranded as Kingfisher Red", "rebranding of Air Deccan as Kingfisher Red", "the Deccan operation was rebranded as Kingfisher Red"),
             ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier", "Kingfisher Red, the low-cost airline offering"),
         ),
