@@ -1919,6 +1919,10 @@ def _caption_segments_for_documents(
             evidence_phrase_groups.extend(
                 getattr(gold_case, "generation_claim_source_groups", ()) or ()
             )
+        semantic_source_groups = (
+            getattr(gold_case, "generation_semantic_source_groups", ()) or ()
+        )
+        evidence_phrase_groups.extend(semantic_source_groups)
         for alternatives in evidence_phrase_groups:
             if any(
                 (normalized_phrase := normalize_evidence_text(phrase))
@@ -1941,6 +1945,18 @@ def _caption_segments_for_documents(
                 claim_source_groups,
             )
             if not raw_claims.issubset(caption_claims):
+                return None
+
+        if semantic_source_groups:
+            raw_semantic_groups = matched_source_phrase_group_indices(
+                raw_group_text,
+                semantic_source_groups,
+            )
+            caption_semantic_groups = matched_source_phrase_group_indices(
+                " ".join(segment["text"] for segment in ordered_segments),
+                semantic_source_groups,
+            )
+            if not raw_semantic_groups.issubset(caption_semantic_groups):
                 return None
 
     return ordered_segments
@@ -2380,6 +2396,38 @@ def _truncate_formatted_source(
                                 sum(len(captions[index]) for index in combined_indices)
                                 + max(0, len(combined_indices) - 1)
                             )
+                    if combined_cost <= available:
+                        gold_evidence_caption_indices.update(candidate_indices)
+
+            semantic_source_groups = (
+                getattr(gold_case, "generation_semantic_source_groups", ()) or ()
+            )
+            if semantic_source_groups:
+                absolute_semantic_caption_spans = matched_source_phrase_group_caption_spans(
+                    source_text,
+                    semantic_source_groups,
+                )
+                semantic_caption_spans = {
+                    group_index: {
+                        line_index - caption_start
+                        for line_index in line_indices
+                        if line_index >= caption_start
+                    }
+                    for group_index, line_indices in absolute_semantic_caption_spans.items()
+                }
+                # Preserve acquisition, rebranding and airline-role assertions
+                # as complete timestamped caption rows. They are separate from
+                # the six entity-name fallback claims and have their own gate.
+                for group_index in sorted(semantic_caption_spans):
+                    candidate_indices = (
+                        semantic_caption_spans[group_index]
+                        - gold_evidence_caption_indices
+                    )
+                    combined_indices = gold_evidence_caption_indices | candidate_indices
+                    combined_cost = (
+                        sum(len(captions[index]) for index in combined_indices)
+                        + max(0, len(combined_indices) - 1)
+                    )
                     if combined_cost <= available:
                         gold_evidence_caption_indices.update(candidate_indices)
 
@@ -3237,6 +3285,76 @@ def _build_registered_gold_answer_fallback(
                 source_block_indices_by_group=source_block_mapping,
             )
             return None
+        semantic_source_groups = tuple(
+            getattr(gold_case, "generation_semantic_source_groups", ()) or ()
+        )
+        semantic_answer_groups = tuple(
+            getattr(gold_case, "generation_semantic_answer_groups", ()) or ()
+        )
+        semantic_source_indices_by_group: dict[int, list[int]] = {}
+        if semantic_source_groups or semantic_answer_groups:
+            if (
+                not semantic_source_groups
+                or len(semantic_source_groups) != len(semantic_answer_groups)
+                or any(not group for group in semantic_source_groups)
+                or any(not group for group in semantic_answer_groups)
+            ):
+                reject(
+                    "invalid_registered_semantic_fallback_claim_contract",
+                    question_id=question_id,
+                )
+                return None
+            for source_index, source_block in enumerate(source_blocks, start=1):
+                for group_index in _matched_registered_phrase_group_indices(
+                    source_block,
+                    semantic_source_groups,
+                ):
+                    semantic_source_indices_by_group.setdefault(
+                        group_index, []
+                    ).append(source_index)
+            required_semantic_indices = set(range(len(semantic_source_groups)))
+            included_semantic_indices = set(semantic_source_indices_by_group)
+            missing_semantic_indices = sorted(
+                required_semantic_indices - included_semantic_indices
+            )
+            if missing_semantic_indices:
+                semantic_source_mapping = {
+                    str(index): indices
+                    for index, indices in sorted(
+                        semantic_source_indices_by_group.items()
+                    )
+                }
+                reject(
+                    "required_fallback_semantic_claims_missing_from_source_blocks",
+                    question_id=question_id,
+                    required_semantic_fallback_claims=sorted(required_semantic_indices),
+                    included_semantic_fallback_claims=sorted(included_semantic_indices),
+                    missing_semantic_fallback_claims=missing_semantic_indices,
+                    source_block_indices_by_semantic_fallback_claim=semantic_source_mapping,
+                )
+                return None
+            semantic_answer_indices = _matched_registered_phrase_group_indices(
+                fallback_answer,
+                semantic_answer_groups,
+            )
+            missing_semantic_answer_indices = sorted(
+                required_semantic_indices - semantic_answer_indices
+            )
+            if missing_semantic_answer_indices:
+                reject(
+                    "fallback_answer_does_not_satisfy_semantic_claim_contract",
+                    question_id=question_id,
+                    required_semantic_fallback_claims=sorted(required_semantic_indices),
+                    included_semantic_fallback_claims=sorted(included_semantic_indices),
+                    answer_contract_semantic_fallback_claims=sorted(semantic_answer_indices),
+                    missing_semantic_fallback_answer_claims=missing_semantic_answer_indices,
+                )
+                return None
+        else:
+            required_semantic_indices = set()
+            included_semantic_indices = set()
+            semantic_answer_indices = set()
+
         if _question_answer_language_mismatch(question, fallback_answer) is not None:
             reject("fallback_answer_failed_language_guard")
             return None
@@ -3256,6 +3374,15 @@ def _build_registered_gold_answer_fallback(
                 "included_fallback_claims": sorted(included_group_indices),
                 "source_block_indices_by_fallback_claim": source_block_mapping,
                 "answer_contract_fallback_claims": sorted(answer_contract_groups),
+                "required_semantic_fallback_claims": sorted(required_semantic_indices),
+                "included_semantic_fallback_claims": sorted(included_semantic_indices),
+                "answer_contract_semantic_fallback_claims": sorted(semantic_answer_indices),
+                "source_block_indices_by_semantic_fallback_claim": {
+                    str(index): indices
+                    for index, indices in sorted(
+                        semantic_source_indices_by_group.items()
+                    )
+                },
                 # Retain the previous diagnostic keys for existing report readers.
                 "required_gold_groups": sorted(required_group_indices),
                 "included_gold_groups": sorted(included_group_indices),
@@ -4399,8 +4526,15 @@ def _gold_evidence_repair_instruction(
             context_text,
             q03_source_claim_groups,
         )
+        q03_semantic_source_groups = tuple(
+            getattr(gold_case, "generation_semantic_source_groups", ()) or ()
+        )
+        q03_semantic_context_claims = _matched_registered_phrase_group_indices(
+            context_text,
+            q03_semantic_source_groups,
+        )
         if (
-            len(q03_source_claim_groups) >= 6
+            len(q03_source_claim_groups) == 6
             and {4, 5}.issubset(q03_context_claims)
             and not _has_q03_entity_distinction(answer_text)
         ):
@@ -4414,8 +4548,8 @@ def _gold_evidence_repair_instruction(
                 "do not add timestamps."
             )
         if (
-            len(q03_source_claim_groups) >= 9
-            and {6, 7, 8}.issubset(q03_context_claims)
+            len(q03_semantic_source_groups) == 3
+            and set(range(3)).issubset(q03_semantic_context_claims)
             and not _has_q03_air_deccan_kingfisher_red_relationship(answer_text)
         ):
             instructions.append(
@@ -4635,6 +4769,11 @@ def build_generation_context(
         registered_generation_claim_source_groups = tuple(
             getattr(gold_case, "generation_claim_source_groups", ()) or ()
         )
+    registered_generation_semantic_source_groups = (
+        tuple(getattr(gold_case, "generation_semantic_source_groups", ()) or ())
+        if gold_case is not None
+        else ()
+    )
     if gold_case is not None:
         gold_phrases = " ".join(
             phrase
@@ -4653,9 +4792,14 @@ def build_generation_context(
             for group in registered_generation_claim_source_groups
             for phrase in group
         )
+        generation_semantic_phrases = " ".join(
+            phrase
+            for group in registered_generation_semantic_source_groups
+            for phrase in group
+        )
         context_selection_question = (
             f"{question or ''} {gold_phrases} {fallback_phrases} "
-            f"{generation_claim_phrases}".strip()
+            f"{generation_claim_phrases} {generation_semantic_phrases}".strip()
         )
 
     if not source_groups:
