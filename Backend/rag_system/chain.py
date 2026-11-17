@@ -3716,12 +3716,12 @@ def _has_q03_entity_distinction(text: str) -> bool:
     """Require RCB as the cricket franchise and Royal Challenge as whisky."""
     normalized = unicodedata.normalize("NFKC", text or "")
     sentences = [
-        part for part in re.split(r"[.!?;\\r\\n]+", normalized) if part.strip()
+        part for part in re.split(r"[.!?;\r\n]+", normalized) if part.strip()
     ]
-    franchise_name = r"\\b(?:Royal Challengers Bangalore|Royal Challenges Bangalore|RCB)\\b"
-    cricket_role = r"\\b(?:cricket|IPL)\\s+(?:team|franchise)\\b"
-    royal_challenge = r"\\bRoyal Challenge\\b"
-    whisky_role = r"\\b(?:whisky|whiskey)(?:\\s+brand)?\\b"
+    franchise_name = r"\b(?:Royal Challengers Bangalore|Royal Challenges Bangalore|RCB)\b"
+    cricket_role = r"\b(?:cricket|IPL)\s+(?:team|franchise)\b"
+    royal_challenge = r"\bRoyal Challenge\b"
+    whisky_role = r"\b(?:whisky|whiskey)(?:\s+brand)?\b"
 
     franchise_is_cricket_team = any(
         re.search(franchise_name, sentence, re.IGNORECASE)
@@ -3734,11 +3734,11 @@ def _has_q03_entity_distinction(text: str) -> bool:
         for sentence in sentences
     )
     royal_challenge_misclassified = bool(re.search(
-        r"\\b(?:cricket|ipl)\\s+(?:team|franchise)\\s+"
-        r"(?:(?:is|was|named|called)\\s+)?Royal Challenge\\b|"
-        r"\\bRoyal Challenge\\s+(?:cricket|ipl)\\s+(?:team|franchise)\\b|"
-        r"\\bRoyal Challenge\\s+(?:is|was)\\s+(?:the\\s+)?"
-        r"(?:cricket\\s+)?franchise\\b",
+        r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+"
+        r"(?:(?:is|was|named|called)\s+)?Royal Challenge\b|"
+        r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
+        r"\bRoyal Challenge\s+(?:is|was)\s+(?:the\s+)?"
+        r"(?:cricket\s+)?franchise\b",
         normalized,
         re.IGNORECASE,
     ))
