@@ -9528,6 +9528,17 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
     assert "normalized_business_list_emphasis" in corrections
 
 
+@pytest.mark.unit
+def test_q03_gold_contract_keeps_six_entities_and_three_semantic_relations_separate():
+    case = chain.get_gold_evidence_case("Q03")
+    assert len(case.generation_claim_source_groups) == 6
+    assert len(case.generation_claim_answer_groups) == 6
+    assert len(case.generation_fallback_source_groups) == 6
+    assert len(case.generation_fallback_answer_groups) == 6
+    assert len(case.generation_semantic_source_groups) == 3
+    assert len(case.generation_semantic_answer_groups) == 3
+
+
 @pytest.mark.regression
 def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
     question = (
