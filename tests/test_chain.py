@@ -9483,6 +9483,91 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
     assert "normalized_business_list_emphasis" in corrections
 
 
+@pytest.mark.regression
+def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "Vijay Mallya talks about several ventures.\\n"
+        "- United Breweries Limited** — the holding company.\\n"
+        "- United Spirits** — a sister company.\\n"
+        "- Air Deccan** (also called \"air deckin\") – the low-cost airline he launched.\\n"
+        "- Kingfisher Red** — the premium beer brand he created after re-branding Kingfisher.\\n"
+        "- Royal Challengers Bangalore (RCB)** — the cricket franchise.\\n"
+        "- Royal Challenge** — the whisky brand."
+    )
+
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert "Air Deccan**" not in corrected
+    assert "Air Deccan**" not in corrected
+    assert "existing low-cost airline that Mallya acquired" in corrected
+    assert "he launched" not in corrected
+    assert "Kingfisher Red** — the premium beer brand" not in corrected
+    assert "Kingfisher Red**" not in corrected
+    assert "low-cost airline created through the rebranding of Air Deccan" in corrected
+    assert "premium Kingfisher First offering" in corrected
+    assert "corrected_q03_air_deccan_acquisition_attribution" in corrections
+    assert "corrected_q03_kingfisher_red_low_cost_airline_identity" in corrections
+
+
+@pytest.mark.regression
+def test_q03_generation_repair_requires_acquisition_rebrand_and_low_cost_roles():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = """[SOURCE 1]
+    United Breweries Limited was the holding company. United Spirits was another group company.
+    [SOURCE 2]
+    Air Deccan was discussed as a low-cost airline. I acquired Eden, and the logic of buying Dean was industry consolidation.
+    [SOURCE 3]
+    You cannot start operating one Deccan and one Kingfisher. So we just called it King Fisher Red.
+    Kingfisher red stood for low cost. Kingfisher First was the premium offering.
+    [SOURCE 4]
+    Royal Challengers Bangalore was the cricket franchise. Royal Challenge was the whisky brand."""
+    incorrect_answer = (
+        "Air Deccan was the low-cost airline Mallya launched. "
+        "Kingfisher Red was the premium beer brand. "
+        "Royal Challengers Bangalore was the cricket franchise and Royal Challenge was the whisky brand."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=incorrect_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "Q03 AIR DECCAN / KINGFISHER RED ROLE REPAIR" in instruction
+    assert "Mallya discusses acquiring the existing low-cost Air Deccan" in instruction
+    assert "Air Deccan was subsequently rebranded as Kingfisher Red" in instruction
+    assert "Do not say Mallya founded or launched Air Deccan" in instruction
+    assert "Do not describe Kingfisher Red as a beer" in instruction
+
+
+@pytest.mark.unit
+def test_q03_airline_relationship_matcher_rejects_the_observed_false_claims():
+    correct = (
+        "Air Deccan was an existing low-cost airline that Mallya acquired. "
+        "Kingfisher Red was the low-cost airline created through the rebranding "
+        "of Air Deccan, distinct from the premium Kingfisher First offering."
+    )
+    incorrect = (
+        "Air Deccan was the low-cost airline Mallya launched. "
+        "Kingfisher Red was the premium beer brand."
+    )
+
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(correct) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(incorrect) is False
+
+
+
 
 @pytest.mark.unit
 def test_q05_answer_correction_preserves_supported_ub_group_contribution_and_repairs_misattributions():
