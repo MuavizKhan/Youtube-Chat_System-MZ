@@ -278,7 +278,7 @@ GOLD_EVIDENCE_CASES = (
             ("Kingfisher Red stood for low cost", "King Fisher Red stood for low cost"),
         ),
         generation_semantic_answer_groups=(
-            ("Mallya says he acquired the existing low-cost Air Deccan", "Mallya acquired the existing low-cost Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
+            ("Mallya says he acquired Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
             ("Air Deccan was rebranded as Kingfisher Red", "rebranding of Air Deccan as Kingfisher Red", "the Deccan operation was rebranded as Kingfisher Red"),
             ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier", "Kingfisher Red, the low-cost airline offering"),
         ),
@@ -287,10 +287,9 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer=(
             "The businesses, brands, and teams discussed are United Breweries, "
             "United Spirits, Air Deccan, Kingfisher Red, Royal Challengers "
-            "Bangalore (RCB), and Royal Challenge. Mallya says he acquired the "
-            "existing low-cost Air Deccan as part of industry consolidation. "
-            "He explains that Air Deccan was rebranded as Kingfisher Red, the low-cost "
-            "airline offering. Royal Challengers Bangalore "
+            "Bangalore (RCB), and Royal Challenge. Mallya says he acquired Air "
+            "Deccan. He explains that Air Deccan was rebranded as Kingfisher Red, "
+            "the low-cost airline offering. Royal Challengers Bangalore "
             "is the cricket franchise; Royal Challenge is the whisky brand."
         ),
         generation_fallback_requires_all_groups=True,
