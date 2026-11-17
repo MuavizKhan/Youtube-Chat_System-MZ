@@ -264,7 +264,7 @@ GOLD_EVIDENCE_CASES = (
         # semantic relationships, not additional companies or brands.
         generation_semantic_source_groups=(
             ("I acquired Air Deccan", "acquired Air Deccan", "I acquired Eden", "logic of buying Dean", "buying Dean"),
-            ("rebrand it to Kingfisher Red", "rebrand it to King Fisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
+            ("rebrand it to Kingfisher Red", "rebrand it to King Fisher Red", "we just called it Kingfisher Red", "we just called it King Fisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
             ("Kingfisher Red stood for low cost", "King Fisher Red stood for low cost"),
         ),
         generation_semantic_answer_groups=(
@@ -279,8 +279,8 @@ GOLD_EVIDENCE_CASES = (
             "United Spirits, Air Deccan, Kingfisher Red, Royal Challengers "
             "Bangalore (RCB), and Royal Challenge. Mallya says he acquired the "
             "existing low-cost Air Deccan as part of industry consolidation. "
-            "He explains that the Deccan operation was rebranded as Kingfisher "
-            "Red, the low-cost airline offering. Royal Challengers Bangalore "
+            "He explains that Air Deccan was rebranded as Kingfisher Red, the low-cost "
+            "airline offering. Royal Challengers Bangalore "
             "is the cricket franchise; Royal Challenge is the whisky brand."
         ),
         generation_fallback_requires_all_groups=True,
