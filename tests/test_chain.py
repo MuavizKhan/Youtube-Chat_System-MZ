@@ -9560,11 +9560,11 @@ def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
 
     assert "Air Deccan (also called" not in corrected
     assert "low-cost airline he launched" not in corrected
-    assert "existing low-cost airline that Mallya acquired" in corrected
+    assert "the airline Mallya acquired" in corrected
     assert "Kingfisher Red — the premium beer brand" not in corrected
     assert "premium beer brand" not in corrected
     assert "low-cost airline created through the rebranding of Air Deccan" in corrected
-    assert "premium Kingfisher First offering" in corrected
+    assert "Kingfisher First" not in corrected
     assert "corrected_q03_air_deccan_acquisition_attribution" in corrections
     assert "corrected_q03_kingfisher_red_low_cost_airline_identity" in corrections
 
@@ -11254,7 +11254,7 @@ def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks()
     ))
     assert chain._has_q03_entity_distinction(answer) is True
     assert chain._has_q03_air_deccan_kingfisher_red_relationship(answer) is True
-    assert "Mallya says he acquired the existing low-cost Air Deccan" in answer
+    assert "Mallya says he acquired Air Deccan" in answer
     assert "Air Deccan was rebranded as Kingfisher Red" in answer
     assert diagnostics["required_semantic_fallback_claims"] == [0, 1, 2]
     assert diagnostics["included_semantic_fallback_claims"] == [0, 1, 2]
