@@ -308,6 +308,19 @@ def test_q03_quality_gate_rejects_air_deccan_and_kingfisher_red_misclassificatio
     assert bad_checks["q03_kingfisher_red_is_low_cost_airline"] is False
     assert bad_checks["q03_kingfisher_red_not_misclassified_as_beer"] is False
 
+    wrong_acquirer_answer = (
+        "United Breweries and United Spirits are group businesses. "
+        "Air Deccan was an existing low-cost airline acquired by Captain Gopinath. "
+        "Air Deccan was rebranded as Kingfisher Red, the low-cost airline offering. "
+        "Royal Challengers Bangalore (RCB) was the cricket franchise; "
+        "Royal Challenge was the whisky brand."
+    )
+    wrong_acquirer_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("Q03", wrong_acquirer_answer)
+    }
+    assert wrong_acquirer_checks["q03_air_deccan_acquisition_not_launch"] is False
+
 
 def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     bad_answer = (
