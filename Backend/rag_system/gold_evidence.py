@@ -227,7 +227,17 @@ GOLD_EVIDENCE_CASES = (
         question_id="Q03",
         groups=(
             ("United Breweries", "United Breweries Limited", "United Spirits"),
-            ("merger of Kingfisher and", "Kingfisher Red", "eliminate the disruptor"),
+            (
+                "merger of Kingfisher and",
+                "Kingfisher Red",
+                "eliminate the disruptor",
+                "I acquired Air Deccan",
+                "I acquired Eden",
+                "rebrand it to Kingfisher Red",
+                "rebrand it to King Fisher Red",
+                "Kingfisher Red stood for low cost",
+                "King Fisher Red stood for low cost",
+            ),
             ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
         ),
         min_group_coverage=2 / 3,
