@@ -3583,8 +3583,7 @@ def _normalize_registered_transcript_answer(
                 and re.match(r"^Air\s+Deccan\b", plain_line, re.IGNORECASE)
             ):
                 normalized_line = (
-                    "**Air Deccan** — an existing low-cost airline that Mallya "
-                    "acquired as part of industry consolidation."
+                    "**Air Deccan** — the airline Mallya acquired."
                 )
                 normalized_lines.append(prefix + normalized_line)
                 corrected_air_deccan_role = corrected_air_deccan_role or (
@@ -3597,8 +3596,7 @@ def _normalize_registered_transcript_answer(
             ):
                 normalized_line = (
                     "**Kingfisher Red** — the low-cost airline created through "
-                    "the rebranding of Air Deccan; distinct from the premium "
-                    "Kingfisher First offering."
+                    "the rebranding of Air Deccan."
                 )
                 normalized_lines.append(prefix + normalized_line)
                 corrected_kingfisher_red_role = corrected_kingfisher_red_role or (
@@ -4607,10 +4605,9 @@ def _gold_evidence_repair_instruction(
             instructions.append(
                 "Q03 AIR DECCAN / KINGFISHER RED ROLE REPAIR. Correct the airline "
                 "history using only the supplied transcript: Mallya discusses "
-                "acquiring the existing low-cost Air Deccan as an industry-"
-                "consolidation decision; Air Deccan was subsequently rebranded "
+                "acquiring Air Deccan; Air Deccan was subsequently rebranded "
                 "as Kingfisher Red; Kingfisher Red was the low-cost airline "
-                "offering, distinct from the premium Kingfisher First offering. "
+                "offering. "
                 "Do not say Mallya founded or launched Air Deccan. Do not describe "
                 "Kingfisher Red as a beer or beer brand. Preserve the other "
                 "source-supported businesses and the separate RCB cricket "
