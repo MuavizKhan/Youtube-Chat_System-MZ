@@ -11324,18 +11324,15 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
         "What businesses or companies does Vijay Mallya discuss in the interview?"
     )
     evidence_captions = [
-        [
-            "United Breweries Limited and United Spirits are discussed. "
-            "I acquired Eden as part of industry consolidation."
-        ],
-        [
-            "Air Deccan and Kingfisher Red are discussed. "
-            "We just called it King Fisher Red. King Fisher Red stood for low cost."
-        ],
+        ["United Breweries Limited and United Spirits are discussed."],
+        ["Air Deccan and Kingfisher Red are discussed."],
         [
             "Royal Challenges Bangalore was selected to promote "
             "Royal Challenge whisky."
         ],
+        ["I acquired Eden as part of industry consolidation."],
+        ["We just called it King Fisher Red."],
+        ["King Fisher Red stood for low cost."],
     ]
     evidence_groups = []
     for index, captions in enumerate(evidence_captions):
@@ -11350,7 +11347,7 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
         evidence_groups.append(group)
 
     distractors = []
-    for index in range(4):
+    for index in range(9):
         long_caption = (
             f"Unrelated Kingfisher interview discussion {index}. "
             + ("Background commentary without a Q03 entity claim. " * 24)
@@ -11380,6 +11377,12 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
     assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
     assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
     assert diagnostics["registered_fallback_context_complete"] is True
+    assert diagnostics["generation_semantic_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_available"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_included"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_semantic_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_semantic_context_complete"] is True
     for phrase in (
         "United Breweries Limited",
         "United Spirits",
@@ -11387,6 +11390,9 @@ def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
         "Kingfisher Red",
         "Royal Challenges Bangalore",
         "Royal Challenge whisky",
+        "I acquired Eden",
+        "We just called it King Fisher Red",
+        "King Fisher Red stood for low cost",
     ):
         assert phrase in packed["context"]
 
