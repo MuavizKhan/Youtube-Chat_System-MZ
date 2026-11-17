@@ -9633,6 +9633,7 @@ def test_q03_acquisition_probe_fails_closed_without_exact_in_range_source(
         document.metadata["video_id"] = "MdeQMVBuGgY"
 
     calls = []
+    probe_call_kwargs = []
 
     base_pair = (base, 0.2)
     probe_pair = (probe_document, distance)
@@ -9640,8 +9641,11 @@ def test_q03_acquisition_probe_fails_closed_without_exact_in_range_source(
     def fake_retrieve(**kwargs):
         calls.append(kwargs["query"])
         if len(calls) == 1:
+            # The initial retrieval requests return_status=True.
             return [base_pair], [base_pair], {"weak_native_query_rejected": False}
-        return [probe_pair], [probe_pair], {"weak_native_query_rejected": False}
+        # The Q03 acquisition probe requests anchors but not status.
+        probe_call_kwargs.append(kwargs)
+        return [probe_pair], [probe_pair]
 
     monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
     monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
@@ -9661,6 +9665,10 @@ def test_q03_acquisition_probe_fails_closed_without_exact_in_range_source(
     )
 
     assert [item[0].metadata["chunk_id"] for item in results] == [20101]
+    assert calls == [question, chain.Q03_ACQUISITION_EVIDENCE_QUERY]
+    assert len(probe_call_kwargs) == 1
+    assert probe_call_kwargs[0]["return_anchors"] is True
+    assert probe_call_kwargs[0].get("return_status", False) is False
     assert trace["final_stage"] == "initial_strict"
     assert trace["registered_q03_acquisition_evidence_probe_attempted"] is True
     assert trace["registered_q03_acquisition_evidence_probe_accepted"] is False
