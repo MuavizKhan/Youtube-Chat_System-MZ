@@ -11002,9 +11002,12 @@ def test_q03_entity_distinction_requires_both_correct_roles():
         "Royal Challengers Bangalore is the cricket franchise; "
         "the cricket franchise was Royal Challenge."
     ) is False
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore is the cricket franchise; "
+        "Royal Challenge is a cricket team and also a whisky brand."
+    ) is False
 
 
-@pytest.mark.unit
 @pytest.mark.unit
 def test_q03_missing_role_receives_explicit_entity_repair_instruction():
     question = (

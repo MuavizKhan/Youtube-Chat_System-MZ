@@ -3737,8 +3737,9 @@ def _has_q03_entity_distinction(text: str) -> bool:
         r"\b(?:cricket|ipl)\s+(?:team|franchise)\s+"
         r"(?:(?:is|was|named|called)\s+)?Royal Challenge\b|"
         r"\bRoyal Challenge\s+(?:cricket|ipl)\s+(?:team|franchise)\b|"
-        r"\bRoyal Challenge\s+(?:is|was)\s+(?:the\s+)?"
-        r"(?:cricket\s+)?franchise\b",
+        r"\bRoyal Challenge\s+(?:is|was)\s+"
+        r"(?:(?:the|a|an)\s+)?(?:(?:cricket|IPL)\s+)?"
+        r"(?:team|franchise)\b",
         normalized,
         re.IGNORECASE,
     ))
