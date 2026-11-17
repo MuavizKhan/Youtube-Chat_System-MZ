@@ -37,6 +37,11 @@ from Backend.rag_system.timestamp_utils import (
 from Backend.rag_system.chain import (
     _blood_movement_attributed_to_arteries,
     _has_q03_entity_distinction,
+    _has_q03_air_deccan_acquisition,
+    _has_q03_air_deccan_rebranding,
+    _has_q03_kingfisher_red_low_cost_airline,
+    _has_q03_air_deccan_launch_misattribution,
+    _has_q03_kingfisher_red_beer_misclassification,
     _has_named_money_stopped_attribution as _chain_has_named_money_stopped_attribution,
     _text_assigns_black_gold_to_kingfisher,
     is_temporal_location_question,
@@ -1106,6 +1111,27 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "q03_royal_challenge_is_whisky_brand_not_franchise",
             _has_q03_entity_distinction(text),
             "Explicitly identify Royal Challengers Bangalore/RCB as the cricket franchise and Royal Challenge as the whisky brand.",
+        )
+        add(
+            "q03_air_deccan_acquisition_not_launch",
+            _has_q03_air_deccan_acquisition(text)
+            and not _has_q03_air_deccan_launch_misattribution(text),
+            "Describe Air Deccan as an existing airline Mallya acquired; do not say he founded or launched it.",
+        )
+        add(
+            "q03_air_deccan_rebranded_as_kingfisher_red",
+            _has_q03_air_deccan_rebranding(text),
+            "Explicitly connect Air Deccan to its rebranding as Kingfisher Red.",
+        )
+        add(
+            "q03_kingfisher_red_is_low_cost_airline",
+            _has_q03_kingfisher_red_low_cost_airline(text),
+            "Identify Kingfisher Red as the low-cost airline offering, not as a beer brand.",
+        )
+        add(
+            "q03_kingfisher_red_not_misclassified_as_beer",
+            not _has_q03_kingfisher_red_beer_misclassification(text),
+            "Do not classify Kingfisher Red as beer, a brewery product, or a beer brand.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
         classifies_as_lenders = bool(re.search(
