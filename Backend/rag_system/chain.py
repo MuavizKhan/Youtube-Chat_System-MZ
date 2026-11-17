@@ -3962,6 +3962,11 @@ def _has_q03_air_deccan_acquisition(text: str) -> bool:
             sentence,
             re.IGNORECASE,
         ))
+        target_then_actor_attribution = bool(re.search(
+            target + r"[^.!?]{0,100}" + actor + r"[^.!?]{0,50}" + acquisition,
+            sentence,
+            re.IGNORECASE,
+        ))
         passive_attribution = bool(re.search(
             target + r"[^.!?]{0,100}(?:was|were)\s+"
             r"(?:acquir\w*|bought|purchas\w*)\s+by\s+"
@@ -3975,7 +3980,12 @@ def _has_q03_air_deccan_acquisition(text: str) -> bool:
             sentence,
             re.IGNORECASE,
         ))
-        if active_attribution or passive_attribution or possessive_attribution:
+        if (
+            active_attribution
+            or target_then_actor_attribution
+            or passive_attribution
+            or possessive_attribution
+        ):
             return True
     return False
 
