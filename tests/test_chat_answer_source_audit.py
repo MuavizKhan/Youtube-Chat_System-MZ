@@ -274,6 +274,41 @@ def test_q07_evidence_groups_distinguish_context_sources_and_summary():
     assert audit["quality"]["failed_checks"] == []
 
 
+def test_q03_quality_gate_rejects_air_deccan_and_kingfisher_red_misclassification():
+    correct_answer = (
+        "United Breweries and United Spirits are separate UB Group businesses. "
+        "Air Deccan was an existing low-cost airline that Mallya acquired as part "
+        "of industry consolidation. Kingfisher Red was the low-cost airline "
+        "created through the rebranding of Air Deccan, distinct from the premium "
+        "Kingfisher First offering. Royal Challengers Bangalore (RCB) was the "
+        "cricket franchise; Royal Challenge was the whisky brand."
+    )
+    correct_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("Q03", correct_answer)
+    }
+    assert correct_checks["q03_air_deccan_acquisition_not_launch"] is True
+    assert correct_checks["q03_air_deccan_rebranded_as_kingfisher_red"] is True
+    assert correct_checks["q03_kingfisher_red_is_low_cost_airline"] is True
+    assert correct_checks["q03_kingfisher_red_not_misclassified_as_beer"] is True
+
+    previous_bad_answer = (
+        "United Breweries and United Spirits are group businesses. "
+        "Air Deccan was the low-cost airline he launched. "
+        "Kingfisher Red was the premium beer brand he created. "
+        "Royal Challengers Bangalore (RCB) was the cricket franchise; "
+        "Royal Challenge was the whisky brand."
+    )
+    bad_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks("Q03", previous_bad_answer)
+    }
+    assert bad_checks["q03_air_deccan_acquisition_not_launch"] is False
+    assert bad_checks["q03_air_deccan_rebranded_as_kingfisher_red"] is False
+    assert bad_checks["q03_kingfisher_red_is_low_cost_airline"] is False
+    assert bad_checks["q03_kingfisher_red_not_misclassified_as_beer"] is False
+
+
 def test_q07_quality_gate_rejects_recovery_amount_as_company_debt():
     bad_answer = (
         "Mallya invested ₹3,000 crore in Kingfisher Airlines. "
