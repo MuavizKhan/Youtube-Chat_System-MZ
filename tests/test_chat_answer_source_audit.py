@@ -620,9 +620,11 @@ def test_q03_quality_gate_normalizes_unicode_narrow_no_break_spaces():
         case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q03"
     )
     answer = (
-        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits, "
-        "Air Deccan and Kingfisher Red, and Royal Challengers Bangalore (RCB), "
-        "the cricket franchise, alongside Royal Challenge, the whisky brand."
+        "Vijay Mallya discusses United\u202fBreweries and United\u202fSpirits. "
+        "Air Deccan was an existing low-cost airline that he acquired. "
+        "Air Deccan was rebranded as Kingfisher Red, the low-cost airline offering. "
+        "Royal Challengers Bangalore (RCB) was the cricket franchise, alongside "
+        "Royal Challenge, the whisky brand."
     )
 
     checks = _answer_quality_checks(case, answer)
@@ -2190,10 +2192,12 @@ def test_q03_claim_contract_requires_three_distinct_business_families():
     assert by_name["q03_distinct_business_families"] is False
 
     complete = (
-        "The businesses include United Breweries and United Spirits, Air Deccan "
-        "and Kingfisher Red, and Royal Challengers Bangalore (RCB), the cricket "
-        "franchise selected to promote the Royal Challenge whisky brand. "
-        "The 17-bank consortium was a group of lenders."
+        "The businesses include United Breweries and United Spirits. "
+        "Mallya acquired the existing low-cost Air Deccan. Air Deccan was "
+        "rebranded as Kingfisher Red, the low-cost airline offering. "
+        "Royal Challengers Bangalore (RCB) was the cricket franchise selected "
+        "to promote the Royal Challenge whisky brand. The 17-bank consortium "
+        "was a group of lenders."
     )
     checks = audit_module._claim_level_semantic_checks("Q03", complete)
     assert all(check["passed"] for check in checks), checks
