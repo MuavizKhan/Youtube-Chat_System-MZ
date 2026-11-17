@@ -11005,6 +11005,50 @@ def test_q03_entity_distinction_requires_both_correct_roles():
 
 
 @pytest.mark.unit
+@pytest.mark.unit
+def test_q03_missing_role_receives_explicit_entity_repair_instruction():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits.\n"
+        "[SOURCE 2]\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\n"
+        "[SOURCE 3]\n"
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    incomplete_answer = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and the Royal Challenge whisky brand."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "Q03 ENTITY-ROLE REPAIR" in instruction
+    assert "Royal Challengers Bangalore (RCB) is the cricket franchise" in instruction
+    assert "Royal Challenge is the whisky brand" in instruction
+
+    complete_answer = (
+        "United Breweries and United Spirits; Air Deccan and Kingfisher Red; "
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=complete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
 def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks():
     question = (
         "What businesses or companies does Vijay Mallya discuss in the interview?"

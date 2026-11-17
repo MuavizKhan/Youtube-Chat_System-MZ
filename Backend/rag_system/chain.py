@@ -3149,7 +3149,7 @@ def _build_registered_gold_answer_fallback(
         reject("retrieved_source_context_empty")
         return None
 
-    # Q02/Q04/Q05 opt into an all-claims contract. A claim is checked against
+    # Q02–Q05 opt into an all-claims contract. A claim is checked against
     # the exact prompt-visible source blocks, independently of the broader
     # retrieval-quality groups. Different claims may live in different blocks,
     # but alternatives within one claim are not treated as cumulative evidence.
@@ -5148,7 +5148,7 @@ def build_generation_context(
         reserved_fallback_indices: set[int] = set()
         covered_fallback_groups: set[int] = set()
 
-        # Q04/Q05 deterministic answers have a stricter, claim-level evidence
+        # Q03–Q05 deterministic answers have a stricter, claim-level evidence
         # contract than their broad retrieval gold groups. Reserve one source
         # group for every available atomic claim before ordinary relevance fill.
         # A source group may cover several claims, but claims are never stitched
