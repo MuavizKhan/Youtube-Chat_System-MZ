@@ -9077,7 +9077,9 @@ def _probe_q03_acquisition_evidence(
 
 
 Q08_BANK_PAYMENT_ATTRIBUTION_QUERY = (
-    "both these have stated in court in judicial proceedings that the banks have been fully paid"
+    "Recovery Officer of the Debt Recovery Tribunal Official Liquidator "
+    "both these stated in court in judicial proceedings that the banks "
+    "have been fully paid"
 )
 
 
@@ -9089,13 +9091,14 @@ def _probe_q08_bank_payment_attribution_evidence(
     retrieved_results: list,
     citation_results: list,
 ) -> tuple[list, list, dict[str, object] | None, bool]:
-    """Recover Q08's exact official-attributed bank-payment caption.
+    """Recover Q08's official-attributed bank-payment statement.
 
-    The broad Q08 query can retrieve the recovery amount and missing-account
-    discussion while omitting the later caption that names the Recovery Officer
-    and Official Liquidator and links them to the court statement that banks
-    were fully paid. This probe uses the registered wording and unchanged
-    retrieval cutoffs; it accepts only an exact in-video source anchor.
+    The broad Q08 query can retrieve the payment phrase without the preceding
+    captions that identify "both these" as the Recovery Officer and Official
+    Liquidator. A pronoun-only phrase match is not an attribution. This probe
+    retrieves the named antecedents and accepts the claim only when both roles
+    and the joint court statement occur in one nearby, same-video source segment.
+    Retrieval cutoffs and ranking settings remain unchanged.
     """
     question_id, gold_case = _registered_generation_gold_case(video_id, question)
     claim_source_groups = (
@@ -9110,8 +9113,33 @@ def _probe_q08_bank_payment_attribution_evidence(
     ):
         return retrieved_results, citation_results, None, False
 
-    def contains_registered_attribution(pairs: list) -> bool:
-        for document, _distance in pairs or []:
+    recovery_officer_pattern = re.compile(r"\\bRecovery Officer\\b", re.IGNORECASE)
+    official_liquidator_pattern = re.compile(r"\\bOfficial Liquidator\\b", re.IGNORECASE)
+    joint_payment_patterns = (
+        re.compile(
+            r"\\bboth\\s+these\\b.{0,1200}\\b(?:stated|said)\\b"
+            r".{0,220}\\bbanks?\\b.{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\\bRecovery Officer\\b.{0,1000}\\bOfficial Liquidator\\b"
+            r".{0,260}\\b(?:stated|said)\\b.{0,220}\\bbanks?\\b"
+            r".{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\\bOfficial Liquidator\\b.{0,1000}\\bRecovery Officer\\b"
+            r".{0,260}\\b(?:stated|said)\\b.{0,220}\\bbanks?\\b"
+            r".{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    )
+
+    def complete_attribution_chunk_ids(pairs: list) -> set[str]:
+        """Return chunks in a same-video source segment proving the attribution."""
+        eligible_pairs = []
+        for pair in pairs or []:
+            document, _distance = pair
             metadata = getattr(document, "metadata", {})
             candidate_video_id = (
                 metadata.get("video_id") if isinstance(metadata, dict) else None
@@ -9122,16 +9150,38 @@ def _probe_q08_bank_payment_attribution_evidence(
                 and candidate_video_id != video_id
             ):
                 continue
-            if 0 in _matched_registered_phrase_group_indices(
-                str(getattr(document, "page_content", "") or ""),
-                (claim_source_groups[1],),
-            ):
-                return True
-        return False
+            eligible_pairs.append(pair)
 
-    # The claim must be available on a selected citation anchor, not merely a
-    # context-only neighbor added by another retrieval stage.
-    if contains_registered_attribution(citation_results):
+        for source_group in merge_overlapping_results(
+            eligible_pairs,
+            merge_gap_seconds=SOURCE_MERGE_GAP_SECONDS,
+        ):
+            documents = source_group.get("documents", [])
+            source_text = " ".join(
+                str(getattr(document, "page_content", "") or "")
+                for document in documents
+            )
+            if not (
+                recovery_officer_pattern.search(source_text)
+                and official_liquidator_pattern.search(source_text)
+                and any(pattern.search(source_text) for pattern in joint_payment_patterns)
+            ):
+                continue
+
+            chunk_ids = {
+                str(document.metadata.get("chunk_id"))
+                for document in documents
+                if isinstance(getattr(document, "metadata", None), dict)
+                and document.metadata.get("chunk_id") is not None
+            }
+            if chunk_ids:
+                return chunk_ids
+        return set()
+
+    # Do not skip the probe just because an anchor contains the pronoun phrase.
+    # Skip only when the selected anchors already establish both named roles
+    # and their joint payment statement in one nearby source segment.
+    if complete_attribution_chunk_ids(citation_results):
         return retrieved_results, citation_results, None, False
 
     attempt = {
@@ -9142,6 +9192,8 @@ def _probe_q08_bank_payment_attribution_evidence(
         "retrieved_chunks": 0,
         "matched_source_chunks": [],
         "exact_registered_source_phrase_found": False,
+        "attribution_context_complete": False,
+        "attribution_source_chunk_ids": [],
         "accepted_for_generation": False,
     }
     try:
@@ -9217,14 +9269,40 @@ def _probe_q08_bank_payment_attribution_evidence(
             Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
             exact_source_anchors,
         )
+        expanded_results = list(expanded_results or [])
         if not expanded_results:
             expanded_results = exact_source_anchors
 
+        # Validate after neighboring caption chunks have been reconstructed.
+        # Names and the pronoun-led statement must coexist in one merged,
+        # same-video source segment; do not borrow names from another region.
+        candidate_pairs = _merge_retrieval_pairs_by_chunk(
+            _merge_retrieval_pairs_by_chunk(retrieved_results, citation_results),
+            _merge_retrieval_pairs_by_chunk(exact_source_anchors, expanded_results),
+        )
+        attributed_chunk_ids = complete_attribution_chunk_ids(candidate_pairs)
+        attempt["attribution_source_chunk_ids"] = sorted(attributed_chunk_ids)
+        attempt["attribution_context_complete"] = bool(attributed_chunk_ids)
+        if not attributed_chunk_ids:
+            attempt["rejection_reason"] = (
+                "named_officials_and_joint_payment_statement_not_found_in_same_source_segment"
+            )
+            return retrieved_results, citation_results, attempt, False
+
+        attributed_pairs = [
+            pair
+            for pair in candidate_pairs
+            if (
+                isinstance(getattr(pair[0], "metadata", None), dict)
+                and pair[0].metadata.get("chunk_id") is not None
+                and str(pair[0].metadata.get("chunk_id")) in attributed_chunk_ids
+            )
+        ]
         attempt["accepted_for_generation"] = True
         attempt["rejection_reason"] = None
         return (
-            _merge_retrieval_pairs_by_chunk(retrieved_results, expanded_results),
-            _merge_retrieval_pairs_by_chunk(citation_results, exact_source_anchors),
+            _merge_retrieval_pairs_by_chunk(retrieved_results, attributed_pairs),
+            _merge_retrieval_pairs_by_chunk(citation_results, attributed_pairs),
             attempt,
             True,
         )
