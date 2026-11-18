@@ -611,6 +611,11 @@ GOLD_EVIDENCE_CASES = (
                 "I still have not been provided a statement of account",
             ),
         ),
+        # Q08 has three independent source-backed claims. Reserve their
+        # timestamped caption rows through bounded context packing so the
+        # officials' bank-payment attribution cannot be displaced by the
+        # denser financial-recovery discussion.
+        generation_claims_require_context_reservation=True,
     ),
     GoldEvidenceCase(
         question_id="Q09",
