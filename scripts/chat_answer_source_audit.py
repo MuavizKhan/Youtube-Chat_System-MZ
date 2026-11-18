@@ -303,7 +303,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
         answer_requirements=(
             {"name": "global_financial_crisis", "pattern": r"\bglobal financial crisis\b"},
             {"name": "working_capital_cycle", "pattern": r"\bworking[- ]capital\b"},
-            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of (?:the )?oil bills?|unpaid bills?[^.!?]{0,45}oil invoices?|unpaid oil invoices?|oil invoices?[^.!?]{0,45}(?:were|remained) unpaid)\b"},
+            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of (?:the )?oil bills?|unpaid bills?[^.!?]{0,45}oil bills?|unpaid bills?[^.!?]{0,45}oil invoices?|unpaid oil invoices?|oil invoices?[^.!?]{0,45}(?:were|remained) unpaid)\b"},
             {"name": "airport_fees", "pattern": r"\bairport fees\b"},
             {"name": "landing_charges", "pattern": r"\blanding charges\b"},
             {"name": "cash_flow_challenge", "pattern": r"\bcash[- ]flow\b"},
