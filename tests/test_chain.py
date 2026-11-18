@@ -12351,6 +12351,69 @@ def test_q08_caption_metadata_cannot_drop_named_official_attribution_from_raw_so
 
 
 @pytest.mark.regression
+def test_q08_truncation_reserves_named_official_caption_rows_with_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+
+    caption_texts = [
+        "You have the Recovery Officer of the Debt Recovery Tribunal.",
+        "The Official Liquidator is also obliged to give an account to the court.",
+        (
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid."
+        ),
+    ]
+    caption_texts.extend(
+        f"The interviewer moves to an unrelated part of the interview about "
+        f"his business history and career topic number {index}."
+        for index in range(30)
+    )
+    document_text = " ".join(caption_texts)
+    document = doc(31201, 10000, 10200, document_text)
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 3120100 + index,
+            "start": 10000 + index * 5,
+            "end": 10004 + index * 5,
+            "text": text,
+        }
+        for index, text in enumerate(caption_texts)
+    ]
+
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 10000.0,
+            "end": 10200.0,
+            "distance": 0.2,
+        },
+        source_number=1,
+        gold_case=gold_case,
+    )
+    assert "Transcript caption segments in chronological order" in rendered
+
+    truncated = chain._truncate_formatted_source(
+        rendered,
+        1200,
+        question=question,
+        selection_question=question,
+        gold_case=gold_case,
+    )
+
+    assert len(truncated) <= 1200
+    assert "Recovery Officer" in truncated
+    assert "Official Liquidator" in truncated
+    assert "both these have stated in court" in truncated.casefold()
+    assert 1 in chain._matched_registered_generation_claim_group_indices(
+        truncated,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    )
+
+
+@pytest.mark.regression
 def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim():
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
