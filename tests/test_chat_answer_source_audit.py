@@ -2566,3 +2566,28 @@ def test_q08_requires_named_official_for_bank_payment_in_answer_claim():
     supported_checks = audit_module._claim_level_semantic_checks("Q08", supported)
     supported_by_name = {check["name"]: check["passed"] for check in supported_checks}
     assert supported_by_name["q08_banks_fully_paid_claim_attributed"] is True
+
+def test_q05_audit_accepts_live_unpaid_bills_oil_bills_wording():
+    case = next(case for case in PHASE11_0_AUDIT_CASES if case["id"] == "Q05")
+    live_wording = (
+        "The global financial crisis broke the working-capital cycle and "
+        "created a cash-flow crisis. The airline faced unpaid bills – the oil "
+        "bills, airport fees and landing charges."
+    )
+    live_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, live_wording)
+    }
+    assert live_checks["answer_requirement_oil_bill_nonpayment"] is True
+
+    generic_bills_without_oil = (
+        "The global financial crisis broke the working-capital cycle and "
+        "created a cash-flow crisis. The airline faced unpaid bills, airport "
+        "fees and landing charges."
+    )
+    generic_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, generic_bills_without_oil)
+    }
+    assert generic_checks["answer_requirement_oil_bill_nonpayment"] is False
+
