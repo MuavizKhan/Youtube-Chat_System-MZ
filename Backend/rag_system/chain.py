@@ -1936,12 +1936,15 @@ def _caption_segments_for_documents(
             claim_source_groups = (
                 getattr(gold_case, "generation_claim_source_groups", ()) or ()
             )
-            raw_claims = matched_source_phrase_group_indices(
+            claim_question_id = getattr(gold_case, "question_id", None)
+            raw_claims = _matched_registered_generation_claim_group_indices(
                 raw_group_text,
+                claim_question_id,
                 claim_source_groups,
             )
-            caption_claims = matched_source_phrase_group_indices(
+            caption_claims = _matched_registered_generation_claim_group_indices(
                 " ".join(segment["text"] for segment in ordered_segments),
+                claim_question_id,
                 claim_source_groups,
             )
             if not raw_claims.issubset(caption_claims):
@@ -2078,11 +2081,12 @@ def format_source_group(
     else:
         raw_gold_groups = _raw_gold_groups_for_documents(documents, gold_case)
         raw_generation_claim_groups = (
-            _matched_registered_phrase_group_indices(
+            _matched_registered_generation_claim_group_indices(
                 " ".join(
                     str(getattr(document, "page_content", "") or "")
                     for document in documents
                 ),
+                getattr(gold_case, "question_id", None),
                 getattr(gold_case, "generation_claim_source_groups", ()) or (),
             )
             if (
