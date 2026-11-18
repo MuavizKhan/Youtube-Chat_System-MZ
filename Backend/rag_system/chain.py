@@ -9113,24 +9113,24 @@ def _probe_q08_bank_payment_attribution_evidence(
     ):
         return retrieved_results, citation_results, None, False
 
-    recovery_officer_pattern = re.compile(r"\\bRecovery Officer\\b", re.IGNORECASE)
-    official_liquidator_pattern = re.compile(r"\\bOfficial Liquidator\\b", re.IGNORECASE)
+    recovery_officer_pattern = re.compile(r"\bRecovery Officer\b", re.IGNORECASE)
+    official_liquidator_pattern = re.compile(r"\bOfficial Liquidator\b", re.IGNORECASE)
     joint_payment_patterns = (
         re.compile(
-            r"\\bboth\\s+these\\b.{0,1200}\\b(?:stated|said)\\b"
-            r".{0,220}\\bbanks?\\b.{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
+            r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
             re.IGNORECASE | re.DOTALL,
         ),
         re.compile(
-            r"\\bRecovery Officer\\b.{0,1000}\\bOfficial Liquidator\\b"
-            r".{0,260}\\b(?:stated|said)\\b.{0,220}\\bbanks?\\b"
-            r".{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
+            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
             re.IGNORECASE | re.DOTALL,
         ),
         re.compile(
-            r"\\bOfficial Liquidator\\b.{0,1000}\\bRecovery Officer\\b"
-            r".{0,260}\\b(?:stated|said)\\b.{0,220}\\bbanks?\\b"
-            r".{0,120}\\b(?:fully\\s+paid|paid\\s+in\\s+full)\\b",
+            r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
+            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
             re.IGNORECASE | re.DOTALL,
         ),
     )
