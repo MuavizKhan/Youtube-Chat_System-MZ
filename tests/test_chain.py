@@ -11192,6 +11192,146 @@ def test_q08_retrieval_probes_exact_joint_official_bank_payment_caption(monkeypa
 
 
 @pytest.mark.unit
+def test_q08_pronoun_only_anchor_triggers_probe_and_reserves_named_officials(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    base = doc(
+        30201,
+        1000,
+        1010,
+        "The Ministry of Finance report shows 14,100 crores recovered.",
+    )
+    pronoun_statement = doc(
+        30202,
+        1055,
+        1065,
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid.",
+    )
+    named_officials = doc(
+        30203,
+        1045,
+        1055,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court.",
+    )
+    for document in (base, pronoun_statement, named_officials):
+        document.metadata["video_id"] = video_id
+
+    base_pair = (base, 0.2)
+    pronoun_pair = (pronoun_statement, 0.2)
+    officials_pair = (named_officials, 0.25)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            # The initial anchors contain the payment phrase but not its
+            # antecedents, so the dedicated attribution probe must still run.
+            return (
+                [base_pair, pronoun_pair],
+                [base_pair, pronoun_pair],
+                {"weak_native_query_rejected": False},
+            )
+        return [pronoun_pair], [pronoun_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors))
+            or [officials_pair, pronoun_pair]
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id=video_id,
+    )
+
+    assert [call["query"] for call in calls] == [
+        question,
+        chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+    ]
+    assert "Recovery Officer" in chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY
+    assert "Official Liquidator" in chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is True
+    assert trace["attempts"][-1]["attribution_context_complete"] is True
+    assert set(trace["attempts"][-1]["attribution_source_chunk_ids"]) == {
+        "30202",
+        "30203",
+    }
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {
+        30201,
+        30202,
+        30203,
+    }
+    assert set(trace["citation_chunk_ids"]) == {30201, 30202, 30203}
+    assert expansion_calls == [
+        (chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY, [pronoun_pair])
+    ]
+
+
+@pytest.mark.unit
+def test_q08_probe_rejects_pronoun_only_payment_statement_without_named_context(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    base = doc(30211, 1000, 1010, "The Ministry report shows 14,100 crores recovered.")
+    pronoun_statement = doc(
+        30212,
+        1055,
+        1065,
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid.",
+    )
+    for document in (base, pronoun_statement):
+        document.metadata["video_id"] = video_id
+    base_pair = (base, 0.2)
+    pronoun_pair = (pronoun_statement, 0.2)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return (
+                [base_pair, pronoun_pair],
+                [base_pair, pronoun_pair],
+                {"weak_native_query_rejected": False},
+            )
+        return [pronoun_pair], [pronoun_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: [pronoun_pair],
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id=video_id,
+    )
+
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is False
+    assert trace["registered_q08_bank_payment_attribution_probe_rejection_reason"] == (
+        "named_officials_and_joint_payment_statement_not_found_in_same_source_segment"
+    )
+    assert trace["attempts"][-1]["attribution_context_complete"] is False
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {30211, 30212}
+    assert trace["citation_chunk_ids"] == [30211, 30212]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("source_text", "distance", "candidate_video_id", "expected_reason"),
     [
