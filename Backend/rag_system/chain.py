@@ -2130,7 +2130,7 @@ def format_source_group(
             transcript_text = merge_overlapping_text(transcript_parts)
             transcript_heading = "Transcript:\n"
 
-    return (
+    formatted_source = (
         f"[SOURCE {source_number}]\n"
         f"Video ID: {video_id}\n"
         f"Timestamp: "
@@ -2139,6 +2139,66 @@ def format_source_group(
         f"{transcript_heading}"
         f"{transcript_text}"
     )
+
+    # Validate Q08 attribution against the exact formatted source block that
+    # downstream context packing and generation will inspect. Caption metadata
+    # can contain physical line breaks or source-like delimiters that are not
+    # present in the original indexed chunk text. The metadata-level check above
+    # is therefore not sufficient: require the formatter's output to preserve
+    # every registered Q08 claim that the original retrieved source proves.
+    if (
+        gold_case is not None
+        and getattr(gold_case, "question_id", None) == "Q08"
+        and getattr(
+            gold_case,
+            "generation_claims_require_context_reservation",
+            False,
+        )
+    ):
+        claim_source_groups = tuple(
+            getattr(gold_case, "generation_claim_source_groups", ()) or ()
+        )
+        raw_group_text = " ".join(
+            str(getattr(document, "page_content", "") or "").strip()
+            for document in documents
+        )
+        raw_claim_groups = _matched_registered_generation_claim_group_indices(
+            raw_group_text,
+            "Q08",
+            claim_source_groups,
+        )
+        formatted_claim_groups = _matched_registered_generation_claim_group_indices(
+            formatted_source,
+            "Q08",
+            claim_source_groups,
+        )
+        if not raw_claim_groups.issubset(formatted_claim_groups):
+            raw_chunk_rows = _format_raw_chunk_caption_rows(
+                documents,
+                fallback_start=start,
+                fallback_end=end,
+            )
+            if raw_chunk_rows:
+                logger.warning(
+                    "Q08 caption formatting lost source-local registered claims; "
+                    "using original retrieved chunks source_number=%s "
+                    "raw_claim_groups=%s formatted_claim_groups=%s",
+                    source_number,
+                    sorted(raw_claim_groups),
+                    sorted(formatted_claim_groups),
+                )
+                formatted_source = (
+                    f"[SOURCE {source_number}]\n"
+                    f"Video ID: {video_id}\n"
+                    f"Timestamp: "
+                    f"{format_timestamp(start)} - "
+                    f"{format_timestamp(end)}\n"
+                    "Original retrieved transcript chunks in chronological order. "
+                    "Each timestamped row is one complete indexed chunk:\n"
+                    + "\n".join(raw_chunk_rows)
+                )
+
+    return formatted_source
 
 
 

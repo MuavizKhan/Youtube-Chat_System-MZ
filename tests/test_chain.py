@@ -12351,6 +12351,62 @@ def test_q08_caption_metadata_cannot_drop_named_official_attribution_from_raw_so
 
 
 @pytest.mark.regression
+def test_q08_format_source_group_falls_back_when_caption_rendering_splits_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    raw_text = (
+        "The government of India Ministry of Finance annual report acknowledged "
+        "14,100 crores recovered from me. You have the Recovery Officer of the "
+        "Debt Recovery Tribunal. The Official Liquidator is also obliged to give "
+        "an account to the court. Both these have stated in court in judicial "
+        "proceedings that the banks have been fully paid. Despite 15 reminders "
+        "the same banks have not given me a statement of account."
+    )
+    document = doc(31301, 11000, 11030, raw_text)
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 3130100 + index,
+            "start": 11000 + index * 4,
+            "end": 11003 + index * 4,
+            "text": text,
+        }
+        for index, text in enumerate([
+            "The Ministry of Finance annual report acknowledged 14,100 crores recovered from me.",
+            "You have the Recovery Officer of the Debt Recovery Tribunal.",
+            "The Official Liquidator is also obliged to give an account to the court.",
+            # This physical marker line is a delimiter collision in the rendered
+            # source format, not a real boundary in the original indexed chunk.
+            "The interviewer displays a source label.\n[SOURCE 99]",
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            "Despite 15 reminders the same banks have not given me a statement of account.",
+        ])
+    ]
+
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 11000.0,
+            "end": 11030.0,
+            "distance": 0.2,
+        },
+        source_number=2,
+        gold_case=gold_case,
+    )
+
+    assert "Original retrieved transcript chunks in chronological order" in rendered
+    assert "Recovery Officer" in rendered
+    assert "Official Liquidator" in rendered
+    assert "both these have stated in court" in rendered.casefold()
+    assert chain._matched_registered_generation_claim_group_indices(
+        rendered,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+
+@pytest.mark.regression
 def test_q08_truncation_reserves_named_official_caption_rows_with_payment_claim():
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
