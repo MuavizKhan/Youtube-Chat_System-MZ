@@ -12175,6 +12175,7 @@ def test_q08_context_does_not_fill_missing_official_attribution_claim():
     report = doc(
         2301,
         8500,
+        8504,
         "The government of India ministry of finance has published a report "
         "their annual report in which they have acknowledged 14,100 crores "
         "recovered from me.",
@@ -12182,6 +12183,7 @@ def test_q08_context_does_not_fill_missing_official_attribution_claim():
     statement = doc(
         2302,
         8700,
+        8704,
         "Despite 15 reminders the same banks have not given me a statement "
         "of account.",
     )
