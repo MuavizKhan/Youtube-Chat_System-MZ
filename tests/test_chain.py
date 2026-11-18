@@ -12355,12 +12355,13 @@ def test_q08_format_source_group_falls_back_when_caption_rendering_splits_attrib
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
     raw_text = (
-        "The government of India Ministry of Finance annual report acknowledged "
-        "14,100 crores recovered from me. You have the Recovery Officer of the "
-        "Debt Recovery Tribunal. The Official Liquidator is also obliged to give "
-        "an account to the court. Both these have stated in court in judicial "
-        "proceedings that the banks have been fully paid. Despite 15 reminders "
-        "the same banks have not given me a statement of account."
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me. You have the Recovery Officer of the Debt Recovery "
+        "Tribunal. The Official Liquidator is also obliged to give an account "
+        "to the court. Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid. Despite 15 reminders the same "
+        "banks have not given me a statement of account."
     )
     document = doc(31301, 11000, 11030, raw_text)
     document.metadata["video_id"] = video_id
@@ -12372,7 +12373,7 @@ def test_q08_format_source_group_falls_back_when_caption_rendering_splits_attrib
             "text": text,
         }
         for index, text in enumerate([
-            "The Ministry of Finance annual report acknowledged 14,100 crores recovered from me.",
+            "The government of India ministry of finance has published a report their annual report in which they have acknowledged 14,100 crores recovered from me.",
             "You have the Recovery Officer of the Debt Recovery Tribunal.",
             "The Official Liquidator is also obliged to give an account to the court.",
             # This physical marker line is a delimiter collision in the rendered
