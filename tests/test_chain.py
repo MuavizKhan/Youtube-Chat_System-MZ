@@ -12359,8 +12359,9 @@ def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim()
         31001,
         8500,
         8505,
-        "The government of India ministry of finance published a report "
-        "acknowledging 14,100 crores recovered.",
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me.",
     )
     named_officials_only = doc(
         31002,
