@@ -12320,15 +12320,22 @@ def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim()
         "The government of India ministry of finance published a report "
         "acknowledging 14,100 crores recovered.",
     )
-    pronoun_payment = doc(
+    named_officials_only = doc(
         31002,
+        8550,
+        8555,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court.",
+    )
+    pronoun_payment = doc(
+        31003,
         8600,
         8605,
         "Both these have stated in court in judicial proceedings that the "
         "banks have been fully paid.",
     )
     missing_statement = doc(
-        31003,
+        31004,
         8700,
         8705,
         "Despite 15 reminders the same banks have not given me a statement "
@@ -12336,7 +12343,9 @@ def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim()
     )
 
     source_groups = []
-    for index, document in enumerate((report, pronoun_payment, missing_statement)):
+    for index, document in enumerate(
+        (report, named_officials_only, pronoun_payment, missing_statement)
+    ):
         document.metadata["video_id"] = video_id
         source_groups.append({
             "documents": [document],
