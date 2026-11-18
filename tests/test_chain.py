@@ -12062,3 +12062,149 @@ def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(mo
     ] == list(range(6))
     assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == []
 
+@pytest.mark.regression
+def test_q08_context_reserves_all_three_registered_claims_within_8000_chars():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    assert gold_case.generation_claims_require_context_reservation is True
+
+    def make_document(chunk_id, start, raw_text, metadata_text):
+        document = doc(chunk_id, start, start + 4, raw_text)
+        document.metadata["video_id"] = video_id
+        document.metadata["transcript_segments"] = [{
+            "segment_id": chunk_id * 100,
+            "start": start,
+            "end": start + 3.5,
+            "text": metadata_text,
+        }]
+        return document
+
+    claim_documents = [
+        make_document(
+            2100,
+            8500,
+            "The government of India ministry of finance has published a report "
+            "their annual report in which they have acknowledged 14,100 crores "
+            "recovered from me.",
+            "The annual report discusses recovered funds.",
+        ),
+        make_document(
+            2101,
+            8600,
+            "The Recovery Officer and Official Liquidator are referenced here. "
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid.",
+            "The banks have been fully paid.",
+        ),
+        make_document(
+            2102,
+            8700,
+            "Despite 15 reminders the same banks have not given me a statement "
+            "of account.",
+            "A statement of account was discussed.",
+        ),
+    ]
+
+    source_groups = [
+        {
+            "documents": [document],
+            "start": float(document.metadata["start"]),
+            "end": float(document.metadata["end"]),
+            "distance": 0.8 + index * 0.05,
+        }
+        for index, document in enumerate(claim_documents)
+    ]
+
+    # Six closer but unrelated source groups force the bounded packer to
+    # reserve the three registered Q08 claim-bearing groups explicitly.
+    filler_text = (
+        "The interviewer then discusses an unrelated subject in the interview. "
+        * 55
+    )
+    for index in range(6):
+        start = 20000 + index * 10
+        filler = make_document(
+            2200 + index,
+            start,
+            filler_text,
+            filler_text,
+        )
+        source_groups.append({
+            "documents": [filler],
+            "start": float(start),
+            "end": float(start + 4),
+            "distance": 0.01 + index * 0.001,
+        })
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    context = result["context"]
+    diagnostics = result["diagnostics"]
+
+    assert len(context) <= 8000
+    assert "14,100 crores" in context
+    assert "Recovery Officer" in context
+    assert "Official Liquidator" in context
+    assert "both these have stated in court" in context.casefold()
+    assert "statement of account" in context.casefold()
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_claim_context_complete"] is True
+    assert diagnostics["groups_available"] == 9
+    assert diagnostics["groups_included"] <= 8
+    claim_diagnostics = diagnostics["gold_evidence_source_groups"]
+    assert all(
+        item["raw_chunk_fallback_used"]
+        for item in claim_diagnostics
+        if item["source_group_index"] in (1, 2, 3)
+    )
+
+
+@pytest.mark.regression
+def test_q08_context_does_not_fill_missing_official_attribution_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    report = doc(
+        2301,
+        8500,
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me.",
+    )
+    statement = doc(
+        2302,
+        8700,
+        "Despite 15 reminders the same banks have not given me a statement "
+        "of account.",
+    )
+    for document in (report, statement):
+        document.metadata["video_id"] = video_id
+
+    result = chain.build_generation_context(
+        [
+            {"documents": [report], "start": 8500, "end": 8504, "distance": 0.2},
+            {"documents": [statement], "start": 8700, "end": 8704, "distance": 0.3},
+        ],
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    diagnostics = result["diagnostics"]
+
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == [1]
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == [1]
+    assert diagnostics["generation_claim_context_complete"] is False
+    assert "Recovery Officer" not in result["context"]
+    assert "Official Liquidator" not in result["context"]
+
