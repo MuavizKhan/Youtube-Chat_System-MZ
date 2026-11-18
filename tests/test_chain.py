@@ -12309,6 +12309,59 @@ def test_q08_context_reserves_all_three_registered_claims_within_8000_chars():
 
 
 @pytest.mark.regression
+def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+
+    report = doc(
+        31001,
+        8500,
+        8505,
+        "The government of India ministry of finance published a report "
+        "acknowledging 14,100 crores recovered.",
+    )
+    pronoun_payment = doc(
+        31002,
+        8600,
+        8605,
+        "Both these have stated in court in judicial proceedings that the "
+        "banks have been fully paid.",
+    )
+    missing_statement = doc(
+        31003,
+        8700,
+        8705,
+        "Despite 15 reminders the same banks have not given me a statement "
+        "of account.",
+    )
+
+    source_groups = []
+    for index, document in enumerate((report, pronoun_payment, missing_statement)):
+        document.metadata["video_id"] = video_id
+        source_groups.append({
+            "documents": [document],
+            "start": float(document.metadata["start"]),
+            "end": float(document.metadata["end"]),
+            "distance": 0.2 + index * 0.1,
+        })
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    diagnostics = result["diagnostics"]
+
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == [1]
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == [1]
+    assert diagnostics["generation_claim_context_complete"] is False
+
+
+@pytest.mark.regression
 def test_q08_context_does_not_fill_missing_official_attribution_claim():
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
