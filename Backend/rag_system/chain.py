@@ -3145,6 +3145,61 @@ def _matched_registered_phrase_group_indices(
     return matched_source_phrase_group_indices(text, phrase_groups)
 
 
+def _has_q08_named_bank_payment_attribution(text: str) -> bool:
+    """Require both named officials and their joint fully-paid statement in one source."""
+    source_text = text or ""
+    has_recovery_officer = re.search(
+        r"\bRecovery Officer\b",
+        source_text,
+        re.IGNORECASE,
+    )
+    has_official_liquidator = re.search(
+        r"\bOfficial Liquidator\b",
+        source_text,
+        re.IGNORECASE,
+    )
+    joint_payment_patterns = (
+        re.compile(
+            r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
+            r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
+            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        re.compile(
+            r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
+            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
+            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    )
+    return bool(
+        has_recovery_officer
+        and has_official_liquidator
+        and any(pattern.search(source_text) for pattern in joint_payment_patterns)
+    )
+
+
+def _matched_registered_generation_claim_group_indices(
+    text: str,
+    question_id: str | None,
+    phrase_groups: tuple[tuple[str, ...], ...],
+) -> set[int]:
+    """Match answer claims, with Q08's named-official attribution as an extra gate."""
+    matched = _matched_registered_phrase_group_indices(text, phrase_groups)
+    if (
+        question_id == "Q08"
+        and 1 in matched
+        and not _has_q08_named_bank_payment_attribution(text)
+    ):
+        matched.discard(1)
+    return matched
+
+
 def _build_registered_gold_answer_fallback(
     question: str,
     context: str,
@@ -4147,7 +4202,11 @@ def _build_generation_repair_diagnostics(
         and all(answer_claim_groups)
     )
     prompt_source_claim_indices = (
-        _matched_registered_phrase_group_indices(context or "", source_claim_groups)
+        _matched_registered_generation_claim_group_indices(
+            context or "",
+            question_id,
+            source_claim_groups,
+        )
         if claim_contract_available
         else set()
     )
@@ -4542,7 +4601,11 @@ def _gold_evidence_repair_instruction(
             else required_prompt_coverage
         )
         required_claim_count = math.ceil(len(source_claim_groups) * float(required_claim_coverage))
-        source_claim_indices = _matched_registered_phrase_group_indices(context_text, source_claim_groups)
+        source_claim_indices = _matched_registered_generation_claim_group_indices(
+            context_text,
+            question_id,
+            source_claim_groups,
+        )
         # Only repair missing assertions when the prompt holds enough registered
         # evidence for the configured answer-coverage contract.
         if len(source_claim_indices) >= required_claim_count:
@@ -4941,25 +5004,28 @@ def build_generation_context(
                 )
             ) if registered_fallback_source_groups else []
             raw_claim_groups = sorted(
-                _matched_registered_phrase_group_indices(
+                _matched_registered_generation_claim_group_indices(
                     " ".join(
                         str(getattr(document, "page_content", "") or "")
                         for document in source_documents
                     ),
+                    gold_question_id,
                     registered_generation_claim_source_groups,
                 )
             ) if registered_generation_claim_source_groups else []
             metadata_claim_groups = (
-                sorted(_matched_registered_phrase_group_indices(
+                sorted(_matched_registered_generation_claim_group_indices(
                     " ".join(segment["text"] for segment in metadata_segments),
+                    gold_question_id,
                     registered_generation_claim_source_groups,
                 ))
                 if metadata_segments is not None and registered_generation_claim_source_groups
                 else []
             )
             formatted_claim_groups = (
-                sorted(_matched_registered_phrase_group_indices(
+                sorted(_matched_registered_generation_claim_group_indices(
                     rendered,
+                    gold_question_id,
                     registered_generation_claim_source_groups,
                 ))
                 if registered_generation_claim_source_groups
@@ -5034,8 +5100,9 @@ def build_generation_context(
                 else set()
             ),
             "generation_claim_group_indexes": (
-                _matched_registered_phrase_group_indices(
+                _matched_registered_generation_claim_group_indices(
                     rendered,
+                    gold_question_id,
                     registered_generation_claim_source_groups,
                 )
                 if registered_generation_claim_source_groups
@@ -5121,8 +5188,9 @@ def build_generation_context(
             included_claim_groups: set[int] = set()
             for text_value in included_texts:
                 included_claim_groups.update(
-                    _matched_registered_phrase_group_indices(
+                    _matched_registered_generation_claim_group_indices(
                         text_value,
+                        gold_question_id,
                         registered_generation_claim_source_groups,
                     )
                 )
@@ -9113,28 +9181,6 @@ def _probe_q08_bank_payment_attribution_evidence(
     ):
         return retrieved_results, citation_results, None, False
 
-    recovery_officer_pattern = re.compile(r"\bRecovery Officer\b", re.IGNORECASE)
-    official_liquidator_pattern = re.compile(r"\bOfficial Liquidator\b", re.IGNORECASE)
-    joint_payment_patterns = (
-        re.compile(
-            r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
-            r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-            re.IGNORECASE | re.DOTALL,
-        ),
-        re.compile(
-            r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
-            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
-            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-            re.IGNORECASE | re.DOTALL,
-        ),
-        re.compile(
-            r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
-            r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
-            r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-            re.IGNORECASE | re.DOTALL,
-        ),
-    )
-
     def complete_attribution_chunk_ids(pairs: list) -> set[str]:
         """Return chunks in a same-video source segment proving the attribution."""
         eligible_pairs = []
@@ -9144,11 +9190,7 @@ def _probe_q08_bank_payment_attribution_evidence(
             candidate_video_id = (
                 metadata.get("video_id") if isinstance(metadata, dict) else None
             )
-            if (
-                isinstance(candidate_video_id, str)
-                and candidate_video_id
-                and candidate_video_id != video_id
-            ):
+            if video_id and candidate_video_id != video_id:
                 continue
             eligible_pairs.append(pair)
 
@@ -9161,11 +9203,7 @@ def _probe_q08_bank_payment_attribution_evidence(
                 str(getattr(document, "page_content", "") or "")
                 for document in documents
             )
-            if not (
-                recovery_officer_pattern.search(source_text)
-                and official_liquidator_pattern.search(source_text)
-                and any(pattern.search(source_text) for pattern in joint_payment_patterns)
-            ):
+            if not _has_q08_named_bank_payment_attribution(source_text):
                 continue
 
             chunk_ids = {
