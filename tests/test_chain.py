@@ -11457,6 +11457,56 @@ def test_q08_financial_fallback_uses_same_source_block_for_joint_official_attrib
     ]
 
 
+@pytest.mark.regression
+def test_q08_financial_fallback_uses_prompt_visible_context_after_formatter_guard(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    prompt_context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal.\n"
+        "- [00:14–00:18] The official liquidator is also obliged to give an account to the court.\n"
+        "- [00:18–00:28] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid yet the banks have not submitted "
+        "a statement of account."
+    )
+
+    def reject_rebuilt_context(_source_groups):
+        pytest.fail(
+            "Q08 must reuse its source-validated prompt context instead of "
+            "rebuilding a differently formatted context."
+        )
+
+    monkeypatch.setattr(chain, "build_context", reject_rebuilt_context)
+    selected_context, context_source = chain._select_financial_fallback_context(
+        question_id="Q08",
+        source_groups=[{"documents": []}],
+        prompt_context=prompt_context,
+    )
+
+    assert selected_context == prompt_context
+    assert context_source == "prompt_visible_generation_context"
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=selected_context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is not None
+    assert "14,100" in answer
+    assert "Ministry of Finance" in answer
+    assert "Recovery Officer and Official Liquidator" in answer
+    assert "banks had been fully paid" in answer
+    assert "not submitted a statement of account" in answer
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
 @pytest.mark.unit
 def test_q08_financial_fallback_does_not_borrow_official_attribution_from_another_source():
     question = "What does Vijay Mallya say about banks and the recovery of money?"

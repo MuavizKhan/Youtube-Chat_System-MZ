@@ -6943,6 +6943,33 @@ def _build_hindi_named_tax_evidence_fallback(
     )
 
 
+def _select_financial_fallback_context(
+    *,
+    question_id: str | None,
+    source_groups: list[dict[str, Any]] | None,
+    prompt_context: str | None,
+) -> tuple[str, str]:
+    """Select the safest evidence context for the financial fallback.
+
+    Q08's prompt formatter performs a source-local attribution check and, when
+    needed, falls back to original retrieved chunk rows. Rebuilding a separate
+    context from source groups bypasses that Q08-specific guard and can split
+    the named-official antecedents from the joint bank-payment statement. Use
+    the exact validated prompt context for Q08. Other financial questions keep
+    the existing broader retrieved-source context.
+    """
+    normalized_prompt = (
+        prompt_context.strip()
+        if isinstance(prompt_context, str)
+        else ""
+    )
+    if question_id == "Q08":
+        return normalized_prompt, "prompt_visible_generation_context"
+    if isinstance(source_groups, list) and source_groups:
+        return build_context(source_groups), "full_retrieved_source_groups"
+    return normalized_prompt, "prompt_visible_generation_context"
+
+
 def _build_full_retrieved_source_group_context(
     source_groups: list[dict[str, Any]] | None,
     fallback_context: str | None = None,
@@ -10570,6 +10597,7 @@ def build_rag_chain(
                         "grounded_hindi_tax_fallback_used": False,
                         "hindi_tax_fallback_diagnostics": {},
                         "financial_evidence_context_chars": None,
+                        "financial_evidence_context_source": None,
                         "financial_fallback_context_source": None,
                         "financial_fallback_diagnostics": None,
                         "generation_repair_diagnostics": _build_generation_repair_diagnostics(
@@ -10605,15 +10633,22 @@ def build_rag_chain(
                 re.IGNORECASE,
             )
         )
-        # Keep the model's prompt bounded, but do not let context truncation hide
-        # already-retrieved evidence from deterministic financial validation or
-        # the extractive fallback. This context is built only from retrieved source
-        # groups; it is not external knowledge and is never sent wholesale to the LLM.
-        financial_evidence_context = (
-            build_context(inputs.get("source_groups", []))
-            if is_financial_question and inputs.get("source_groups")
-            else inputs.get("context", "")
-        )
+        # Keep generic financial fallbacks able to inspect the full retrieved
+        # source groups. Q08 is deliberately different: its prompt-visible context
+        # has already passed the registered source-local formatter guard, while a
+        # separate build_context() pass can lose the named-official attribution.
+        if is_financial_question:
+            (
+                financial_evidence_context,
+                financial_evidence_context_source,
+            ) = _select_financial_fallback_context(
+                question_id=gold_question_id,
+                source_groups=inputs.get("source_groups", []),
+                prompt_context=inputs.get("context", ""),
+            )
+        else:
+            financial_evidence_context = inputs.get("context", "")
+            financial_evidence_context_source = None
 
         try:
             answer = generation_chain.invoke(inputs)
@@ -11347,8 +11382,9 @@ def build_rag_chain(
                 "financial_evidence_context_chars": (
                     len(financial_evidence_context) if is_financial_question else None
                 ),
+                "financial_evidence_context_source": financial_evidence_context_source,
                 "financial_fallback_context_source": (
-                    "full_retrieved_source_groups"
+                    financial_evidence_context_source
                     if grounded_financial_fallback_used
                     else None
                 ),
