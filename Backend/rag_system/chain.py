@@ -3146,18 +3146,8 @@ def _matched_registered_phrase_group_indices(
 
 
 def _has_q08_named_bank_payment_attribution(text: str) -> bool:
-    """Require both named officials and their joint fully-paid statement in one source."""
+    """Require both named officials and their joint fully-paid statement in one source block."""
     source_text = text or ""
-    has_recovery_officer = re.search(
-        r"\bRecovery Officer\b",
-        source_text,
-        re.IGNORECASE,
-    )
-    has_official_liquidator = re.search(
-        r"\bOfficial Liquidator\b",
-        source_text,
-        re.IGNORECASE,
-    )
     joint_payment_patterns = (
         re.compile(
             r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
@@ -3177,11 +3167,20 @@ def _has_q08_named_bank_payment_attribution(text: str) -> bool:
             re.IGNORECASE | re.DOTALL,
         ),
     )
-    return bool(
-        has_recovery_officer
-        and has_official_liquidator
-        and any(pattern.search(source_text) for pattern in joint_payment_patterns)
+    # build_generation_context may pass multiple [SOURCE n] blocks joined in
+    # one string. Keep the antecedent and its payment statement source-local.
+    source_blocks = re.split(
+        r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
+        source_text,
     )
+    for source_block in source_blocks:
+        if (
+            re.search(r"\bRecovery Officer\b", source_block, re.IGNORECASE)
+            and re.search(r"\bOfficial Liquidator\b", source_block, re.IGNORECASE)
+            and any(pattern.search(source_block) for pattern in joint_payment_patterns)
+        ):
+            return True
+    return False
 
 
 def _matched_registered_generation_claim_group_indices(
