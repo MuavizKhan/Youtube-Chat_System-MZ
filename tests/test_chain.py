@@ -12309,6 +12309,48 @@ def test_q08_context_reserves_all_three_registered_claims_within_8000_chars():
 
 
 @pytest.mark.regression
+def test_q08_caption_metadata_cannot_drop_named_official_attribution_from_raw_source():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    document = doc(
+        31101,
+        10000,
+        10010,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court. "
+        "Both these have stated in court in judicial proceedings that the "
+        "banks have been fully paid.",
+    )
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [{
+        "segment_id": 3110100,
+        "start": 10000,
+        "end": 10010,
+        "text": (
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid."
+        ),
+    }]
+
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 10000.0,
+            "end": 10010.0,
+            "distance": 0.2,
+        },
+        source_number=1,
+        gold_case=gold_case,
+    )
+
+    assert "Original retrieved transcript chunks" in rendered
+    assert "Recovery Officer" in rendered
+    assert "Official Liquidator" in rendered
+    assert "both these have stated in court" in rendered.casefold()
+
+
+@pytest.mark.regression
 def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim():
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
