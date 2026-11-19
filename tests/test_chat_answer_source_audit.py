@@ -2580,6 +2580,33 @@ def test_q05_audit_accepts_live_unpaid_bills_oil_bills_wording():
     }
     assert live_checks["answer_requirement_oil_bill_nonpayment"] is True
 
+    # The full 43-case run produced this semantically equivalent construction:
+    # the oil bills, airport fees and landing charges are the collective
+    # subject of "went unpaid", rather than the phrase "unpaid oil bills".
+    went_unpaid_collective = (
+        "The global financial crisis broke the working-capital cycle and "
+        "created a cash-flow nightmare: oil bills, airport fees and landing "
+        "charges went unpaid."
+    )
+    went_unpaid_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, went_unpaid_collective)
+    }
+    assert went_unpaid_checks["answer_requirement_oil_bill_nonpayment"] is True
+
+    # Do not let a later unpaid-fees clause misattribute non-payment to oil
+    # bills that the answer explicitly says were paid.
+    paid_oil_bills = (
+        "The global financial crisis broke the working-capital cycle and "
+        "created a cash-flow crisis. Oil bills were paid, but airport fees "
+        "and landing charges went unpaid."
+    )
+    paid_oil_checks = {
+        check["name"]: check["passed"]
+        for check in _answer_quality_checks(case, paid_oil_bills)
+    }
+    assert paid_oil_checks["answer_requirement_oil_bill_nonpayment"] is False
+
     generic_bills_without_oil = (
         "The global financial crisis broke the working-capital cycle and "
         "created a cash-flow crisis. The airline faced unpaid bills, airport "
