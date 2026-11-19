@@ -12460,6 +12460,34 @@ def test_q08_format_source_group_falls_back_when_caption_rendering_splits_attrib
         gold_case.generation_claim_source_groups,
     ) == {0, 1, 2}
 
+    # A full-source fallback must use the same Q08-aware formatter. Rebuilding
+    # without gold_case can discard the named-official antecedents.
+    source_group = {
+        "documents": [document],
+        "start": 11000.0,
+        "end": 11030.0,
+        "distance": 0.2,
+    }
+    rebuilt_context = chain.build_context([source_group], gold_case=gold_case)
+    assert "Original retrieved transcript chunks in chronological order" in rebuilt_context
+    assert chain._matched_registered_generation_claim_group_indices(
+        rebuilt_context,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+    fallback_diagnostics = {}
+    fallback_answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=rebuilt_context,
+        diagnostics=fallback_diagnostics,
+        video_id=video_id,
+    )
+    assert fallback_answer is not None
+    assert fallback_diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
 
 @pytest.mark.regression
 def test_q08_truncation_reserves_named_official_caption_rows_with_payment_claim():
