@@ -11412,9 +11412,89 @@ def build_rag_chain(
             included_answer_groups = set(
                 context_budget.get("gold_evidence_groups_included", [])
             )
+            fallback_selection_reason = None
             if len(answer_alias_groups & included_answer_groups) < required_answer_groups:
+                fallback_selection_reason = "registered_gold_group_coverage_incomplete"
+
+            q03_fallback_selection_diagnostics = None
+            if _question_id == "Q03":
+                # Q03 has two independent answer contracts: six named entities
+                # and three airline-history relationships. The broad legacy
+                # gold groups allow any one alias per category, so they can all
+                # pass even when the airline history is missing from the answer.
+                q03_answer_claim_groups = tuple(
+                    getattr(registered_case, "generation_claim_answer_groups", ()) or ()
+                )
+                q03_semantic_answer_groups = tuple(
+                    getattr(registered_case, "generation_semantic_answer_groups", ()) or ()
+                )
+                q03_answer_claim_indices = _matched_registered_phrase_group_indices(
+                    answer or "",
+                    q03_answer_claim_groups,
+                )
+                q03_semantic_answer_indices = _matched_registered_phrase_group_indices(
+                    answer or "",
+                    q03_semantic_answer_groups,
+                )
+                q03_required_claim_indices = set(range(len(q03_answer_claim_groups)))
+                q03_required_semantic_indices = set(
+                    range(len(q03_semantic_answer_groups))
+                )
+                q03_missing_claim_indices = sorted(
+                    q03_required_claim_indices - q03_answer_claim_indices
+                )
+                q03_missing_semantic_indices = sorted(
+                    q03_required_semantic_indices - q03_semantic_answer_indices
+                )
+                q03_entity_distinction_passed = _has_q03_entity_distinction(
+                    answer or ""
+                )
+                q03_airline_relationship_passed = (
+                    _has_q03_air_deccan_kingfisher_red_relationship(answer or "")
+                )
+                q03_contract_complete = (
+                    len(q03_answer_claim_groups) == 6
+                    and len(q03_semantic_answer_groups) == 3
+                    and not q03_missing_claim_indices
+                    and not q03_missing_semantic_indices
+                    and q03_entity_distinction_passed
+                    and q03_airline_relationship_passed
+                )
+                q03_fallback_selection_diagnostics = {
+                    "required_answer_claim_indices": sorted(q03_required_claim_indices),
+                    "matched_answer_claim_indices": sorted(q03_answer_claim_indices),
+                    "missing_answer_claim_indices": q03_missing_claim_indices,
+                    "required_semantic_answer_indices": sorted(q03_required_semantic_indices),
+                    "matched_semantic_answer_indices": sorted(q03_semantic_answer_indices),
+                    "missing_semantic_answer_indices": q03_missing_semantic_indices,
+                    "entity_distinction_passed": q03_entity_distinction_passed,
+                    "airline_relationship_passed": q03_airline_relationship_passed,
+                }
+                if not q03_contract_complete:
+                    fallback_selection_reason = (
+                        "q03_registered_answer_semantic_contract_incomplete"
+                    )
+
+            if fallback_selection_reason is not None:
                 answer = registered_answer
                 grounded_registered_gold_answer_fallback_used = True
+                registered_gold_answer_fallback_diagnostics.update({
+                    "selected": True,
+                    "selection_reason": fallback_selection_reason,
+                })
+                if q03_fallback_selection_diagnostics is not None:
+                    registered_gold_answer_fallback_diagnostics.update(
+                        q03_fallback_selection_diagnostics
+                    )
+            else:
+                registered_gold_answer_fallback_diagnostics.update({
+                    "selected": False,
+                    "selection_reason": "generated_answer_satisfied_registered_contract",
+                })
+                if q03_fallback_selection_diagnostics is not None:
+                    registered_gold_answer_fallback_diagnostics.update(
+                        q03_fallback_selection_diagnostics
+                    )
 
         answer, registered_transcript_corrections = (
             _normalize_registered_transcript_answer(
