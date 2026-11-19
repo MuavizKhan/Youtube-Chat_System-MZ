@@ -12257,6 +12257,114 @@ def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(mo
     assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == []
 
 @pytest.mark.regression
+def test_q08_uses_validated_financial_fallback_after_model_repair_fails(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    source_groups = [
+        _caption_group(
+            33001,
+            10000,
+            [
+                "The government of India ministry of finance has published a report "
+                "their annual report in which they have acknowledged 14,100 crores "
+                "recovered from me."
+            ],
+            0.2,
+        ),
+        _caption_group(
+            33002,
+            10020,
+            [
+                "You have the Recovery Officer of the Debt Recovery Tribunal.",
+                "The Official Liquidator is also obliged to give an account to the court.",
+                "Both these have stated in court in judicial proceedings that the "
+                "banks have been fully paid.",
+            ],
+            0.25,
+        ),
+        _caption_group(
+            33003,
+            10040,
+            [
+                "Despite 15 reminders the same banks have not given me a statement "
+                "of account."
+            ],
+            0.3,
+        ),
+    ]
+    for group in source_groups:
+        for document in group["documents"]:
+            document.metadata["video_id"] = video_id
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [33001, 33002, 33003],
+                "citation_chunk_ids": [33001, 33002, 33003],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+
+    # Deliberately omit the Ministry recovery figure. Both generation attempts
+    # remain incomplete, reproducing the live Q08 repair failure.
+    incomplete_answer = (
+        "The Recovery Officer and Official Liquidator stated in court that the "
+        "banks had been fully paid. Mallya says the banks had not provided him "
+        "a statement of account."
+    )
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return incomplete_answer
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": video_id,
+    })
+
+    trace = result["generation_trace"]
+    assert len(generation_calls) == 2
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_financial_fallback_used"] is True
+    assert trace["financial_answer_suppressed"] is False
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["financial_fallback_diagnostics"]["rejection_reason"] is None
+    assert trace["financial_fallback_diagnostics"]["supported_evidence_groups"] == [
+        "recovery_amount",
+        "bank_payment",
+        "account_statement",
+    ]
+    assert trace["financial_fallback_context_source"] == (
+        "prompt_visible_generation_context"
+    )
+    assert "14,100" in result["answer"]
+    assert "Ministry of Finance" in result["answer"]
+    assert "Recovery Officer and Official Liquidator" in result["answer"]
+    assert "banks had been fully paid" in result["answer"]
+    assert "statement of account" in result["answer"].casefold()
+    assert chain._is_abstention_answer(result["answer"]) is False
+
+
+@pytest.mark.regression
 def test_q08_context_reserves_all_three_registered_claims_within_8000_chars():
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
