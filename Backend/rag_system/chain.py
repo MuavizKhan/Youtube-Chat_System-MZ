@@ -10710,7 +10710,7 @@ def build_rag_chain(
                     diagnostics["context_attempt_diagnostics"] = attempt_diagnostics
                     return (
                         alternate_answer,
-                        "full_retrieved_source_groups_q08_aware_fallback",
+                        "full_retrieved_source_groups_fallback",
                     )
 
                 diagnostics.clear()
