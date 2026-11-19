@@ -12257,6 +12257,127 @@ def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(mo
     assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == []
 
 @pytest.mark.regression
+def test_q03_selects_registered_fallback_when_six_entity_draft_omits_airline_roles(
+    monkeypatch,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    evidence_captions = [
+        [
+            "United Breweries Limited and United Spirits. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        [
+            "The merger of Kingfisher and Air Deccan created Kingfisher Red. "
+            "We just called it King Fisher Red. King Fisher Red stood for low cost."
+        ],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky."
+        ],
+    ]
+    source_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            11800 + index,
+            6200 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [11800, 11801, 11802],
+                "citation_chunk_ids": [11800, 11801, 11802],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+
+    # This draft names all six registered entities and correctly separates
+    # the RCB franchise from the Royal Challenge whisky brand. It still omits
+    # the sourced acquisition, rebranding, and low-cost airline relationships.
+    incomplete_answer = (
+        "The group includes United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and Kingfisher Airlines. "
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY",
+        question,
+    )
+    assert len(chain.matched_gold_answer_alias_groups(
+        incomplete_answer,
+        gold_case,
+    )) == 3
+    assert chain._has_q03_entity_distinction(incomplete_answer) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(
+        incomplete_answer
+    ) is False
+
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return incomplete_answer
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert len(generation_calls) == 2
+    assert all(name in result["answer"] for name in (
+        "United Breweries",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge",
+    ))
+    assert chain._has_q03_entity_distinction(result["answer"]) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(
+        result["answer"]
+    ) is True
+
+    fallback_diagnostics = result["generation_trace"][
+        "registered_gold_answer_fallback_diagnostics"
+    ]
+    assert fallback_diagnostics["used"] is True
+    assert fallback_diagnostics["selected"] is True
+    assert fallback_diagnostics["selection_reason"] == (
+        "q03_registered_answer_semantic_contract_incomplete"
+    )
+    assert fallback_diagnostics["missing_semantic_answer_indices"] == [0, 1, 2]
+    assert fallback_diagnostics["airline_relationship_passed"] is False
+    assert result["generation_trace"][
+        "grounded_registered_gold_answer_fallback_used"
+    ] is True
+
+
+@pytest.mark.regression
 def test_q08_uses_validated_financial_fallback_after_model_repair_fails(monkeypatch):
     question = "What does Vijay Mallya say about banks and the recovery of money?"
     video_id = "MdeQMVBuGgY"
