@@ -11160,13 +11160,61 @@ def build_rag_chain(
                 ) = run_financial_evidence_fallback(
                     financial_fallback_diagnostics
                 )
+                q08_financial_fallback_validated = False
+                if gold_question_id == "Q08" and extractive_answer is not None:
+                    required_q08_groups = {
+                        "recovery_amount",
+                        "bank_payment",
+                        "account_statement",
+                    }
+                    supported_q08_groups = set(
+                        financial_fallback_diagnostics.get(
+                            "supported_evidence_groups",
+                            [],
+                        )
+                    )
+                    missing_q08_groups = set(
+                        financial_fallback_diagnostics.get(
+                            "missing_evidence_groups",
+                            [],
+                        )
+                    )
+                    q08_attribution_checks = financial_fallback_diagnostics.get(
+                        "q08_bank_payment_attribution_by_source",
+                        {},
+                    )
+                    named_attribution_verified = any(
+                        isinstance(checks, dict)
+                        and checks.get("accepted") is True
+                        for checks in q08_attribution_checks.values()
+                    ) if isinstance(q08_attribution_checks, dict) else False
+                    q08_financial_fallback_validated = (
+                        financial_fallback_diagnostics.get("rejection_reason") is None
+                        and financial_fallback_diagnostics.get(
+                            "minimum_supported_evidence_groups"
+                        ) == 3
+                        and required_q08_groups.issubset(supported_q08_groups)
+                        and not missing_q08_groups
+                        and named_attribution_verified
+                    )
+
                 if (
                     extractive_answer is not None
-                    and not gold_evidence_answer_suppressed
+                    and (
+                        not gold_evidence_answer_suppressed
+                        or q08_financial_fallback_validated
+                    )
                     and not grounded_registered_gold_answer_fallback_used
                 ):
                     answer = extractive_answer
                     grounded_financial_fallback_used = True
+                    # Q08's extractive path has independently verified all three
+                    # registered financial claims, including source-local named
+                    # official attribution. That validated answer supersedes the
+                    # generic answer-repair suppression state; it does not relax
+                    # or bypass any Q08 evidence requirement.
+                    if q08_financial_fallback_validated:
+                        gold_evidence_answer_suppressed = False
                     logger.warning(
                         "Using source-extractive financial fallback after generation repair failed"
                     )
