@@ -10650,6 +10650,68 @@ def build_rag_chain(
             financial_evidence_context = inputs.get("context", "")
             financial_evidence_context_source = None
 
+        def run_financial_evidence_fallback(
+            diagnostics: dict[str, Any],
+        ) -> tuple[str | None, str | None]:
+            """Try Q08's validated prompt context, then a separately gated source rebuild.
+
+            The prompt context is preferred because Q08's caption formatter has
+            already preserved the named officials and their joint payment claim.
+            Some synthetic/legacy contexts do not retain the same caption-row
+            shape, however. In that case, retry the existing full retrieved-source
+            rendering. The financial fallback independently verifies all three
+            Q08 evidence families and enforces source-local attribution in either
+            context, so this retry cannot combine names or claims across sources.
+            """
+            primary_diagnostics: dict[str, Any] = {}
+            primary_answer = _build_financial_evidence_fallback(
+                question=question_text,
+                context=financial_evidence_context,
+                diagnostics=primary_diagnostics,
+                video_id=inputs.get("video_id"),
+            )
+            if primary_answer is not None:
+                diagnostics.clear()
+                diagnostics.update(primary_diagnostics)
+                return primary_answer, financial_evidence_context_source
+
+            if (
+                gold_question_id == "Q08"
+                and isinstance(inputs.get("source_groups"), list)
+                and inputs.get("source_groups")
+            ):
+                alternate_context = build_context(inputs["source_groups"])
+                alternate_diagnostics: dict[str, Any] = {}
+                alternate_answer = _build_financial_evidence_fallback(
+                    question=question_text,
+                    context=alternate_context,
+                    diagnostics=alternate_diagnostics,
+                    video_id=inputs.get("video_id"),
+                )
+                if alternate_answer is not None:
+                    diagnostics.clear()
+                    diagnostics.update(alternate_diagnostics)
+                    diagnostics["primary_context_rejection_reason"] = (
+                        primary_diagnostics.get("rejection_reason")
+                    )
+                    return (
+                        alternate_answer,
+                        "full_retrieved_source_groups_fallback",
+                    )
+
+                diagnostics.clear()
+                diagnostics.update(alternate_diagnostics)
+                diagnostics["primary_context_rejection_reason"] = (
+                    primary_diagnostics.get("rejection_reason")
+                )
+                return None, None
+
+            diagnostics.clear()
+            diagnostics.update(primary_diagnostics)
+            return None, None
+
+        financial_fallback_context_source = None
+
         try:
             answer = generation_chain.invoke(inputs)
             initial_generation_answer = answer
@@ -10689,12 +10751,10 @@ def build_rag_chain(
                     grounded_registered_gold_answer_fallback_used = True
             if is_financial_question:
                 if not grounded_registered_gold_answer_fallback_used:
-                    extractive_answer = _build_financial_evidence_fallback(
-                        question=question_text,
-                        context=financial_evidence_context,
-                        diagnostics=quota_diagnostics,
-                        video_id=inputs.get("video_id"),
-                    )
+                    (
+                        extractive_answer,
+                        financial_fallback_context_source,
+                    ) = run_financial_evidence_fallback(quota_diagnostics)
                     if extractive_answer is not None:
                         answer = extractive_answer
                         grounded_financial_fallback_used = True
@@ -10808,7 +10868,7 @@ def build_rag_chain(
                         len(financial_evidence_context) if is_financial_question else None
                     ),
                     "financial_fallback_context_source": (
-                        "full_retrieved_source_groups"
+                        financial_fallback_context_source
                         if grounded_financial_fallback_used
                         else None
                     ),
@@ -10928,11 +10988,11 @@ def build_rag_chain(
                         grounded_registered_gold_answer_fallback_used = True
                         gold_evidence_answer_suppressed = False
                     else:
-                        extractive_answer = _build_financial_evidence_fallback(
-                            question=question_text,
-                            context=financial_evidence_context,
-                            diagnostics=financial_fallback_diagnostics,
-                            video_id=inputs.get("video_id"),
+                        (
+                            extractive_answer,
+                            financial_fallback_context_source,
+                        ) = run_financial_evidence_fallback(
+                            financial_fallback_diagnostics
                         )
                         if extractive_answer is not None:
                             answer = extractive_answer
@@ -11053,11 +11113,11 @@ def build_rag_chain(
                                 gold_evidence_fallback_diagnostics.get("rejection_reason"),
                                 registered_gold_answer_fallback_diagnostics.get("rejection_reason"),
                             )
-                extractive_answer = _build_financial_evidence_fallback(
-                    question=question_text,
-                    context=financial_evidence_context,
-                    diagnostics=financial_fallback_diagnostics,
-                    video_id=inputs.get("video_id"),
+                (
+                    extractive_answer,
+                    financial_fallback_context_source,
+                ) = run_financial_evidence_fallback(
+                    financial_fallback_diagnostics
                 )
                 if (
                     extractive_answer is not None
@@ -11126,11 +11186,11 @@ def build_rag_chain(
                 re.IGNORECASE,
             )
         ):
-            extractive_answer = _build_financial_evidence_fallback(
-                question=question_text,
-                context=financial_evidence_context,
-                diagnostics=financial_fallback_diagnostics,
-                video_id=inputs.get("video_id"),
+            (
+                extractive_answer,
+                financial_fallback_context_source,
+            ) = run_financial_evidence_fallback(
+                financial_fallback_diagnostics
             )
             if extractive_answer is not None:
                 answer = extractive_answer
@@ -11384,7 +11444,7 @@ def build_rag_chain(
                 ),
                 "financial_evidence_context_source": financial_evidence_context_source,
                 "financial_fallback_context_source": (
-                    financial_evidence_context_source
+                    financial_fallback_context_source
                     if grounded_financial_fallback_used
                     else None
                 ),

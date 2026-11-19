@@ -6320,6 +6320,10 @@ def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provi
     assert trace["provider_failure_reason"] == "empty_answer_after_retries"
     assert trace["grounded_financial_fallback_used"] is True
     assert trace["financial_answer_suppressed"] is False
+    assert trace["financial_fallback_context_source"] in {
+        "prompt_visible_generation_context",
+        "full_retrieved_source_groups_fallback",
+    }
     assert "14,100 crore" in result["answer"]
     assert "statement of account" in result["answer"].casefold()
     assert "fully paid" in result["answer"].casefold()
