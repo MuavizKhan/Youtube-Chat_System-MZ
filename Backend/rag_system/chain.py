@@ -7297,9 +7297,27 @@ def _extract_bank_recovery_statement_evidence(
                 if normalized in seen[group_name]:
                     continue
                 seen[group_name].add(normalized)
+
+                # A source row may be an entire raw chunk rather than one short
+                # caption. Keep a bounded excerpt around the matched claim so
+                # the negative wording before "statement of account" is not
+                # clipped by a fixed prefix slice.
+                evidence_pattern = (
+                    bank_payment_pattern
+                    if group_name == "bank_payment"
+                    else account_statement_pattern
+                )
+                evidence_match = evidence_pattern.search(cleaned)
+                if evidence_match is not None:
+                    excerpt_start = max(0, evidence_match.start() - 180)
+                    excerpt_end = min(len(cleaned), evidence_match.end() + 180)
+                    evidence_text = cleaned[excerpt_start:excerpt_end].strip()
+                else:
+                    evidence_text = cleaned[:360]
+
                 evidence[group_name].append({
                     "source_id": source_id,
-                    "text": cleaned[:240],
+                    "text": evidence_text,
                 })
     return evidence
 
@@ -7590,6 +7608,14 @@ def _build_financial_evidence_fallback(
                     )
                     attributed_bank_payment_evidence.append(attributed_item)
             bank_payment_evidence = attributed_bank_payment_evidence
+            # Q08 asks about Mallya's allegation that no statement was supplied.
+            # A positive statement-of-account mention is not equivalent evidence.
+            account_statement_evidence = [
+                item for item in account_statement_evidence
+                if _is_explicitly_missing_account_statement(
+                    str(item.get("text") or "")
+                )
+            ]
 
         recovery_claim = (
             claims_by_topic.get("recovery_report")
