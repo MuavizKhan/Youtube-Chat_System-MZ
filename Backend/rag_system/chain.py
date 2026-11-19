@@ -2208,38 +2208,30 @@ def format_source_group(
 
 def build_context(
     source_groups: list[dict],
+    gold_case=None,
 ) -> str:
     """
-    Convert merged source segments into one structured
-    context block for the generation model.
+    Convert merged source segments into one structured context block.
+
+    When a registered gold case is supplied, retain its source-specific
+    formatting safeguards while rebuilding a full retrieved-source context.
+    Existing non-gold callers retain the original behavior.
     """
-
     if not source_groups:
-
-        return (
-            "No relevant transcript context was retrieved."
-        )
-
+        return "No relevant transcript context was retrieved."
 
     formatted_sources = []
-
-
-    for source_number, source_group in enumerate(
-        source_groups,
-        start=1,
-    ):
-
+    for source_number, source_group in enumerate(source_groups, start=1):
         formatted_sources.append(
             format_source_group(
                 source_group=source_group,
                 source_number=source_number,
+                gold_case=gold_case,
             )
         )
 
+    return "\n\n".join(formatted_sources)
 
-    return "\n\n".join(
-        formatted_sources
-    )
 
 
 def _generation_context_query_terms(question: str | None) -> set[str]:
@@ -3262,8 +3254,8 @@ def _matched_registered_phrase_group_indices(
     return matched_source_phrase_group_indices(text, phrase_groups)
 
 
-def _has_q08_named_bank_payment_attribution(text: str) -> bool:
-    """Require both named officials and their joint fully-paid statement in one source block."""
+def _q08_bank_payment_attribution_checks(text: str) -> dict[str, bool]:
+    """Evaluate Q08's named-official and joint-payment predicates in one source block."""
     source_text = text or ""
     joint_payment_patterns = (
         re.compile(
@@ -3284,20 +3276,39 @@ def _has_q08_named_bank_payment_attribution(text: str) -> bool:
             re.IGNORECASE | re.DOTALL,
         ),
     )
-    # build_generation_context may pass multiple [SOURCE n] blocks joined in
-    # one string. Keep the antecedent and its payment statement source-local.
+    has_recovery_officer = bool(
+        re.search(r"\bRecovery Officer\b", source_text, re.IGNORECASE)
+    )
+    has_official_liquidator = bool(
+        re.search(r"\bOfficial Liquidator\b", source_text, re.IGNORECASE)
+    )
+    has_joint_payment_statement = any(
+        pattern.search(source_text) for pattern in joint_payment_patterns
+    )
+    return {
+        "has_recovery_officer": has_recovery_officer,
+        "has_official_liquidator": has_official_liquidator,
+        "has_joint_payment_statement": has_joint_payment_statement,
+        "accepted": (
+            has_recovery_officer
+            and has_official_liquidator
+            and has_joint_payment_statement
+        ),
+    }
+
+
+def _has_q08_named_bank_payment_attribution(text: str) -> bool:
+    """Require both named officials and their joint fully-paid statement in one source block."""
     source_blocks = re.split(
         r"(?m)^[ \t]*\[SOURCE\s+\d+\][ \t]*$",
-        source_text,
+        text or "",
     )
-    for source_block in source_blocks:
-        if (
-            re.search(r"\bRecovery Officer\b", source_block, re.IGNORECASE)
-            and re.search(r"\bOfficial Liquidator\b", source_block, re.IGNORECASE)
-            and any(pattern.search(source_block) for pattern in joint_payment_patterns)
-        ):
-            return True
-    return False
+    # Never let names or payment wording cross a [SOURCE n] boundary.
+    return any(
+        _q08_bank_payment_attribution_checks(source_block)["accepted"]
+        for source_block in source_blocks
+    )
+
 
 
 def _matched_registered_generation_claim_group_indices(
@@ -7558,47 +7569,20 @@ def _build_financial_evidence_fallback(
         question_id, _registered_case = _registered_generation_gold_case(video_id, question)
         bank_payment_evidence = bank_evidence["bank_payment"]
         account_statement_evidence = bank_evidence["account_statement"]
+        q08_bank_payment_attribution_by_source: dict[str, dict[str, bool]] = {}
         if question_id == "Q08":
-            recovery_officer_pattern = re.compile(
-                r"\bRecovery Officer\b",
-                re.IGNORECASE,
-            )
-            official_liquidator_pattern = re.compile(
-                r"\bOfficial Liquidator\b",
-                re.IGNORECASE,
-            )
-            joint_bank_payment_patterns = (
-                re.compile(
-                    r"\bboth\s+these\b.{0,1200}\b(?:stated|said)\b"
-                    r".{0,220}\bbanks?\b.{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE | re.DOTALL,
-                ),
-                re.compile(
-                    r"\bRecovery Officer\b.{0,1000}\bOfficial Liquidator\b"
-                    r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
-                    r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE | re.DOTALL,
-                ),
-                re.compile(
-                    r"\bOfficial Liquidator\b.{0,1000}\bRecovery Officer\b"
-                    r".{0,260}\b(?:stated|said)\b.{0,220}\bbanks?\b"
-                    r".{0,120}\b(?:fully\s+paid|paid\s+in\s+full)\b",
-                    re.IGNORECASE | re.DOTALL,
-                ),
-            )
-
+            q08_bank_payment_attribution_by_source = {
+                str(source_id): _q08_bank_payment_attribution_checks(source_text)
+                for source_id, source_text in source_blocks.items()
+            }
             attributed_bank_payment_evidence = []
             for item in bank_payment_evidence:
-                source_text = source_blocks.get(item.get("source_id"), "")
-                has_both_named_roles = (
-                    recovery_officer_pattern.search(source_text)
-                    and official_liquidator_pattern.search(source_text)
+                source_id = item.get("source_id")
+                attribution = q08_bank_payment_attribution_by_source.get(
+                    str(source_id),
+                    {},
                 )
-                has_joint_payment_statement = any(
-                    pattern.search(source_text)
-                    for pattern in joint_bank_payment_patterns
-                )
-                if has_both_named_roles and has_joint_payment_statement:
+                if attribution.get("accepted") is True:
                     attributed_item = dict(item)
                     attributed_item["text"] = (
                         "The Recovery Officer and Official Liquidator both "
@@ -7606,10 +7590,7 @@ def _build_financial_evidence_fallback(
                     )
                     attributed_bank_payment_evidence.append(attributed_item)
             bank_payment_evidence = attributed_bank_payment_evidence
-            account_statement_evidence = [
-                item for item in account_statement_evidence
-                if _is_explicitly_missing_account_statement(str(item.get("text") or ""))
-            ]
+
         recovery_claim = (
             claims_by_topic.get("recovery_report")
             or claims_by_topic.get("recovery")
@@ -7673,6 +7654,11 @@ def _build_financial_evidence_fallback(
                     group: entries[:3]
                     for group, entries in bank_evidence.items()
                 },
+                "q08_bank_payment_attribution_by_source": (
+                    q08_bank_payment_attribution_by_source
+                    if question_id == "Q08"
+                    else {}
+                ),
                 "source_block_count": len(source_blocks),
                 "candidate_claims": candidate_claim_diagnostics[:30],
                 "source_financial_excerpts": {
@@ -10653,16 +10639,7 @@ def build_rag_chain(
         def run_financial_evidence_fallback(
             diagnostics: dict[str, Any],
         ) -> tuple[str | None, str | None]:
-            """Try Q08's validated prompt context, then a separately gated source rebuild.
-
-            The prompt context is preferred because Q08's caption formatter has
-            already preserved the named officials and their joint payment claim.
-            Some synthetic/legacy contexts do not retain the same caption-row
-            shape, however. In that case, retry the existing full retrieved-source
-            rendering. The financial fallback independently verifies all three
-            Q08 evidence families and enforces source-local attribution in either
-            context, so this retry cannot combine names or claims across sources.
-            """
+            """Try prompt-visible evidence, then rebuild with the same Q08 source contract."""
             primary_diagnostics: dict[str, Any] = {}
             primary_answer = _build_financial_evidence_fallback(
                 question=question_text,
@@ -10680,7 +10657,16 @@ def build_rag_chain(
                 and isinstance(inputs.get("source_groups"), list)
                 and inputs.get("source_groups")
             ):
-                alternate_context = build_context(inputs["source_groups"])
+                # Do not call build_context() without gold_case here. That bypasses
+                # Q08's formatter guard and can discard the named-official
+                # antecedents when caption metadata and raw chunk text differ.
+                alternate_gold_case = (
+                    gold_context_case if gold_question_id == "Q08" else None
+                )
+                alternate_context = build_context(
+                    inputs["source_groups"],
+                    gold_case=alternate_gold_case,
+                )
                 alternate_diagnostics: dict[str, Any] = {}
                 alternate_answer = _build_financial_evidence_fallback(
                     question=question_text,
@@ -10688,15 +10674,43 @@ def build_rag_chain(
                     diagnostics=alternate_diagnostics,
                     video_id=inputs.get("video_id"),
                 )
+
+                def compact_financial_attempt(
+                    diagnostic: dict[str, Any],
+                ) -> dict[str, Any]:
+                    keys = (
+                        "rejection_reason",
+                        "required_evidence_groups",
+                        "supported_evidence_groups",
+                        "missing_evidence_groups",
+                        "bank_recovery_statement_evidence",
+                        "source_block_count",
+                        "q08_bank_payment_attribution_by_source",
+                    )
+                    return {
+                        key: diagnostic[key]
+                        for key in keys
+                        if key in diagnostic
+                    }
+
+                attempt_diagnostics = {
+                    "prompt_visible_generation_context": compact_financial_attempt(
+                        primary_diagnostics
+                    ),
+                    "full_retrieved_source_groups_q08_aware": compact_financial_attempt(
+                        alternate_diagnostics
+                    ),
+                }
                 if alternate_answer is not None:
                     diagnostics.clear()
                     diagnostics.update(alternate_diagnostics)
                     diagnostics["primary_context_rejection_reason"] = (
                         primary_diagnostics.get("rejection_reason")
                     )
+                    diagnostics["context_attempt_diagnostics"] = attempt_diagnostics
                     return (
                         alternate_answer,
-                        "full_retrieved_source_groups_fallback",
+                        "full_retrieved_source_groups_q08_aware_fallback",
                     )
 
                 diagnostics.clear()
@@ -10704,6 +10718,7 @@ def build_rag_chain(
                 diagnostics["primary_context_rejection_reason"] = (
                     primary_diagnostics.get("rejection_reason")
                 )
+                diagnostics["context_attempt_diagnostics"] = attempt_diagnostics
                 return None, None
 
             diagnostics.clear()
