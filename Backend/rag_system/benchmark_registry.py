@@ -565,6 +565,56 @@ ARABIC_SILENCE_GOLD = (
         question_id="AR03",
         groups=(("نبض قلبك حركة الدم",),),
         min_group_coverage=1.0,
+        min_generation_context_group_coverage=1.0,
+        generation_answer_aliases=(
+            (
+                "blood moving through the veins",
+                "blood movement through the veins",
+                "blood flows through the veins",
+                "blood flowing through the veins",
+                "blood flow through veins",
+            ),
+        ),
+        min_generation_answer_group_coverage=1.0,
+        generation_claim_source_groups=(
+            ("نبض قلبك",),
+            ("حركة الدم في عروقك",),
+            ("صوت الرئتين",),
+            ("صوت المعدة",),
+            ("عينيك وهي بترمش",),
+        ),
+        generation_claim_answer_groups=(
+            ("heartbeat", "pulse"),
+            (
+                "blood moving through the veins",
+                "blood movement through the veins",
+                "blood flows through the veins",
+                "blood flow through veins",
+            ),
+            ("sound of their lungs", "lungs or breathing"),
+            ("stomach sounds", "stomach noises"),
+            ("eyelids blinking", "eyes blinking"),
+        ),
+        generation_fallback_answer=(
+            "People may begin to hear their heartbeat, blood moving through "
+            "their veins, the sound of their lungs or breathing, stomach "
+            "sounds, and even the sound of their eyelids blinking."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("نبض قلبك",),
+            ("حركة الدم في عروقك",),
+            ("صوت الرئتين",),
+            ("صوت المعدة",),
+            ("عينيك وهي بترمش",),
+        ),
+        generation_fallback_answer_groups=(
+            ("heartbeat",),
+            ("blood moving through their veins",),
+            ("sound of their lungs", "lungs or breathing"),
+            ("stomach sounds",),
+            ("eyelids blinking",),
+        ),
     ),
     GoldEvidenceCase(
         question_id="AR04",

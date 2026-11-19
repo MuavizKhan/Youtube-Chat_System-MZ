@@ -723,6 +723,181 @@ def test_generation_context_reserves_registered_gold_evidence_before_nearby_dist
 
 
 @pytest.mark.regression
+def test_q02_context_preserves_all_four_atomic_claims_when_caption_metadata_omits_them():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    benchmark = chain.get_video_benchmark(video_id)
+    gold_case = benchmark.gold_evidence_by_question["Q02"]
+    assert gold_case.generation_claims_require_context_reservation is True
+
+    def make_document(chunk_id, start, raw_text, metadata_text):
+        document = doc(chunk_id, start, start + 4, raw_text)
+        document.metadata["video_id"] = video_id
+        document.metadata["transcript_segments"] = [{
+            "segment_id": chunk_id * 100,
+            "start": start,
+            "end": start + 3.5,
+            "text": metadata_text,
+        }]
+        return document
+
+    filler = [
+        "Unrelated interview narration describes another topic without Formula One evidence. "
+        * 3
+        for _ in range(10)
+    ]
+    first_raw_captions = [
+        "Formula 1 is the pinnacle of motorsport, and it was a dream to have a team on the F1 grid.",
+        "I named it Force India.",
+        "I wanted the Indian flag to be on the grid.",
+        "Of course I also use the platform to advertise my brands.",
+        *filler,
+    ]
+    first_metadata_captions = [
+        "Formula 1 was discussed as a motorsport.",
+        "The guest discussed an earlier decision.",
+        "The guest described the team.",
+        "The guest discussed a promotional opportunity.",
+        *filler,
+    ]
+    first_documents = [
+        make_document(
+            1200 + index,
+            6000 + index * 5,
+            raw_caption,
+            metadata_caption,
+        )
+        for index, (raw_caption, metadata_caption) in enumerate(
+            zip(first_raw_captions, first_metadata_captions)
+        )
+    ]
+    second_raw_captions = [
+        "The Formula One team sent back 10 million pounds to Kingfisher Airlines to help it.",
+        *filler,
+    ]
+    second_metadata_captions = [
+        "The sponsorship was discussed in the interview.",
+        *filler,
+    ]
+    second_documents = [
+        make_document(
+            1300 + index,
+            15000 + index * 5,
+            raw_caption,
+            metadata_caption,
+        )
+        for index, (raw_caption, metadata_caption) in enumerate(
+            zip(second_raw_captions, second_metadata_captions)
+        )
+    ]
+    non_claim_document = make_document(
+        1400,
+        18000,
+        "The interviewer discusses an unrelated career anecdote.",
+        "The interviewer discusses an unrelated career anecdote.",
+    )
+    source_groups = [
+        {
+            "documents": first_documents,
+            "start": 6000,
+            "end": 6100,
+            "distance": 0.45,
+        },
+        {
+            "documents": second_documents,
+            "start": 15000,
+            "end": 15100,
+            "distance": 0.55,
+        },
+        {
+            "documents": [non_claim_document],
+            "start": 18000,
+            "end": 18004,
+            "distance": 0.65,
+        },
+    ]
+
+    # Caption metadata retains the broad Formula One topic but drops each
+    # precise claim. The formatter must reject that lossy reconstruction.
+    assert chain._caption_segments_for_documents(first_documents, gold_case) is None
+    assert chain._caption_segments_for_documents(second_documents, gold_case) is None
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=1800,
+        video_id=video_id,
+    )
+    context = result["context"]
+    diagnostics = result["diagnostics"]
+
+    assert len(context) <= 1800
+    assert "I named it Force India." in context
+    assert "I wanted the Indian flag to be on the grid." in context
+    assert "Of course I also use the platform to advertise my brands." in context
+    expected_transfer_caption = (
+        "the Formula One team sent back 10 million pounds to Kingfisher Airlines"
+    )
+    assert expected_transfer_caption.casefold() in context.casefold()
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_available"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_included"] == [0, 1, 2, 3]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_claim_context_complete"] is True
+    assert diagnostics["final_chars"] > 0
+    assert diagnostics["groups_included"] == 2
+    assert diagnostics["gold_evidence_source_groups"][0]["raw_chunk_fallback_used"] is True
+    assert diagnostics["gold_evidence_source_groups"][1]["raw_chunk_fallback_used"] is True
+
+    # Two source blocks cannot be stitched together to manufacture a claim.
+    split_source_claim = (
+        "[SOURCE 1]\\nI named it\\n"
+        "[SOURCE 2]\\nForce India."
+    )
+    assert chain._matched_registered_phrase_group_indices(
+        split_source_claim,
+        gold_case.generation_claim_source_groups,
+    ) == set()
+
+
+@pytest.mark.unit
+def test_q02_registered_claim_matcher_accepts_verified_formula_one_transcript_wording():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert gold_case is not None
+    context = (
+        "[SOURCE 1]\\n"
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. Of course I also use the platform to advertise my brands. "
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines."
+    )
+
+    source_claims = chain._matched_registered_phrase_group_indices(
+        context, gold_case.generation_claim_source_groups
+    )
+    assert source_claims == set(range(4))
+
+    incomplete_answer = (
+        "Mallya said he named the team Force India. He used the Formula One "
+        "platform to advertise his brands. The Formula One team sent £10 million "
+        "back to Kingfisher Airlines."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "wanted the Indian flag" in instruction
+
+
+@pytest.mark.regression
 @pytest.mark.parametrize(
     "question,evidence_caption_groups,required_phrases",
     [
@@ -1524,6 +1699,64 @@ def test_rag_chain_abstains_when_registered_required_gold_context_is_incomplete(
     assert result["generation_trace"]["gold_evidence_context_complete"] is False
     assert result["generation_trace"]["gold_evidence_required_groups"] == 3
     assert result["generation_trace"]["gold_evidence_included_groups"] == [0, 1]
+
+
+@pytest.mark.unit
+def test_q02_generation_abstains_when_any_required_atomic_claim_is_missing(monkeypatch):
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    source = _caption_group(
+        611,
+        6300,
+        [
+            "Formula 1 is the pinnacle of motorsport and it was a dream to have a team on the grid. "
+            "I wanted the Indian flag to be on the grid."
+        ],
+        0.2,
+    )["documents"][0]
+    source.metadata["video_id"] = video_id
+
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            [(source, 0.2)],
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [611],
+                "citation_chunk_ids": [611],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "generate_with_llm",
+        lambda **_kwargs: pytest.fail(
+            "Q02 generation must not run without all four source-backed claims"
+        ),
+    )
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": video_id,
+    })
+
+    trace = result["generation_trace"]
+    assert result["answer"] == chain.FALLBACK_ANSWER
+    assert trace["generated"] is False
+    assert trace["gold_evidence_context_complete"] is True
+    assert trace["generation_claim_context_complete"] is False
+    assert trace["generation_claim_groups_required"] == [0, 1, 2, 3]
+    assert trace["generation_claim_groups_included"] == [1]
+    assert trace["generation_claim_groups_missing_from_retrieval"] == [0, 2, 3]
+    assert trace["generation_claim_groups_missing_from_prompt"] == [0, 2, 3]
+    assert trace["generation_claim_evidence_answer_suppressed"] is True
+    assert (
+        "generation_not_attempted_incomplete_registered_claim_evidence"
+        in trace["generation_repair_diagnostics"]["failure_reasons"]
+    )
 
 
 @pytest.mark.unit
@@ -6052,8 +6285,9 @@ def test_rag_chain_uses_grounded_financial_fallback_when_initial_provider_answer
 def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provider_answer(monkeypatch):
     context = (
         "The Ministry of Finance report records that 14,100 crore rupees "
-        "were recovered from me. The banks have been fully paid. "
-        "The government and banks have not rendered a statement of account."
+        "were recovered from me. The Recovery Officer and Official Liquidator "
+        "said in court that the banks have been fully paid. The government and "
+        "banks have not rendered a statement of account."
     )
     monkeypatch.setattr(
         chain,
@@ -6086,6 +6320,10 @@ def test_rag_chain_uses_question_scoped_bank_recovery_fallback_after_empty_provi
     assert trace["provider_failure_reason"] == "empty_answer_after_retries"
     assert trace["grounded_financial_fallback_used"] is True
     assert trace["financial_answer_suppressed"] is False
+    assert trace["financial_fallback_context_source"] in {
+        "prompt_visible_generation_context",
+        "full_retrieved_source_groups_fallback",
+    }
     assert "14,100 crore" in result["answer"]
     assert "statement of account" in result["answer"].casefold()
     assert "fully paid" in result["answer"].casefold()
@@ -8633,14 +8871,14 @@ def test_q05_registered_fallback_accepts_operating_evidence_split_across_source_
     assert "non-payment of the oil bills" in answer.lower()
     assert "airport fees" in answer.lower()
     assert "landing charges" in answer.lower()
-    assert "the interviewer summarizes the impact" in answer.lower()
-    assert "the interviewer then points to" in answer.lower()
+    assert "the interviewer summarizes the impact" not in answer.lower()
+    assert "the interviewer then points to" not in answer.lower()
     assert "kingfisher airlines was not able to pay the airport fees and landing charges" in answer.lower()
-    assert "mallya responds" in answer.lower()
+    assert "mallya responds" not in answer.lower()
     assert "working capital cycle got disrupted" in answer.lower()
     assert "non-payment of the oil bills" in answer.lower()
-    assert "cash flow issue affects everybody" in answer.lower()
-    assert "one creditor or vendor cannot be isolated" in answer.lower()
+    assert "cash flow issue" in answer.lower()
+    assert "one creditor or vendor cannot be isolated" not in answer.lower()
     assert diagnostics["used"] is True
     assert diagnostics["required_fallback_claims"] == list(range(6))
     assert diagnostics["included_fallback_claims"] == list(range(6))
@@ -8950,6 +9188,51 @@ def test_registered_multigroup_fallback_rejects_missing_required_prompt_evidence
     assert diagnostics["missing_fallback_claims"] == missing_groups
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("missing_semantic_claim", [0, 1, 2])
+def test_q03_fallback_rejects_each_missing_airline_relationship_claim(
+    missing_semantic_claim,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    semantic_claims = (
+        "I acquired Eden as part of industry consolidation.",
+        "The interviewer asked whether it was the wrong decision to rebrand it to King Fisher Red. "
+        "So we just called it King Fisher Red.",
+        "King Fisher Red stood for low cost.",
+    )
+    source_blocks = (
+        "[SOURCE 1]\nUnited Breweries Limited and United Spirits.",
+        "[SOURCE 2]\nAir Deccan and Kingfisher Red. "
+        + " ".join(
+            phrase for index, phrase in enumerate(semantic_claims)
+            if index != missing_semantic_claim
+        ),
+        "[SOURCE 3]\nRoyal Challengers Bangalore and Royal Challenge whisky.",
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context="\n".join(source_blocks),
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_semantic_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_semantic_fallback_claims"] == [
+        missing_semantic_claim
+    ]
+
+
+
+
+
 @pytest.mark.unit
 def test_q05_fallback_rejects_airport_fees_and_landing_charges_split_across_sources():
     question = (
@@ -9249,6 +9532,280 @@ def test_q03_answer_correction_handles_real_line_separators(separator):
     assert "normalized_business_list_emphasis" in corrections
 
 
+@pytest.mark.unit
+def test_q03_retrieval_probes_exact_acquisition_caption_when_semantic_group_is_missing(
+    monkeypatch,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    base = doc(
+        20001,
+        4000,
+        4010,
+        "United Breweries and United Spirits. We just called it King Fisher Red. "
+        "King Fisher Red stood for low cost.",
+    )
+    acquisition = doc(
+        20002,
+        2100,
+        2110,
+        "I acquired Eden which everybody says was a big mistake.",
+    )
+    for document in (base, acquisition):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    retrieval_queries = []
+
+    base_pair = (base, 0.2)
+    acquisition_pair = (acquisition, 0.2)
+
+    def fake_retrieve(**kwargs):
+        retrieval_queries.append(kwargs["query"])
+        if len(retrieval_queries) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [acquisition_pair], [acquisition_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or list(anchors)
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert retrieval_queries == [
+        question,
+        chain.Q03_ACQUISITION_EVIDENCE_QUERY,
+    ]
+    assert {item[0].metadata["chunk_id"] for item in results} == {20001, 20002}
+    assert trace["citation_chunk_ids"] == [20001, 20002]
+    assert trace["final_stage"] == "registered_q03_acquisition_evidence_probe"
+    assert trace["registered_q03_acquisition_evidence_probe_attempted"] is True
+    assert trace["registered_q03_acquisition_evidence_probe_accepted"] is True
+    assert trace["attempts"][-1]["exact_registered_source_phrase_found"] is True
+    assert trace["attempts"][-1]["accepted_for_generation"] is True
+    assert expansion_calls == [
+        (chain.Q03_ACQUISITION_EVIDENCE_QUERY, [acquisition_pair])
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_text", "distance", "expected_rejection"),
+    [
+        (
+            "Air Deccan was discussed as an airline, but no acquisition is stated.",
+            0.2,
+            "registered_acquisition_phrase_not_retrieved",
+        ),
+        (
+            "I acquired Eden which everybody says was a big mistake.",
+            chain.MAX_DISTANCE + 0.01,
+            "exact_registered_acquisition_source_not_found_within_distance",
+        ),
+    ],
+)
+def test_q03_acquisition_probe_fails_closed_without_exact_in_range_source(
+    monkeypatch,
+    source_text,
+    distance,
+    expected_rejection,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    base = doc(
+        20101,
+        4000,
+        4010,
+        "United Breweries and United Spirits. We just called it King Fisher Red. "
+        "King Fisher Red stood for low cost.",
+    )
+    probe_document = doc(20102, 2100, 2110, source_text)
+    for document in (base, probe_document):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    calls = []
+    probe_call_kwargs = []
+
+    base_pair = (base, 0.2)
+    probe_pair = (probe_document, distance)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs["query"])
+        if len(calls) == 1:
+            # The initial retrieval requests return_status=True.
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        # The Q03 acquisition probe requests anchors but not status.
+        probe_call_kwargs.append(kwargs)
+        return [probe_pair], [probe_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Rejected acquisition evidence must not be expanded or added."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [20101]
+    assert calls == [question, chain.Q03_ACQUISITION_EVIDENCE_QUERY]
+    assert len(probe_call_kwargs) == 1
+    assert probe_call_kwargs[0]["return_anchors"] is True
+    assert probe_call_kwargs[0].get("return_status", False) is False
+    assert trace["final_stage"] == "initial_strict"
+    assert trace["registered_q03_acquisition_evidence_probe_attempted"] is True
+    assert trace["registered_q03_acquisition_evidence_probe_accepted"] is False
+    assert trace["registered_q03_acquisition_evidence_probe_rejection_reason"] == (
+        expected_rejection
+    )
+
+
+
+@pytest.mark.unit
+def test_q03_gold_contract_keeps_six_entities_and_three_semantic_relations_separate():
+    from Backend.rag_system.gold_evidence import get_gold_evidence_case
+    case = get_gold_evidence_case("Q03")
+    assert len(case.generation_claim_source_groups) == 6
+    assert len(case.generation_claim_answer_groups) == 6
+    assert len(case.generation_fallback_source_groups) == 6
+    assert len(case.generation_fallback_answer_groups) == 6
+    assert len(case.generation_semantic_source_groups) == 3
+    assert len(case.generation_semantic_answer_groups) == 3
+
+
+@pytest.mark.regression
+def test_q03_answer_correction_repairs_air_deccan_and_kingfisher_red_roles():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    answer = (
+        "Vijay Mallya talks about several ventures.\\n"
+        "- United Breweries Limited** — the holding company.\\n"
+        "- United Spirits** — a sister company.\\n"
+        "- Air Deccan** (also called \"air deckin\") – the low-cost airline he launched.\\n"
+        "- Kingfisher Red** — the premium beer brand he created after re-branding Kingfisher.\\n"
+        "- Royal Challengers Bangalore (RCB)** — the cricket franchise.\\n"
+        "- Royal Challenge** — the whisky brand."
+    )
+
+    source_context = (
+        "[SOURCE 1]\n"
+        "Mallya says, I acquired Eden as part of industry consolidation.\n"
+        "[SOURCE 2]\n"
+        "So we just called it King Fisher Red.\n"
+        "[SOURCE 3]\n"
+        "King Fisher Red stood for low cost."
+    )
+    corrected, corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+        source_context=source_context,
+    )
+
+    assert "Air Deccan (also called" not in corrected
+    assert "low-cost airline he launched" not in corrected
+    assert "the airline Mallya acquired" in corrected
+    assert "Kingfisher Red — the premium beer brand" not in corrected
+    assert "premium beer brand" not in corrected
+    assert "low-cost airline created through the rebranding of Air Deccan" in corrected
+    assert "Kingfisher First" not in corrected
+    assert "corrected_q03_air_deccan_acquisition_attribution" in corrections
+    assert "corrected_q03_kingfisher_red_low_cost_airline_identity" in corrections
+
+    # The normalizer must not inject a role correction when the corresponding
+    # transcript assertions are absent from the prompt-visible context.
+    ungrounded, ungrounded_corrections = chain._normalize_registered_transcript_answer(
+        question=question,
+        answer=answer,
+        video_id="MdeQMVBuGgY",
+    )
+    assert "low-cost airline he launched" in ungrounded
+    assert "premium beer brand he created" in ungrounded
+    assert "corrected_q03_air_deccan_acquisition_attribution" not in ungrounded_corrections
+    assert "corrected_q03_kingfisher_red_low_cost_airline_identity" not in ungrounded_corrections
+
+
+@pytest.mark.regression
+def test_q03_generation_repair_requires_acquisition_rebrand_and_low_cost_roles():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = """[SOURCE 1]
+    United Breweries Limited was the holding company. United Spirits was another group company.
+    [SOURCE 2]
+    Air Deccan was discussed as a low-cost airline. I acquired Eden, and the logic of buying Dean was industry consolidation.
+    [SOURCE 3]
+    The interviewer asked whether it was the wrong decision to rebrand it to King Fisher Red.
+    You cannot start operating one Deccan and one Kingfisher. So we just called it King Fisher Red.
+    King Fisher Red stood for low cost. Kingfisher First was the premium offering.
+    [SOURCE 4]
+    Royal Challengers Bangalore was the cricket franchise. Royal Challenge was the whisky brand."""
+    incorrect_answer = (
+        "Air Deccan was the low-cost airline Mallya launched. "
+        "Kingfisher Red was the premium beer brand. "
+        "Royal Challengers Bangalore was the cricket franchise and Royal Challenge was the whisky brand."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=incorrect_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "Q03 AIR DECCAN / KINGFISHER RED ROLE REPAIR" in instruction
+    assert "Mallya discusses acquiring Air Deccan" in instruction
+    assert "Air Deccan was subsequently rebranded as Kingfisher Red" in instruction
+    assert "Do not say Mallya founded or launched Air Deccan" in instruction
+    assert "Do not describe Kingfisher Red as a beer" in instruction
+
+
+@pytest.mark.unit
+def test_q03_airline_relationship_matcher_rejects_the_observed_false_claims():
+    correct = (
+        "Air Deccan was an existing low-cost airline that Mallya acquired. "
+        "Kingfisher Red was the low-cost airline created through the rebranding "
+        "of Air Deccan, distinct from the premium Kingfisher First offering."
+    )
+    incorrect = (
+        "Air Deccan was the low-cost airline Mallya launched. "
+        "Kingfisher Red was the premium beer brand."
+    )
+
+    misattributed_acquisition = (
+        "Air Deccan was an existing low-cost airline acquired by Captain Gopinath. "
+        "Kingfisher Red was the low-cost airline created through rebranding of Air Deccan."
+    )
+
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(correct) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(incorrect) is False
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(misattributed_acquisition) is False
+
+
+
 
 @pytest.mark.unit
 def test_q05_answer_correction_preserves_supported_ub_group_contribution_and_repairs_misattributions():
@@ -9517,24 +10074,27 @@ def test_rag_chain_uses_prompt_scoped_registered_q04_q05_fallback_after_failed_r
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("question", "video_id"),
+    ("question", "video_id", "expected_rejection"),
     [
         (
             "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?",
             "UnregisteredVideo",
+            "no_registered_generation_gold_case",
         ),
         (
             "How does Vijay Mallya describe the challenges he faced while running Kingfisher Airlines?",
             "UnregisteredVideo",
+            "no_registered_generation_gold_case",
         ),
         (
             "What does Vijay Mallya say about building the Kingfisher brand?",
             "MdeQMVBuGgY",
+            "required_fallback_claims_missing_from_source_blocks",
         ),
     ],
 )
-def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
-    question, video_id
+def test_registered_fallback_rejects_unregistered_questions_or_missing_claims(
+    question, video_id, expected_rejection
 ):
     complete_context = (
         "[SOURCE 1]\\n"
@@ -9556,9 +10116,7 @@ def test_registered_q04_q05_fallback_rejects_wrong_video_or_question(
 
     assert answer is None
     assert diagnostics["used"] is False
-    assert diagnostics["rejection_reason"] == (
-        "no_registered_generation_gold_case"
-    )
+    assert diagnostics["rejection_reason"] == expected_rejection
 
 
 
@@ -9608,7 +10166,7 @@ def test_registered_answer_claim_repair_only_runs_when_every_claim_is_in_prompt(
 
 
 @pytest.mark.unit
-def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
+def test_q04_repair_removes_unsupported_named_speaker_attribution():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
         item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
@@ -9619,19 +10177,138 @@ def test_q04_repair_attributes_money_stopped_phrase_to_interviewer():
     assert registered_id == "Q04"
     context = (
         "[SOURCE 1]\nThe global financial crisis affected every sector. "
-        "Raj Shamani said money stopped and it got dry."
+        "The money stopped and it got dry."
     )
     answer = "Mallya says the global financial crisis meant money stopped and it got dry."
     instruction = chain._gold_evidence_repair_instruction(
         question=question, answer=answer, context=context, video_id="MdeQMVBuGgY"
     )
     assert instruction is not None
-    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
-    assert "Raj Shamani" in instruction
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "do not attribute the phrase" in instruction.lower()
 
 
 @pytest.mark.unit
-def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completeness_repair():
+def test_q04_generation_money_stopped_attribution_is_sentence_scoped():
+    question = (
+        "Why does Vijay Mallya say Kingfisher Airlines struggled or failed?"
+    )
+    fallback_style_answer = (
+        "Vijay Mallya says Kingfisher Airlines faced several connected pressures. "
+        "Mallya says the global financial crisis affected every sector. "
+        "The discussion then describes how money stopped and it got dry, "
+        "without assigning those words to either speaker. Mallya recalls being "
+        "told, “You continue, banks will support you,” and being told not to "
+        "downsize Kingfisher. He also points to government policies that didn't "
+        "help and mounting losses, describing the refusal to let Etihad invest "
+        "as the final straw."
+    )
+
+    # A nearby speaker mention in another sentence must not become attribution.
+    assert chain._has_named_money_stopped_attribution(fallback_style_answer) is False
+
+    # Explicit attribution in the same sentence must still be detected in
+    # either word order.
+    assert chain._has_named_money_stopped_attribution(
+        "Mallya says money stopped and it got dry."
+    ) is True
+    assert chain._has_named_money_stopped_attribution(
+        "Money stopped and it got dry, Mallya says."
+    ) is True
+
+    context = (
+        "[SOURCE 1] The global financial crisis affected every sector. "
+        "The money stopped and it got dry. "
+        "I was told, 'You continue, banks will support you,' and not to "
+        "downsize Kingfisher. "
+        "Government policies that didn't help and mounting losses; "
+        "the refusal to let Etihad invest was the final straw."
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=fallback_style_answer,
+        repaired_draft=None,
+        final_answer=fallback_style_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    assert diagnostics["initial_draft"][
+        "unsupported_money_stopped_speaker_attribution"
+    ] is False
+    assert (
+        "unsupported_money_stopped_speaker_attribution"
+        not in diagnostics["initial_draft"]["issue_codes"]
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=fallback_style_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    assert instruction is None or "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" not in instruction
+
+
+@pytest.mark.unit
+def test_q05_oil_bill_and_airport_fee_claims_receive_speaker_neutral_repair():
+    question = (
+        "How does Vijay Mallya describe the challenges he faced "
+        "while running Kingfisher Airlines?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "The working capital cycle got disrupted and there was a cash flow issue. "
+        "The transcript refers to non-payment of the oil bills and says "
+        "Kingfisher Airlines was not able to pay airport fees and landing charges."
+    )
+    misattributed_answer = (
+        "Vijay Mallya says the global financial crisis affected every sector "
+        "and that the working capital cycle got disrupted after non-payment "
+        "of oil bills, airport fees and landing charges, causing a cash-flow issue."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=misattributed_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=misattributed_answer,
+        repaired_draft=None,
+        final_answer=misattributed_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL OPERATIONAL-CLAIM REPAIR" in instruction
+    assert "do not attribute these operational claims" in instruction.lower()
+    assert diagnostics["initial_draft"]["unsupported_q05_operational_speaker_attribution"] is True
+    assert (
+        "unsupported_q05_operational_speaker_attribution"
+        in diagnostics["initial_draft"]["issue_codes"]
+    )
+
+    neutral_answer = (
+        "Vijay Mallya describes the global financial crisis, the disrupted "
+        "working-capital cycle and a cash-flow issue. Separately, the discussion "
+        "refers to non-payment of oil bills and the inability to pay airport fees "
+        "and landing charges."
+    )
+    assert chain._has_named_q05_operational_attribution(neutral_answer) is False
+
+
+@pytest.mark.unit
+def test_q04_partial_context_keeps_neutral_attribution_repair_but_suppresses_gold_completeness_repair():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
         item["question"] for item in benchmark.question_cases if item["id"] == "Q04"
@@ -9639,7 +10316,7 @@ def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completene
     context = (
         "[SOURCE 1]\n"
         "The global financial crisis affected every sector. "
-        "Raj Shamani said money stopped and it got dry. "
+        "The money stopped and it got dry. "
         "I was told not to downsize Kingfisher; banks will support you."
     )
     answer = "Mallya says money stopped and it got dry."
@@ -9648,7 +10325,7 @@ def test_q04_partial_context_keeps_speaker_repair_but_suppresses_gold_completene
     )
 
     assert instruction is not None
-    assert "SPEAKER-ATTRIBUTION REPAIR" in instruction
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
     assert "CURATED EVIDENCE COMPLETENESS REPAIR" not in instruction
 
 
@@ -9735,3 +10412,2417 @@ def test_q03_normalizer_removes_bold_marked_lender_bullet_without_touching_busin
     assert "United Spirits" in corrected
     assert "Kingfisher Airlines" in corrected
     assert "removed_lender_consortium_from_business_list" in corrections
+
+
+@pytest.mark.unit
+def test_ar03_arabic_vein_caption_repairs_arteries_substitution():
+    question = "What sounds might people hear from their own bodies inside the room?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+        "صوت الرئتين أو صوت المعدة.\n"
+        "- [00:08–00:12] حتى عينيك وهي بترمش بقيت بتسمعها."
+    )
+    answer = (
+        "People may hear their heartbeat, blood moving through arteries, "
+        "their lungs and stomach, and their eyelids blinking."
+    )
+
+    instruction = chain._generation_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="fAd2nKfrDB8",
+    )
+
+    assert instruction is not None
+    assert "ANATOMICAL TERM CORRECTION" in instruction
+    assert "عروق means veins" in instruction
+    assert "not arteries" in instruction
+
+
+@pytest.mark.unit
+def test_ar03_registered_fallback_requires_all_five_arabic_bodily_sound_claims():
+    benchmark = chain.get_video_benchmark("fAd2nKfrDB8")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "AR03"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] فتبدأ تسمع حاجات زي نبض قلبك، حركة الدم في عروقك، "
+        "صوت الرئتين أو صوت المعدة.\n"
+        "- [00:08–00:12] حتى عينيك وهي بترمش بقيت بتسمعها."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="fAd2nKfrDB8",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "heartbeat" in answer
+    assert "blood moving through their veins" in answer
+    assert "sound of their lungs" in answer
+    assert "stomach sounds" in answer
+    assert "eyelids blinking" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2, 3, 4]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3, 4]
+
+    missing_eyelid_caption = context.replace(
+        "عينيك وهي بترمش",
+        "عينيك",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_eyelid_caption,
+        video_id="fAd2nKfrDB8",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["missing_fallback_claims"] == [4]
+
+
+@pytest.mark.unit
+def test_q06_repair_corrects_black_gold_attribution_without_dropping_strategy_claims():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q06"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "A brand needs a personality. He talked about surrogate advertising and "
+        "building a full water business around Kingfisher. There was nothing red "
+        "about McDowell. It was all black and gold. The only one around that is "
+        "red is Kingfisher."
+    )
+    answer = (
+        "A brand needs a personality. He used surrogate advertising and built a "
+        "water business around Kingfisher. Kingfisher's identity was black and gold."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "VISUAL-IDENTITY ATTRIBUTION REPAIR" in instruction
+    assert "black-and-gold description to McDowell's" in instruction
+    assert "Preserve the transcript-supported brand-personality" in instruction
+
+
+@pytest.mark.unit
+def test_q06_registered_fallback_requires_all_three_brand_strategy_claims():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q06"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "A brand needs a personality. I gave Kingfisher a very colorful "
+        "personality. I went into authoring surrogate advertising. We built "
+        "a full water business around Kingfisher, large enough that we could "
+        "advertise the core brand."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "brand needs a personality" in answer
+    assert "surrogate advertising" in answer
+    assert "water business around Kingfisher" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2]
+
+    missing_personality = context.replace(
+        "A brand needs a personality.",
+        "Brand identity was discussed.",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_personality,
+        video_id="MdeQMVBuGgY",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["missing_fallback_claims"] == [0]
+
+
+@pytest.mark.unit
+def test_q10_generation_repair_uses_neutral_speaker_attribution():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q10"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    misattributed = (
+        "Mallya says the global financial crisis meant money stopped and it got dry. "
+        "Government policies did not help and mounting losses followed. "
+        "The refusal to let Etihad invest was the final straw."
+    )
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=misattributed,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "do not attribute the phrase" in instruction.lower()
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_expose_atomic_claim_indices_without_draft_text():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q10"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    incomplete_draft = (
+        "The discussion describes the global financial crisis; money stopped and it got dry."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=incomplete_draft,
+        repaired_draft=None,
+        final_answer=incomplete_draft,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1, 2, 3]
+    assert diagnostics["initial_draft"]["missing_answer_claim_indices"] == [2, 3]
+    assert "missing_registered_answer_claims" in diagnostics["initial_draft"]["issue_codes"]
+    assert incomplete_draft not in repr(diagnostics)
+
+
+@pytest.mark.unit
+def test_q03_claim_repair_recognizes_asr_name_variants_and_requires_all_six_entities():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q03"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits. "
+        "The merger of Kingfisher and Air Deckin created Kingfisher Red. "
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q03"
+    source_claims = gold_case.generation_claim_source_groups
+    matched_source_claims = chain._matched_registered_phrase_group_indices(
+        context, source_claims
+    )
+    assert matched_source_claims == set(range(6))
+
+    answer = "The companies include United Breweries and United Spirits."
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "Air Deccan" in instruction
+    assert "Kingfisher Red" in instruction
+    assert "Royal Challengers Bangalore" in instruction
+    assert "Royal Challenge" in instruction
+
+
+
+@pytest.mark.regression
+def test_q02_registered_fallback_requires_all_four_source_claims_across_prompt_blocks():
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    source_context = (
+        "[SOURCE 1]\n"
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. Of course I also use the platform to advertise "
+        "my brands. The car and all the merchandise around Formula 1 had a lot "
+        "of our brands on it for promotional purposes.\n"
+        "[SOURCE 2]\n"
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
+        "to help it."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=source_context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert "Force India" in answer
+    assert "Indian flag" in answer
+    assert "pinnacle of motorsport" in answer
+    assert "used the Formula One platform to promote his brands" in answer
+    assert "Formula One team sent 10 million pounds back to Kingfisher Airlines" in answer
+    assert diagnostics["used"] is True
+    assert diagnostics["fallback_contract"] == (
+        "all_registered_fallback_claims_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["included_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [1],
+        "3": [2],
+    }
+    assert diagnostics["answer_contract_fallback_claims"] == [0, 1, 2, 3]
+    assert diagnostics["evidence_scope"] == "prompt_visible_context"
+
+    missing_brand_context = source_context.replace(
+        "Of course I also use the platform to advertise my brands.",
+        "The interviewer asks about the team's racing history.",
+    )
+    rejected = {}
+    assert chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=missing_brand_context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=rejected,
+    ) is None
+    assert rejected["used"] is False
+    assert rejected["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert rejected["missing_fallback_claims"] == [2]
+
+
+
+@pytest.mark.regression
+def test_q02_generation_uses_source_bound_fallback_after_failed_claim_repair(monkeypatch):
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    first_document = doc(
+        94,
+        6359.92,
+        6497.28,
+        "Now I named it Force India. I wanted the Indian flag to be on the grid. "
+        "I wanted the world to know that the team with roots in India was at the "
+        "pinnacle of motorsport. Of course I also use the platform to advertise "
+        "my brands. The car and all the merchandise around Formula 1 had a lot "
+        "of our brands on it for promotional purposes.",
+    )
+    second_document = doc(
+        215,
+        14541.399,
+        14636.64,
+        "The Formula 1 team sent back 10 million pounds to King Fisher Airlines "
+        "to help it.",
+    )
+    first_document.metadata["video_id"] = video_id
+    second_document.metadata["video_id"] = video_id
+    source_groups = [
+        {
+            "documents": [first_document],
+            "start": 6359.92,
+            "end": 6497.28,
+            "distance": 0.4,
+        },
+        {
+            "documents": [second_document],
+            "start": 14541.399,
+            "end": 14636.64,
+            "distance": 0.5,
+        },
+    ]
+    retrieved_results = [
+        (first_document, 0.4),
+        (second_document, 0.5),
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [94, 215],
+                "citation_chunk_ids": [94, 215],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 8000)
+    generation_calls = []
+
+    def incomplete_answer(**kwargs):
+        generation_calls.append(kwargs)
+        return "Formula 1 was an important motorsport interest discussed by Mallya."
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_answer)
+    result = chain.build_rag_chain(object(), object()).invoke(
+        {"question": question, "video_id": video_id}
+    )
+
+    trace = result["generation_trace"]
+    registered_case = chain.get_video_benchmark(video_id).gold_evidence_by_question[
+        "Q02"
+    ]
+    assert len(generation_calls) == 2
+    assert result["answer"] == registered_case.generation_fallback_answer
+    assert trace["gold_evidence_repair_attempted"] is True
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"][
+        "included_fallback_claims"
+    ] == [0, 1, 2, 3]
+    assert trace["generation_claim_groups_included"] == [0, 1, 2, 3]
+
+    selected = chain._select_citation_results(
+        result["retrieved_results"],
+        result["retrieval_trace"],
+        trace,
+    )
+    selected_ids = {
+        int(document.metadata["chunk_id"])
+        for document, _distance in selected
+    }
+    assert selected_ids == {94, 215}
+
+
+@pytest.mark.unit
+def test_q02_transfer_claim_source_matcher_accepts_amount_before_back_and_spaced_airline():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q02"
+    )
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q02"
+    source_groups = gold_case.generation_claim_source_groups
+    context = (
+        "[SOURCE 1]\n"
+        "The Formula One team sent £10 million back to King Fisher Airlines."
+    )
+
+    matched = chain._matched_registered_phrase_group_indices(context, source_groups)
+    assert 3 in matched
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_requires_all_three_registered_claims():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report showed 14,100 crores recovered.\n"
+        "- [00:05–00:10] The banks had not provided a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["scope"] == "bank_recovery"
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+
+
+@pytest.mark.unit
+def test_bank_recovery_extractor_joins_only_adjacent_caption_rows_within_source():
+    same_source = chain._extract_bank_recovery_statement_evidence({
+        11: (
+            "- [00:00–00:04] The Recovery Officer and Official Liquidator said in court "
+            "that the banks had been fully\n"
+            "- [00:04–00:08] paid."
+        )
+    })
+    assert same_source["bank_payment"]
+    assert same_source["bank_payment"][0]["source_id"] == 11
+    assert "banks had been fully paid" in same_source["bank_payment"][0]["text"]
+
+    auxiliary_started_caption = chain._extract_bank_recovery_statement_evidence({
+        13: (
+            "- [00:00–00:04] The banks\n"
+            "- [00:04–00:08] were fully paid."
+        )
+    })
+    assert auxiliary_started_caption["bank_payment"]
+    assert "The banks were fully paid" in auxiliary_started_caption["bank_payment"][0]["text"]
+
+    split_across_sources = chain._extract_bank_recovery_statement_evidence({
+        11: "- [00:00–00:04] The banks had been fully",
+        12: "- [00:04–00:08] paid.",
+    })
+    assert split_across_sources["bank_payment"] == []
+
+
+@pytest.mark.unit
+def test_bank_recovery_extractor_does_not_join_across_question_caption():
+    evidence = chain._extract_bank_recovery_statement_evidence({
+        1: (
+            "- [00:00–00:04] The banks had been fully\n"
+            "- [00:04–00:08] Were the banks fully paid?\n"
+            "- [00:08–00:12] The next topic is the recovery report."
+        )
+    })
+    assert evidence["bank_payment"] == []
+
+
+@pytest.mark.unit
+def test_q08_full_financial_fallback_uses_caption_pair_for_bank_payment():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer of the Debt Recovery Tribunal "
+        "and the Official Liquidator are referenced in this passage.\n"
+        "- [00:14–00:18] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is not None
+    assert "14,100" in fallback
+    assert "Recovery Officer and Official Liquidator" in fallback
+    assert "banks had been fully paid" in fallback
+    assert "Mallya said the banks had not provided him a statement of account" in fallback
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
+@pytest.mark.unit
+def test_q05_generation_repair_neutralizes_unsupported_money_stopped_speaker():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q05"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. "
+        "The money stopped and it got dry. "
+        "The working capital cycle got disrupted."
+    )
+    answer = (
+        "Vijay Mallya says the global financial crisis meant money stopped and it got dry."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "SPEAKER-NEUTRAL ATTRIBUTION REPAIR" in instruction
+    assert "Do not attribute the phrase" in instruction
+    assert "SPEAKER-ATTRIBUTION REPAIR" not in instruction
+
+
+@pytest.mark.unit
+def test_q08_answer_claim_requires_recovery_officer_or_official_liquidator_attribution():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q08"
+    )
+    registered_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    assert registered_id == "Q08"
+    claim_groups = gold_case.generation_claim_answer_groups
+
+    generic_answer = "The banks had been fully paid."
+    attributed_answer = (
+        "The Recovery Officer and Official Liquidator said in court that "
+        "the banks had been fully paid."
+    )
+    generic_claims = chain._matched_registered_phrase_group_indices(
+        generic_answer, claim_groups
+    )
+    attributed_claims = chain._matched_registered_phrase_group_indices(
+        attributed_answer, claim_groups
+    )
+
+    assert 1 not in generic_claims
+    assert 1 in attributed_claims
+
+
+@pytest.mark.unit
+def test_generation_repair_diagnostics_expose_speaker_and_visual_identity_gate_failures():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    q10 = next(item["question"] for item in benchmark.question_cases if item["id"] == "Q10")
+    q10_context = (
+        "[SOURCE 1]\n"
+        "The global financial crisis affected every sector. The money stopped; it got dry. "
+        "Government policies that didn't help and mounting losses. The refusal to let "
+        "Etihad invest was the final straw."
+    )
+    q10_answer = (
+        "Mallya says the global financial crisis meant money stopped and it got dry. "
+        "Government policies did not help and mounting losses followed. "
+        "The refusal to let Etihad invest was the final straw."
+    )
+    q10_diagnostics = chain._build_generation_repair_diagnostics(
+        question=q10,
+        video_id="MdeQMVBuGgY",
+        context=q10_context,
+        initial_draft=q10_answer,
+        repaired_draft=None,
+        final_answer=q10_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    q10_initial = q10_diagnostics["initial_draft"]
+    assert q10_initial["unsupported_money_stopped_speaker_attribution"] is True
+    assert "unsupported_money_stopped_speaker_attribution" in q10_initial["issue_codes"]
+
+    q06 = next(item["question"] for item in benchmark.question_cases if item["id"] == "Q06")
+    q06_context = (
+        "[SOURCE 1]\n"
+        "There was nothing red about McDowell. It was all black and gold. "
+        "The only one around that is red is Kingfisher."
+    )
+    q06_answer = (
+        "Kingfisher's brand identity and logo used a black-and-gold colour scheme."
+    )
+    q06_diagnostics = chain._build_generation_repair_diagnostics(
+        question=q06,
+        video_id="MdeQMVBuGgY",
+        context=q06_context,
+        initial_draft=q06_answer,
+        repaired_draft=None,
+        final_answer=q06_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+    q06_initial = q06_diagnostics["initial_draft"]
+    assert q06_initial["unsupported_kingfisher_black_gold_attribution"] is True
+    assert "unsupported_kingfisher_black_gold_attribution" in q06_initial["issue_codes"]
+
+
+@pytest.mark.unit
+def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "It had all the attributes of a low cost carrier, which is single class, "
+        "standard fleet. It had in flight entertainment. It had the best flying "
+        "experience that India had ever seen."
+    )
+    answer = "A single-class, low-cost carrier with in-flight entertainment."
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["required_source_claim_count"] == 2
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1]
+    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [0, 1]
+    assert "registered_source_claim_evidence_incomplete" not in (
+        diagnostics["initial_draft"]["issue_codes"]
+    )
+    assert "missing_registered_answer_claims" not in (
+        diagnostics["initial_draft"]["issue_codes"]
+    )
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+    assert chain._generation_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+@pytest.mark.unit
+def test_q03_royal_challengers_alone_does_not_satisfy_royal_challenge_whisky_claim():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q03"
+    )
+    _, gold_case = chain._registered_generation_gold_case("MdeQMVBuGgY", question)
+
+    franchise_only = (
+        "[SOURCE 1] Royal Challengers Bangalore was the cricket franchise."
+    )
+    matched = chain._matched_registered_phrase_group_indices(
+        franchise_only, gold_case.generation_claim_source_groups
+    )
+
+    assert 4 in matched
+    assert 5 not in matched
+
+
+@pytest.mark.unit
+def test_q08_retrieval_probes_exact_joint_official_bank_payment_caption(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    base = doc(
+        30001,
+        1000,
+        1010,
+        "The government of India ministry of finance published a report "
+        "acknowledging 14,100 crores recovered. The banks have not given me "
+        "a statement of account.",
+    )
+    attribution = doc(
+        30002,
+        1060,
+        1070,
+        "The Recovery Officer of the Debt Recovery Tribunal and the Official "
+        "Liquidator are referenced here. Both these have stated in court in "
+        "judicial proceedings that the banks have been fully paid.",
+    )
+    for document in (base, attribution):
+        document.metadata["video_id"] = "MdeQMVBuGgY"
+
+    calls = []
+    base_pair = (base, 0.2)
+    attribution_pair = (attribution, 0.2)
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [attribution_pair], [attribution_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors)) or list(anchors)
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [call["query"] for call in calls] == [
+        question,
+        chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+    ]
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is True
+    assert trace["final_stage"] == "registered_q08_bank_payment_attribution_probe"
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {30001, 30002}
+    assert trace["citation_chunk_ids"] == [30001, 30002]
+    assert expansion_calls == [
+        (chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY, [attribution_pair])
+    ]
+
+
+@pytest.mark.unit
+def test_q08_pronoun_only_anchor_triggers_probe_and_reserves_named_officials(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    base = doc(
+        30201,
+        1000,
+        1010,
+        "The Ministry of Finance report shows 14,100 crores recovered.",
+    )
+    pronoun_statement = doc(
+        30202,
+        1055,
+        1065,
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid.",
+    )
+    named_officials = doc(
+        30203,
+        1045,
+        1055,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court.",
+    )
+    for document in (base, pronoun_statement, named_officials):
+        document.metadata["video_id"] = video_id
+
+    base_pair = (base, 0.2)
+    pronoun_pair = (pronoun_statement, 0.2)
+    officials_pair = (named_officials, 0.25)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            # The initial anchors contain the payment phrase but not its
+            # antecedents, so the dedicated attribution probe must still run.
+            return (
+                [base_pair, pronoun_pair],
+                [base_pair, pronoun_pair],
+                {"weak_native_query_rejected": False},
+            )
+        return [pronoun_pair], [pronoun_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    expansion_calls = []
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda _store, query, anchors: (
+            expansion_calls.append((query, anchors))
+            or [officials_pair, pronoun_pair]
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id=video_id,
+    )
+
+    assert [call["query"] for call in calls] == [
+        question,
+        chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY,
+    ]
+    assert "Recovery Officer" in chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY
+    assert "Official Liquidator" in chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is True
+    assert trace["attempts"][-1]["attribution_context_complete"] is True
+    assert set(trace["attempts"][-1]["attribution_source_chunk_ids"]) == {
+        "30202",
+        "30203",
+    }
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {
+        30201,
+        30202,
+        30203,
+    }
+    assert set(trace["citation_chunk_ids"]) == {30201, 30202, 30203}
+    assert expansion_calls == [
+        (chain.Q08_BANK_PAYMENT_ATTRIBUTION_QUERY, [pronoun_pair])
+    ]
+
+
+@pytest.mark.unit
+def test_q08_probe_rejects_pronoun_only_payment_statement_without_named_context(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    base = doc(30211, 1000, 1010, "The Ministry report shows 14,100 crores recovered.")
+    pronoun_statement = doc(
+        30212,
+        1055,
+        1065,
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid.",
+    )
+    for document in (base, pronoun_statement):
+        document.metadata["video_id"] = video_id
+    base_pair = (base, 0.2)
+    pronoun_pair = (pronoun_statement, 0.2)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return (
+                [base_pair, pronoun_pair],
+                [base_pair, pronoun_pair],
+                {"weak_native_query_rejected": False},
+            )
+        return [pronoun_pair], [pronoun_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: [pronoun_pair],
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id=video_id,
+    )
+
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is False
+    assert trace["registered_q08_bank_payment_attribution_probe_rejection_reason"] == (
+        "named_officials_and_joint_payment_statement_not_found_in_same_source_segment"
+    )
+    assert trace["attempts"][-1]["attribution_context_complete"] is False
+    assert {pair[0].metadata["chunk_id"] for pair in results} == {30211, 30212}
+    assert trace["citation_chunk_ids"] == [30211, 30212]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_text", "distance", "candidate_video_id", "expected_reason"),
+    [
+        (
+            "Banks have been fully paid, but the transcript does not name the officials.",
+            0.2,
+            "MdeQMVBuGgY",
+            "registered_bank_payment_attribution_phrase_not_retrieved",
+        ),
+        (
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            chain.MAX_DISTANCE + 0.01,
+            "MdeQMVBuGgY",
+            "exact_bank_payment_attribution_source_not_found_within_distance",
+        ),
+        (
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            0.2,
+            "OtherVideo",
+            "bank_payment_attribution_source_only_found_for_wrong_video",
+        ),
+    ],
+)
+def test_q08_attribution_probe_fails_closed_without_exact_in_video_source(
+    monkeypatch, source_text, distance, candidate_video_id, expected_reason
+):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    base = doc(30101, 1000, 1010, "The Ministry report shows 14,100 crores recovered.")
+    candidate = doc(30102, 1060, 1070, source_text)
+    base.metadata["video_id"] = "MdeQMVBuGgY"
+    candidate.metadata["video_id"] = candidate_video_id
+    base_pair = (base, 0.2)
+    candidate_pair = (candidate, distance)
+    calls = []
+
+    def fake_retrieve(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [base_pair], [base_pair], {"weak_native_query_rejected": False}
+        return [candidate_pair], [candidate_pair]
+
+    monkeypatch.setattr(chain, "retrieve_temporal_context", lambda **_kwargs: None)
+    monkeypatch.setattr(chain, "retrieve_question_context", fake_retrieve)
+    monkeypatch.setattr(
+        chain,
+        "expand_question_context",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Unverified Q08 attribution must not be expanded or added."
+        ),
+    )
+
+    results, trace = chain._retrieve_with_query_recovery_trace(
+        vector_store=object(),
+        question=question,
+        llm_client=object(),
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert [item[0].metadata["chunk_id"] for item in results] == [30101]
+    assert trace["registered_q08_bank_payment_attribution_probe_attempted"] is True
+    assert trace["registered_q08_bank_payment_attribution_probe_accepted"] is False
+    assert trace["registered_q08_bank_payment_attribution_probe_rejection_reason"] == expected_reason
+
+
+@pytest.mark.unit
+def test_q08_generation_source_claims_match_the_registered_caption_wording():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q08"
+    )
+    _, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY", question
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "official liquidator is also obliged to give an account to the court. "
+        "Both these have stated in court in judicial proceedings that the banks "
+        "have been fully paid. Despite 15 reminders, the same banks have not "
+        "given me a statement of account."
+    )
+
+    assert chain._matched_registered_phrase_group_indices(
+        context,
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_uses_same_source_block_for_joint_official_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal.\n"
+        "- [00:14–00:18] The official liquidator is also obliged to give an account to the court.\n"
+        "- [00:18–00:28] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid yet the banks have not submitted "
+        "a statement of account."
+    )
+    diagnostics = {}
+
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is not None
+    assert "14,100" in answer
+    assert "Ministry of Finance" in answer
+    assert "Recovery Officer and Official Liquidator" in answer
+    assert "banks had been fully paid" in answer
+    assert "not submitted a statement of account" in answer
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
+@pytest.mark.regression
+def test_q08_financial_fallback_uses_prompt_visible_context_after_formatter_guard(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    prompt_context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] The government of India ministry of finance has published a report, "
+        "their annual report, in which they have acknowledged 14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal.\n"
+        "- [00:14–00:18] The official liquidator is also obliged to give an account to the court.\n"
+        "- [00:18–00:28] Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid yet the banks have not submitted "
+        "a statement of account."
+    )
+
+    def reject_rebuilt_context(_source_groups):
+        pytest.fail(
+            "Q08 must reuse its source-validated prompt context instead of "
+            "rebuilding a differently formatted context."
+        )
+
+    monkeypatch.setattr(chain, "build_context", reject_rebuilt_context)
+    selected_context, context_source = chain._select_financial_fallback_context(
+        question_id="Q08",
+        source_groups=[{"documents": []}],
+        prompt_context=prompt_context,
+    )
+
+    assert selected_context == prompt_context
+    assert context_source == "prompt_visible_generation_context"
+
+    diagnostics = {}
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=selected_context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is not None
+    assert "14,100" in answer
+    assert "Ministry of Finance" in answer
+    assert "Recovery Officer and Official Liquidator" in answer
+    assert "banks had been fully paid" in answer
+    assert "not submitted a statement of account" in answer
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_does_not_borrow_official_attribution_from_another_source():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:08] The printed report of the Ministry of Finance showed "
+        "14,100 crores recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] You have the Recovery Officer of the Debt Recovery Tribunal. "
+        "The official liquidator is also obliged to give an account to the court.\n"
+        "[SOURCE 3]\n"
+        "- [00:18–00:28] Both these have stated in court that the banks have "
+        "been fully paid, yet the banks have not submitted a statement of account."
+    )
+    diagnostics = {}
+
+    answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert answer is None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_rejects_positive_statement_of_account_as_missing_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] The banks provided a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["account_statement"]
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+
+
+@pytest.mark.unit
+def test_blood_through_veins_not_arteries_is_not_treated_as_wrong_attribution():
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins, not arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins rather than arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins and arteries."
+    ) is True
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood flows through arteries rather than veins."
+    ) is True
+
+
+@pytest.mark.unit
+def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_respects_negation():
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher's identity was black and gold."
+    ) is True
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "McDowell was black and gold, while Kingfisher was red."
+    ) is False
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was red, not black and gold."
+    ) is False
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was presented in black and gold rather than red."
+    ) is True
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was red rather than black and gold."
+    ) is False
+
+
+@pytest.mark.unit
+def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "It had all the attributes of a low cost carrier, which is single class, "
+        "standard fleet. It had in flight entertainment. It had the best flying "
+        "experience that India had ever seen."
+    )
+    answer = "A single-class, low-cost carrier with in-flight entertainment."
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["required_source_claim_count"] == 2
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1]
+    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [0, 1]
+    assert "registered_source_claim_evidence_incomplete" not in diagnostics["initial_draft"]["issue_codes"]
+    assert "missing_registered_answer_claims" not in diagnostics["initial_draft"]["issue_codes"]
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+@pytest.mark.unit
+def test_q03_royal_challengers_alone_does_not_satisfy_royal_challenge_whisky_claim():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q03"
+    )
+    _, gold_case = chain._registered_generation_gold_case("MdeQMVBuGgY", question)
+    franchise_only = "[SOURCE 1] Royal Challengers Bangalore was the cricket franchise."
+
+    matched = chain._matched_registered_phrase_group_indices(
+        franchise_only, gold_case.generation_claim_source_groups
+    )
+
+    assert 4 in matched
+    assert 5 not in matched
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_rejects_positive_statement_of_account_as_missing_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report said 14,100 crores had been recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] The banks provided a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == ["recovery_amount", "bank_payment"]
+    assert diagnostics["missing_evidence_groups"] == ["account_statement"]
+    assert diagnostics["rejection_reason"] == "insufficient_bank_recovery_evidence"
+
+
+@pytest.mark.unit
+def test_blood_through_veins_not_arteries_is_not_treated_as_wrong_attribution():
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins, not arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins rather than arteries."
+    ) is False
+    assert chain._blood_movement_attributed_to_arteries(
+        "Blood moves through veins and arteries."
+    ) is True
+
+
+@pytest.mark.unit
+def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_respects_negation():
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher's identity was black and gold."
+    ) is True
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "McDowell was black and gold, while Kingfisher was red."
+    ) is False
+    assert chain._text_assigns_black_gold_to_kingfisher(
+        "Kingfisher was red, not black and gold."
+    ) is False
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_rejects_recovery_amount_without_report_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] 14,100 crores were recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["minimum_supported_evidence_groups"] == 3
+    assert diagnostics["supported_evidence_groups"] == [
+        "bank_payment", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["recovery_amount"]
+
+
+@pytest.mark.unit
+def test_q08_financial_fallback_requires_named_official_for_bank_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report showed 14,100 crores recovered.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] Mallya said the banks had not provided him a statement of account."
+    )
+    diagnostics = {}
+
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert fallback is None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "account_statement"
+    ]
+    assert diagnostics["missing_evidence_groups"] == ["bank_payment"]
+
+
+@pytest.mark.unit
+def test_royal_challenge_phrase_requires_a_token_boundary():
+    phrase_groups = (("Royal Challenge",),)
+
+    assert chain._matched_registered_phrase_group_indices(
+        "Royal Challengers Bangalore was the cricket franchise.",
+        phrase_groups,
+    ) == set()
+    assert chain._matched_registered_phrase_group_indices(
+        "The whisky brand was Royal Challenge.",
+        phrase_groups,
+    ) == {0}
+
+
+@pytest.mark.unit
+def test_q08_missing_statement_accepts_explicit_not_rendered_caption():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    context = (
+        "[SOURCE 1]\n"
+        "- [00:00–00:05] The Ministry of Finance report records that 14,100 crore "
+        "rupees were recovered from me.\n"
+        "[SOURCE 2]\n"
+        "- [00:10–00:14] The Recovery Officer and Official Liquidator said in court "
+        "that the banks had been fully paid.\n"
+        "[SOURCE 3]\n"
+        "- [00:20–00:25] The government and banks have not rendered a statement "
+        "of account."
+    )
+    diagnostics = {}
+    fallback = chain._build_financial_evidence_fallback(
+        question=question,
+        context=context,
+        diagnostics=diagnostics,
+        video_id="MdeQMVBuGgY",
+    )
+    assert fallback is not None
+    assert diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+    assert "not rendered a statement of account" in fallback
+
+
+@pytest.mark.unit
+def test_q03_entity_distinction_requires_both_correct_roles():
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    ) is True
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore and Royal Challenge whisky."
+    ) is False
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore is the cricket franchise; "
+        "the cricket franchise was Royal Challenge."
+    ) is False
+    assert chain._has_q03_entity_distinction(
+        "Royal Challengers Bangalore is the cricket franchise; "
+        "Royal Challenge is a cricket team and also a whisky brand."
+    ) is False
+
+    # Timestamp sanitization removes semicolons and joins answer fragments.
+    # That adjacency must not create a false cricket-franchise attribution.
+    correctly_distinguished = (
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+    sanitized = chain._strip_unverified_timestamp_summary(correctly_distinguished)
+    assert chain._has_q03_entity_distinction(sanitized) is True
+
+
+@pytest.mark.unit
+def test_q03_missing_role_receives_explicit_entity_repair_instruction():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits.\n"
+        "[SOURCE 2]\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red.\n"
+        "[SOURCE 3]\n"
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    incomplete_answer = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and the Royal Challenge whisky brand."
+    )
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "Q03 ENTITY-ROLE REPAIR" in instruction
+    assert "Royal Challengers Bangalore (RCB) is the cricket franchise" in instruction
+    assert "Royal Challenge is the whisky brand" in instruction
+
+    complete_answer = (
+        "United Breweries and United Spirits; Air Deccan and Kingfisher Red; "
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+    assert chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=complete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    ) is None
+
+
+def test_q03_registered_fallback_accepts_all_six_entities_across_source_blocks():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "United Breweries Limited and United Spirits.\n"
+        "[SOURCE 2]\n"
+        "The merger of Kingfisher and Air Deccan created Kingfisher Red. "
+        "I acquired Air Deccan as part of industry consolidation. "
+        "The interviewer asked if it was the wrong decision to rebrand it to Kingfisher Red; "
+        "Mallya replied, so we just called it Kingfisher Red. "
+        "Kingfisher Red stood for low cost.\n"
+        "[SOURCE 3]\n"
+        "Royal Challenges Bangalore was selected to promote Royal Challenge whisky."
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context=context,
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is not None
+    assert all(name in answer for name in (
+        "United Breweries",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge",
+    ))
+    assert chain._has_q03_entity_distinction(answer) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(answer) is True
+    assert "Mallya says he acquired Air Deccan" in answer
+    assert "Air Deccan was rebranded as Kingfisher Red" in answer
+    assert "Kingfisher Red, the low-cost airline offering" in answer
+    assert "Kingfisher First" not in answer
+    assert diagnostics["required_semantic_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["included_semantic_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["answer_contract_semantic_fallback_claims"] == [0, 1, 2]
+    assert diagnostics["used"] is True
+    assert diagnostics["question_id"] == "Q03"
+    assert diagnostics["fallback_contract"] == (
+        "all_registered_fallback_claims_across_prompt_source_blocks"
+    )
+    assert diagnostics["required_fallback_claims"] == list(range(6))
+    assert diagnostics["included_fallback_claims"] == list(range(6))
+    assert diagnostics["answer_contract_fallback_claims"] == list(range(6))
+    assert diagnostics["source_block_indices_by_fallback_claim"] == {
+        "0": [1],
+        "1": [1],
+        "2": [2],
+        "3": [2],
+        "4": [3],
+        "5": [3],
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_claim", range(6))
+def test_q03_registered_fallback_rejects_each_missing_atomic_entity_claim(missing_claim):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    claims = (
+        "United Breweries Limited",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge whisky",
+    )
+    source_blocks = (
+        "[SOURCE 1]\n" + " ".join(
+            [claims[index] for index in (0, 1) if index != missing_claim]
+            + ["I acquired Eden."]
+        ),
+        "[SOURCE 2]\n" + " ".join(
+            [claims[index] for index in (2, 3) if index != missing_claim]
+            + [
+                "We just called it King Fisher Red.",
+                "King Fisher Red stood for low cost.",
+            ]
+        ),
+        "[SOURCE 3]\n" + " ".join(
+            claims[index] for index in (4, 5) if index != missing_claim
+        ),
+    )
+    diagnostics = {}
+
+    answer = chain._build_registered_gold_answer_fallback(
+        question=question,
+        context="\n".join(source_blocks),
+        video_id="MdeQMVBuGgY",
+        diagnostics=diagnostics,
+    )
+
+    assert answer is None
+    assert diagnostics["used"] is False
+    assert diagnostics["rejection_reason"] == (
+        "required_fallback_claims_missing_from_source_blocks"
+    )
+    assert diagnostics["missing_fallback_claims"] == [missing_claim]
+
+
+@pytest.mark.regression
+def test_q03_context_packing_reserves_all_six_atomic_fallback_claims():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    evidence_captions = [
+        ["United Breweries Limited and United Spirits are discussed."],
+        ["Air Deccan and Kingfisher Red are discussed."],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky."
+        ],
+        ["I acquired Eden as part of industry consolidation."],
+        ["We just called it King Fisher Red."],
+        ["King Fisher Red stood for low cost."],
+    ]
+    evidence_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            11200 + index,
+            4500 + index * 30,
+            captions,
+            0.7 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        evidence_groups.append(group)
+
+    distractors = []
+    for index in range(9):
+        long_caption = (
+            f"Unrelated Kingfisher interview discussion {index}. "
+            + ("Background commentary without a Q03 entity claim. " * 24)
+        )
+        group = _caption_group(
+            11300 + index,
+            index * 120,
+            [long_caption],
+            0.01 + index * 0.01,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        distractors.append(group)
+
+    packed = chain.build_generation_context(
+        distractors + evidence_groups,
+        question=question,
+        max_chars=4200,
+        video_id="MdeQMVBuGgY",
+    )
+    diagnostics = packed["diagnostics"]
+
+    assert len(packed["context"]) <= 4200
+    assert diagnostics["registered_fallback_groups_required"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_available"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_included"] == list(range(6))
+    assert diagnostics["registered_fallback_groups_missing_from_retrieval"] == []
+    assert diagnostics["registered_fallback_groups_missing_from_prompt"] == []
+    assert diagnostics["registered_fallback_context_complete"] is True
+    assert diagnostics["generation_semantic_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_available"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_included"] == [0, 1, 2]
+    assert diagnostics["generation_semantic_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_semantic_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_semantic_context_complete"] is True
+    for phrase in (
+        "United Breweries Limited",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challenges Bangalore",
+        "Royal Challenge whisky",
+        "I acquired Eden",
+        "We just called it King Fisher Red",
+        "King Fisher Red stood for low cost",
+    ):
+        assert phrase in packed["context"]
+
+
+@pytest.mark.regression
+def test_q03_generation_is_suppressed_when_rebranding_evidence_is_not_prompt_visible(
+    monkeypatch,
+):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    source_captions = [
+        [
+            "United Breweries Limited and United Spirits are discussed. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        ["Air Deccan and Kingfisher Red are discussed."],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky. King Fisher Red stood for low cost."
+        ],
+    ]
+    source_groups = []
+    for index, captions in enumerate(source_captions):
+        group = _caption_group(
+            11600 + index,
+            5200 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    chunk_ids = [
+        int(document.metadata["chunk_id"])
+        for group in source_groups
+        for document in group["documents"]
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": chunk_ids,
+                "citation_chunk_ids": chunk_ids,
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    monkeypatch.setattr(chain, "RAG_GENERATION_CONTEXT_MAX_CHARS", 9000)
+
+    generation_calls = []
+
+    def forbidden_generation(**_kwargs):
+        generation_calls.append(True)
+        return "This answer must not be generated from incomplete airline evidence."
+
+    monkeypatch.setattr(chain, "generate_with_llm", forbidden_generation)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert generation_calls == []
+    trace = result["generation_trace"]
+    assert trace["generated"] is False
+    assert trace["generation_semantic_context_complete"] is False
+    assert trace["generation_semantic_groups_required"] == [0, 1, 2]
+    assert trace["generation_semantic_groups_included"] == [0, 2]
+    assert (
+        "generation_not_attempted_incomplete_semantic_evidence"
+        in trace["generation_repair_diagnostics"]["failure_reasons"]
+    )
+    assert "Kingfisher Red" not in result["answer"]
+
+
+
+
+
+@pytest.mark.regression
+def test_q03_uses_source_bound_fallback_after_model_repair_remains_incomplete(monkeypatch):
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    evidence_captions = [
+        [
+            "United Breweries Limited and United Spirits. "
+            "I acquired Eden as part of industry consolidation."
+        ],
+        [
+            "The merger of Kingfisher and Air Deccan created Kingfisher Red. "
+            "We just called it King Fisher Red. King Fisher Red stood for low cost."
+        ],
+        [
+            "Royal Challenges Bangalore was selected to promote "
+            "Royal Challenge whisky."
+        ],
+    ]
+    source_groups = []
+    for index, captions in enumerate(evidence_captions):
+        group = _caption_group(
+            11400 + index,
+            5200 + index * 30,
+            captions,
+            0.2 + index * 0.1,
+        )
+        for document in group["documents"]:
+            document.metadata["video_id"] = "MdeQMVBuGgY"
+        source_groups.append(group)
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [11400, 11401, 11402],
+                "citation_chunk_ids": [11400, 11401, 11402],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+    incomplete_answer = (
+        "The businesses include United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and the Royal Challenge whisky brand."
+    )
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return incomplete_answer
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": "MdeQMVBuGgY",
+    })
+
+    assert len(generation_calls) == 2
+    assert all(name in result["answer"] for name in (
+        "United Breweries",
+        "United Spirits",
+        "Air Deccan",
+        "Kingfisher Red",
+        "Royal Challengers Bangalore",
+        "Royal Challenge",
+    ))
+    assert chain._has_q03_entity_distinction(result["answer"]) is True
+
+    trace = result["generation_trace"]
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_registered_gold_answer_fallback_used"] is True
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["registered_gold_answer_fallback_diagnostics"]["used"] is True
+    assert trace["registered_gold_answer_fallback_diagnostics"][
+        "answer_contract_fallback_claims"
+    ] == list(range(6))
+    assert trace["context_budget"]["registered_fallback_groups_missing_from_prompt"] == []
+
+@pytest.mark.unit
+def test_q03_registered_fallback_selection_requires_all_airline_relationships():
+    question = (
+        "What businesses or companies does Vijay Mallya discuss in the interview?"
+    )
+    _question_id, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY",
+        question,
+    )
+    incomplete_answer = (
+        "The group includes United Breweries, United Spirits, Air Deccan, "
+        "Kingfisher Red, and Kingfisher Airlines. "
+        "Royal Challengers Bangalore (RCB) is the cricket franchise; "
+        "Royal Challenge is the whisky brand."
+    )
+
+    # The broad legacy categories and the RCB / whisky role check all pass,
+    # but the required acquisition, rebranding, and low-cost airline claims do not.
+    assert len(chain.matched_gold_answer_alias_groups(
+        incomplete_answer,
+        gold_case,
+    )) == 3
+    assert chain._has_q03_entity_distinction(incomplete_answer) is True
+    assert chain._has_q03_air_deccan_kingfisher_red_relationship(
+        incomplete_answer
+    ) is False
+
+    reason, diagnostics = chain._registered_gold_fallback_selection_reason(
+        answer=incomplete_answer,
+        question_id="Q03",
+        registered_case=gold_case,
+        included_answer_groups={0, 1, 2},
+        required_answer_groups=3,
+    )
+
+    assert reason == "q03_registered_answer_semantic_contract_incomplete"
+    assert diagnostics["required_answer_claim_indices"] == list(range(6))
+    assert diagnostics["missing_answer_claim_indices"] == []
+    assert diagnostics["required_semantic_answer_indices"] == [0, 1, 2]
+    assert diagnostics["missing_semantic_answer_indices"] == [0, 1, 2]
+    assert diagnostics["entity_distinction_passed"] is True
+    assert diagnostics["airline_relationship_passed"] is False
+
+    complete_registered_answer = gold_case.generation_fallback_answer
+    assert isinstance(complete_registered_answer, str)
+    complete_reason, complete_diagnostics = (
+        chain._registered_gold_fallback_selection_reason(
+            answer=complete_registered_answer,
+            question_id="Q03",
+            registered_case=gold_case,
+            included_answer_groups={0, 1, 2},
+            required_answer_groups=3,
+        )
+    )
+    assert complete_reason is None
+    assert complete_diagnostics["missing_answer_claim_indices"] == []
+    assert complete_diagnostics["missing_semantic_answer_indices"] == []
+    assert complete_diagnostics["entity_distinction_passed"] is True
+    assert complete_diagnostics["airline_relationship_passed"] is True
+
+
+@pytest.mark.regression
+def test_q08_uses_validated_financial_fallback_after_model_repair_fails(monkeypatch):
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    source_groups = [
+        _caption_group(
+            33001,
+            10000,
+            [
+                "The government of India ministry of finance has published a report "
+                "their annual report in which they have acknowledged 14,100 crores "
+                "recovered from me."
+            ],
+            0.2,
+        ),
+        _caption_group(
+            33002,
+            10020,
+            [
+                "You have the Recovery Officer of the Debt Recovery Tribunal.",
+                "The Official Liquidator is also obliged to give an account to the court.",
+                "Both these have stated in court in judicial proceedings that the "
+                "banks have been fully paid.",
+            ],
+            0.25,
+        ),
+        _caption_group(
+            33003,
+            10040,
+            [
+                "Despite 15 reminders the same banks have not given me a statement "
+                "of account."
+            ],
+            0.3,
+        ),
+    ]
+    for group in source_groups:
+        for document in group["documents"]:
+            document.metadata["video_id"] = video_id
+
+    retrieved_results = [
+        (group["documents"][0], group["distance"])
+        for group in source_groups
+    ]
+    monkeypatch.setattr(
+        chain,
+        "_retrieve_with_query_recovery_trace",
+        lambda **_kwargs: (
+            retrieved_results,
+            {
+                "recovery_used": False,
+                "final_stage": "initial_strict",
+                "retrieval_latency_ms": 1.0,
+                "final_chunk_ids": [33001, 33002, 33003],
+                "citation_chunk_ids": [33001, 33002, 33003],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        chain,
+        "merge_overlapping_results",
+        lambda _results: source_groups,
+    )
+
+    # Deliberately omit the Ministry recovery figure. Both generation attempts
+    # remain incomplete, reproducing the live Q08 repair failure.
+    incomplete_answer = (
+        "The Recovery Officer and Official Liquidator stated in court that the "
+        "banks had been fully paid. Mallya says the banks had not provided him "
+        "a statement of account."
+    )
+    generation_calls = []
+
+    def incomplete_model_answer(**_kwargs):
+        generation_calls.append(True)
+        return incomplete_answer
+
+    monkeypatch.setattr(chain, "generate_with_llm", incomplete_model_answer)
+
+    result = chain.build_rag_chain(object(), object()).invoke({
+        "question": question,
+        "video_id": video_id,
+    })
+
+    trace = result["generation_trace"]
+    assert len(generation_calls) == 2
+    assert trace["quality_repair_attempted"] is True
+    assert trace["quality_repair_passed"] is False
+    assert trace["grounded_financial_fallback_used"] is True
+    assert trace["financial_answer_suppressed"] is False
+    assert trace["gold_evidence_answer_suppressed"] is False
+    assert trace["financial_fallback_diagnostics"]["rejection_reason"] is None
+    assert trace["financial_fallback_diagnostics"]["supported_evidence_groups"] == [
+        "recovery_amount",
+        "bank_payment",
+        "account_statement",
+    ]
+    assert trace["financial_fallback_context_source"] == (
+        "prompt_visible_generation_context"
+    )
+    assert "14,100" in result["answer"]
+    assert "Ministry of Finance" in result["answer"]
+    assert "Recovery Officer and Official Liquidator" in result["answer"]
+    assert "banks had been fully paid" in result["answer"]
+    assert "statement of account" in result["answer"].casefold()
+    assert chain._is_abstention_answer(result["answer"]) is False
+
+
+@pytest.mark.regression
+def test_q08_context_reserves_all_three_registered_claims_within_8000_chars():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    assert gold_case.generation_claims_require_context_reservation is True
+
+    def make_document(chunk_id, start, raw_text, metadata_text):
+        document = doc(chunk_id, start, start + 4, raw_text)
+        document.metadata["video_id"] = video_id
+        document.metadata["transcript_segments"] = [{
+            "segment_id": chunk_id * 100,
+            "start": start,
+            "end": start + 3.5,
+            "text": metadata_text,
+        }]
+        return document
+
+    claim_documents = [
+        make_document(
+            2100,
+            8500,
+            "The government of India ministry of finance has published a report "
+            "their annual report in which they have acknowledged 14,100 crores "
+            "recovered from me.",
+            "The annual report discusses recovered funds.",
+        ),
+        make_document(
+            2101,
+            8600,
+            "The Recovery Officer and Official Liquidator are referenced here. "
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid.",
+            "The banks have been fully paid.",
+        ),
+        make_document(
+            2102,
+            8700,
+            "Despite 15 reminders the same banks have not given me a statement "
+            "of account.",
+            "A statement of account was discussed.",
+        ),
+    ]
+
+    source_groups = [
+        {
+            "documents": [document],
+            "start": float(document.metadata["start"]),
+            "end": float(document.metadata["end"]),
+            "distance": 0.8 + index * 0.05,
+        }
+        for index, document in enumerate(claim_documents)
+    ]
+
+    # Six closer but unrelated source groups force the bounded packer to
+    # reserve the three registered Q08 claim-bearing groups explicitly.
+    filler_text = (
+        "The interviewer then discusses an unrelated subject in the interview. "
+        * 55
+    )
+    for index in range(6):
+        start = 20000 + index * 10
+        filler = make_document(
+            2200 + index,
+            start,
+            filler_text,
+            filler_text,
+        )
+        source_groups.append({
+            "documents": [filler],
+            "start": float(start),
+            "end": float(start + 4),
+            "distance": 0.01 + index * 0.001,
+        })
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    context = result["context"]
+    diagnostics = result["diagnostics"]
+
+    assert len(context) <= 8000
+    assert "14,100 crores" in context
+    assert "Recovery Officer" in context
+    assert "Official Liquidator" in context
+    assert "both these have stated in court" in context.casefold()
+    assert "statement of account" in context.casefold()
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == []
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == []
+    assert diagnostics["generation_claim_context_complete"] is True
+    assert diagnostics["groups_available"] == 9
+    assert diagnostics["groups_included"] <= 8
+    claim_diagnostics = diagnostics["gold_evidence_source_groups"]
+    assert all(
+        item["raw_chunk_fallback_used"]
+        for item in claim_diagnostics
+        if item["source_group_index"] in (1, 2, 3)
+    )
+
+
+@pytest.mark.regression
+def test_q08_caption_metadata_cannot_drop_named_official_attribution_from_raw_source():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    document = doc(
+        31101,
+        10000,
+        10010,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court. "
+        "Both these have stated in court in judicial proceedings that the "
+        "banks have been fully paid.",
+    )
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [{
+        "segment_id": 3110100,
+        "start": 10000,
+        "end": 10010,
+        "text": (
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid."
+        ),
+    }]
+
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 10000.0,
+            "end": 10010.0,
+            "distance": 0.2,
+        },
+        source_number=1,
+        gold_case=gold_case,
+    )
+
+    assert "Original retrieved transcript chunks" in rendered
+    assert "Recovery Officer" in rendered
+    assert "Official Liquidator" in rendered
+    assert "both these have stated in court" in rendered.casefold()
+
+
+@pytest.mark.regression
+def test_q08_format_source_group_falls_back_when_caption_rendering_splits_attribution():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    raw_text = (
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me. You have the Recovery Officer of the Debt Recovery "
+        "Tribunal. The Official Liquidator is also obliged to give an account "
+        "to the court. Both these have stated in court in judicial proceedings "
+        "that the banks have been fully paid. Despite 15 reminders the same "
+        "banks have not given me a statement of account."
+    )
+    document = doc(31301, 11000, 11030, raw_text)
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 3130100 + index,
+            "start": 11000 + index * 4,
+            "end": 11003 + index * 4,
+            "text": text,
+        }
+        for index, text in enumerate([
+            "The government of India ministry of finance has published a report their annual report in which they have acknowledged 14,100 crores recovered from me.",
+            "You have the Recovery Officer of the Debt Recovery Tribunal.",
+            "The Official Liquidator is also obliged to give an account to the court.",
+            # This physical marker line is a delimiter collision in the rendered
+            # source format, not a real boundary in the original indexed chunk.
+            "The interviewer displays a source label.\n[SOURCE 99]",
+            "Both these have stated in court in judicial proceedings that the banks have been fully paid.",
+            "Despite 15 reminders the same banks have not given me a statement of account.",
+        ])
+    ]
+
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 11000.0,
+            "end": 11030.0,
+            "distance": 0.2,
+        },
+        source_number=2,
+        gold_case=gold_case,
+    )
+
+    assert "Original retrieved transcript chunks in chronological order" in rendered
+    assert "Recovery Officer" in rendered
+    assert "Official Liquidator" in rendered
+    assert "both these have stated in court" in rendered.casefold()
+    assert chain._matched_registered_generation_claim_group_indices(
+        rendered,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+    # A full-source fallback must use the same Q08-aware formatter. Rebuilding
+    # without gold_case can discard the named-official antecedents.
+    source_group = {
+        "documents": [document],
+        "start": 11000.0,
+        "end": 11030.0,
+        "distance": 0.2,
+    }
+    rebuilt_context = chain.build_context([source_group], gold_case=gold_case)
+    assert "Original retrieved transcript chunks in chronological order" in rebuilt_context
+    assert chain._matched_registered_generation_claim_group_indices(
+        rebuilt_context,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    ) == {0, 1, 2}
+
+    fallback_diagnostics = {}
+    fallback_answer = chain._build_financial_evidence_fallback(
+        question=question,
+        context=rebuilt_context,
+        diagnostics=fallback_diagnostics,
+        video_id=video_id,
+    )
+    assert fallback_answer is not None
+    assert fallback_diagnostics["supported_evidence_groups"] == [
+        "recovery_amount", "bank_payment", "account_statement"
+    ]
+
+
+@pytest.mark.regression
+def test_q08_truncation_reserves_named_official_caption_rows_with_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q08"]
+
+    caption_texts = [
+        "You have the Recovery Officer of the Debt Recovery Tribunal.",
+        "The Official Liquidator is also obliged to give an account to the court.",
+        (
+            "Both these have stated in court in judicial proceedings that the "
+            "banks have been fully paid."
+        ),
+    ]
+    caption_texts.extend(
+        f"The interviewer moves to an unrelated part of the interview about "
+        f"his business history and career topic number {index}."
+        for index in range(30)
+    )
+    document_text = " ".join(caption_texts)
+    document = doc(31201, 10000, 10200, document_text)
+    document.metadata["video_id"] = video_id
+    document.metadata["transcript_segments"] = [
+        {
+            "segment_id": 3120100 + index,
+            "start": 10000 + index * 5,
+            "end": 10004 + index * 5,
+            "text": text,
+        }
+        for index, text in enumerate(caption_texts)
+    ]
+
+    rendered = chain.format_source_group(
+        {
+            "documents": [document],
+            "start": 10000.0,
+            "end": 10200.0,
+            "distance": 0.2,
+        },
+        source_number=1,
+        gold_case=gold_case,
+    )
+    assert "Transcript caption segments in chronological order" in rendered
+
+    truncated = chain._truncate_formatted_source(
+        rendered,
+        1200,
+        question=question,
+        selection_question=question,
+        gold_case=gold_case,
+    )
+
+    assert len(truncated) <= 1200
+    assert "Recovery Officer" in truncated
+    assert "Official Liquidator" in truncated
+    assert "both these have stated in court" in truncated.casefold()
+    assert 1 in chain._matched_registered_generation_claim_group_indices(
+        truncated,
+        "Q08",
+        gold_case.generation_claim_source_groups,
+    )
+
+
+@pytest.mark.regression
+def test_q08_generation_context_does_not_count_pronoun_only_bank_payment_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+
+    report = doc(
+        31001,
+        8500,
+        8505,
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me.",
+    )
+    named_officials_only = doc(
+        31002,
+        8550,
+        8555,
+        "You have the Recovery Officer of the Debt Recovery Tribunal. The "
+        "Official Liquidator is also obliged to give an account to the court.",
+    )
+    pronoun_payment = doc(
+        31003,
+        8600,
+        8605,
+        "Both these have stated in court in judicial proceedings that the "
+        "banks have been fully paid.",
+    )
+    missing_statement = doc(
+        31004,
+        8700,
+        8705,
+        "Despite 15 reminders the same banks have not given me a statement "
+        "of account.",
+    )
+
+    source_groups = []
+    for index, document in enumerate(
+        (report, named_officials_only, pronoun_payment, missing_statement)
+    ):
+        document.metadata["video_id"] = video_id
+        source_groups.append({
+            "documents": [document],
+            "start": float(document.metadata["start"]),
+            "end": float(document.metadata["end"]),
+            "distance": 0.2 + index * 0.1,
+        })
+
+    result = chain.build_generation_context(
+        source_groups,
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    diagnostics = result["diagnostics"]
+
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == [1]
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == [1]
+    assert diagnostics["generation_claim_context_complete"] is False
+
+
+@pytest.mark.regression
+def test_q08_context_does_not_fill_missing_official_attribution_claim():
+    question = "What does Vijay Mallya say about banks and the recovery of money?"
+    video_id = "MdeQMVBuGgY"
+    report = doc(
+        2301,
+        8500,
+        8504,
+        "The government of India ministry of finance has published a report "
+        "their annual report in which they have acknowledged 14,100 crores "
+        "recovered from me.",
+    )
+    statement = doc(
+        2302,
+        8700,
+        8704,
+        "Despite 15 reminders the same banks have not given me a statement "
+        "of account.",
+    )
+    for document in (report, statement):
+        document.metadata["video_id"] = video_id
+
+    result = chain.build_generation_context(
+        [
+            {"documents": [report], "start": 8500, "end": 8504, "distance": 0.2},
+            {"documents": [statement], "start": 8700, "end": 8704, "distance": 0.3},
+        ],
+        question=question,
+        max_chars=8000,
+        video_id=video_id,
+    )
+    diagnostics = result["diagnostics"]
+
+    assert diagnostics["generation_claim_groups_required"] == [0, 1, 2]
+    assert diagnostics["generation_claim_groups_available"] == [0, 2]
+    assert diagnostics["generation_claim_groups_included"] == [0, 2]
+    assert diagnostics["generation_claim_groups_missing_from_retrieval"] == [1]
+    assert diagnostics["generation_claim_groups_missing_from_prompt"] == [1]
+    assert diagnostics["generation_claim_context_complete"] is False
+    assert "Recovery Officer" not in result["context"]
+    assert "Official Liquidator" not in result["context"]
+

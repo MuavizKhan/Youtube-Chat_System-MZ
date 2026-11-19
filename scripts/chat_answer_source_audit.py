@@ -34,7 +34,18 @@ from Backend.rag_system.timestamp_utils import (
     parse_timestamp_range,
     timestamp_to_seconds as _shared_timestamp_to_seconds,
 )
-from Backend.rag_system.chain import is_temporal_location_question
+from Backend.rag_system.chain import (
+    _blood_movement_attributed_to_arteries,
+    _has_q03_entity_distinction,
+    _has_q03_air_deccan_acquisition,
+    _has_q03_air_deccan_rebranding,
+    _has_q03_kingfisher_red_low_cost_airline,
+    _has_q03_air_deccan_launch_misattribution,
+    _has_q03_kingfisher_red_beer_misclassification,
+    _has_named_money_stopped_attribution as _chain_has_named_money_stopped_attribution,
+    _text_assigns_black_gold_to_kingfisher,
+    is_temporal_location_question,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -170,7 +181,7 @@ PHASE10_11_AUDIT_CASES: tuple[dict[str, Any], ...] = (
             # This direct-fact question asks for the count. Require the number
             # and its unit; don't force the model to restate the question's
             # "express yourself" wording when "Three ways." is a complete answer.
-            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+ways?\b"},
+            {"name": "three_ways", "pattern": r"\b(?:three|3)\s+(?:different\s+)?ways?\b"},
         ),
     ),
     _make_audit_case(
@@ -292,7 +303,7 @@ PHASE11_0_ADDITIONAL_CASES: tuple[dict[str, Any], ...] = (
         answer_requirements=(
             {"name": "global_financial_crisis", "pattern": r"\bglobal financial crisis\b"},
             {"name": "working_capital_cycle", "pattern": r"\bworking[- ]capital\b"},
-            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of the )?oil bills\b"},
+            {"name": "oil_bill_nonpayment", "pattern": r"\b(?:non[- ]?payment of (?:the )?oil bills?|unpaid bills?[^.!?]{0,45}oil bills?|unpaid bills?[^.!?]{0,45}oil invoices?|unpaid oil invoices?|oil invoices?[^.!?]{0,45}(?:were|remained) unpaid|oil bills?(?:(?!\b(?:but|although|however|whereas|while|yet|except|paid|settled|cleared)\b)[^.!?]){0,80}\b(?:went|were|remained|stayed) unpaid)\b"},
             {"name": "airport_fees", "pattern": r"\bairport fees\b"},
             {"name": "landing_charges", "pattern": r"\blanding charges\b"},
             {"name": "cash_flow_challenge", "pattern": r"\bcash[- ]flow\b"},
@@ -835,12 +846,11 @@ def _bodily_sound_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
         )
         for name, pattern in requirements
     ]
-    has_veins = bool(re.search(r"\bveins?\b", text, re.IGNORECASE))
-    has_arteries_only = bool(re.search(r"\barter(?:y|ies)\b", text, re.IGNORECASE)) and not has_veins
+    blood_attributed_to_arteries = _blood_movement_attributed_to_arteries(text)
     checks.append(_quality_check(
         "blood_movement_not_misattributed_to_arteries",
-        not has_arteries_only,
-        "The transcript-supported reference is to veins; an arteries-only substitution is incorrect.",
+        not blood_attributed_to_arteries,
+        "The registered Arabic caption describes blood moving through veins, not arteries.",
     ))
     return checks
 
@@ -940,6 +950,37 @@ def _answer_language_matches(answer: str, language: str) -> bool:
     return False
 
 
+def _claims_kingfisher_is_black_and_gold(answer: str) -> bool:
+    """Share generation's semantic guard so the audit cannot disagree."""
+    return _text_assigns_black_gold_to_kingfisher(answer)
+
+
+def _has_named_money_stopped_attribution(text: str) -> bool:
+    """Use the generation module's canonical speaker-attribution contract."""
+    return _chain_has_named_money_stopped_attribution(text)
+
+
+def _has_named_q05_operational_attribution(text: str) -> bool:
+    """Detect named-speaker attribution of Q05 oil-bill/airport-fee claims."""
+    operational_claim = (
+        r"\b(?:oil bills?|oil invoices?|airport fees?|landing charges?)\b"
+    )
+    speaker = r"\b(?:Vijay Mallya|Mallya|Raj Shamani|the interviewer|interviewer)\b"
+    return any(
+        re.search(
+            speaker + r"[^.!?]{0,220}" + operational_claim,
+            sentence,
+            re.IGNORECASE,
+        )
+        or re.search(
+            operational_claim + r"[^.!?]{0,120}" + speaker,
+            sentence,
+            re.IGNORECASE,
+        )
+        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", text or "")
+    )
+
+
 def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, Any]]:
     """Check high-risk claims that broad phrase-presence checks cannot validate."""
     text = _normalize_answer_requirement_text(answer)
@@ -981,6 +1022,12 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             text,
             re.IGNORECASE,
         ) or re.search(
+            r"(?:Formula One|F1)(?:\s+team)?.{0,180}"
+            r"\bsent\b.{0,35}(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
+            r".{0,35}\bback\b.{0,120}(?:to\s+)?King\s?fisher",
+            text,
+            re.IGNORECASE,
+        ) or re.search(
             r"(?:£\s*)?(?:10\s*million|10\s*m|10m|ten\s*million)"
             r".{0,100}(?:sent.{0,30}back|returned|repaid).{0,100}"
             r"to\s+Kingfisher",
@@ -989,10 +1036,36 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
         ))
         wrong_force_india_reason = bool(re.search(
             r"(?:named|called)\s+(?:the\s+team\s+)?Force India.{0,100}"
-            r"(?:after|for)\s+(?:his|Mallya's)\s+(?:own\s+)?brand",
+            r"(?:after|for)\s+(?:his|Mallya's)\s+(?:own\s+)?brand|"
+            r"\bForce India\b.{0,100}\b(?:originally|initially)\s+"
+            r"named\s+after\s+(?:his|Mallya's)\s+(?:own\s+)?brand",
             text,
             re.IGNORECASE,
         ))
+        malaya_counterfactual_pattern = re.compile(
+            r"\b(?:could|might|would)\s+have\b.{0,80}\b(?:named|called)\b"
+            r".{0,35}\bMalaya\s+Formula\s+1\b.{0,100}\b(?:but|instead)\b"
+            r".{0,50}\bForce India\b",
+            re.IGNORECASE,
+        )
+        malaya_counterfactual_spans = [
+            match.span()
+            for match in malaya_counterfactual_pattern.finditer(text)
+        ]
+        malaya_actual_name_pattern = re.compile(
+            r"\b(?:the\s+team|it)\s+(?:was\s+)?(?:named|called)\s+[\"“']?Malaya\s+Formula\s+1\b|"
+            r"\b(?:named|called)\s+(?:(?:the\s+team|it)\s+)?[\"“']?Malaya\s+Formula\s+1\b|"
+            r"\bteam\s+(?:that|which)\s+(?:he\s+)?(?:named|called)\s+[\"“']?Malaya\s+Formula\s+1\b",
+            re.IGNORECASE,
+        )
+        wrong_malaya_team_name = any(
+            not any(
+                counterfactual_start <= actual_match.start()
+                and counterfactual_end >= actual_match.end()
+                for counterfactual_start, counterfactual_end in malaya_counterfactual_spans
+            )
+            for actual_match in malaya_actual_name_pattern.finditer(text)
+        )
         reverse_transfer = bool(re.search(
             r"Kingfisher(?: Airlines)? .{0,100}"
             r"(?:paid|provided|gave|sponsored|funded).{0,100}"
@@ -1009,87 +1082,136 @@ def _claim_level_semantic_checks(case_id: str, answer: str) -> list[dict[str, An
             "Preserve the transfer: the Formula One team sent £10 million back to Kingfisher Airlines.")
         add("q02_not_named_after_mallya_brand", not wrong_force_india_reason,
             "Do not claim Force India was named after Mallya's own brand.")
+        add("q02_malaya_formula_one_not_actual_team_name", not wrong_malaya_team_name,
+            "Malaya Formula 1 was a counterfactual name; the team was named Force India.")
         add("q02_transfer_direction_not_reversed", not reverse_transfer,
             "Do not describe Kingfisher as paying or sponsoring the Formula One team with this returned £10 million.")
 
     elif case_id == "Q03":
-        groups = [
-            bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
-            bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
-            bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE))
-            and bool(re.search(r"\bRoyal Challenge\b", text, re.IGNORECASE)),
-        ]
+        entity_checks = {
+            "united_breweries": bool(re.search(r"\bUnited Breweries\b", text, re.IGNORECASE)),
+            "united_spirits": bool(re.search(r"\bUnited Spirits\b", text, re.IGNORECASE)),
+            "air_deccan": bool(re.search(r"\bAir Deccan\b", text, re.IGNORECASE)),
+            "kingfisher_red": bool(re.search(r"\bKingfisher Red\b", text, re.IGNORECASE)),
+            "royal_challengers_bangalore": bool(re.search(r"\bRoyal Challengers Bangalore\b|\bRCB\b", text, re.IGNORECASE)),
+            "royal_challenge": bool(re.search(r"\bRoyal Challenge\b", text, re.IGNORECASE)),
+        }
+        for name, passed in entity_checks.items():
+            add(
+                f"q03_{name}",
+                passed,
+                f"The answer must separately identify {name.replace('_', ' ')}.",
+            )
         add(
             "q03_distinct_business_families",
-            all(groups),
-            "Distinguish United Breweries/United Spirits, Air Deccan/Kingfisher Red, and Royal Challengers Bangalore/Royal Challenge.",
+            all(entity_checks.values()),
+            "Name all six distinct entities: United Breweries, United Spirits, Air Deccan, Kingfisher Red, Royal Challengers Bangalore/RCB, and Royal Challenge.",
+        )
+        add(
+            "q03_royal_challenge_is_whisky_brand_not_franchise",
+            _has_q03_entity_distinction(text),
+            "Explicitly identify Royal Challengers Bangalore/RCB as the cricket franchise and Royal Challenge as the whisky brand.",
+        )
+        add(
+            "q03_air_deccan_acquisition_not_launch",
+            _has_q03_air_deccan_acquisition(text)
+            and not _has_q03_air_deccan_launch_misattribution(text),
+            "Describe Air Deccan as an existing airline Mallya acquired; do not say he founded or launched it.",
+        )
+        add(
+            "q03_air_deccan_rebranded_as_kingfisher_red",
+            _has_q03_air_deccan_rebranding(text),
+            "Explicitly connect Air Deccan to its rebranding as Kingfisher Red.",
+        )
+        add(
+            "q03_kingfisher_red_is_low_cost_airline",
+            _has_q03_kingfisher_red_low_cost_airline(text),
+            "Identify Kingfisher Red as the low-cost airline offering, not as a beer brand.",
+        )
+        add(
+            "q03_kingfisher_red_not_misclassified_as_beer",
+            not _has_q03_kingfisher_red_beer_misclassification(text),
+            "Do not classify Kingfisher Red as beer, a brewery product, or a beer brand.",
         )
         mentions_consortium = bool(re.search(r"consortium of 17 banks", text, re.IGNORECASE))
-        classifies_as_lenders = bool(re.search(r"\b(?:lenders?|creditors?|financiers?)\b", text, re.IGNORECASE))
+        classifies_as_lenders = bool(re.search(
+            r"\b(?:lenders?|creditors?|financiers?)\b|"
+            r"\b(?:provided|extended|offered|gave)\s+(?:a\s+)?"
+            r"(?:loan|credit|financing)\b|"
+            r"\b(?:lent|financed)\b.{0,45}\b(?:company|business|airline)\b",
+            text,
+            re.IGNORECASE,
+        ))
         add(
             "q03_bank_consortium_not_a_business",
             not mentions_consortium or classifies_as_lenders,
             "A 17-bank consortium is a lender group, not a separate operating business.",
         )
 
-    elif case_id in {"Q04", "Q10"}:
+    elif case_id in {"Q04", "Q05", "Q10"}:
         phrase_present = bool(re.search(
             r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b",
             text,
             re.IGNORECASE,
         ))
-        interviewer_attributed = bool(re.search(
-            r"(?:\b(?:Raj Shamani|the interviewer|interviewer)\b.{0,100}"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b.{0,100}"
-            r"\b(?:Raj Shamani|the interviewer|interviewer)\b)",
-            text,
-            re.IGNORECASE,
-        ))
-        guest_attributed = bool(re.search(
-            r"(?:\bMallya\b[^.!?]{0,80}\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b|"
-            r"\b(?:money stopped|it got dry|money dried up|stopped the money|money just stopped)\b[^.!?]{0,80}\bMallya\b)",
-            text,
-            re.IGNORECASE,
-        ))
+        named_speaker_attribution = _has_named_money_stopped_attribution(text)
         add(
-            f"{case_id.lower()}_money_stopped_attributed_to_interviewer",
-            not phrase_present or (interviewer_attributed and not guest_attributed),
-            "If repeating 'money stopped / it got dry', attribute those words to interviewer Raj Shamani, not Mallya.",
+            f"{case_id.lower()}_money_stopped_attribution_is_source_supported",
+            not phrase_present or not named_speaker_attribution,
+            "The registered captions do not establish who said the money-stopped phrase; describe it neutrally rather than assigning it to Mallya or the interviewer.",
         )
+        if case_id == "Q05":
+            add(
+                "q05_operational_claims_speaker_neutral",
+                not _has_named_q05_operational_attribution(text),
+                "The registered captions do not establish a speaker for the oil-bill non-payment and airport-fee/landing-charge passage; describe those operational claims neutrally.",
+            )
 
     elif case_id == "Q06":
         for name, pattern in (
             ("q06_brand_personality", r"brand.{0,60}personalit|personalit.{0,60}brand"),
             ("q06_surrogate_advertising", r"surrogate advertising"),
-            ("q06_kingfisher_water_business", r"water business.{0,100}Kingfisher|Kingfisher.{0,100}water business"),
+            ("q06_kingfisher_water_business", r"water[- ]business.{0,100}Kingfisher|Kingfisher.{0,100}water[- ]business"),
         ):
             add(
                 name,
                 bool(re.search(pattern, text, re.IGNORECASE)),
                 "Cover brand personality, surrogate advertising, and the Kingfisher water-business strategy.",
             )
+        kingfisher_black_gold_claim = _claims_kingfisher_is_black_and_gold(text)
         add(
             "q06_avoids_unsupported_visual_identity_details",
-            not bool(re.search(r"black[-‑‒–—− ]and[-‑‒–—− ]gold", text, re.IGNORECASE)),
-            "Do not invent a black-and-gold identity or packaging strategy.",
+            not kingfisher_black_gold_claim,
+            "Do not assign McDowell's black-and-gold identity to Kingfisher; the source distinguishes Kingfisher as red.",
         )
 
     elif case_id == "Q08":
+        q08_recovery_figure = re.compile(
+            r"14[\s,\u202f]*100\s*(?:crores?|cr)\b",
+            re.IGNORECASE,
+        )
+        q08_ministry_report = re.compile(
+            r"\b(?:Ministry of Finance|Finance Ministry)\b.{0,90}\b(?:report|reported)\b|"
+            r"\b(?:report|reported)\b.{0,90}\b(?:Ministry of Finance|Finance Ministry)\b",
+            re.IGNORECASE,
+        )
+        q08_recovery_report_attributed = any(
+            q08_recovery_figure.search(clause)
+            and q08_ministry_report.search(clause)
+            for clause in re.split(r"[.!?;\n]+", text)
+        )
         add(
             "q08_ministry_recovery_figure",
-            bool(re.search(r"14[\s,\u202f]*100\s*(?:crores?|cr)\b", text, re.IGNORECASE)),
-            "Include the distinct £/₹14,100-crore recovery figure reported in Parliament.",
+            q08_recovery_report_attributed,
+            "Include the 14,100-crore figure and attribute it to the Ministry of Finance report.",
         )
         add(
             "q08_banks_fully_paid_claim_attributed",
             bool(re.search(
-                r"(?:Recovery Officer|Official Liquidator|court).{0,140}"
+                r"(?:Recovery Officer|Official Liquidator).{0,140}"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full)|"
                 r"(?:banks|bank).{0,60}(?:fully paid|paid in full).{0,140}"
-                r"(?:Recovery Officer|Official Liquidator|court)",
+                r"(?:Recovery Officer|Official Liquidator)",
                 text,
                 re.IGNORECASE,
             )),

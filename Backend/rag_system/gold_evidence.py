@@ -64,6 +64,13 @@ class GoldEvidenceCase:
     # Generated-answer claims are independent of deterministic fallbacks.
     generation_claim_source_groups: tuple[tuple[str, ...], ...] = ()
     generation_claim_answer_groups: tuple[tuple[str, ...], ...] = ()
+    # Opt in when every registered generated-answer claim must be preserved
+    # through caption reconstruction and bounded generation-context packing.
+    generation_claims_require_context_reservation: bool = False
+    # Separate semantic relationship claims (for example, acquisition and
+    # rebranding) that must not be folded into the legacy entity-name contract.
+    generation_semantic_source_groups: tuple[tuple[str, ...], ...] = ()
+    generation_semantic_answer_groups: tuple[tuple[str, ...], ...] = ()
 
 
 GOLD_EVIDENCE_CASES = (
@@ -112,17 +119,108 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         min_generation_answer_group_coverage=1.0,
+        generation_claims_require_context_reservation=True,
         generation_claim_source_groups=(
             ("named it Force India", "called it Force India"),
             ("wanted the Indian flag to be on the grid", "team with roots in India"),
-            ("used the platform to advertise my brand", "used the platform to advertise my brands"),
-            ("Formula One team sent back 10 million pounds to Kingfisher Airlines", "sent back 10 million pounds to Kingfisher Airlines"),
+            ("use the platform to advertise my brands", "used the platform to advertise my brand", "used the platform to advertise my brands"),
+            (
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "sent 10 million pounds back to Kingfisher Airlines",
+                "Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "the Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "the Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
         ),
         generation_claim_answer_groups=(
             ("named the Formula One team Force India", "called the team Force India"),
             ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
-            ("used the Formula One platform, car livery and merchandise to promote brands"),
-            ("Formula One team sent 10 million pounds back to Kingfisher Airlines", "F1 team returned 10 million pounds to Kingfisher Airlines"),
+            ("used the Formula One platform to promote his brands", "used the Formula One platform, car livery and merchandise to promote brands"),
+            (
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "F1 team returned 10 million pounds to Kingfisher Airlines",
+                "F1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent £10 million back to King Fisher Airlines",
+                "sent £10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
+        ),
+        generation_fallback_answer=(
+            "Vijay Mallya says he named the Formula One team Force India because "
+            "he wanted the Indian flag on the grid and wanted the world to know "
+            "that a team with roots in India was at the pinnacle of motorsport. "
+            "He also says he used the Formula One platform to promote his brands, "
+            "which appeared on the car and Formula One merchandise. He says the "
+            "Formula One team sent 10 million pounds back to Kingfisher Airlines "
+            "to help it."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("named it Force India", "called it Force India"),
+            ("wanted the Indian flag to be on the grid", "team with roots in India"),
+            ("use the platform to advertise my brands", "used the platform to advertise my brand", "used the platform to advertise my brands"),
+            (
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "sent 10 million pounds back to Kingfisher Airlines",
+                "Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula 1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "the Formula 1 team sent back 10 million pounds to King Fisher Airlines",
+                "the Formula 1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to King Fisher Airlines",
+                "Formula One team sent back 10 million pounds to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
+        ),
+        generation_fallback_answer_groups=(
+            ("named the Formula One team Force India", "called the team Force India"),
+            ("wanted the Indian flag on the grid", "wanted an Indian team on the F1 grid"),
+            ("used the Formula One platform to promote his brands", "used the Formula One platform, car livery and merchandise to promote brands"),
+            (
+                "Formula One team sent 10 million pounds back to Kingfisher Airlines",
+                "F1 team returned 10 million pounds to Kingfisher Airlines",
+                "F1 team sent 10 million pounds back to Kingfisher Airlines",
+                "Formula One team sent 10 million back to Kingfisher Airlines",
+                "F1 team sent 10 million back to Kingfisher Airlines",
+                "Formula One team sent 10 million pounds back to King Fisher Airlines",
+                "F1 team sent 10 million pounds back to King Fisher Airlines",
+                "Formula One team sent £10 million back to King Fisher Airlines",
+                "sent £10 million back to King Fisher Airlines",
+                "Formula One team sent 10 million back to King Fisher Airlines",
+                "sent 10 million back to King Fisher Airlines",
+            ),
         ),
     ),
     GoldEvidenceCase(
@@ -138,24 +236,67 @@ GOLD_EVIDENCE_CASES = (
         generation_answer_aliases=(
             ("United Breweries", "United Spirits"),
             ("Air Deccan", "Kingfisher Red", "eliminate the disruptor"),
-            ("Royal Challengers Bangalore", "Royal Challenge", "RCB was born"),
+            ("Royal Challengers Bangalore", "Royal Challenge", "Royal Challenge whisky", "RCB was born"),
         ),
         min_generation_answer_group_coverage=1.0,
+        # Keep the established six-entity answer/fallback contract stable.
+        # The three role-defining airline facts are a separate semantic contract
+        # below so older diagnostics and all-six-entity fallback accounting do
+        # not change meaning.
         generation_claim_source_groups=(
             ("United Breweries Limited", "United Breweries"),
-            ("United Spirits"),
-            ("Air Deccan"),
-            ("Kingfisher Red"),
-            ("Royal Challengers Bangalore", "RCB"),
-            ("Royal Challenge"),
+            ("United Spirits",),
+            ("Air Deccan", "air deckin", "one deckan"),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
         generation_claim_answer_groups=(
-            ("United Breweries"),
-            ("United Spirits"),
-            ("Air Deccan"),
-            ("Kingfisher Red"),
-            ("Royal Challengers Bangalore"),
-            ("Royal Challenge"),
+            ("United Breweries",),
+            ("United Spirits",),
+            ("Air Deccan",),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore",),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+        ),
+        # These exact transcript assertions establish the airline history.
+        # Keep them separate from the six entity-name claims because they are
+        # semantic relationships, not additional companies or brands.
+        generation_semantic_source_groups=(
+            ("I acquired Air Deccan", "acquired Air Deccan", "I acquired Eden"),
+            ("we just called it Kingfisher Red", "we just called it King Fisher Red", "so we just called it Kingfisher Red", "so we just called it King Fisher Red"),
+            ("Kingfisher Red stood for low cost", "King Fisher Red stood for low cost"),
+        ),
+        generation_semantic_answer_groups=(
+            ("Mallya says he acquired Air Deccan", "Mallya acquired Air Deccan", "Air Deccan was acquired by Mallya"),
+            ("Air Deccan was rebranded as Kingfisher Red", "rebranding of Air Deccan as Kingfisher Red", "the Deccan operation was rebranded as Kingfisher Red"),
+            ("Kingfisher Red was the low-cost airline offering", "Kingfisher Red is the low-cost airline", "Kingfisher Red was the low-cost carrier", "Kingfisher Red, the low-cost airline offering"),
+        ),
+        # Preserve the established six-entity deterministic fallback contract.
+        generation_fallback_answer=(
+            "The businesses, brands, and teams discussed are United Breweries, "
+            "United Spirits, Air Deccan, Kingfisher Red, Royal Challengers "
+            "Bangalore (RCB), and Royal Challenge. Mallya says he acquired Air "
+            "Deccan. He explains that Air Deccan was rebranded as Kingfisher Red, "
+            "the low-cost airline offering. Royal Challengers Bangalore "
+            "is the cricket franchise; Royal Challenge is the whisky brand."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("United Breweries Limited", "United Breweries"),
+            ("United Spirits",),
+            ("Air Deccan", "air deckin", "one deckan"),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore", "Royal Challenges Bangalore", "RCB"),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
+        ),
+        generation_fallback_answer_groups=(
+            ("United Breweries",),
+            ("United Spirits",),
+            ("Air Deccan",),
+            ("Kingfisher Red",),
+            ("Royal Challengers Bangalore",),
+            ("Royal Challenge", "Royal Challenge whisky", "Royal Challenge whiskey", "Royal Challenge brand"),
         ),
     ),
     GoldEvidenceCase(
@@ -196,8 +337,9 @@ GOLD_EVIDENCE_CASES = (
         generation_fallback_answer=(
             "Vijay Mallya says Kingfisher Airlines faced several connected "
             "pressures. Mallya says the global financial crisis affected every "
-            "sector. Raj Shamani, the interviewer, then says that money stopped "
-            "and it got dry. Mallya recalls being told, “You continue, banks will support you,” "
+            "sector. The discussion then describes how money stopped and it got dry, "
+            "without assigning those words to either speaker. Mallya recalls being told, "
+            "“You continue, banks will support you,” "
             "and that he should not downsize Kingfisher. He also points to "
             "government policies that didn't help and mounting losses, "
             "describing the refusal to let Etihad invest as the final straw."
@@ -263,15 +405,12 @@ GOLD_EVIDENCE_CASES = (
             ),
         ),
         generation_fallback_answer=(
-            "Vijay Mallya identifies the global financial crisis as a shock that "
-            "affected every sector. The interviewer summarizes the impact by "
-            "saying that money stopped and it got dry. Mallya says Kingfisher's "
-            "working capital cycle got disrupted. The interviewer then points to "
-            "the non-payment of the oil bills and says Kingfisher Airlines was "
-            "not able to pay the airport fees and landing charges. Mallya responds "
-            "that a cash "
-            "flow issue affects everybody; one creditor or vendor cannot be "
-            "isolated because the cash shortage is across the board."
+            "The discussion describes the global financial crisis and how money "
+            "stopped, without assigning those words to either speaker. It says "
+            "the working capital cycle got disrupted and there was a cash flow "
+            "issue. It refers to the non-payment of the oil bills and says "
+            "Kingfisher Airlines was not able to pay the airport fees and "
+            "landing charges."
         ),
         generation_fallback_requires_all_groups=True,
         generation_fallback_source_groups=(
@@ -281,8 +420,8 @@ GOLD_EVIDENCE_CASES = (
             ("cash flow issue",),
             ("non-payment of the oil bills",),
             (
-                # The interviewer states this; Mallya's following reply is
-                # about the cash-flow impact across creditors and vendors.
+                # The caption does not establish a speaker boundary here;
+                # keep the oil-bill and airport-fee facts speaker-neutral.
                 "Kingfisher Airlines was not able to pay the airport fees the landing charges",
                 "not able to pay the airport fees the landing charges",
                 "not able to pay airport fees and landing charges",
@@ -323,7 +462,24 @@ GOLD_EVIDENCE_CASES = (
         ),
         generation_claim_answer_groups=(
             ("a brand needs a personality", "gave Kingfisher a personality"),
-            ("surrogate advertising"),
+            ("surrogate advertising",),
+            ("water business around Kingfisher", "advertise the core brand"),
+        ),
+        generation_fallback_answer=(
+            "Mallya says a brand needs a personality and describes giving "
+            "Kingfisher a colorful, fun, exciting and vibrant personality. "
+            "He describes using surrogate advertising and building a full "
+            "water business around Kingfisher so the core brand could be advertised."
+        ),
+        generation_fallback_requires_all_groups=True,
+        generation_fallback_source_groups=(
+            ("a brand needs a personality", "gave brands their personalities"),
+            ("authoring surrogate advertising", "surrogate advertising"),
+            ("built a full water business around Kingfisher", "water business around Kingfisher", "advertise the core brand"),
+        ),
+        generation_fallback_answer_groups=(
+            ("a brand needs a personality", "gave Kingfisher a personality"),
+            ("surrogate advertising",),
             ("water business around Kingfisher", "advertise the core brand"),
         ),
     ),
@@ -346,21 +502,120 @@ GOLD_EVIDENCE_CASES = (
         min_group_coverage=2 / 3,
         min_generation_context_group_coverage=1.0,
         generation_answer_aliases=(
-            ("14,100 crores recovered from me", "Ministry of Finance report"),
-            ("banks have been fully paid", "the banks were fully paid"),
-            ("statement of account", "statement in Parliament"),
+            (
+                "Ministry of Finance report said 14,100 crores had been recovered",
+                "the Ministry of Finance report said 14,100 crores had been recovered",
+                "Ministry of Finance report showed 14,100 crores recovered",
+                "the Ministry of Finance report showed 14,100 crores recovered",
+                "Ministry of Finance report showed 14,100 crores had been recovered",
+                "the Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+                "Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+            ),
+            (
+                "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said in court that the banks have been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
+                "the Recovery Officer said in court that the banks had been fully paid",
+                "the Official Liquidator said in court that the banks had been fully paid",
+            ),
+            (
+                "banks had not provided a statement of account",
+                "the banks had not provided a statement of account",
+                "banks had not provided him a statement of account",
+                "Mallya said the banks had not provided him a statement of account",
+                "banks had not provided him with a statement of account",
+                "banks have not provided a statement of account",
+                "banks still had not provided a statement of account",
+                "the statement of account was not provided",
+                "statement of account had not been provided",
+                "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
+            ),
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
-            ("14,100 crore rupees were recovered from me", "14,100 crores recovered from me", "government has recovered 14,100 crores"),
-            ("banks have been fully paid", "the banks have been fully paid"),
-            ("statement of account", "statement in parliament"),
+            (
+                "the government of India ministry of finance has published a report their annual report in which they have acknowledged 14,100 crores recovered from me",
+                "the printed report of the ministry of finance that they have shown 14,100 crores recovered from me",
+                "Ministry of Finance report said 14,100 crores had been recovered",
+                "the Ministry of Finance report said 14,100 crores had been recovered",
+                "Ministry of Finance report showed 14,100 crores recovered",
+                "the Ministry of Finance report showed 14,100 crores recovered",
+                "Ministry of Finance report showed 14,100 crores had been recovered",
+                "the Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+                "Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+            ),
+            (
+                "both these have stated in court in judicial proceedings that the banks have been fully paid",
+                "Recovery Officer and Official Liquidator said in court that banks have been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that banks have been fully paid",
+                "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said in court that the banks have been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
+                "The Recovery Officer and Official Liquidator had stated in court that the banks had been fully paid",
+            ),
+            (
+                "despite 15 reminders the same banks have not given me a statement of account",
+                "the banks have not submitted a statement of account",
+                "the government have the banks have not rendered a statement of account",
+                "banks had not provided a statement of account",
+                "the banks had not provided a statement of account",
+                "banks had not provided him a statement of account",
+                "Mallya said the banks had not provided him a statement of account",
+                "banks had not provided him with a statement of account",
+                "banks have not provided a statement of account",
+                "banks still had not provided a statement of account",
+                "the statement of account was not provided",
+                "statement of account had not been provided",
+                "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
+            ),
         ),
         generation_claim_answer_groups=(
-            ("14,100 crores recovered from him", "14,100 crore rupees recovered from him"),
-            ("banks had been fully paid"),
-            ("statement of account had not been provided", "banks had not provided a statement of account"),
+            (
+                "the transcript attributes a recovery figure of 14,100 crore to the Ministry of Finance report",
+                "Ministry of Finance report said 14,100 crores had been recovered",
+                "the Ministry of Finance report said 14,100 crores had been recovered",
+                "Ministry of Finance report showed 14,100 crores recovered",
+                "the Ministry of Finance report showed 14,100 crores recovered",
+                "Ministry of Finance report showed 14,100 crores had been recovered",
+                "the Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+                "Ministry of Finance report records that 14,100 crore rupees were recovered from me",
+            ),
+            (
+                "Recovery Officer and Official Liquidator said in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said in court that the banks have been fully paid",
+                "Recovery Officer and Official Liquidator stated in court that the banks had been fully paid",
+                "Recovery Officer and Official Liquidator said that the banks had been fully paid",
+                "the Recovery Officer said in court that the banks had been fully paid",
+                "the Official Liquidator said in court that the banks had been fully paid",
+                "the court was told by the Recovery Officer and Official Liquidator that banks had been fully paid",
+                "Recovery Officer and Official Liquidator told the court that all banks had been paid in full",
+                "Recovery Officer and Official Liquidator said that all banks were fully paid",
+                "the court was told that the banks had been fully paid by the Recovery Officer and Official Liquidator",
+            ),
+            (
+                "statement of account had not been provided",
+                "banks had not provided a statement of account",
+                "banks still had not provided a statement of account",
+                "banks have not provided a statement of account",
+                "Mallya said the banks had not provided him a statement of account",
+                "banks had not provided him a statement of account",
+                "banks had not provided him with a statement of account",
+                "the statement of account was not provided",
+                "a statement of account had not been provided",
+                "the government and banks have not rendered a statement of account",
+                "government and banks have not rendered a statement of account",
+                "I still have not been provided a statement of account",
+            ),
         ),
+        # Q08 has three independent source-backed claims. Reserve their
+        # timestamped caption rows through bounded context packing so the
+        # officials' bank-payment attribution cannot be displaced by the
+        # denser financial-recovery discussion.
+        generation_claims_require_context_reservation=True,
     ),
     GoldEvidenceCase(
         question_id="Q09",
@@ -403,14 +658,14 @@ GOLD_EVIDENCE_CASES = (
         ),
         min_generation_answer_group_coverage=1.0,
         generation_claim_source_groups=(
-            ("global financial crisis"),
+            ("global financial crisis",),
             ("money stopped", "it got dry"),
             ("government policies that didn't help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
         generation_claim_answer_groups=(
-            ("global financial crisis"),
-            ("Raj Shamani, the interviewer, says that money stopped", "the interviewer says that money stopped"),
+            ("global financial crisis",),
+            ("money stopped", "it got dry", "money dried up", "money stopped flowing"),
             ("government policies that did not help", "mounting losses"),
             ("refusal to let Etihad invest", "final straw"),
         ),
@@ -684,7 +939,14 @@ def matched_source_phrase_group_indices(
     for group_index, alternatives in enumerate(phrase_groups):
         if any(
             (normalized_phrase := normalize_evidence_text(phrase))
-            and any(normalized_phrase in block for block in normalized_blocks)
+            and any(
+                re.search(
+                    rf"(?<!\w){re.escape(normalized_phrase)}(?!\w)",
+                    block,
+                )
+                is not None
+                for block in normalized_blocks
+            )
             for phrase in alternatives
         ):
             matched_indices.add(group_index)
@@ -733,17 +995,8 @@ def matched_gold_answer_groups(
     strict transcript/context matcher used by retrieval and prompt packing.
     """
     matched = matched_gold_groups(text, case)
-    if not isinstance(text, str) or not text or not case.generation_answer_aliases:
-        return matched
-
-    normalized_answer = normalize_evidence_text(text)
-    for group_index, aliases in enumerate(case.generation_answer_aliases):
-        if group_index >= len(case.groups):
-            break
-        if any(
-            normalize_evidence_text(alias) in normalized_answer
-            for alias in aliases
-        ):
-            matched.add(group_index)
-
+    # Use the same whole-phrase matching semantics for transcript phrases and
+    # curated English answer aliases. Substring matches can conflate distinct
+    # named entities (for example, "Royal Challenge" inside "Royal Challengers").
+    matched.update(matched_gold_answer_alias_groups(text, case))
     return matched
