@@ -11063,18 +11063,110 @@ def test_generation_repair_diagnostics_expose_speaker_and_visual_identity_gate_f
 
 
 @pytest.mark.unit
-def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage():
+@pytest.mark.parametrize(
+    (
+        "context",
+        "answer",
+        "expected_prompt_claims",
+        "expected_answer_claims",
+    ),
+    [
+        pytest.param(
+            (
+                "[SOURCE 1]\n"
+                "It had all the attributes of a low cost carrier, which is single class, "
+                "standard fleet. It had in flight entertainment. It had the best flying "
+                "experience that India had ever seen."
+            ),
+            (
+                "Kingfisher Airlines aimed to provide the best flying experience "
+                "that India had ever seen, with in-flight entertainment."
+            ),
+            [0, 1, 2],
+            [1, 2],
+            id="premium-and-entertainment-satisfy-two-of-three",
+        ),
+        pytest.param(
+            (
+                "[SOURCE 1]\n"
+                "It had in flight entertainment. It had the best flying experience "
+                "that India had ever seen."
+            ),
+            (
+                "Kingfisher Airlines aimed to provide the best flying experience "
+                "that India had ever seen, with in-flight entertainment."
+            ),
+            [1, 2],
+            [1, 2],
+            id="premium-and-entertainment-without-airline-model-claim",
+        ),
+        pytest.param(
+            (
+                "[SOURCE 1]\n"
+                "It had all the attributes of a low cost carrier, which is single class, "
+                "standard fleet. It had in flight entertainment."
+            ),
+            "A single-class, low-cost carrier with in-flight entertainment.",
+            [0, 2],
+            [0, 2],
+            id="airline-model-and-entertainment-satisfy-two-of-three",
+        ),
+        pytest.param(
+            (
+                "[SOURCE 1]\n"
+                "It offered good food and the best flying experience that India had ever seen."
+            ),
+            "Kingfisher aimed to offer the best flying experience and good food.",
+            [1, 2],
+            [1, 2],
+            id="premium-and-food-satisfy-two-of-three",
+        ),
+        pytest.param(
+            (
+                "[SOURCE 1]\n"
+                "It had the best flying experience that India had ever seen. "
+                "It had in flight entertainment and offered good food."
+            ),
+            (
+                "Kingfisher offered the best flying experience, in-flight entertainment, "
+                "and good food."
+            ),
+            [1, 2],
+            [1, 2],
+            id="entertainment-and-food-remain-one-differentiator-group",
+        ),
+    ],
+)
+def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage(
+    context,
+    answer,
+    expected_prompt_claims,
+    expected_answer_claims,
+):
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(
         item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
     )
-    context = (
-        "[SOURCE 1]\n"
-        "It had all the attributes of a low cost carrier, which is single class, "
-        "standard fleet. It had in flight entertainment. It had the best flying "
-        "experience that India had ever seen."
+    _, gold_case = chain._registered_generation_gold_case(
+        "MdeQMVBuGgY",
+        question,
     )
-    answer = "A single-class, low-cost carrier with in-flight entertainment."
+
+    assert len(gold_case.groups) == 3
+    assert len(gold_case.generation_claim_source_groups) == 3
+    assert len(gold_case.generation_claim_answer_groups) == 3
+    assert sorted(
+        chain._matched_registered_phrase_group_indices(
+            context,
+            gold_case.generation_claim_source_groups,
+        )
+    ) == expected_prompt_claims
+    assert sorted(
+        chain._matched_registered_phrase_group_indices(
+            answer,
+            gold_case.generation_claim_answer_groups,
+        )
+    ) == expected_answer_claims
 
     diagnostics = chain._build_generation_repair_diagnostics(
         question=question,
@@ -11090,26 +11182,80 @@ def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage()
 
     assert diagnostics["registered_claim_contract_available"] is True
     assert diagnostics["required_source_claim_count"] == 2
-    assert diagnostics["prompt_source_claim_indices"] == [0, 1]
-    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [0, 1]
+    assert diagnostics["prompt_source_claim_indices"] == expected_prompt_claims
+    assert (
+        diagnostics["initial_draft"]["answer_source_claim_indices"]
+        == expected_answer_claims
+    )
+    assert (
+        diagnostics["initial_draft"]["answer_gold_groups"]
+        == expected_answer_claims
+    )
     assert "registered_source_claim_evidence_incomplete" not in (
         diagnostics["initial_draft"]["issue_codes"]
     )
     assert "missing_registered_answer_claims" not in (
         diagnostics["initial_draft"]["issue_codes"]
     )
-    assert chain._gold_evidence_repair_instruction(
+
+    if expected_prompt_claims == [0, 1, 2] and expected_answer_claims == [1, 2]:
+        assert diagnostics["initial_draft"]["missing_answer_claim_indices"] == [0]
+        assert diagnostics["initial_draft"]["issue_codes"] == []
+        assert chain._gold_evidence_repair_instruction(
+            question=question,
+            answer=answer,
+            context=context,
+            video_id="MdeQMVBuGgY",
+        ) is None
+        assert chain._generation_repair_instruction(
+            question=question,
+            answer=answer,
+            context=context,
+            video_id="MdeQMVBuGgY",
+        ) is None
+
+
+@pytest.mark.unit
+def test_q01_generation_claim_contract_still_rejects_one_of_three_answer_concepts():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
+    )
+    context = (
+        "[SOURCE 1]\n"
+        "It had all the attributes of a low cost carrier, which is single class, "
+        "standard fleet. It had in flight entertainment. It had the best flying "
+        "experience that India had ever seen."
+    )
+    answer = (
+        "Kingfisher Airlines aimed to provide the best flying experience "
+        "that India had ever seen."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
         question=question,
-        answer=answer,
-        context=context,
         video_id="MdeQMVBuGgY",
-    ) is None
+        context=context,
+        initial_draft=answer,
+        repaired_draft=None,
+        final_answer=answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["required_source_claim_count"] == 2
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1, 2]
+    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [1]
+    assert "missing_registered_answer_claims" in (
+        diagnostics["initial_draft"]["issue_codes"]
+    )
     assert chain._generation_repair_instruction(
         question=question,
         answer=answer,
         context=context,
         video_id="MdeQMVBuGgY",
-    ) is None
+    ) is not None
 
 
 @pytest.mark.unit
@@ -11604,46 +11750,6 @@ def test_kingfisher_colour_guard_attributes_black_gold_to_nearest_brand_and_resp
     assert chain._text_assigns_black_gold_to_kingfisher(
         "Kingfisher was red rather than black and gold."
     ) is False
-
-
-@pytest.mark.unit
-def test_q01_generation_claim_diagnostics_respect_two_of_three_answer_coverage():
-    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
-    question = next(
-        item["question"] for item in benchmark.question_cases if item["id"] == "Q01"
-    )
-    context = (
-        "[SOURCE 1]\n"
-        "It had all the attributes of a low cost carrier, which is single class, "
-        "standard fleet. It had in flight entertainment. It had the best flying "
-        "experience that India had ever seen."
-    )
-    answer = "A single-class, low-cost carrier with in-flight entertainment."
-
-    diagnostics = chain._build_generation_repair_diagnostics(
-        question=question,
-        video_id="MdeQMVBuGgY",
-        context=context,
-        initial_draft=answer,
-        repaired_draft=None,
-        final_answer=answer,
-        repair_attempted=False,
-        repair_passed=None,
-        repair_aborted_due_quota=False,
-    )
-
-    assert diagnostics["registered_claim_contract_available"] is True
-    assert diagnostics["required_source_claim_count"] == 2
-    assert diagnostics["prompt_source_claim_indices"] == [0, 1]
-    assert diagnostics["initial_draft"]["answer_source_claim_indices"] == [0, 1]
-    assert "registered_source_claim_evidence_incomplete" not in diagnostics["initial_draft"]["issue_codes"]
-    assert "missing_registered_answer_claims" not in diagnostics["initial_draft"]["issue_codes"]
-    assert chain._gold_evidence_repair_instruction(
-        question=question,
-        answer=answer,
-        context=context,
-        video_id="MdeQMVBuGgY",
-    ) is None
 
 
 @pytest.mark.unit
