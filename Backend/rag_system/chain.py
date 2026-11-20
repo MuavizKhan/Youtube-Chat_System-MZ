@@ -2489,9 +2489,11 @@ def _truncate_formatted_source(
                             gold_evidence_caption_indices
                             - set().union(*claim_caption_spans.values()),
                             key=lambda index: (
-                                _generation_context_line_overlap(
+                                _generation_line_relevance(
                                     captions[index],
-                                    selection_question or question,
+                                    question_terms,
+                                    financial_question=financial_question,
+                                    financial_group_context=financial_group_context,
                                 ),
                                 len(captions[index]),
                                 index,
