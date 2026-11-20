@@ -12932,3 +12932,82 @@ def test_q08_context_does_not_fill_missing_official_attribution_claim():
     assert "Recovery Officer" not in result["context"]
     assert "Official Liquidator" not in result["context"]
 
+
+
+
+@pytest.mark.regression
+def test_q02_context_truncation_uses_existing_relevance_scorer_when_claim_rows_displace_gold_rows(
+    monkeypatch,
+):
+    question = "What connection does Vijay Mallya discuss with Formula One?"
+    video_id = "MdeQMVBuGgY"
+    gold_case = chain.get_video_benchmark(video_id).gold_evidence_by_question["Q02"]
+    assert gold_case.generation_claims_require_context_reservation is True
+
+    header = (
+        "[SOURCE 1]\n"
+        "Transcript caption segments in chronological order:"
+    )
+    rows = [
+        "- [00:00–00:02] Broad evidence anchor one " + ("interview context " * 22),
+        "- [00:02–00:04] Broad evidence anchor two " + ("interview context " * 22),
+        "- [00:04–00:06] Broad evidence anchor three " + ("interview context " * 22),
+        "- [00:06–00:08] Force India team claim " + ("source context " * 22),
+    ]
+    source_text = header + "\n" + "\n".join(rows)
+
+    # Deterministically model three separately reserved broad rows and one
+    # registered claim row. The combined set exceeds the available caption
+    # budget, so the truncator must score removable broad rows before fitting
+    # the claim row.
+    monkeypatch.setattr(
+        chain,
+        "matched_gold_group_caption_spans",
+        lambda *_args, **_kwargs: {
+            0: {2},
+            1: {3},
+            2: {4},
+        },
+    )
+    monkeypatch.setattr(
+        chain,
+        "matched_source_phrase_group_caption_spans",
+        lambda *_args, **_kwargs: {0: {5}},
+    )
+
+    scored_lines = []
+    original_scorer = chain._generation_line_relevance
+
+    def recording_scorer(
+        line,
+        question_terms,
+        *,
+        financial_question,
+        financial_group_context="",
+    ):
+        scored_lines.append(line)
+        return original_scorer(
+            line,
+            question_terms,
+            financial_question=financial_question,
+            financial_group_context=financial_group_context,
+        )
+
+    monkeypatch.setattr(
+        chain,
+        "_generation_line_relevance",
+        recording_scorer,
+    )
+
+    max_chars = 1500
+    truncated = chain._truncate_formatted_source(
+        source_text,
+        max_chars,
+        question=question,
+        selection_question=question,
+        gold_case=gold_case,
+    )
+
+    assert len(truncated) <= max_chars
+    assert any(line in scored_lines for line in rows[:3])
+    assert "Force India team claim" in truncated
