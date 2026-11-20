@@ -89,15 +89,51 @@ GOLD_EVIDENCE_CASES = (
             ("inflight entertainment", "in flight entertainment", "good food", "offered meals"),
         ),
         min_generation_answer_group_coverage=2 / 3,
+        # Keep strict generation-claim indices aligned with the three broad
+        # evidence concepts above: airline model, premium experience, and the
+        # combined differentiator category (entertainment OR food/meals).
         generation_claim_source_groups=(
-            ("all the attributes of a low cost carrier", "which is single class, standard fleet", "single class airline", "low cost airline"),
-            ("in flight entertainment", "inflight entertainment", "it had inflight entertainment"),
-            ("good food", "offered meals"),
+            (
+                "all the attributes of a low cost carrier",
+                "which is single class, standard fleet",
+                "single class airline",
+                "low cost airline",
+                "low cost carrier",
+                "low cost",
+            ),
+            (
+                "best flying experience that India had ever seen",
+                "best flying experience",
+                "premium experience",
+            ),
+            (
+                "in flight entertainment",
+                "inflight entertainment",
+                "it had inflight entertainment",
+                "offered meals",
+                "good food",
+            ),
         ),
         generation_claim_answer_groups=(
-            ("single class low cost carrier", "single-class low-cost carrier", "single class low cost airline", "low cost single class carrier"),
-            ("in flight entertainment", "inflight entertainment"),
-            ("good food", "offered meals"),
+            (
+                "single class low cost carrier",
+                "single-class low-cost carrier",
+                "single class low cost airline",
+                "low cost single class carrier",
+                "single class airline",
+                "low cost carrier",
+            ),
+            (
+                "best flying experience that India had ever seen",
+                "best flying experience",
+                "premium experience",
+            ),
+            (
+                "in flight entertainment",
+                "inflight entertainment",
+                "good food",
+                "offered meals",
+            ),
         ),
     ),
     GoldEvidenceCase(
