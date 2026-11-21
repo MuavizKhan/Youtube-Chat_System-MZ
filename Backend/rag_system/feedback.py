@@ -131,9 +131,9 @@ class FeedbackSubmission(BaseModel):
         if not self.helpful and self.reason is None:
             raise ValueError("a not-helpful rating requires a feedback reason.")
 
-        if self.allow_ai_assessment and not self.share_context:
+        if self.allow_ai_assessment and (self.helpful or not self.share_context):
             raise ValueError(
-                "AI assessment requires share_context=true."
+                "AI assessment requires a not-helpful report with share_context=true."
             )
 
         if self.share_context:

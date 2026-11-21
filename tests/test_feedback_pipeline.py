@@ -447,3 +447,19 @@ def test_shared_conversation_history_total_length_is_limited():
             answer="Because.",
             conversation_history=turns,
         )
+
+
+
+def test_ai_assessment_permission_is_rejected_for_positive_ratings():
+    with pytest.raises(
+        ValidationError,
+        match="AI assessment requires a not-helpful report",
+    ):
+        make_submission(
+            helpful=True,
+            reason=None,
+            share_context=True,
+            allow_ai_assessment=True,
+            question="What happened?",
+            answer="The speaker explained it.",
+        )
