@@ -136,3 +136,31 @@ def test_summary_contains_aggregates_not_user_content(tmp_path):
 def test_submission_rejects_unrecognized_fields():
     with pytest.raises(ValidationError, match="extra"):
         make_submission(email="person@example.com")
+
+
+
+def test_feedback_endpoint_persists_and_returns_receipt(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from Backend import app as backend_app
+
+    store = FeedbackStore(tmp_path / "api-feedback.sqlite3")
+    monkeypatch.setattr(backend_app, "feedback_store", store)
+    client = TestClient(backend_app.app)
+
+    response = client.post(
+        "/feedback",
+        json={
+            "answer_id": "answer-api-test-12345",
+            "video_id": VIDEO_ID,
+            "helpful": False,
+            "reason": "question_or_context_misunderstood",
+            "share_context": False,
+        },
+    )
+
+    assert response.status_code == 202
+    receipt = response.json()
+    assert receipt["status"] == "received"
+    assert len(receipt["feedback_id"]) == 32
+    assert store.summary()["not_helpful"] == 1
