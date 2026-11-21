@@ -1100,7 +1100,7 @@ def submit_answer_feedback(
     context_payload = None
     if feedback_request.share_context and feedback_request.context is not None:
         for source in feedback_request.context.sources:
-            if source.video_id not in (None, canonical_video_id):
+            if source.video_id != canonical_video_id:
                 raise HTTPException(
                     status_code=422,
                     detail={
