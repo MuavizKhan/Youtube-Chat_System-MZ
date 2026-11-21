@@ -186,6 +186,12 @@ def _serialize_ai_proposal(result) -> dict:
     notes = {note.aspect_id: note.summary for note in result.notes}
     return {
         "status": result.diagnostics.status.value,
+        "scope": "cited_answer_claim_support_only",
+        "scope_limitations": [
+            "Does not determine whether the answer covers every part of the user's question.",
+            "Does not determine whether a negative user rating is justified.",
+            "Does not replace review of the original video, caption track, or conversational intent.",
+        ],
         "ground_truth": False,
         "human_review_required": True,
         "coverage": {
