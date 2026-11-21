@@ -43,6 +43,8 @@ def test_successful_answer_displays_yes_no_feedback_controls():
     assert 'yesButton.textContent = "Yes"' in content
     assert 'noButton.textContent = "No"' in content
     assert "Your rating, video ID and technical details are recorded" in content
+    assert "source?.chunk_ids" in content
+    assert "chunk_ids:" in content
     assert "answer_incorrect_or_incomplete" in content
     assert "question_or_context_misunderstood" in content
     assert "transcript_missing_or_inaccurate" in content

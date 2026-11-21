@@ -2084,6 +2084,11 @@ function sendMessage() {
                         .slice(0, 16)
                         .map((source) => ({
                             source_id: Number(source?.source_id),
+                            chunk_ids: Array.isArray(source?.chunk_ids)
+                                ? source.chunk_ids
+                                    .filter((chunkId) => Number.isInteger(chunkId) && chunkId >= 0)
+                                    .slice(0, 16)
+                                : [],
                             video_id: typeof source?.video_id === "string"
                                 ? source.video_id
                                 : requestedVideoId,

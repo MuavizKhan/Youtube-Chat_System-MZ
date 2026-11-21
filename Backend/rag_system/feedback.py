@@ -44,6 +44,18 @@ class FeedbackSource(BaseModel):
     video_id: str = Field(min_length=11, max_length=11, pattern=VIDEO_ID_PATTERN)
     start: float = Field(ge=0, le=86_400)
     end: float = Field(ge=0, le=86_400)
+    chunk_ids: list[int] = Field(default_factory=list, max_length=16)
+
+    @field_validator("chunk_ids", mode="before")
+    @classmethod
+    def validate_chunk_ids(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            raise ValueError("chunk_ids must be an array.")
+        if any(type(item) is not int or item < 0 for item in value):
+            raise ValueError("chunk_ids must contain non-negative integers.")
+        if len(value) != len(set(value)):
+            raise ValueError("chunk_ids must not contain duplicates.")
+        return value
 
     @model_validator(mode="after")
     def validate_interval(self) -> "FeedbackSource":

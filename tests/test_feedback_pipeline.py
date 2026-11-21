@@ -93,6 +93,7 @@ def test_opted_in_context_is_saved_for_review(tmp_path):
     assert row["question"] == "Why did the company face financial pressure?"
     assert row["answer"] == "The speaker describes several pressures."
     assert row["sources"][0]["start"] == 44.5
+    assert row["sources"][0]["chunk_ids"] == []
 
 
 def test_duplicate_answer_submission_is_idempotent(tmp_path):
@@ -164,3 +165,46 @@ def test_feedback_endpoint_persists_and_returns_receipt(monkeypatch, tmp_path):
     assert receipt["status"] == "received"
     assert len(receipt["feedback_id"]) == 32
     assert store.summary()["not_helpful"] == 1
+
+
+
+def test_feedback_source_rejects_invalid_or_duplicate_chunk_ids():
+    with pytest.raises(ValidationError, match="non-negative integers"):
+        FeedbackSource(
+            source_id=1,
+            video_id=VIDEO_ID,
+            start=1,
+            end=2,
+            chunk_ids=[1, True],
+        )
+
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        FeedbackSource(
+            source_id=1,
+            video_id=VIDEO_ID,
+            start=1,
+            end=2,
+            chunk_ids=[3, 3],
+        )
+
+
+def test_feedback_store_persists_selected_chunk_ids(tmp_path):
+    store = FeedbackStore(tmp_path / "feedback.sqlite3")
+    store.save(
+        make_submission(
+            share_context=True,
+            question="What did the speaker say?",
+            answer="The speaker described the event.",
+            sources=[
+                FeedbackSource(
+                    source_id=1,
+                    video_id=VIDEO_ID,
+                    start=20,
+                    end=30,
+                    chunk_ids=[4, 5],
+                )
+            ],
+        )
+    )
+
+    assert store.list_records()[0]["sources"][0]["chunk_ids"] == [4, 5]

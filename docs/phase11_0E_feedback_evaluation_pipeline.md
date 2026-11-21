@@ -49,11 +49,16 @@ $python = ".\.venv\Scripts\python.exe"
 # Aggregate counts only; does not print submitted question/answer/comment text.
 & $python -m scripts.phase11_feedback_queue summary
 
-# Export the full review queue (including only context users explicitly shared).
+# Export the review queue with the shared fields only.
 # Keep this file private; evaluation_data/private/ is ignored by Git.
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $output = "evaluation_data/private/feedback_queue_$stamp.jsonl"
 & $python -m scripts.phase11_feedback_queue export --output $output
+
+# Optional: resolve the exact cited transcript chunks from existing local indexes.
+# This is local-only and makes no AI/provider calls.
+$evidenceOutput = "evaluation_data/private/feedback_evidence_$stamp.jsonl"
+& $python -m scripts.phase11_feedback_queue export --include-evidence --output $evidenceOutput
 ~~~
 
 To use a non-default database:
@@ -64,6 +69,8 @@ To use a non-default database:
 ~~~
 
 The exporter refuses paths outside `evaluation_data/private/` and refuses to overwrite an existing export. Summary output contains counts only. Export output is sensitive and must not be committed or sent to public issue trackers.
+
+With `--include-evidence`, the local command loads the existing index for each opted-in video and resolves only the chunk IDs returned with that answer. It includes the exact chunk text, caption-segment text, transcript language, and source timing; it reports missing chunks instead of silently substituting other text. It does not build or modify an index, change the accepted retrieval configuration, or call a language-model provider. The evidence-enriched export contains YouTube transcript text and must remain in the private ignored directory.
 
 ## 5. How feedback becomes evaluation data
 
