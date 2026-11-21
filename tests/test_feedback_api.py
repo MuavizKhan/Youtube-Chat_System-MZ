@@ -110,3 +110,38 @@ def test_feedback_endpoint_rejects_mismatched_source_video(feedback_client):
     )
     assert response.status_code == 422
     assert len(feedback_store.list_feedback_records()) == 0
+
+
+
+def test_chat_response_exposes_request_id_for_feedback(feedback_client, monkeypatch):
+    def answer_question_stub(**kwargs):
+        return {
+            "answer": "The speaker says the project was delayed by funding.",
+            "video_id": "Gfr50f6ZBvo",
+            "sources": [],
+            "retrieved_chunks": 0,
+            "model": "test-model",
+            "source_segments": 0,
+            "retrieval_method": "question_aware_mmr_lexical",
+            "retrieval_config": {
+                "top_k": 4,
+                "fetch_k": 10,
+                "lambda_mult": 0.7,
+                "max_distance": 1.3,
+            },
+            "observability": {},
+        }
+
+    monkeypatch.setattr(app_module, "answer_question", answer_question_stub)
+    response = feedback_client.post(
+        "/chat",
+        json={
+            "video_id": "Gfr50f6ZBvo",
+            "question": "Why was the project delayed?",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("x-request-id")
+    assert response.json()["request_id"] == response.headers["x-request-id"]
+    assert len(response.json()["request_id"]) == 32
