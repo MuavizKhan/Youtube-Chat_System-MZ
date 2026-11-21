@@ -8,6 +8,7 @@ Raw transcript text is never accepted or stored by this module.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import closing
 from datetime import datetime, timezone
 import json
 import os
@@ -219,7 +220,7 @@ def create_feedback_record(
     created_at = datetime.now(timezone.utc).isoformat()
 
     try:
-        with _connect() as connection:
+        with closing(_connect()) as connection, connection:
             _ensure_schema(connection)
             connection.execute(
                 """
@@ -281,7 +282,7 @@ def list_feedback_records(
                 "Unsupported review status: " + ", ".join(sorted(invalid))
             )
 
-    with _connect() as connection:
+    with closing(_connect()) as connection, connection:
         _ensure_schema(connection)
         clauses: list[str] = []
         parameters: list[Any] = []
@@ -321,7 +322,7 @@ def update_feedback_review(
         notes = notes.strip() or None
 
     reviewed_at = datetime.now(timezone.utc).isoformat()
-    with _connect() as connection:
+    with closing(_connect()) as connection, connection:
         _ensure_schema(connection)
         cursor = connection.execute(
             """
