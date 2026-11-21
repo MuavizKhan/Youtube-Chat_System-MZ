@@ -77,6 +77,7 @@ def test_ai_provider_consent_is_separate_and_requires_context_consent():
     assert "aiConsent.checked = false" in renderer
     assert "allow_ai_assessment: Boolean(shareContext && allowAiAssessment)" in renderer
     assert "Allow the configured AI provider" in renderer
+    assert "allow_ai_assessment" in renderer
 
 
 def test_feedback_form_uses_required_reason_placeholder_and_retryable_failure():

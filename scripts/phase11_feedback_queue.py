@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -149,6 +150,256 @@ def attach_evidence_snapshots(records: list[dict]) -> list[dict]:
     return hydrated
 
 
+def split_answer_claims(answer: str) -> list[str]:
+    """Split rendered answer bullets/sentences into bounded assessment aspects."""
+    if not isinstance(answer, str):
+        return []
+    claims = []
+    in_code_block = False
+    for raw_line in answer.splitlines() or [answer]:
+        line = raw_line.strip()
+        if line.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block or not line:
+            continue
+        line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line)
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        parts = re.split(r"(?<=[.!?؟।])\s+|;\s+", line)
+        for part in parts:
+            cleaned = part.strip().strip("*_ 	")
+            if cleaned and cleaned not in claims:
+                claims.append(cleaned)
+    return claims
+
+
+def _reference_to_dict(reference) -> dict:
+    return {
+        "video_id": reference.video_id,
+        "chunk_id": reference.chunk_id,
+        "start_seconds": reference.start_seconds,
+        "end_seconds": reference.end_seconds,
+    }
+
+
+def _serialize_ai_proposal(result) -> dict:
+    notes = {note.aspect_id: note.summary for note in result.notes}
+    return {
+        "status": result.diagnostics.status.value,
+        "ground_truth": False,
+        "human_review_required": True,
+        "coverage": {
+            "status": result.coverage.status.value,
+            "coverage_ratio": result.coverage.coverage_ratio,
+            "required_aspect_count": result.coverage.required_aspect_count,
+            "supported_required_aspect_count": result.coverage.supported_required_aspect_count,
+            "missing_aspect_ids": list(result.coverage.missing_aspect_ids),
+            "contradicted_aspect_ids": list(result.coverage.contradicted_aspect_ids),
+            "unknown_aspect_ids": list(result.coverage.unknown_aspect_ids),
+        },
+        "assessments": [
+            {
+                "aspect_id": item.aspect_id,
+                "status": item.status.value,
+                "support_score": item.support_score,
+                "supporting_evidence": [
+                    _reference_to_dict(reference)
+                    for reference in item.supporting_evidence
+                ],
+                "contradicting_evidence": [
+                    _reference_to_dict(reference)
+                    for reference in item.contradicting_evidence
+                ],
+                "summary": notes.get(item.aspect_id),
+            }
+            for item in result.assessments
+        ],
+        "diagnostics": {
+            "provider": result.diagnostics.provider,
+            "model": result.diagnostics.model,
+            "status": result.diagnostics.status.value,
+            "request_count": result.diagnostics.request_count,
+            "elapsed_ms": result.diagnostics.elapsed_ms,
+            "input_chars": result.diagnostics.input_chars,
+            "input_limit_chars": result.diagnostics.input_limit_chars,
+            "passage_count": result.diagnostics.passage_count,
+            "aspect_count": result.diagnostics.aspect_count,
+            "error_code": result.diagnostics.error_code,
+            "input_tokens": result.diagnostics.input_tokens,
+            "output_tokens": result.diagnostics.output_tokens,
+        },
+    }
+
+
+def attach_ai_assessments(
+    records: list[dict],
+    *,
+    max_cases: int = 10,
+) -> list[dict]:
+    """Run Phase 11.0B only on negative reports with explicit AI-provider consent."""
+    if isinstance(max_cases, bool) or not isinstance(max_cases, int) or not 1 <= max_cases <= 20:
+        raise ValueError("max_cases must be between 1 and 20.")
+
+    eligible = []
+    output = []
+    for record in records:
+        item = dict(record)
+        if item.get("helpful"):
+            item["ai_proposed_assessment"] = {"status": "not_a_negative_report"}
+        elif not item.get("context_shared"):
+            item["ai_proposed_assessment"] = {"status": "context_not_shared"}
+        elif not item.get("allow_ai_assessment"):
+            item["ai_proposed_assessment"] = {"status": "not_consented"}
+        elif (item.get("evidence_snapshot") or {}).get("status") != "complete":
+            item["ai_proposed_assessment"] = {"status": "evidence_incomplete"}
+        else:
+            eligible.append(len(output))
+        output.append(item)
+
+    if not eligible:
+        return output
+
+    selected = set(eligible[:max_cases])
+    for index in eligible[max_cases:]:
+        output[index]["ai_proposed_assessment"] = {
+            "status": "deferred_batch_limit",
+            "human_review_required": True,
+            "ground_truth": False,
+        }
+
+    from Backend.rag_system import config
+    from Backend.rag_system.evidence_assessment import (
+        EvidencePassage,
+        assess_evidence_support,
+    )
+    from Backend.rag_system.evidence_contracts import (
+        EvidenceAspect,
+        EvidenceReference,
+        QuestionAnalysis,
+        QuestionIntent,
+    )
+
+    provider = config.LLM_PROVIDER
+    model = (
+        config.GROQ_MODEL_ID if provider == "groq"
+        else config.HF_MODEL_ID
+    )
+    try:
+        from Backend.rag_system.chain import create_llm_client
+        client = create_llm_client()
+    except Exception:
+        client = None
+
+    for index in sorted(selected):
+        item = output[index]
+        question = item.get("question")
+        answer = item.get("answer")
+        snapshot = item.get("evidence_snapshot") or {}
+        claims = split_answer_claims(answer or "")
+
+        if not isinstance(question, str) or not question.strip() or not claims:
+            item["ai_proposed_assessment"] = {
+                "status": "insufficient_feedback_context",
+                "ground_truth": False,
+                "human_review_required": True,
+            }
+            continue
+        if len(claims) > 8:
+            item["ai_proposed_assessment"] = {
+                "status": "answer_claim_budget_exceeded",
+                "claim_count": len(claims),
+                "maximum_claims": 8,
+                "ground_truth": False,
+                "human_review_required": True,
+            }
+            continue
+
+        passage_records = snapshot.get("passages", [])
+        if not isinstance(passage_records, list) or not passage_records or len(passage_records) > 12:
+            item["ai_proposed_assessment"] = {
+                "status": "passage_budget_exceeded_or_empty",
+                "passage_count": len(passage_records) if isinstance(passage_records, list) else None,
+                "maximum_passages": 12,
+                "ground_truth": False,
+                "human_review_required": True,
+            }
+            continue
+
+        passages = []
+        try:
+            for passage_record in passage_records:
+                video_id = passage_record["video_id"]
+                chunk_id = passage_record["chunk_id"]
+                start = passage_record.get("start")
+                end = passage_record.get("end")
+                reference_kwargs = {}
+                if (
+                    isinstance(start, (int, float))
+                    and not isinstance(start, bool)
+                    and isinstance(end, (int, float))
+                    and not isinstance(end, bool)
+                    and float(start) >= 0
+                    and float(end) > float(start)
+                ):
+                    reference_kwargs = {
+                        "start_seconds": float(start),
+                        "end_seconds": float(end),
+                    }
+                reference = EvidenceReference(
+                    video_id=video_id,
+                    chunk_id=chunk_id,
+                    **reference_kwargs,
+                )
+                language = passage_record.get("language_code")
+                if isinstance(language, str):
+                    language = {
+                        "english": "en",
+                        "hindi": "hi",
+                        "arabic": "ar",
+                    }.get(language.strip().casefold(), language.strip().replace("_", "-"))
+                else:
+                    language = None
+                passages.append(
+                    EvidencePassage(
+                        passage_id=passage_record["passage_id"],
+                        text=passage_record["text"],
+                        references=(reference,),
+                        transcript_language=language,
+                    )
+                )
+            analysis = QuestionAnalysis(
+                intent=QuestionIntent.UNKNOWN,
+                language=None,
+                aspects=tuple(
+                    EvidenceAspect(
+                        aspect_id=f"answer_claim_{claim_index + 1}",
+                        description=claim,
+                        required=True,
+                    )
+                    for claim_index, claim in enumerate(claims)
+                ),
+                video_id=item["video_id"],
+                subject=f"User question: {question.strip()}",
+                analysis_source="feedback_answer_sentence_splitter_v1",
+            )
+            result = assess_evidence_support(
+                analysis,
+                passages,
+                client,
+                provider=provider,
+                model=model,
+            )
+            item["ai_proposed_assessment"] = _serialize_ai_proposal(result)
+        except Exception:
+            item["ai_proposed_assessment"] = {
+                "status": "assessment_preparation_failed",
+                "ground_truth": False,
+                "human_review_required": True,
+            }
+
+    return output
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Summarize or privately export user feedback records."
@@ -171,6 +422,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-evidence",
         action="store_true",
         help="Resolve opted-in cited chunk IDs from existing local indexes into the private export.",
+    )
+    export.add_argument(
+        "--assess",
+        action="store_true",
+        help="Run Phase 11.0B only for reports with separate AI-provider consent.",
+    )
+    export.add_argument(
+        "--max-ai-cases",
+        type=int,
+        default=10,
+        help="Maximum consented reports to assess in this command (1-20; default 10).",
     )
     return parser
 
@@ -199,7 +461,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     records = store.list_records()
-    if args.include_evidence:
+    if args.assess:
+        if not 1 <= args.max_ai_cases <= 20:
+            print("--max-ai-cases must be between 1 and 20.", file=sys.stderr)
+            return 2
+        records = attach_evidence_snapshots(records)
+        records = attach_ai_assessments(records, max_cases=args.max_ai_cases)
+    elif args.include_evidence:
         records = attach_evidence_snapshots(records)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf-8", newline="\n") as handle:

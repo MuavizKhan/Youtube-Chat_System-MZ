@@ -4,7 +4,11 @@ import pytest
 from pydantic import ValidationError
 from types import SimpleNamespace
 
-from scripts.phase11_feedback_queue import build_evidence_snapshot
+from scripts.phase11_feedback_queue import (
+    attach_ai_assessments,
+    build_evidence_snapshot,
+    split_answer_claims,
+)
 
 from Backend.rag_system.feedback import (
     FeedbackReason,
@@ -303,3 +307,59 @@ def test_evidence_snapshot_marks_index_errors_without_fabricating_passages():
     assert snapshot["status"] == "index_unavailable"
     assert snapshot["missing_chunk_ids"] == [4]
     assert snapshot["passages"] == []
+
+
+
+def test_answer_claim_splitter_handles_bullets_and_multilingual_punctuation():
+    claims = split_answer_claims(
+        "- Revenue increased by 12%.\n"
+        "- The speaker denied that the loan was fully repaid।\n"
+        "The transcript is incomplete"
+    )
+
+    assert claims == [
+        "Revenue increased by 12%.",
+        "The speaker denied that the loan was fully repaid।",
+        "The transcript is incomplete",
+    ]
+
+
+def test_ai_assessment_queue_skips_provider_for_reports_without_consent():
+    records = [
+        {
+            "helpful": False,
+            "context_shared": True,
+            "allow_ai_assessment": False,
+            "evidence_snapshot": {
+                "status": "complete",
+                "passages": [{"passage_id": "p1", "text": "Transcript", "chunk_id": 1}],
+            },
+        }
+    ]
+
+    assessed = attach_ai_assessments(records)
+
+    assert assessed[0]["ai_proposed_assessment"]["status"] == "not_consented"
+
+
+def test_ai_assessment_queue_skips_reports_with_incomplete_evidence():
+    records = [
+        {
+            "helpful": False,
+            "context_shared": True,
+            "allow_ai_assessment": True,
+            "evidence_snapshot": {
+                "status": "partial",
+                "passages": [{"passage_id": "p1", "text": "Transcript", "chunk_id": 1}],
+            },
+        }
+    ]
+
+    assessed = attach_ai_assessments(records)
+
+    assert assessed[0]["ai_proposed_assessment"]["status"] == "evidence_incomplete"
+
+
+def test_ai_assessment_queue_bounds_number_of_cases():
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        attach_ai_assessments([], max_cases=21)
