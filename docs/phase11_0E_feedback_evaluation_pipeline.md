@@ -9,7 +9,7 @@
 
 This slice adds a user-facing helpful/not-helpful control below each completed answer, a bounded feedback API, local SQLite persistence, and a private JSONL export/summary command.
 
-It does **not** change `chain.py`, retrieval, index creation, context packing, answer prompts, model/provider settings, embedding configuration, or the accepted 43-case baseline. The semantic assessor is not called when a user clicks a feedback button. That is intentional: the current chat response contains answer text and source IDs/timestamps, but not the actual transcript passage text needed for a grounded semantic assessment.
+It does **not** change `chain.py`, retrieval, index creation, context packing, answer prompts, model/provider settings, embedding configuration, or the accepted 43-case baseline. The semantic assessor is never called when a user clicks a feedback button. It can only be run later through the local `--assess` batch command, and only for reports with separate AI-provider consent and a complete exact-source evidence snapshot.
 
 ## 2. Feedback interaction
 
@@ -101,9 +101,11 @@ The queue is designed to make these steps much faster, not to eliminate source v
 
 The aggregate helpful rate is a product signal, not an answer-accuracy metric. Feedback is self-selected and may be biased toward unusually good or bad experiences. A user clicking "No" does not prove the answer is false; a "Yes" does not establish that its claims are supported.
 
-The current extension response does not include transcript excerpts. Therefore fully automated semantic triage is deferred until a separate evidence-snapshot component can safely bind an opted-in report to exact indexed transcript passages and caption provenance. Only then should the bounded Phase 11.0B assessor produce a clearly marked **AI-proposed** label for human review. It must not create final labels, tune against held-out data, or trigger automatic model updates.
+The extension response includes exact citation chunk IDs and timestamps. When the user opts into context sharing, the local evidence exporter resolves those IDs against the existing FAISS docstore and includes exact indexed transcript text and caption segments. It reports missing or duplicate chunks as incomplete rather than substituting nearby passages. This hydration step makes no generation-provider call and does not alter the accepted index or retrieval configuration.
 
-The next part of Phase 11.0E can add that evidence snapshot and AI-assisted triage workflow, then feed independently verified records into Phase 11.0C/11.0D. Phase 11.0F remains a separate calibrated development/held-out assessment.
+When the user also opts into AI-provider assessment, the `--assess` batch command splits the generated answer into candidate claims and asks the existing bounded Phase 11.0B assessor whether the exact cited passages support each claim. This is deliberately heuristic and can mis-segment claims or miss conversational context; outputs are proposals only, not final labels or calibrated probabilities. All outputs require human review and must never be used as ground truth, used to tune against held-out data, or trigger automatic model/prompt changes.
+
+This export is a review bundle, not a ready-to-assemble Phase 11.0D source manifest. A curator must still verify the actual video, caption track and timestamps, define source/independence groups, confirm each question aspect, and attest the verification fields before using the blinded human-annotation workflow. The feedback pipeline accelerates candidate discovery and evidence collection; it does not fabricate those human attestations. Phase 11.0F remains a separate calibrated development/held-out assessment.
 
 ## 7. Validation
 

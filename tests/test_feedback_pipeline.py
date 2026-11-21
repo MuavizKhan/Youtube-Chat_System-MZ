@@ -363,3 +363,41 @@ def test_ai_assessment_queue_skips_reports_with_incomplete_evidence():
 def test_ai_assessment_queue_bounds_number_of_cases():
     with pytest.raises(ValueError, match="between 1 and 20"):
         attach_ai_assessments([], max_cases=21)
+
+
+
+def test_existing_feedback_database_is_migrated_with_ai_consent_default_off(tmp_path):
+    import sqlite3
+
+    database = tmp_path / "legacy-feedback.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE answer_feedback (
+            feedback_id TEXT PRIMARY KEY,
+            answer_id TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            helpful INTEGER NOT NULL,
+            reason TEXT,
+            comment TEXT,
+            video_id TEXT NOT NULL,
+            request_id TEXT,
+            context_shared INTEGER NOT NULL,
+            question TEXT,
+            answer TEXT,
+            sources_json TEXT NOT NULL,
+            model TEXT,
+            retrieval_method TEXT,
+            retrieval_config_json TEXT NOT NULL,
+            review_status TEXT NOT NULL DEFAULT 'new'
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = FeedbackStore(database)
+    store.save(make_submission())
+
+    record = store.list_records()[0]
+    assert record["allow_ai_assessment"] is False
