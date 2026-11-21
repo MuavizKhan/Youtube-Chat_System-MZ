@@ -563,8 +563,6 @@ class SourceResponse(BaseModel):
 
 class ChatResponse(BaseModel):
 
-    request_id: str | None = None
-
     answer: str
 
     video_id: str
@@ -950,10 +948,7 @@ def chat(
             observability.get("total_latency_ms"),
         )
 
-        return {
-            **result,
-            "request_id": request.state.request_id,
-        }
+        return result
 
     except IndexNotReadyError as error:
 
