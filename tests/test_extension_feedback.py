@@ -80,7 +80,7 @@ def test_ai_provider_consent_is_separate_and_requires_context_consent():
     assert "aiConsent.checked = false" in renderer
     assert "allow_ai_assessment: Boolean(shareContext && allowAiAssessment)" in renderer
     assert "Allow the configured AI provider" in renderer
-    assert "whether answer claims are supported by the cited transcript passages" in renderer
+    assert "using the shared question, recent chat context and cited transcript passages" in renderer
     assert "allow_ai_assessment" in renderer
 
 

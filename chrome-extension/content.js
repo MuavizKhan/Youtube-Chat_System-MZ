@@ -1889,7 +1889,7 @@ function renderAnswerFeedback(aiMessage, context) {
         aiConsent.disabled = true;
         const aiConsentText = document.createElement("span");
         aiConsentText.textContent =
-            "Allow the configured AI provider to check whether answer claims are supported by the cited transcript passages.";
+            "Allow the configured AI provider to check answer-claim support using the shared question, recent chat context and cited transcript passages.";
         aiConsentLabel.appendChild(aiConsent);
         aiConsentLabel.appendChild(aiConsentText);
 
