@@ -27,7 +27,7 @@ Negative feedback reasons are one of:
 - `language_or_translation_issue`
 - `other`
 
-A free-text comment is optional and limited to 1,000 characters.
+A free-text comment is optional and limited to 1,000 characters. The extension explains that a submitted comment is stored with the report and asks users not to include sensitive personal information.
 
 The form includes an unchecked-by-default consent control. Only when the user checks it does the extension submit the question, answer, and source timing references. Without that opt-in, the backend stores the rating, reason/comment (if given), video ID, answer/request identifiers, model/retrieval metadata, and no question/answer/source timing content. Conversation history, user identity, IP address, cookies, and transcript text are not stored by this feedback feature.
 
@@ -51,7 +51,8 @@ $python = ".\.venv\Scripts\python.exe"
 
 # Export the full review queue (including only context users explicitly shared).
 # Keep this file private; evaluation_data/private/ is ignored by Git.
-$output = "evaluation_data/private/feedback_queue_20261121.jsonl"
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$output = "evaluation_data/private/feedback_queue_$stamp.jsonl"
 & $python -m scripts.phase11_feedback_queue export --output $output
 ~~~
 

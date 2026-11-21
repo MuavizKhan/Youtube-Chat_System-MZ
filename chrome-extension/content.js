@@ -1675,6 +1675,11 @@ function renderAnswerFeedback(aiMessage, context) {
     prompt.className = "answer-feedback-prompt";
     prompt.textContent = "Was this answer helpful?";
 
+    const disclosure = document.createElement("div");
+    disclosure.className = "answer-feedback-disclosure";
+    disclosure.textContent =
+        "Your rating, video ID and technical details are recorded. Sharing the question, answer and source times is optional.";
+
     const actions = document.createElement("div");
     actions.className = "answer-feedback-actions";
 
@@ -1698,6 +1703,7 @@ function renderAnswerFeedback(aiMessage, context) {
     actions.appendChild(yesButton);
     actions.appendChild(noButton);
     card.appendChild(prompt);
+    card.appendChild(disclosure);
     card.appendChild(actions);
     card.appendChild(status);
 
@@ -1828,6 +1834,12 @@ function renderAnswerFeedback(aiMessage, context) {
         const commentLabel = document.createElement("label");
         commentLabel.className = "answer-feedback-label";
         commentLabel.textContent = "Anything else? (optional)";
+
+        const commentPrivacy = document.createElement("span");
+        commentPrivacy.className = "answer-feedback-comment-note";
+        commentPrivacy.textContent =
+            "Your comment is submitted with this report. Please do not include sensitive personal information.";
+        commentLabel.appendChild(commentPrivacy);
 
         const commentInput = document.createElement("textarea");
         commentInput.className = "answer-feedback-comment";
