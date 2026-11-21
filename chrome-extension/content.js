@@ -1666,6 +1666,34 @@ function createFeedbackAnswerId() {
 }
 
 
+function buildFeedbackConversationHistory(messages) {
+    const recentMessages = Array.isArray(messages) ? messages.slice(-6) : [];
+    let remainingCharacters = 4000;
+    const boundedMessages = [];
+
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        if (remainingCharacters <= 0) {
+            break;
+        }
+        const message = recentMessages[index] || {};
+        const rawContent = typeof message.content === "string"
+            ? message.content.trim()
+            : "";
+        const content = rawContent.slice(-Math.min(1000, remainingCharacters));
+        if (!content) {
+            continue;
+        }
+        boundedMessages.unshift({
+            role: message.role === "assistant" ? "assistant" : "user",
+            content
+        });
+        remainingCharacters -= content.length;
+    }
+
+    return boundedMessages;
+}
+
+
 function renderAnswerFeedback(aiMessage, context) {
     const card = document.createElement("section");
     card.className = "answer-feedback";
@@ -2153,16 +2181,9 @@ function sendMessage() {
                         videoId: requestedVideoId,
                         question,
                         answer,
-                        conversationHistory: conversationHistory
-                            .slice(0, -2)
-                            .slice(-6)
-                            .map((turn) => ({
-                                role: turn.role === "assistant" ? "assistant" : "user",
-                                content: typeof turn.content === "string"
-                                    ? turn.content.slice(0, 1000)
-                                    : ""
-                            }))
-                            .filter((turn) => turn.content.trim()),
+                        conversationHistory: buildFeedbackConversationHistory(
+                            conversationHistory.slice(0, -2)
+                        ),
                         sources: feedbackSources,
                         requestId: response.request_id || null,
                         model: response.model || null,

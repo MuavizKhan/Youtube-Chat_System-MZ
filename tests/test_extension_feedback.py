@@ -67,6 +67,15 @@ def test_context_sharing_is_explicitly_opt_in_and_only_then_sent():
     assert "payload.sources = context.sources" in renderer
 
 
+def test_shared_conversation_history_is_bounded_to_six_messages_and_4000_chars():
+    content = CONTENT.read_text(encoding="utf-8")
+    assert "function buildFeedbackConversationHistory(messages)" in content
+    assert "messages.slice(-6)" in content
+    assert "remainingCharacters = 4000" in content
+    assert "Math.min(1000, remainingCharacters)" in content
+    assert "conversationHistory: buildFeedbackConversationHistory(" in content
+
+
 def test_ai_provider_consent_is_separate_and_requires_context_consent():
     content = CONTENT.read_text(encoding="utf-8")
     start = content.index("function renderAnswerFeedback(")
