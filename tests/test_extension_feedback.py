@@ -43,6 +43,7 @@ def test_successful_answer_displays_yes_no_feedback_controls():
     assert 'yesButton.textContent = "Yes"' in content
     assert 'noButton.textContent = "No"' in content
     assert "Your rating, video ID and technical details are recorded" in content
+    assert "recent chat context" in content
     assert "source?.chunk_ids" in content
     assert "new TextEncoder()" in content
     assert "payloadBytes > 14000" in content
@@ -61,6 +62,7 @@ def test_context_sharing_is_explicitly_opt_in_and_only_then_sent():
     assert "consent.checked = false" in renderer
     assert "if (shareContext)" in renderer
     assert "payload.question = context.question" in renderer
+    assert "payload.conversation_history = context.conversationHistory || []" in renderer
     assert "payload.answer = context.answer" in renderer
     assert "payload.sources = context.sources" in renderer
 

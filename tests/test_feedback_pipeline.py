@@ -11,6 +11,7 @@ from scripts.phase11_feedback_queue import (
 )
 
 from Backend.rag_system.feedback import (
+    FeedbackConversationTurn,
     FeedbackReason,
     FeedbackSource,
     FeedbackStore,
@@ -75,6 +76,7 @@ def test_context_is_omitted_from_database_without_opt_in(tmp_path):
     assert row["question"] is None
     assert row["answer"] is None
     assert row["sources"] == []
+    assert row["conversation_history"] == []
 
 
 def test_opted_in_context_is_saved_for_review(tmp_path):
@@ -101,6 +103,7 @@ def test_opted_in_context_is_saved_for_review(tmp_path):
     assert row["answer"] == "The speaker describes several pressures."
     assert row["sources"][0]["start"] == 44.5
     assert row["sources"][0]["chunk_ids"] == []
+    assert row["conversation_history"] == []
 
 
 def test_duplicate_answer_submission_is_idempotent(tmp_path):
@@ -401,3 +404,46 @@ def test_existing_feedback_database_is_migrated_with_ai_consent_default_off(tmp_
 
     record = store.list_records()[0]
     assert record["allow_ai_assessment"] is False
+    assert record["conversation_history"] == []
+
+
+
+def test_shared_conversation_history_requires_context_opt_in():
+    turn = FeedbackConversationTurn(role="user", content="What about the earlier figure?")
+    with pytest.raises(ValidationError, match="require share_context=true"):
+        make_submission(conversation_history=[turn])
+
+
+def test_shared_conversation_history_is_bounded_and_persisted(tmp_path):
+    store = FeedbackStore(tmp_path / "feedback.sqlite3")
+    store.save(
+        make_submission(
+            share_context=True,
+            question="What about that figure?",
+            answer="The earlier figure was not confirmed.",
+            conversation_history=[
+                FeedbackConversationTurn(role="user", content="What was the figure?"),
+                FeedbackConversationTurn(role="assistant", content="The speaker gave two figures."),
+            ],
+        )
+    )
+
+    row = store.list_records()[0]
+    assert row["conversation_history"] == [
+        {"role": "user", "content": "What was the figure?"},
+        {"role": "assistant", "content": "The speaker gave two figures."},
+    ]
+
+
+def test_shared_conversation_history_total_length_is_limited():
+    turns = [
+        FeedbackConversationTurn(role="user", content="x" * 1_000)
+        for _ in range(5)
+    ]
+    with pytest.raises(ValidationError, match="4,000 characters"):
+        make_submission(
+            share_context=True,
+            question="Why?",
+            answer="Because.",
+            conversation_history=turns,
+        )

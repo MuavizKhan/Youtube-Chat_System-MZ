@@ -1678,7 +1678,7 @@ function renderAnswerFeedback(aiMessage, context) {
     const disclosure = document.createElement("div");
     disclosure.className = "answer-feedback-disclosure";
     disclosure.textContent =
-        "Your rating, video ID and technical details are recorded. Sharing the question, answer and source times is optional.";
+        "Your rating, video ID and technical details are recorded. Sharing the question, answer, recent chat context and source times is optional.";
 
     const actions = document.createElement("div");
     actions.className = "answer-feedback-actions";
@@ -1755,6 +1755,7 @@ function renderAnswerFeedback(aiMessage, context) {
         if (shareContext) {
             payload.question = context.question;
             payload.answer = context.answer;
+            payload.conversation_history = context.conversationHistory || [];
             payload.sources = context.sources;
         }
 
@@ -1875,7 +1876,7 @@ function renderAnswerFeedback(aiMessage, context) {
         consent.checked = false;
         const consentText = document.createElement("span");
         consentText.textContent =
-            "Share this question, answer and source timestamps so we can review the report.";
+            "Share this question, answer, recent chat context and source timestamps so we can review the report.";
         consentLabel.appendChild(consent);
         consentLabel.appendChild(consentText);
 
@@ -2152,6 +2153,16 @@ function sendMessage() {
                         videoId: requestedVideoId,
                         question,
                         answer,
+                        conversationHistory: conversationHistory
+                            .slice(0, -2)
+                            .slice(-6)
+                            .map((turn) => ({
+                                role: turn.role === "assistant" ? "assistant" : "user",
+                                content: typeof turn.content === "string"
+                                    ? turn.content.slice(0, 1000)
+                                    : ""
+                            }))
+                            .filter((turn) => turn.content.trim()),
                         sources: feedbackSources,
                         requestId: response.request_id || null,
                         model: response.model || null,

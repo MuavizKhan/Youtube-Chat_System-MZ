@@ -379,7 +379,16 @@ def attach_ai_assessments(
                     for claim_index, claim in enumerate(claims)
                 ),
                 video_id=item["video_id"],
-                subject=f"User question: {question.strip()}",
+                subject=(
+                    "Prior conversation context (if supplied): "
+                    + " | ".join(
+                        f"{turn.get('role', 'user')}: {turn.get('content', '')}"
+                        for turn in item.get("conversation_history", [])
+                        if isinstance(turn, dict)
+                        and isinstance(turn.get("content"), str)
+                    )
+                    + f" | Current user question: {question.strip()}"
+                ),
                 analysis_source="feedback_answer_sentence_splitter_v1",
             )
             result = assess_evidence_support(

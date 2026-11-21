@@ -66,6 +66,23 @@ class FeedbackSource(BaseModel):
         return self
 
 
+class FeedbackConversationTurn(BaseModel):
+    """One bounded prior chat turn, stored only with explicit context consent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=1_000)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("conversation turn content must not be blank.")
+        return cleaned
+
+
 class FeedbackSubmission(BaseModel):
     """One rating for one rendered answer, with explicitly consented context."""
 
@@ -78,6 +95,10 @@ class FeedbackSubmission(BaseModel):
     comment: str | None = Field(default=None, max_length=1_000)
     share_context: bool = False
     allow_ai_assessment: bool = False
+    conversation_history: list[FeedbackConversationTurn] = Field(
+        default_factory=list,
+        max_length=6,
+    )
     question: str | None = Field(default=None, min_length=1, max_length=1_000)
     answer: str | None = Field(default=None, min_length=1, max_length=12_000)
     sources: list[FeedbackSource] = Field(
@@ -120,9 +141,23 @@ class FeedbackSubmission(BaseModel):
                 raise ValueError(
                     "sharing context requires both the question and answer."
                 )
-        elif self.question is not None or self.answer is not None or self.sources:
+        elif (
+            self.question is not None
+            or self.answer is not None
+            or self.sources
+            or self.conversation_history
+        ):
             raise ValueError(
-                "question, answer, and source timings require share_context=true."
+                "question, answer, source timings, and conversation history "
+                "require share_context=true."
+            )
+
+        history_characters = sum(
+            len(turn.content) for turn in self.conversation_history
+        )
+        if history_characters > 4_000:
+            raise ValueError(
+                "shared conversation history cannot exceed 4,000 characters."
             )
 
         if any(source.video_id != self.video_id for source in self.sources):
@@ -176,6 +211,7 @@ class FeedbackStore:
                 allow_ai_assessment INTEGER NOT NULL DEFAULT 0,
                 question TEXT,
                 answer TEXT,
+                conversation_history_json TEXT NOT NULL DEFAULT '[]',
                 sources_json TEXT NOT NULL,
                 model TEXT,
                 retrieval_method TEXT,
@@ -192,6 +228,11 @@ class FeedbackStore:
             connection.execute(
                 "ALTER TABLE answer_feedback "
                 "ADD COLUMN allow_ai_assessment INTEGER NOT NULL DEFAULT 0"
+            )
+        if "conversation_history_json" not in existing_columns:
+            connection.execute(
+                "ALTER TABLE answer_feedback "
+                "ADD COLUMN conversation_history_json TEXT NOT NULL DEFAULT '[]'"
             )
         connection.commit()
         return connection
@@ -218,6 +259,11 @@ class FeedbackStore:
             int(submission.allow_ai_assessment and context_shared),
             submission.question if context_shared else None,
             submission.answer if context_shared else None,
+            json.dumps(
+                [turn.model_dump(mode="json") for turn in submission.conversation_history]
+                if context_shared else [],
+                ensure_ascii=False,
+            ),
             json.dumps(sources if context_shared else [], ensure_ascii=False),
             submission.model,
             submission.retrieval_method,
@@ -232,9 +278,10 @@ class FeedbackStore:
                     INSERT OR IGNORE INTO answer_feedback (
                         feedback_id, answer_id, created_at, helpful, reason,
                         comment, video_id, request_id, context_shared,
-                        allow_ai_assessment, question, answer, sources_json,
-                        model, retrieval_method, retrieval_config_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        allow_ai_assessment, question, answer,
+                        conversation_history_json, sources_json, model,
+                        retrieval_method, retrieval_config_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -268,8 +315,9 @@ class FeedbackStore:
                 """
                 SELECT feedback_id, answer_id, created_at, helpful, reason,
                        comment, video_id, request_id, context_shared,
-                       allow_ai_assessment, question, answer, sources_json,
-                       model, retrieval_method,
+                       allow_ai_assessment, question, answer,
+                       conversation_history_json, sources_json, model,
+                       retrieval_method,
                        retrieval_config_json, review_status
                 FROM answer_feedback
                 ORDER BY created_at ASC, feedback_id ASC
@@ -289,6 +337,7 @@ class FeedbackStore:
                     "allow_ai_assessment": bool(row["allow_ai_assessment"]),
                     "question": row["question"],
                     "answer": row["answer"],
+                    "conversation_history": json.loads(row["conversation_history_json"]),
                     "sources": json.loads(row["sources_json"]),
                     "model": row["model"],
                     "retrieval_method": row["retrieval_method"],

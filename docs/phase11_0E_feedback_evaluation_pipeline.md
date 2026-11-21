@@ -29,7 +29,7 @@ Negative feedback reasons are one of:
 
 A free-text comment is optional and limited to 1,000 characters. The extension explains that a submitted comment is stored with the report and asks users not to include sensitive personal information.
 
-The form includes an unchecked-by-default context-sharing control. Only when the user checks it does the extension submit the question, answer, and source timing/chunk references. A second, separate checkbox—also unchecked by default and disabled until context sharing is enabled—asks for permission to send the shared answer and cited transcript excerpts to the configured AI provider for a bounded quality assessment. Without the first opt-in, the backend stores no question/answer/source content. Without the second opt-in, the pipeline must not call an AI provider for that record. The backend stores the rating, reason/comment (if given), video ID, answer/request identifiers and technical model/retrieval metadata. Conversation history, user identity, IP address, cookies, and transcript text are not stored at submission time.
+The form includes an unchecked-by-default context-sharing control. Only when the user checks it does the extension submit the question, answer, up to six preceding conversation turns (capped at 4,000 characters), and source timing/chunk references. A second, separate checkbox—also unchecked by default and disabled until context sharing is enabled—asks for permission to send the shared answer and cited transcript excerpts to the configured AI provider for a bounded quality assessment. Without the first opt-in, the backend stores no question/answer/conversation-history/source content. Without the second opt-in, the pipeline must not call an AI provider for that record. The backend stores the rating, reason/comment (if given), video ID, answer/request identifiers and technical model/retrieval metadata. Conversation history, user identity, IP address, cookies, and transcript text are not stored at submission time.
 
 ## 3. Backend persistence and limits
 
@@ -109,7 +109,7 @@ This export is a review bundle, not a ready-to-assemble Phase 11.0D source manif
 
 ## 7. Validation
 
-The new unit tests cover validation, explicit context consent, source/video consistency, SQLite persistence, idempotent retries, aggregate-only summaries, and rejection of unexpected fields.
+The new unit tests cover validation, explicit context and AI-provider consent, bounded recent conversation history, source/video consistency, SQLite persistence and migrations, idempotent retries, aggregate-only summaries, and rejection of unexpected fields.
 
 Run:
 
