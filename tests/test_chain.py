@@ -10519,6 +10519,58 @@ def test_q06_repair_corrects_black_gold_attribution_without_dropping_strategy_cl
 
 
 @pytest.mark.unit
+def test_q06_claim_repair_requires_water_business_relationship_not_brand_advertising():
+    benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
+    question = next(
+        item["question"] for item in benchmark.question_cases if item["id"] == "Q06"
+    )
+
+    context = (
+        "[SOURCE 1]\n"
+        "A brand needs a personality. I gave Kingfisher a very colorful personality. "
+        "I went into authoring surrogate advertising. We built a full water business "
+        "around Kingfisher, large enough that we could advertise the core brand."
+    )
+
+    incomplete_answer = (
+        "A brand needs a personality. He used surrogate advertising "
+        "to advertise the core brand."
+    )
+
+    diagnostics = chain._build_generation_repair_diagnostics(
+        question=question,
+        video_id="MdeQMVBuGgY",
+        context=context,
+        initial_draft=incomplete_answer,
+        repaired_draft=None,
+        final_answer=incomplete_answer,
+        repair_attempted=False,
+        repair_passed=None,
+        repair_aborted_due_quota=False,
+    )
+
+    assert diagnostics["registered_claim_contract_available"] is True
+    assert diagnostics["prompt_source_claim_indices"] == [0, 1, 2]
+
+    initial = diagnostics["initial_draft"]
+
+    assert initial["answer_source_claim_indices"] == [0, 1]
+    assert initial["missing_answer_claim_indices"] == [2]
+    assert "missing_registered_answer_claims" in initial["issue_codes"]
+
+    instruction = chain._gold_evidence_repair_instruction(
+        question=question,
+        answer=incomplete_answer,
+        context=context,
+        video_id="MdeQMVBuGgY",
+    )
+
+    assert instruction is not None
+    assert "REGISTERED ANSWER CLAIM-COMPLETENESS REPAIR" in instruction
+    assert "water business around Kingfisher" in instruction
+
+
+@pytest.mark.unit
 def test_q06_registered_fallback_requires_all_three_brand_strategy_claims():
     benchmark = chain.get_video_benchmark("MdeQMVBuGgY")
     question = next(

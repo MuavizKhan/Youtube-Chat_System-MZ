@@ -499,7 +499,7 @@ GOLD_EVIDENCE_CASES = (
         generation_claim_answer_groups=(
             ("a brand needs a personality", "gave Kingfisher a personality"),
             ("surrogate advertising",),
-            ("water business around Kingfisher", "advertise the core brand"),
+            ("water business around Kingfisher",),
         ),
         generation_fallback_answer=(
             "Mallya says a brand needs a personality and describes giving "
