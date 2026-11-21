@@ -179,7 +179,7 @@ def test_feedback_endpoint_persists_and_returns_receipt(monkeypatch, tmp_path):
 
 
 def test_ai_assessment_permission_requires_context_sharing():
-    with pytest.raises(ValidationError, match="AI assessment requires share_context=true"):
+    with pytest.raises(ValidationError, match="AI assessment requires a not-helpful report with share_context=true"):
         make_submission(allow_ai_assessment=True)
 
 
