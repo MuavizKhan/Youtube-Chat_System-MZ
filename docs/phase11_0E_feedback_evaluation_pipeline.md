@@ -72,6 +72,8 @@ The exporter refuses paths outside `evaluation_data/private/` and refuses to ove
 
 With `--include-evidence`, the local command loads the existing index for each opted-in video and resolves only the chunk IDs returned with that answer. It includes the exact chunk text, caption-segment text, transcript language, and source timing; it reports missing chunks instead of silently substituting other text. It does not build or modify an index, change the accepted retrieval configuration, or call a language-model provider. The evidence-enriched export contains YouTube transcript text and must remain in the private ignored directory.
 
+Shared-context feedback is checked client-side against a 14 KB payload ceiling so it stays below the backend's existing request-body limit. If it is too large, the user can uncheck the sharing option and submit the rating/reason without the question, answer, or source references.
+
 ## 5. How feedback becomes evaluation data
 
 A user report is a **candidate case**, not a verdict. A negative rating can reflect an answer defect, an ambiguous question, missing conversational context, a misleading/incomplete transcript, a source/timestamp issue, or a user misunderstanding.

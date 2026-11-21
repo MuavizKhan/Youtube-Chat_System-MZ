@@ -13,6 +13,8 @@ import uuid
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
+
+from dotenv import load_dotenv
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -129,6 +131,8 @@ class FeedbackReceipt(BaseModel):
     feedback_id: str
     status: Literal["received", "already_received"]
 
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
 def default_feedback_database_path() -> Path:
     """Resolve the configurable SQLite path without creating it at import time."""

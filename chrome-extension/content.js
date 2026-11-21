@@ -1752,6 +1752,19 @@ function renderAnswerFeedback(aiMessage, context) {
             payload.sources = context.sources;
         }
 
+        const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+        if (payloadBytes > 14000) {
+            setBusy(false);
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = "Submit feedback";
+            }
+            status.textContent =
+                "The shared context is too large to send. Uncheck the sharing option and submit the report without the question and answer.";
+            status.dataset.state = "error";
+            return;
+        }
+
         sendExtensionMessage(
             { type: "feedback", feedback: payload },
             (response, runtimeError) => {

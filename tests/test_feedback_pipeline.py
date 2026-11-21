@@ -2,6 +2,9 @@
 
 import pytest
 from pydantic import ValidationError
+from types import SimpleNamespace
+
+from scripts.phase11_feedback_queue import build_evidence_snapshot
 
 from Backend.rag_system.feedback import (
     FeedbackReason,
@@ -208,3 +211,77 @@ def test_feedback_store_persists_selected_chunk_ids(tmp_path):
     )
 
     assert store.list_records()[0]["sources"][0]["chunk_ids"] == [4, 5]
+
+
+
+def test_evidence_snapshot_resolves_only_exact_opted_in_video_chunks():
+    record = {
+        "context_shared": True,
+        "video_id": VIDEO_ID,
+        "sources": [{"chunk_ids": [4, 5]}],
+    }
+    documents = [
+        SimpleNamespace(
+            page_content="Cited transcript passage four.",
+            metadata={
+                "video_id": VIDEO_ID,
+                "chunk_id": 4,
+                "start": 20.0,
+                "end": 28.0,
+                "language_code": "en",
+                "is_generated": False,
+                "transcript_segments": [
+                    {"segment_id": 7, "start": 20.0, "end": 23.0, "text": "Cited segment."}
+                ],
+            },
+        ),
+        SimpleNamespace(
+            page_content="Wrong video's chunk five.",
+            metadata={"video_id": "zzzzzzzzzzz", "chunk_id": 5},
+        ),
+        SimpleNamespace(
+            page_content="Not a cited chunk.",
+            metadata={"video_id": VIDEO_ID, "chunk_id": 6},
+        ),
+    ]
+
+    snapshot = build_evidence_snapshot(record, documents)
+
+    assert snapshot["status"] == "partial"
+    assert snapshot["requested_chunk_ids"] == [4, 5]
+    assert snapshot["missing_chunk_ids"] == [5]
+    assert [item["chunk_id"] for item in snapshot["passages"]] == [4]
+    assert snapshot["passages"][0]["text"] == "Cited transcript passage four."
+    assert snapshot["passages"][0]["transcript_segments"][0]["text"] == "Cited segment."
+
+
+def test_evidence_snapshot_refuses_to_resolve_context_without_opt_in():
+    record = {
+        "context_shared": False,
+        "video_id": VIDEO_ID,
+        "sources": [{"chunk_ids": [4]}],
+    }
+
+    snapshot = build_evidence_snapshot(
+        record,
+        [SimpleNamespace(page_content="Private transcript text", metadata={
+            "video_id": VIDEO_ID, "chunk_id": 4
+        })],
+    )
+
+    assert snapshot["status"] == "not_shared"
+    assert snapshot["passages"] == []
+
+
+def test_evidence_snapshot_marks_index_errors_without_fabricating_passages():
+    record = {
+        "context_shared": True,
+        "video_id": VIDEO_ID,
+        "sources": [{"chunk_ids": [4]}],
+    }
+
+    snapshot = build_evidence_snapshot(record, [], index_error="video_index_not_found")
+
+    assert snapshot["status"] == "index_unavailable"
+    assert snapshot["missing_chunk_ids"] == [4]
+    assert snapshot["passages"] == []
