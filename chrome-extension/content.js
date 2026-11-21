@@ -1287,6 +1287,211 @@ function appendMessage(text, type) {
 
 
 // ============================================================
+function appendFeedbackControls(message, context) {
+    const requestId = String(context?.requestId || "");
+    if (!/^[a-f0-9]{32}$/.test(requestId)) {
+        return;
+    }
+
+    const widget = document.createElement("div");
+    widget.className = "answer-feedback";
+
+    const prompt = document.createElement("span");
+    prompt.className = "answer-feedback-prompt";
+    prompt.textContent = "Was this answer helpful?";
+
+    const actions = document.createElement("div");
+    actions.className = "answer-feedback-actions";
+
+    const yesButton = document.createElement("button");
+    yesButton.type = "button";
+    yesButton.className = "answer-feedback-button";
+    yesButton.textContent = "Yes";
+
+    const noButton = document.createElement("button");
+    noButton.type = "button";
+    noButton.className = "answer-feedback-button";
+    noButton.textContent = "No";
+
+    const status = document.createElement("span");
+    status.className = "answer-feedback-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.hidden = true;
+
+    const baseContext = {
+        question: String(context.question || ""),
+        answer: String(context.answer || ""),
+        sources: Array.isArray(context.sources) ? context.sources : [],
+        model: String(context.model || ""),
+        retrieval_method: String(context.retrievalMethod || ""),
+        retrieval_config: context.retrievalConfig &&
+            typeof context.retrievalConfig === "object"
+            ? context.retrievalConfig
+            : {}
+    };
+
+    const showStatus = (messageText, isError = false) => {
+        status.hidden = false;
+        status.textContent = messageText;
+        status.dataset.state = isError ? "error" : "success";
+    };
+
+    const sendVote = (vote, details = {}) => {
+        const consent = details.shareContext === true;
+        const payload = {
+            type: "feedback",
+            request_id: requestId,
+            video_id: String(context.videoId || ""),
+            vote,
+            reason: details.reason || null,
+            comment: details.comment || null,
+            share_context: consent
+        };
+        if (consent) {
+            payload.context = baseContext;
+        }
+
+        yesButton.disabled = true;
+        noButton.disabled = true;
+        if (details.submitButton) {
+            details.submitButton.disabled = true;
+        }
+
+        const restoreControls = () => {
+            yesButton.disabled = false;
+            noButton.disabled = false;
+            if (details.submitButton) {
+                details.submitButton.disabled = false;
+            }
+        };
+
+        sendExtensionMessage(
+            payload,
+            (response, runtimeError) => {
+                if (runtimeError || !response || response.success !== true) {
+                    restoreControls();
+                    showStatus(
+                        response?.error || "Feedback could not be sent. Please try again.",
+                        true
+                    );
+                    return;
+                }
+                widget.querySelectorAll("button, select, textarea, input").forEach(
+                    (control) => {
+                        control.disabled = true;
+                    }
+                );
+                showStatus("Thanks — your feedback was received.");
+            },
+            () => {
+                restoreControls();
+                showStatus(
+                    "The extension connection is unavailable. Refresh this YouTube page and try again.",
+                    true
+                );
+            }
+        );
+    };
+
+    yesButton.addEventListener("click", () => {
+        sendVote("helpful");
+    });
+
+    noButton.addEventListener("click", () => {
+        actions.hidden = true;
+        prompt.textContent = "What might have gone wrong?";
+
+        const form = document.createElement("div");
+        form.className = "answer-feedback-form";
+
+        const reason = document.createElement("select");
+        reason.className = "answer-feedback-select";
+        reason.setAttribute("aria-label", "Feedback category");
+
+        const reasonOptions = [
+            ["", "Choose a reason (optional)"],
+            ["incorrect_or_unsupported", "Answer seems incorrect or unsupported"],
+            ["missing_information", "Important information is missing"],
+            ["wrong_attribution", "Wrong speaker or attribution"],
+            ["wrong_timestamp_or_source", "Wrong timestamp or source"],
+            ["transcript_problem", "Transcript may be incomplete or misheard"],
+            ["question_context_misunderstood", "Question or context may be misunderstood"],
+            ["uncertain_context", "Not sure — more context may be needed"],
+            ["other", "Something else"]
+        ];
+        reasonOptions.forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            reason.appendChild(option);
+        });
+
+        const comment = document.createElement("textarea");
+        comment.className = "answer-feedback-comment";
+        comment.rows = 2;
+        comment.maxLength = 1200;
+        comment.placeholder = "Optional: tell us what you noticed. Please do not include personal or sensitive information.";
+
+        const consentLabel = document.createElement("label");
+        consentLabel.className = "answer-feedback-consent";
+
+        const consent = document.createElement("input");
+        consent.type = "checkbox";
+        consent.checked = false;
+
+        const consentText = document.createElement("span");
+        consentText.textContent =
+            "Share this question, answer, source timestamps and model/retrieval details for quality review.";
+
+        consentLabel.append(consent, consentText);
+
+        const privacyNote = document.createElement("span");
+        privacyNote.className = "answer-feedback-note";
+        privacyNote.textContent =
+            "This is optional and off by default. Transcript text and conversation history are not shared.";
+
+        const submitButton = document.createElement("button");
+        submitButton.type = "button";
+        submitButton.className = "answer-feedback-submit";
+        submitButton.textContent = "Send feedback";
+        submitButton.addEventListener("click", () => {
+            sendVote("not_helpful", {
+                reason: reason.value || null,
+                comment: comment.value.trim() || null,
+                shareContext: consent.checked,
+                submitButton
+            });
+        });
+
+        const skipButton = document.createElement("button");
+        skipButton.type = "button";
+        skipButton.className = "answer-feedback-skip";
+        skipButton.textContent = "Send without details";
+        skipButton.addEventListener("click", () => {
+            sendVote("not_helpful", {
+                submitButton: skipButton
+            });
+        });
+
+        form.append(
+            reason,
+            comment,
+            consentLabel,
+            privacyNote,
+            submitButton,
+            skipButton
+        );
+        widget.appendChild(form);
+        status.hidden = true;
+    });
+
+    actions.append(yesButton, noButton);
+    widget.append(prompt, actions, status);
+    message.appendChild(widget);
+}
+
+
 // 11. CLEAR SOURCES
 // ============================================================
 
@@ -1837,6 +2042,17 @@ function sendMessage() {
                 );
 
                 renderSources();
+
+                appendFeedbackControls(aiMessage, {
+                    requestId: response.request_id,
+                    videoId: requestedVideoId,
+                    question,
+                    answer,
+                    sources: response.sources || [],
+                    model: response.model || "",
+                    retrievalMethod: response.retrieval_method || "",
+                    retrievalConfig: response.retrieval_config || {}
+                });
 
                 if (chatBody) {
                     chatBody.scrollTop =
