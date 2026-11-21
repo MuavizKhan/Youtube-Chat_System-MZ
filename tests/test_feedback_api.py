@@ -146,3 +146,9 @@ def test_chat_response_exposes_request_id_for_feedback(feedback_client, monkeypa
     assert request_id
     assert len(request_id) == 32
     assert "request_id" not in response.json()
+
+
+
+def test_feedback_has_no_public_read_or_list_endpoint(feedback_client):
+    response = feedback_client.get("/feedback")
+    assert response.status_code == 405
