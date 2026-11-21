@@ -142,6 +142,7 @@ def test_chat_response_exposes_request_id_for_feedback(feedback_client, monkeypa
     )
 
     assert response.status_code == 200
-    assert response.headers.get("x-request-id")
-    assert response.json()["request_id"] == response.headers["x-request-id"]
-    assert len(response.json()["request_id"]) == 32
+    request_id = response.headers.get("x-request-id")
+    assert request_id
+    assert len(request_id) == 32
+    assert "request_id" not in response.json()
