@@ -30,7 +30,7 @@ If the user does not opt in to context sharing, the database stores only the ans
 
 POST /feedback accepts a bounded request containing:
 
-- request_id: the X-Request-ID returned by the corresponding /chat response;
+- request_id: the X-Request-ID response header returned by the corresponding /chat response (the chat JSON contract remains unchanged);
 - video_id: validated as a YouTube video reference;
 - vote: helpful or not_helpful;
 - optional reason and note;
