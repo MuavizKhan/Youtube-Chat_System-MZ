@@ -497,6 +497,7 @@ async function handleChatRequest(
                 true,
 
             request_id:
+                (typeof data.request_id === "string" && data.request_id) ||
                 response.headers.get("X-Request-ID") || "",
 
             answer:
