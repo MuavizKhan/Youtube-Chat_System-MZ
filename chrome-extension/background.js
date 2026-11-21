@@ -847,6 +847,18 @@ async function handleFeedbackSubmission(message, sendResponse) {
         });
 
         const data = await parseResponse(response);
+        if (
+            response.status === 409 &&
+            data?.error === "feedback_already_submitted"
+        ) {
+            sendResponse({
+                success: true,
+                status: "already_received",
+                context_saved: false
+            });
+            return;
+        }
+
         if (!response.ok) {
             throw new Error(
                 extractBackendError(data) ||
