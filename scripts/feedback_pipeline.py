@@ -41,6 +41,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     summary.add_argument("--db", help="Override the feedback SQLite database path.")
 
+    list_command = subparsers.add_parser(
+        "list",
+        help="List feedback records for local triage.",
+    )
+    list_command.add_argument("--db", help="Override the feedback SQLite database path.")
+    list_command.add_argument(
+        "--status",
+        nargs="*",
+        choices=feedback_store.REVIEW_STATUSES,
+        default=["new"],
+        help="Review states to include (default: new).",
+    )
+    list_command.add_argument("--limit", type=int, default=50)
+    list_command.add_argument(
+        "--include-context",
+        action="store_true",
+        help="Include question/answer/source context that users explicitly shared.",
+    )
+
     review = subparsers.add_parser(
         "review",
         help="Record a human triage outcome for one feedback item.",
@@ -78,6 +97,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "summary":
             print(json.dumps(feedback_store.summarize_feedback(), indent=2))
+            return 0
+
+        if args.command == "list":
+            if args.limit < 1 or args.limit > 500:
+                raise feedback_store.FeedbackStoreError(
+                    "--limit must be between 1 and 500."
+                )
+            records = feedback_store.list_feedback_records(
+                statuses=tuple(args.status) if args.status else None
+            )[:args.limit]
+            if not args.include_context:
+                for item in records:
+                    item.pop("context", None)
+            print(json.dumps(records, indent=2, ensure_ascii=False))
             return 0
 
         if args.command == "review":
