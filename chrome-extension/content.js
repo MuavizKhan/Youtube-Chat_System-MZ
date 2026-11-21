@@ -1705,7 +1705,7 @@ function renderAnswerFeedback(aiMessage, context) {
     let detailsForm = null;
 
     function setBusy(busy) {
-        yesButton.disabled = busy;
+        yesButton.disabled = busy || Boolean(detailsForm);
         noButton.disabled = busy || Boolean(detailsForm);
         if (detailsForm) {
             detailsForm.querySelectorAll("button, select, textarea, input").forEach((element) => {
@@ -1800,6 +1800,13 @@ function renderAnswerFeedback(aiMessage, context) {
         const reasonSelect = document.createElement("select");
         reasonSelect.className = "answer-feedback-select";
         reasonSelect.required = true;
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = "Select a reason";
+        placeholderOption.disabled = true;
+        placeholderOption.selected = true;
+        reasonSelect.appendChild(placeholderOption);
 
         const reasons = [
             ["answer_incorrect_or_incomplete", "The answer was incorrect or incomplete"],
