@@ -65,6 +65,20 @@ def test_context_sharing_is_explicitly_opt_in_and_only_then_sent():
     assert "payload.sources = context.sources" in renderer
 
 
+def test_ai_provider_consent_is_separate_and_requires_context_consent():
+    content = CONTENT.read_text(encoding="utf-8")
+    start = content.index("function renderAnswerFeedback(")
+    end = content.index("// REQUEST STATE RESET", start)
+    renderer = content[start:end]
+
+    assert "aiConsent.checked = false" in renderer
+    assert "aiConsent.disabled = true" in renderer
+    assert "aiConsent.disabled = !consent.checked" in renderer
+    assert "aiConsent.checked = false" in renderer
+    assert "allow_ai_assessment: Boolean(shareContext && allowAiAssessment)" in renderer
+    assert "Allow the configured AI provider" in renderer
+
+
 def test_feedback_form_uses_required_reason_placeholder_and_retryable_failure():
     content = CONTENT.read_text(encoding="utf-8")
 

@@ -77,6 +77,7 @@ class FeedbackSubmission(BaseModel):
     reason: FeedbackReason | None = None
     comment: str | None = Field(default=None, max_length=1_000)
     share_context: bool = False
+    allow_ai_assessment: bool = False
     question: str | None = Field(default=None, min_length=1, max_length=1_000)
     answer: str | None = Field(default=None, min_length=1, max_length=12_000)
     sources: list[FeedbackSource] = Field(
@@ -108,6 +109,11 @@ class FeedbackSubmission(BaseModel):
     def validate_feedback_context(self) -> "FeedbackSubmission":
         if not self.helpful and self.reason is None:
             raise ValueError("a not-helpful rating requires a feedback reason.")
+
+        if self.allow_ai_assessment and not self.share_context:
+            raise ValueError(
+                "AI assessment requires share_context=true."
+            )
 
         if self.share_context:
             if not self.question or not self.answer:
@@ -167,6 +173,7 @@ class FeedbackStore:
                 video_id TEXT NOT NULL,
                 request_id TEXT,
                 context_shared INTEGER NOT NULL,
+                allow_ai_assessment INTEGER NOT NULL DEFAULT 0,
                 question TEXT,
                 answer TEXT,
                 sources_json TEXT NOT NULL,
@@ -177,6 +184,15 @@ class FeedbackStore:
             )
             """
         )
+        existing_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(answer_feedback)")
+        }
+        if "allow_ai_assessment" not in existing_columns:
+            connection.execute(
+                "ALTER TABLE answer_feedback "
+                "ADD COLUMN allow_ai_assessment INTEGER NOT NULL DEFAULT 0"
+            )
         connection.commit()
         return connection
 
@@ -199,6 +215,7 @@ class FeedbackStore:
             submission.video_id,
             submission.request_id,
             int(context_shared),
+            int(submission.allow_ai_assessment and context_shared),
             submission.question if context_shared else None,
             submission.answer if context_shared else None,
             json.dumps(sources if context_shared else [], ensure_ascii=False),
@@ -214,10 +231,10 @@ class FeedbackStore:
                     """
                     INSERT OR IGNORE INTO answer_feedback (
                         feedback_id, answer_id, created_at, helpful, reason,
-                        comment, video_id, request_id, context_shared, question,
-                        answer, sources_json, model, retrieval_method,
-                        retrieval_config_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        comment, video_id, request_id, context_shared,
+                        allow_ai_assessment, question, answer, sources_json,
+                        model, retrieval_method, retrieval_config_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -250,8 +267,9 @@ class FeedbackStore:
             rows = connection.execute(
                 """
                 SELECT feedback_id, answer_id, created_at, helpful, reason,
-                       comment, video_id, request_id, context_shared, question,
-                       answer, sources_json, model, retrieval_method,
+                       comment, video_id, request_id, context_shared,
+                       allow_ai_assessment, question, answer, sources_json,
+                       model, retrieval_method,
                        retrieval_config_json, review_status
                 FROM answer_feedback
                 ORDER BY created_at ASC, feedback_id ASC
@@ -268,6 +286,7 @@ class FeedbackStore:
                     "video_id": row["video_id"],
                     "request_id": row["request_id"],
                     "context_shared": bool(row["context_shared"]),
+                    "allow_ai_assessment": bool(row["allow_ai_assessment"]),
                     "question": row["question"],
                     "answer": row["answer"],
                     "sources": json.loads(row["sources_json"]),

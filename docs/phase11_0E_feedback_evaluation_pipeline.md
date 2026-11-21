@@ -29,7 +29,7 @@ Negative feedback reasons are one of:
 
 A free-text comment is optional and limited to 1,000 characters. The extension explains that a submitted comment is stored with the report and asks users not to include sensitive personal information.
 
-The form includes an unchecked-by-default consent control. Only when the user checks it does the extension submit the question, answer, and source timing references. Without that opt-in, the backend stores the rating, reason/comment (if given), video ID, answer/request identifiers, model/retrieval metadata, and no question/answer/source timing content. Conversation history, user identity, IP address, cookies, and transcript text are not stored by this feedback feature.
+The form includes an unchecked-by-default context-sharing control. Only when the user checks it does the extension submit the question, answer, and source timing/chunk references. A second, separate checkbox—also unchecked by default and disabled until context sharing is enabled—asks for permission to send the shared answer and cited transcript excerpts to the configured AI provider for a bounded quality assessment. Without the first opt-in, the backend stores no question/answer/source content. Without the second opt-in, the pipeline must not call an AI provider for that record. The backend stores the rating, reason/comment (if given), video ID, answer/request identifiers and technical model/retrieval metadata. Conversation history, user identity, IP address, cookies, and transcript text are not stored at submission time.
 
 ## 3. Backend persistence and limits
 
@@ -56,9 +56,14 @@ $output = "evaluation_data/private/feedback_queue_$stamp.jsonl"
 & $python -m scripts.phase11_feedback_queue export --output $output
 
 # Optional: resolve the exact cited transcript chunks from existing local indexes.
-# This is local-only and makes no AI/provider calls.
+# This step does not call a text-generation model.
 $evidenceOutput = "evaluation_data/private/feedback_evidence_$stamp.jsonl"
 & $python -m scripts.phase11_feedback_queue export --include-evidence --output $evidenceOutput
+
+# Optional: run the bounded Phase 11.0B assessor only for reports with
+# separate AI-provider consent. Default maximum is 10 reports per command.
+$assessmentOutput = "evaluation_data/private/feedback_assessment_$stamp.jsonl"
+& $python -m scripts.phase11_feedback_queue export --assess --output $assessmentOutput
 ~~~
 
 To use a non-default database:
@@ -70,7 +75,9 @@ To use a non-default database:
 
 The exporter refuses paths outside `evaluation_data/private/` and refuses to overwrite an existing export. Summary output contains counts only. Export output is sensitive and must not be committed or sent to public issue trackers.
 
-With `--include-evidence`, the local command loads the existing index for each opted-in video and resolves only the chunk IDs returned with that answer. It includes the exact chunk text, caption-segment text, transcript language, and source timing; it reports missing chunks instead of silently substituting other text. It does not build or modify an index, change the accepted retrieval configuration, or call a language-model provider. The evidence-enriched export contains YouTube transcript text and must remain in the private ignored directory.
+With `--include-evidence`, the local command loads the existing index for each opted-in video and resolves only the chunk IDs returned with that answer. It includes the exact chunk text, caption-segment text, transcript language, and source timing; it reports missing chunks instead of silently substituting other text. It does not build or modify an index or change the accepted retrieval configuration. The evidence-enriched export contains YouTube transcript text and must remain in the private ignored directory.
+
+With `--assess`, the command runs the existing Phase 11.0B evidence assessor only for negative reports where the user explicitly consented to AI-provider analysis and where all cited chunks were resolved. It uses the configured provider/model, one bounded call per report, no retries, at most eight sentence/bullet answer claims and twelve passages per report, and at most ten reports by default. The assessor output is marked `ai_proposed_assessment`, never ground truth; every result requires human verification. Reports without consent, complete evidence, or within-budget claims are skipped with a reason. This is an optional local command, not a per-click provider call.
 
 Shared-context feedback is checked client-side against a 14 KB payload ceiling so it stays below the backend's existing request-body limit. If it is too large, the user can uncheck the sharing option and submit the rating/reason without the question, answer, or source references.
 

@@ -171,6 +171,24 @@ def test_feedback_endpoint_persists_and_returns_receipt(monkeypatch, tmp_path):
 
 
 
+def test_ai_assessment_permission_requires_context_sharing():
+    with pytest.raises(ValidationError, match="AI assessment requires share_context=true"):
+        make_submission(allow_ai_assessment=True)
+
+
+def test_ai_assessment_permission_is_saved_only_with_context_opt_in(tmp_path):
+    store = FeedbackStore(tmp_path / "feedback.sqlite3")
+    store.save(
+        make_submission(
+            share_context=True,
+            allow_ai_assessment=True,
+            question="What happened?",
+            answer="The speaker explains what happened.",
+        )
+    )
+    assert store.list_records()[0]["allow_ai_assessment"] is True
+
+
 def test_feedback_source_rejects_invalid_or_duplicate_chunk_ids():
     with pytest.raises(ValidationError, match="non-negative integers"):
         FeedbackSource(

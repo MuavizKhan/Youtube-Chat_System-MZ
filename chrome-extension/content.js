@@ -1720,7 +1720,7 @@ function renderAnswerFeedback(aiMessage, context) {
         }
     }
 
-    function submitFeedback(helpful, reason, comment, shareContext, submitButton) {
+    function submitFeedback(helpful, reason, comment, shareContext, allowAiAssessment, submitButton) {
         if (submitted) {
             return;
         }
@@ -1740,6 +1740,7 @@ function renderAnswerFeedback(aiMessage, context) {
             reason,
             comment: comment || null,
             share_context: shareContext,
+            allow_ai_assessment: Boolean(shareContext && allowAiAssessment),
             request_id: context.requestId || null,
             model: context.model || null,
             retrieval_method: context.retrievalMethod || null,
@@ -1801,7 +1802,7 @@ function renderAnswerFeedback(aiMessage, context) {
     }
 
     yesButton.addEventListener("click", () => {
-        submitFeedback(true, null, null, false, yesButton);
+        submitFeedback(true, null, null, false, false, yesButton);
     });
 
     noButton.addEventListener("click", () => {
@@ -1872,6 +1873,25 @@ function renderAnswerFeedback(aiMessage, context) {
         consentLabel.appendChild(consent);
         consentLabel.appendChild(consentText);
 
+        const aiConsentLabel = document.createElement("label");
+        aiConsentLabel.className = "answer-feedback-consent";
+        const aiConsent = document.createElement("input");
+        aiConsent.type = "checkbox";
+        aiConsent.checked = false;
+        aiConsent.disabled = true;
+        const aiConsentText = document.createElement("span");
+        aiConsentText.textContent =
+            "Allow the configured AI provider to analyze the shared answer and transcript passages for quality triage.";
+        aiConsentLabel.appendChild(aiConsent);
+        aiConsentLabel.appendChild(aiConsentText);
+
+        consent.addEventListener("change", () => {
+            aiConsent.disabled = !consent.checked;
+            if (!consent.checked) {
+                aiConsent.checked = false;
+            }
+        });
+
         const submitButton = document.createElement("button");
         submitButton.type = "submit";
         submitButton.className = "answer-feedback-submit";
@@ -1880,6 +1900,7 @@ function renderAnswerFeedback(aiMessage, context) {
         detailsForm.appendChild(reasonLabel);
         detailsForm.appendChild(commentLabel);
         detailsForm.appendChild(consentLabel);
+        detailsForm.appendChild(aiConsentLabel);
         detailsForm.appendChild(submitButton);
         detailsForm.addEventListener("submit", (event) => {
             event.preventDefault();
@@ -1888,6 +1909,7 @@ function renderAnswerFeedback(aiMessage, context) {
                 reasonSelect.value,
                 commentInput.value.trim(),
                 consent.checked,
+                aiConsent.checked,
                 submitButton
             );
         });
