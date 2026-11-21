@@ -1800,6 +1800,7 @@ function renderAnswerFeedback(aiMessage, context) {
         const reasonSelect = document.createElement("select");
         reasonSelect.className = "answer-feedback-select";
         reasonSelect.required = true;
+        reasonSelect.required = true;
 
         const placeholderOption = document.createElement("option");
         placeholderOption.value = "";

@@ -65,6 +65,7 @@ def test_feedback_form_uses_required_reason_placeholder_and_retryable_failure():
 
     assert 'placeholderOption.textContent = "Select a reason"' in content
     assert "placeholderOption.disabled = true" in content
+    assert "reasonSelect.required = true" in content
     assert 'status.dataset.state = "error"' in content
     assert "Please try again." in content
 
