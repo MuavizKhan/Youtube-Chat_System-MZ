@@ -37,6 +37,11 @@ from typing import Any, Literal
 
 from Backend.rag_system.chain import ProviderRateLimitError, answer_question
 from Backend.rag_system.retrieval import extract_video_id
+from Backend.rag_system.feedback import (
+    FeedbackReceipt,
+    FeedbackStore,
+    FeedbackSubmission,
+)
 from Backend.rag_system.index_service import (
     IndexLanguageConflictError,
     IndexNotReadyError,
@@ -152,6 +157,8 @@ limiter = Limiter(
 )
 
 app.state.limiter = limiter
+
+feedback_store = FeedbackStore()
 
 
 # ============================================================
@@ -796,6 +803,36 @@ def index_status(
                 "message": "The supplied value is not a valid YouTube video ID.",
             },
         ) from error
+
+
+# ============================================================
+# USER ANSWER FEEDBACK
+# ============================================================
+
+@app.post(
+    "/feedback",
+    response_model=FeedbackReceipt,
+    status_code=202,
+)
+@limiter.limit(RATE_LIMIT)
+def submit_feedback(
+    feedback_submission: FeedbackSubmission,
+    request: Request,
+    response: Response,
+):
+    """Persist an answer rating without entering the RAG answer-generation path."""
+    receipt = feedback_store.save(feedback_submission)
+    logger.info(
+        "Answer feedback received request_id=%s feedback_id=%s video_id=%s "
+        "helpful=%s context_shared=%s status=%s",
+        request.state.request_id,
+        receipt.feedback_id,
+        feedback_submission.video_id,
+        feedback_submission.helpful,
+        feedback_submission.share_context,
+        receipt.status,
+    )
+    return receipt
 
 
 # ============================================================

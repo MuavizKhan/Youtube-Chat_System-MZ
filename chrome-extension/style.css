@@ -650,3 +650,128 @@
         flex-basis: 28px;
     }
 }
+
+
+
+/* ============================================================
+   ANSWER FEEDBACK
+   ============================================================ */
+
+.answer-feedback {
+    max-width: 90%;
+    margin: -5px 0 14px;
+    padding: 10px 11px;
+    border: 1px solid #e5e7eb;
+    border-radius: 9px;
+    background: #ffffff;
+    color: #374151;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.answer-feedback-prompt {
+    margin-bottom: 7px;
+    font-weight: 600;
+}
+
+.answer-feedback-actions {
+    display: flex;
+    gap: 7px;
+}
+
+.answer-feedback-button,
+.answer-feedback-submit {
+    padding: 6px 11px;
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    background: #f9fafb;
+    color: #1f2937;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.answer-feedback-button:hover:not(:disabled),
+.answer-feedback-submit:hover:not(:disabled) {
+    background: #eef2f7;
+}
+
+.answer-feedback-button:disabled,
+.answer-feedback-submit:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.answer-feedback-details {
+    display: grid;
+    gap: 8px;
+    margin-top: 9px;
+}
+
+.answer-feedback-label {
+    display: grid;
+    gap: 5px;
+    color: #374151;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.answer-feedback-select,
+.answer-feedback-comment {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #111827;
+    font: inherit;
+    font-weight: 400;
+}
+
+.answer-feedback-comment {
+    resize: vertical;
+}
+
+.answer-feedback-consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    color: #4b5563;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.answer-feedback-consent input {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.answer-feedback-submit {
+    justify-self: start;
+    background: #111827;
+    color: #ffffff;
+}
+
+.answer-feedback-submit:hover:not(:disabled) {
+    background: #374151;
+}
+
+.answer-feedback-status {
+    margin-top: 6px;
+    color: #6b7280;
+    font-size: 11px;
+}
+
+.answer-feedback-status[data-state="error"] {
+    color: #b91c1c;
+}
+
+.answer-feedback-status[data-state="success"] {
+    color: #166534;
+}
+
+.answer-feedback-submitted .answer-feedback-prompt {
+    margin-bottom: 0;
+}
