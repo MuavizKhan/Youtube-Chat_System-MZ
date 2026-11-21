@@ -62,6 +62,7 @@ From the repository root in PowerShell:
 ~~~powershell
 $python = ".\.venv\Scripts\python.exe"
 & $python scripts/feedback_pipeline.py summary
+& $python scripts/feedback_pipeline.py list --status new --limit 100
 & $python scripts/feedback_pipeline.py review --feedback-id "<feedback-id>" --status needs_context --reviewer-id R01 --notes "The caption excerpt around the reported timestamp needs checking."
 & $python scripts/feedback_pipeline.py review --feedback-id "<feedback-id>" --status evaluation_candidate --reviewer-id R01 --notes "Checked the YouTube caption and answer source; candidate for independent annotation."
 & $python scripts/feedback_pipeline.py export-candidates --output evaluation_data/private/feedback_candidates.jsonl
