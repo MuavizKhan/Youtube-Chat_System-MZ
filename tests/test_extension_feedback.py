@@ -72,6 +72,7 @@ def test_ai_provider_consent_is_separate_and_requires_context_consent():
     renderer = content[start:end]
 
     assert "aiConsent.checked = false" in renderer
+    assert "aiConsentInput.disabled = busy || !contextConsentInput.checked" in renderer
     assert "aiConsent.disabled = true" in renderer
     assert "aiConsent.disabled = !consent.checked" in renderer
     assert "aiConsent.checked = false" in renderer

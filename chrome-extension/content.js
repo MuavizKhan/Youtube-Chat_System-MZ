@@ -1709,6 +1709,8 @@ function renderAnswerFeedback(aiMessage, context) {
 
     let submitted = false;
     let detailsForm = null;
+    let contextConsentInput = null;
+    let aiConsentInput = null;
 
     function setBusy(busy) {
         yesButton.disabled = busy || Boolean(detailsForm);
@@ -1717,6 +1719,9 @@ function renderAnswerFeedback(aiMessage, context) {
             detailsForm.querySelectorAll("button, select, textarea, input").forEach((element) => {
                 element.disabled = busy;
             });
+        }
+        if (aiConsentInput && contextConsentInput) {
+            aiConsentInput.disabled = busy || !contextConsentInput.checked;
         }
     }
 
@@ -1866,6 +1871,7 @@ function renderAnswerFeedback(aiMessage, context) {
         consentLabel.className = "answer-feedback-consent";
         const consent = document.createElement("input");
         consent.type = "checkbox";
+        contextConsentInput = consent;
         consent.checked = false;
         const consentText = document.createElement("span");
         consentText.textContent =
@@ -1877,6 +1883,7 @@ function renderAnswerFeedback(aiMessage, context) {
         aiConsentLabel.className = "answer-feedback-consent";
         const aiConsent = document.createElement("input");
         aiConsent.type = "checkbox";
+        aiConsentInput = aiConsent;
         aiConsent.checked = false;
         aiConsent.disabled = true;
         const aiConsentText = document.createElement("span");
