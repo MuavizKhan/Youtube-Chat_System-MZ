@@ -2121,6 +2121,8 @@ function sendMessage() {
                     typeof response.answer === "string"
                         ? response.answer.trim()
                         : "";
+                const previousConversationHistory =
+                    conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
 
                 aiMessage.innerHTML = renderMarkdown(
                     answer || "No answer was returned."
@@ -2182,7 +2184,7 @@ function sendMessage() {
                         question,
                         answer,
                         conversationHistory: buildFeedbackConversationHistory(
-                            conversationHistory.slice(0, -2)
+                            previousConversationHistory
                         ),
                         sources: feedbackSources,
                         requestId: response.request_id || null,

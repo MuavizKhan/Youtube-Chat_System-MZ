@@ -74,6 +74,7 @@ def test_shared_conversation_history_is_bounded_to_six_messages_and_4000_chars()
     assert "remainingCharacters = 4000" in content
     assert "Math.min(1000, remainingCharacters)" in content
     assert "conversationHistory: buildFeedbackConversationHistory(" in content
+    assert "const previousConversationHistory =" in content
 
 
 def test_ai_provider_consent_is_separate_and_requires_context_consent():
