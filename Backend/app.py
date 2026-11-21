@@ -37,6 +37,7 @@ from typing import Any, Literal
 
 from Backend.rag_system.chain import ProviderRateLimitError, answer_question
 from Backend.rag_system.retrieval import extract_video_id
+from Backend.rag_system import feedback_store
 from Backend.rag_system.index_service import (
     IndexLanguageConflictError,
     IndexNotReadyError,
@@ -586,6 +587,40 @@ class ChatResponse(BaseModel):
         ),
     )
 
+class FeedbackContext(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    answer: str = Field(..., min_length=1, max_length=12000)
+    sources: list[SourceResponse] = Field(default_factory=list, max_length=20)
+    model: str = Field(default="", max_length=200)
+    retrieval_method: str = Field(default="", max_length=120)
+    retrieval_config: dict[str, int | float | bool | str] = Field(default_factory=dict)
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str = Field(
+        ...,
+        min_length=32,
+        max_length=32,
+        pattern=r"^[a-f0-9]{32}$",
+        description="X-Request-ID returned by the corresponding /chat response.",
+    )
+    video_id: str = Field(..., min_length=1, max_length=2048)
+    vote: Literal["helpful", "not_helpful"]
+    reason: Literal[
+        "incorrect_or_unsupported",
+        "missing_information",
+        "wrong_attribution",
+        "wrong_timestamp_or_source",
+        "transcript_problem",
+        "question_context_misunderstood",
+        "uncertain_context",
+        "other",
+    ] | None = None
+    comment: str | None = Field(default=None, max_length=1200)
+    share_context: bool = False
+    context: FeedbackContext | None = None
+
+
 # ============================================================
 # ERROR RESPONSE MODEL
 # ============================================================
@@ -1029,3 +1064,105 @@ def chat(
                 ),
             },
         ) from error
+
+# ============================================================
+# ANSWER FEEDBACK
+# ============================================================
+
+@app.post("/feedback", status_code=201)
+@limiter.limit(RATE_LIMIT)
+def submit_answer_feedback(
+    feedback_request: FeedbackRequest,
+    request: Request,
+    response: Response,
+):
+    """Record one answer-specific rating; never expose the feedback queue."""
+    try:
+        canonical_video_id = extract_video_id(feedback_request.video_id.strip())
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_video_reference",
+                "message": "The feedback video must be a valid YouTube video ID or URL.",
+            },
+        ) from error
+
+    if feedback_request.share_context and feedback_request.context is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "feedback_context_required",
+                "message": "Answer context is required when context sharing is enabled.",
+            },
+        )
+
+    context_payload = None
+    if feedback_request.share_context and feedback_request.context is not None:
+        for source in feedback_request.context.sources:
+            if source.video_id != canonical_video_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "feedback_source_video_mismatch",
+                        "message": "Every shared source must belong to the feedback video.",
+                    },
+                )
+        context_payload = feedback_request.context.model_dump()
+
+    try:
+        record = feedback_store.create_feedback_record(
+            request_id=feedback_request.request_id,
+            video_id=canonical_video_id,
+            vote=feedback_request.vote,
+            reason=feedback_request.reason,
+            comment=feedback_request.comment,
+            share_context=feedback_request.share_context,
+            context=context_payload,
+        )
+    except feedback_store.DuplicateFeedbackError as error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "feedback_already_submitted",
+                "message": "Feedback has already been submitted for this answer.",
+            },
+        ) from error
+    except feedback_store.FeedbackStoreError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_feedback",
+                "message": str(error),
+            },
+        ) from error
+    except Exception as error:
+        logger.exception(
+            "Feedback storage failed request_id=%s video_id=%s",
+            request.state.request_id,
+            canonical_video_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "feedback_unavailable",
+                "message": "Feedback could not be saved right now. Please try again later.",
+            },
+        ) from error
+
+    response.headers["Cache-Control"] = "no-store"
+    logger.info(
+        "Answer feedback received feedback_id=%s request_id=%s video_id=%s "
+        "vote=%s context_shared=%s",
+        record["feedback_id"],
+        feedback_request.request_id,
+        canonical_video_id,
+        feedback_request.vote,
+        record["context_shared"],
+    )
+    return {
+        "feedback_id": record["feedback_id"],
+        "status": "received",
+        "context_saved": record["context_shared"],
+    }
+

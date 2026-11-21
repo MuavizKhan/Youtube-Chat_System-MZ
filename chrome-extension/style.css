@@ -650,3 +650,118 @@
         flex-basis: 28px;
     }
 }
+
+
+/* ============================================================
+   ANSWER FEEDBACK
+   ============================================================ */
+
+.answer-feedback {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 12px;
+    padding-top: 9px;
+    border-top: 1px solid #e5e7eb;
+    color: #4b5563;
+    font-size: 12px;
+}
+
+.answer-feedback-prompt {
+    font-weight: 600;
+    color: #374151;
+}
+
+.answer-feedback-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.answer-feedback-button,
+.answer-feedback-submit,
+.answer-feedback-skip {
+    min-height: 30px;
+    padding: 5px 11px;
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #374151;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.answer-feedback-button:hover,
+.answer-feedback-skip:hover {
+    background: #f3f4f6;
+}
+
+.answer-feedback-submit {
+    background: #111827;
+    border-color: #111827;
+    color: #ffffff;
+}
+
+.answer-feedback-submit:hover {
+    background: #374151;
+}
+
+.answer-feedback button:disabled,
+.answer-feedback select:disabled,
+.answer-feedback textarea:disabled,
+.answer-feedback input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.answer-feedback-form {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.answer-feedback-select,
+.answer-feedback-comment {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #111827;
+    font: inherit;
+}
+
+.answer-feedback-comment {
+    resize: vertical;
+    line-height: 1.4;
+}
+
+.answer-feedback-consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    line-height: 1.4;
+}
+
+.answer-feedback-consent input {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.answer-feedback-note {
+    color: #6b7280;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.answer-feedback-status[data-state="error"] {
+    color: #b91c1c;
+}
+
+.answer-feedback-status[data-state="success"] {
+    color: #166534;
+}
+

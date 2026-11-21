@@ -22,6 +22,9 @@ importScripts("config.js");
 const BACKEND_URL =
     `${BACKEND_BASE_URL}/chat`;
 
+const FEEDBACK_URL =
+    `${BACKEND_BASE_URL}/feedback`;
+
 const INDEX_URL =
     `${BACKEND_BASE_URL}/index`;
 
@@ -129,6 +132,29 @@ chrome.runtime.onMessage.addListener(
             }
 
             handleIndexStatus(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type === "feedback") {
+            const videoId = normalizeString(message.video_id);
+            const requestId = normalizeString(message.request_id);
+            const senderUrl = sender?.tab?.url || "";
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (
+                !isYouTubeUrl(senderUrl) ||
+                !videoId ||
+                pageVideoId !== videoId ||
+                !/^[a-f0-9]{32}$/.test(requestId)
+            ) {
+                sendResponse({
+                    success: false,
+                    error: "Feedback must reference an answer from the current YouTube video."
+                });
+                return;
+            }
+
+            handleFeedbackSubmission(message, sendResponse);
             return true;
         }
 
@@ -470,6 +496,9 @@ async function handleChatRequest(
             success:
                 true,
 
+            request_id:
+                response.headers.get("X-Request-ID") || "",
+
             answer:
                 answer,
 
@@ -779,3 +808,80 @@ function extractVideoIdFromUrl(
         return null;
     }
 }
+
+// ============================================================
+// 3A. SUBMIT ANSWER FEEDBACK
+// ============================================================
+
+async function handleFeedbackSubmission(message, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+        () => controller.abort(),
+        REQUEST_TIMEOUT_MS
+    );
+
+    const shareContext = message.share_context === true;
+    const payload = {
+        request_id: normalizeString(message.request_id),
+        video_id: normalizeString(message.video_id),
+        vote: message.vote === "helpful" ? "helpful" : "not_helpful",
+        reason: normalizeString(message.reason) || null,
+        comment: normalizeString(message.comment) || null,
+        share_context: shareContext
+    };
+
+    if (shareContext && message.context && typeof message.context === "object") {
+        payload.context = message.context;
+    }
+
+    try {
+        const response = await fetch(FEEDBACK_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+
+        const data = await parseResponse(response);
+        if (
+            response.status === 409 &&
+            data?.error === "feedback_already_submitted"
+        ) {
+            sendResponse({
+                success: true,
+                status: "already_received",
+                context_saved: false
+            });
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                "The feedback service could not save your report."
+            );
+        }
+
+        sendResponse({
+            success: true,
+            feedback_id: data?.feedback_id || null,
+            status: data?.status || "received",
+            context_saved: data?.context_saved === true
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Sending feedback timed out. Please try again."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to send feedback.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
