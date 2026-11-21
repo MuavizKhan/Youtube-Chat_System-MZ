@@ -261,11 +261,8 @@ def create_feedback_record(
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["context_shared"] = bool(item["context_shared"])
-    item["context"] = (
-        json.loads(item.pop("context_json"))
-        if item.get("context_json")
-        else None
-    )
+    context_json = item.pop("context_json", None)
+    item["context"] = json.loads(context_json) if context_json else None
     return item
 
 
