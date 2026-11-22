@@ -42,6 +42,97 @@ const REQUEST_TIMEOUT_MS =
 const CHAT_REQUEST_TIMEOUT_MS =
     90000;
 
+const CONTENT_SCRIPT_MARKER =
+    "data-youtube-ai-chat-content-version";
+
+async function injectFreshYouTubeContentScript(tabId) {
+    if (typeof tabId !== "number" || !chrome.scripting?.executeScript) {
+        return false;
+    }
+
+    try {
+        // Remove only this extension's old UI and marker. An orphaned content
+        // script cannot reconnect to a newly loaded extension runtime.
+        await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "ISOLATED",
+            func: (markerName) => {
+                document.documentElement?.removeAttribute(markerName);
+                document.getElementById("youtube-ai-chat-launcher")?.remove();
+                document.getElementById("youtube-ai-chat")?.remove();
+            },
+            args: [CONTENT_SCRIPT_MARKER]
+        });
+
+        await chrome.scripting.insertCSS({
+            target: { tabId },
+            files: ["style.css"]
+        });
+
+        await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "ISOLATED",
+            files: ["content.js"]
+        });
+
+        console.info(
+            "YouTube AI content script reattached after extension lifecycle change.",
+            { tabId }
+        );
+        return true;
+    } catch (error) {
+        console.warn(
+            "Could not reattach the YouTube AI content script.",
+            { tabId, error: String(error?.message || error) }
+        );
+        return false;
+    }
+}
+
+async function ensureYouTubeContentScript(tabId) {
+    try {
+        const response = await chrome.tabs.sendMessage(tabId, {
+            type: "extension_ping"
+        });
+        if (response?.success === true) {
+            return true;
+        }
+    } catch (_error) {
+        // No live content script is listening; inject a fresh isolated world.
+    }
+
+    return injectFreshYouTubeContentScript(tabId);
+}
+
+async function reconnectOpenYouTubeTabs() {
+    const tabs = await chrome.tabs.query({
+        url: ["https://www.youtube.com/*"]
+    });
+
+    await Promise.all(
+        tabs
+            .filter((tab) => typeof tab.id === "number")
+            .map((tab) => ensureYouTubeContentScript(tab.id))
+    );
+}
+
+// Chrome leaves an already-injected content script orphaned when an
+// extension is reloaded or updated. Reattach a current script to open
+// YouTube tabs so users do not have to guess which page needs refreshing.
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason !== "install" && details.reason !== "update") {
+        return;
+    }
+
+    void reconnectOpenYouTubeTabs().catch((error) => {
+        console.warn(
+            "Could not reconnect existing YouTube tabs after extension update.",
+            error
+        );
+    });
+});
+
+
 
 // ============================================================
 // 1. EXTENSION ACTION → TOGGLE CHAT
@@ -80,10 +171,24 @@ chrome.action.onClicked.addListener(
 
         } catch (error) {
 
-            console.error(
-                "Could not communicate with YouTube page:",
+            console.warn(
+                "Could not communicate with the existing YouTube content script; attempting recovery:",
                 error
             );
+
+            const recovered = await injectFreshYouTubeContentScript(tabId);
+            if (recovered) {
+                try {
+                    await chrome.tabs.sendMessage(tabId, {
+                        type: "toggle_chat"
+                    });
+                } catch (retryError) {
+                    console.warn(
+                        "YouTube AI content script was reattached but did not respond to the toolbar action.",
+                        retryError
+                    );
+                }
+            }
         }
     }
 );
