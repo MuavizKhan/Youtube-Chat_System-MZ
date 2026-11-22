@@ -877,7 +877,7 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
                 ? error.message
                 : "Unable to contact the index service.");
         const browserDiagnostic = browserFailure
-            ? "\\n\\nBrowser caption capture also failed (" +
+            ? "\n\nBrowser caption capture also failed (" +
                 browserFailure.code + "): " + browserFailure.message
             : "";
         sendResponse({
