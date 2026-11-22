@@ -13,6 +13,33 @@
  */
 
 
+// Keep the content script self-contained so Chrome can safely inject a
+// fresh instance into a tab whose previous extension context was invalidated.
+(() => {
+    const CONTENT_SCRIPT_VERSION = (() => {
+        try {
+            return chrome.runtime.getManifest().version;
+        } catch (_error) {
+            return "unknown";
+        }
+    })();
+    const CONTENT_SCRIPT_MARKER = "data-youtube-ai-chat-content-version";
+    const root = document.documentElement;
+    const existingVersion = root?.getAttribute(CONTENT_SCRIPT_MARKER);
+
+    // Manifest injection and lifecycle recovery can race. Do not create two
+    // launchers when the current version is already active in this document.
+    if (existingVersion === CONTENT_SCRIPT_VERSION) {
+        return;
+    }
+
+    root?.setAttribute(CONTENT_SCRIPT_MARKER, CONTENT_SCRIPT_VERSION);
+
+    // Replace visible DOM left behind by a content script from an older,
+    // invalidated extension context.
+    document.getElementById("youtube-ai-chat-launcher")?.remove();
+    document.getElementById("youtube-ai-chat")?.remove();
+
 // ============================================================
 // STATE
 // ============================================================
@@ -2315,16 +2342,22 @@ function handleVideoNavigation() {
 // ============================================================
 
 chrome.runtime.onMessage.addListener(
-    (message) => {
-
-        if (
-            !message ||
-            message.type !== "toggle_chat"
-        ) {
-
+    (message, _sender, sendResponse) => {
+        if (!message) {
             return;
         }
 
+        if (message.type === "extension_ping") {
+            sendResponse({
+                success: true,
+                version: CONTENT_SCRIPT_VERSION
+            });
+            return;
+        }
+
+        if (message.type !== "toggle_chat") {
+            return;
+        }
 
         toggleChat();
     }
@@ -2378,3 +2411,4 @@ window.addEventListener(
 // ============================================================
 
 initialize();
+})();
