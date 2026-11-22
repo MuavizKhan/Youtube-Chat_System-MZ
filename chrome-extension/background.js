@@ -679,12 +679,32 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
         }
     });
 
-    const capture = results?.[0]?.result;
+    const mainFrameResult = results?.find((entry) => entry.frameId === 0) || results?.[0];
+    if (!mainFrameResult) {
+        const error = new Error("Chrome did not return a result for the YouTube page caption-capture script.");
+        error.errorCode = "BROWSER_SCRIPT_NOT_EXECUTED";
+        throw error;
+    }
+    if (mainFrameResult.error) {
+        const error = new Error(
+            String(mainFrameResult.error?.message || mainFrameResult.error)
+        );
+        error.errorCode = "BROWSER_SCRIPT_EXECUTION_FAILED";
+        throw error;
+    }
+
+    const capture = mainFrameResult.result;
     if (!capture || capture.ok !== true) {
-        throw new Error(capture?.message || "The YouTube player did not provide captions.");
+        const error = new Error(
+            capture?.message || "The YouTube player did not provide captions."
+        );
+        error.errorCode = capture?.code || "BROWSER_CAPTURE_FAILED";
+        throw error;
     }
     if (capture.video_id !== videoId) {
-        throw new Error("The browser returned captions for a different YouTube video.");
+        const error = new Error("The browser returned captions for a different YouTube video.");
+        error.errorCode = "BROWSER_VIDEO_ID_MISMATCH";
+        throw error;
     }
 
     return {
@@ -778,6 +798,7 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
 
     // The browser tab uses the same YouTube session and network path that
     // loaded the video. This is the primary transcript source.
+    let browserFailure = null;
     try {
         const transcript = await fetchBrowserTranscriptFromTab(tabId, videoId);
         const data = await postBrowserTranscript(transcript);
@@ -792,9 +813,18 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
         });
         return;
     } catch (browserError) {
+        browserFailure = {
+            code: browserError?.errorCode || "BROWSER_CAPTURE_FAILED",
+            message: String(browserError?.message || browserError || "Unknown browser caption failure.")
+        };
         console.warn(
             "Browser caption capture was unavailable; falling back to server transcript acquisition:",
-            browserError
+            {
+                videoId,
+                tabId,
+                browserErrorCode: browserFailure.code,
+                browserErrorMessage: browserFailure.message
+            }
         );
     }
 
@@ -841,14 +871,19 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
             error_message: data.error_message || null
         });
     } catch (error) {
+        const serverErrorMessage = error?.name === "AbortError"
+            ? "The index service did not respond. Reopen the chat to retry."
+            : (error instanceof Error && error.message
+                ? error.message
+                : "Unable to contact the index service.");
+        const browserDiagnostic = browserFailure
+            ? "\\n\\nBrowser caption capture also failed (" +
+                browserFailure.code + "): " + browserFailure.message
+            : "";
         sendResponse({
             success: false,
             error_code: error?.errorCode || null,
-            error: error?.name === "AbortError"
-                ? "The index service did not respond. Reopen the chat to retry."
-                : (error instanceof Error && error.message
-                    ? error.message
-                    : "Unable to contact the index service.")
+            error: serverErrorMessage + browserDiagnostic
         });
     } finally {
         clearTimeout(timeoutId);
