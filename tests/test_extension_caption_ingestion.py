@@ -28,3 +28,28 @@ def test_backend_exposes_a_separate_browser_caption_ingestion_route():
     assert "def index_browser_transcript(" in app
     assert "submit_browser_transcript(submission)" in app
     assert "MAX_BROWSER_TRANSCRIPT_BODY_BYTES" in app
+
+
+
+def test_extension_reconnects_open_youtube_tabs_after_reload():
+    background = BACKGROUND.read_text(encoding="utf-8")
+    content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
+
+    assert "chrome.runtime.onInstalled.addListener" in background
+    assert "reconnectOpenYouTubeTabs" in background
+    assert 'type: "extension_ping"' in background
+    assert "chrome.scripting.executeScript" in background
+    assert 'files: ["content.js"]' in background
+    assert 'world: "ISOLATED"' in background
+    assert "data-youtube-ai-chat-content-version" in content
+    assert 'message.type === "extension_ping"' in content
+    assert 'version: CONTENT_SCRIPT_VERSION' in content
+
+
+def test_extension_content_script_is_safe_to_inject_more_than_once():
+    content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
+
+    assert content.lstrip().startswith("(() => {")
+    assert 'if (existingVersion === CONTENT_SCRIPT_VERSION)' in content
+    assert 'document.getElementById("youtube-ai-chat-launcher")?.remove()' in content
+    assert content.rstrip().endswith("})();")
