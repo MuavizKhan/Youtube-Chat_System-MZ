@@ -17,6 +17,7 @@ def test_extension_can_read_caption_tracks_in_the_youtube_page_world():
     assert "chrome.scripting.executeScript" in background
     assert 'world: "MAIN"' in background
     assert "playerCaptionsTracklistRenderer" in background
+    assert "orderedTracks.slice(0, 6)" in background
     assert 'INDEX_BROWSER_TRANSCRIPT_URL' in background
     assert '/index/browser-transcript' in background
 

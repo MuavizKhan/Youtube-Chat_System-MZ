@@ -466,7 +466,9 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                     );
             };
 
-            const attempts = orderedTracks.slice(0, 3);
+            // Try up to six highest-priority tracks so one unavailable track does not
+            // prevent the remaining preferred languages and fallbacks from being tried.
+            const attempts = orderedTracks.slice(0, 6);
             const failures = [];
             for (const track of attempts) {
                 if (!track.baseUrl) {

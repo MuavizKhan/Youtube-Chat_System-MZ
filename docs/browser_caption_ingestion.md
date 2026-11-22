@@ -4,7 +4,7 @@
 
 The backend's direct youtube-transcript-api requests can be blocked by YouTube at the backend's public IP. Retrying the same server request for every video does not fix an IP-level restriction.
 
-The extension now reads caption tracks exposed by the YouTube player in the active browser tab. The page-world script obtains the current player response, selects a caption track (preferring English, Hindi, Urdu, or Arabic and then another available language), fetches its timed-text payload with the user's browser session, and converts JSON3/XML captions to timestamped segments.
+The extension now reads caption tracks exposed by the YouTube player in the active browser tab. The page-world script obtains the current player response, orders caption tracks by English, Hindi, Urdu, and Arabic preference (then other available languages), tries up to six tracks, fetches their timed-text payload with the user's browser session, and converts JSON3/XML captions to timestamped segments.
 
 The extension submits those bounded segments to POST /index/browser-transcript. The backend validates and stages the transcript, then dispatches the existing durable index worker. The worker consumes the staged transcript through the same get_transcript -> documents -> timestamped chunks -> embeddings -> FAISS flow. Retrieval and answer generation are unchanged.
 
