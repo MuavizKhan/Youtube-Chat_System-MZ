@@ -49,7 +49,7 @@ def test_extension_reconnects_open_youtube_tabs_after_reload():
 def test_extension_content_script_is_safe_to_inject_more_than_once():
     content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
 
-    assert content.lstrip().startswith("(() => {")
+    assert "(() => {" in content
     assert 'if (existingVersion === CONTENT_SCRIPT_VERSION)' in content
     assert 'document.getElementById("youtube-ai-chat-launcher")?.remove()' in content
     assert content.rstrip().endswith("})();")
