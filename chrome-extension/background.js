@@ -28,6 +28,9 @@ const INDEX_URL =
 const INDEX_STATUS_URL =
     `${BACKEND_BASE_URL}/index`;
 
+const INDEX_BROWSER_TRANSCRIPT_URL =
+    `${BACKEND_BASE_URL}/index/browser-transcript`;
+
 const FEEDBACK_URL =
     `${BACKEND_BASE_URL}/feedback`;
 
@@ -114,7 +117,7 @@ chrome.runtime.onMessage.addListener(
                 return;
             }
 
-            handleIndexPreparation(videoId, sendResponse);
+            handleIndexPreparation(videoId, sender?.tab?.id, sendResponse);
             return true;
         }
 
@@ -272,7 +275,413 @@ chrome.runtime.onMessage.addListener(
  // 3. PREPARE VIDEO INDEX
  // ============================================================
 
-async function handleIndexPreparation(videoId, sendResponse) {
+async function fetchBrowserTranscriptFromTab(tabId, videoId) {
+    if (typeof tabId !== "number" || !chrome.scripting?.executeScript) {
+        throw new Error("Browser caption capture is unavailable in this extension context.");
+    }
+
+    const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        args: [videoId],
+        func: async (expectedVideoId) => {
+            const currentVideoId = () => {
+                try {
+                    const pageUrl = new URL(window.location.href);
+                    const queryId = pageUrl.searchParams.get("v");
+                    if (queryId) {
+                        return queryId;
+                    }
+                    const pathMatch = pageUrl.pathname.match(/\/(?:shorts|embed)\/([A-Za-z0-9_-]{11})/);
+                    return pathMatch ? pathMatch[1] : null;
+                } catch (_error) {
+                    return null;
+                }
+            };
+
+            if (currentVideoId() !== expectedVideoId) {
+                return {
+                    ok: false,
+                    code: "VIDEO_CHANGED",
+                    message: "The YouTube video changed before captions could be read."
+                };
+            }
+
+            const parsePlayerResponse = (candidate) => {
+                if (!candidate) {
+                    return null;
+                }
+                if (typeof candidate === "string") {
+                    try {
+                        candidate = JSON.parse(candidate);
+                    } catch (_error) {
+                        return null;
+                    }
+                }
+                if (typeof candidate !== "object") {
+                    return null;
+                }
+                const playerVideoId = candidate.videoDetails?.videoId;
+                if (playerVideoId && playerVideoId !== expectedVideoId) {
+                    return null;
+                }
+                return candidate;
+            };
+
+            const readPlayerResponse = () => {
+                const candidates = [];
+                try {
+                    const player = document.getElementById("movie_player");
+                    if (player && typeof player.getPlayerResponse === "function") {
+                        candidates.push(player.getPlayerResponse());
+                    }
+                } catch (_error) {
+                    // Use the global player response fallback.
+                }
+                candidates.push(window.ytInitialPlayerResponse);
+                try {
+                    if (window.ytcfg && typeof window.ytcfg.get === "function") {
+                        candidates.push(window.ytcfg.get("PLAYER_RESPONSE"));
+                    }
+                } catch (_error) {
+                    // Some YouTube builds do not expose PLAYER_RESPONSE through ytcfg.
+                }
+                candidates.push(window.ytcfg?.data_?.PLAYER_RESPONSE);
+                candidates.push(window.ytplayer?.config?.args?.player_response);
+
+                for (const candidate of candidates) {
+                    const parsed = parsePlayerResponse(candidate);
+                    if (parsed) {
+                        return parsed;
+                    }
+                }
+                return null;
+            };
+
+            let playerResponse = null;
+            let captionTracks = [];
+            for (let attempt = 0; attempt < 12; attempt += 1) {
+                playerResponse = readPlayerResponse();
+                captionTracks = playerResponse?.captions
+                    ?.playerCaptionsTracklistRenderer?.captionTracks || [];
+                if (captionTracks.length > 0) {
+                    break;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 400));
+            }
+
+            if (currentVideoId() !== expectedVideoId) {
+                return {
+                    ok: false,
+                    code: "VIDEO_CHANGED",
+                    message: "The YouTube video changed while captions were loading."
+                };
+            }
+
+            if (!captionTracks.length) {
+                return {
+                    ok: false,
+                    code: "NO_CAPTION_TRACKS",
+                    message: "The YouTube player did not expose a caption track for this video."
+                };
+            }
+
+            const languagePriority = ["en", "hi", "ur", "ar"];
+            const languageBase = (track) =>
+                String(track.languageCode || "").toLowerCase().split("-")[0];
+            const orderedTracks = [...captionTracks].sort((first, second) => {
+                const firstLanguage = languagePriority.indexOf(languageBase(first));
+                const secondLanguage = languagePriority.indexOf(languageBase(second));
+                const firstRank = firstLanguage < 0 ? languagePriority.length : firstLanguage;
+                const secondRank = secondLanguage < 0 ? languagePriority.length : secondLanguage;
+                if (firstRank !== secondRank) {
+                    return firstRank - secondRank;
+                }
+                const firstGenerated = first.kind === "asr" ? 1 : 0;
+                const secondGenerated = second.kind === "asr" ? 1 : 0;
+                return firstGenerated - secondGenerated;
+            });
+
+            const captionText = (track) => {
+                const name = track.name;
+                if (typeof name === "string") {
+                    return name;
+                }
+                if (name?.simpleText) {
+                    return name.simpleText;
+                }
+                if (Array.isArray(name?.runs)) {
+                    return name.runs.map((run) => run.text || "").join("");
+                }
+                return track.languageCode || "Unknown";
+            };
+
+            const parseJson3 = (payload) => {
+                if (!Array.isArray(payload?.events)) {
+                    return [];
+                }
+                const snippets = [];
+                for (const event of payload.events) {
+                    if (!Array.isArray(event.segs)) {
+                        continue;
+                    }
+                    const text = event.segs
+                        .map((segment) => segment?.utf8 || "")
+                        .join("")
+                        .replace(/\s+/g, " ")
+                        .trim();
+                    const startMs = Number(event.tStartMs);
+                    const durationMs = Number(event.dDurationMs || 0);
+                    if (!text || !Number.isFinite(startMs) || startMs < 0) {
+                        continue;
+                    }
+                    snippets.push({
+                        text,
+                        start: startMs / 1000,
+                        duration: Number.isFinite(durationMs) && durationMs > 0
+                            ? durationMs / 1000
+                            : 0
+                    });
+                }
+                return snippets;
+            };
+
+            const parseXml = (raw) => {
+                const documentNode = new DOMParser().parseFromString(raw, "application/xml");
+                if (documentNode.querySelector("parsererror")) {
+                    return [];
+                }
+                return Array.from(documentNode.getElementsByTagName("text"))
+                    .map((node) => ({
+                        text: (node.textContent || "").replace(/\s+/g, " ").trim(),
+                        start: Number(node.getAttribute("start")),
+                        duration: Number(node.getAttribute("dur") || 0)
+                    }))
+                    .filter((item) =>
+                        item.text &&
+                        Number.isFinite(item.start) &&
+                        item.start >= 0 &&
+                        Number.isFinite(item.duration) &&
+                        item.duration >= 0
+                    );
+            };
+
+            const attempts = orderedTracks.slice(0, 3);
+            const failures = [];
+            for (const track of attempts) {
+                if (!track.baseUrl) {
+                    continue;
+                }
+                try {
+                    const captionUrl = new URL(track.baseUrl, window.location.origin);
+                    captionUrl.searchParams.set("fmt", "json3");
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 8000);
+                    let response;
+                    try {
+                        response = await fetch(captionUrl.toString(), {
+                            method: "GET",
+                            credentials: "include",
+                            cache: "no-store",
+                            signal: controller.signal
+                        });
+                    } finally {
+                        clearTimeout(timeoutId);
+                    }
+
+                    if (!response.ok) {
+                        failures.push("HTTP " + response.status);
+                        continue;
+                    }
+
+                    const raw = await response.text();
+                    let snippets = [];
+                    try {
+                        snippets = parseJson3(JSON.parse(raw));
+                    } catch (_error) {
+                        snippets = parseXml(raw);
+                    }
+
+                    if (!snippets.length) {
+                        failures.push("The caption track returned no timed segments.");
+                        continue;
+                    }
+
+                    const totalCharacters = snippets.reduce(
+                        (total, item) => total + item.text.length,
+                        0
+                    );
+                    if (snippets.length > 100000 || totalCharacters > 1500000) {
+                        return {
+                            ok: false,
+                            code: "CAPTION_LIMIT_EXCEEDED",
+                            message: "This video's caption track is larger than the current indexing limit."
+                        };
+                    }
+
+                    if (currentVideoId() !== expectedVideoId) {
+                        return {
+                            ok: false,
+                            code: "VIDEO_CHANGED",
+                            message: "The YouTube video changed while captions were being retrieved."
+                        };
+                    }
+
+                    const videoIdFromPlayer = playerResponse?.videoDetails?.videoId;
+                    if (videoIdFromPlayer && videoIdFromPlayer !== expectedVideoId) {
+                        return {
+                            ok: false,
+                            code: "VIDEO_CHANGED",
+                            message: "The YouTube player changed videos while captions were being retrieved."
+                        };
+                    }
+
+                    return {
+                        ok: true,
+                        video_id: expectedVideoId,
+                        language: captionText(track),
+                        language_code: track.languageCode || "und",
+                        is_generated: track.kind === "asr",
+                        snippets
+                    };
+                } catch (error) {
+                    failures.push(error?.name === "AbortError"
+                        ? "caption request timed out"
+                        : String(error?.message || error));
+                }
+            }
+
+            return {
+                ok: false,
+                code: "CAPTION_FETCH_FAILED",
+                message: failures.length
+                    ? "The YouTube player exposed captions but they could not be fetched: " + failures.join("; ")
+                    : "The YouTube player did not expose a usable caption URL."
+            };
+        }
+    });
+
+    const capture = results?.[0]?.result;
+    if (!capture || capture.ok !== true) {
+        throw new Error(capture?.message || "The YouTube player did not provide captions.");
+    }
+    if (capture.video_id !== videoId) {
+        throw new Error("The browser returned captions for a different YouTube video.");
+    }
+
+    return {
+        video_id: capture.video_id,
+        language: capture.language,
+        language_code: capture.language_code,
+        is_generated: capture.is_generated,
+        snippets: capture.snippets
+    };
+}
+
+
+async function fetchIndexStatusForPreparation(videoId) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    try {
+        const response = await fetch(
+            INDEX_STATUS_URL + "/" + encodeURIComponent(videoId),
+            {
+                method: "GET",
+                headers: { "Accept": "application/json" },
+                signal: controller.signal
+            }
+        );
+        const data = await parseResponse(response);
+        if (!response.ok) {
+            return null;
+        }
+        return data;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+
+async function postBrowserTranscript(transcript) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+        const response = await fetch(INDEX_BROWSER_TRANSCRIPT_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(transcript),
+            signal: controller.signal
+        });
+        const data = await parseResponse(response);
+        if (!response.ok) {
+            throw new Error(
+                data?.error_message ||
+                extractBackendError(data) ||
+                ("Browser transcript upload failed (HTTP " + response.status + ").")
+            );
+        }
+        return data;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+
+async function handleIndexPreparation(videoId, tabId, sendResponse) {
+    // Avoid fetching the same captions again when an index is already ready
+    // or a durable worker is already preparing this video.
+    try {
+        const current = await fetchIndexStatusForPreparation(videoId);
+        if (
+            current &&
+            (
+                current.ready === true ||
+                current.state === "ready"
+            )
+        ) {
+            sendResponse({
+                success: true,
+                video_id: current.video_id || videoId,
+                state: current.state,
+                action: current.action,
+                ready: current.ready === true,
+                error_code: current.error_code || null,
+                error_message: current.error_message || null
+            });
+            return;
+        }
+    } catch (_error) {
+        // Continue to browser capture; a later upload or fallback will report
+        // a backend connectivity error if the local service is unavailable.
+    }
+
+    // The browser tab uses the same YouTube session and network path that
+    // loaded the video. This is the primary transcript source.
+    try {
+        const transcript = await fetchBrowserTranscriptFromTab(tabId, videoId);
+        const data = await postBrowserTranscript(transcript);
+        sendResponse({
+            success: true,
+            video_id: data.video_id || videoId,
+            state: data.state || "queued",
+            action: data.action || "create",
+            ready: data.ready === true,
+            error_code: data.error_code || null,
+            error_message: data.error_message || null
+        });
+        return;
+    } catch (browserError) {
+        console.warn(
+            "Browser caption capture was unavailable; falling back to server transcript acquisition:",
+            browserError
+        );
+    }
+
+    // Keep the existing transcript API as a fallback when the active player
+    // does not expose a usable caption track.
     const controller = new AbortController();
     const timeoutId = setTimeout(
         () => controller.abort(),
@@ -291,11 +700,10 @@ async function handleIndexPreparation(videoId, sendResponse) {
         });
 
         const data = await parseResponse(response);
-
         if (!response.ok) {
             const backendMessage = data?.error_message ||
                 extractBackendError(data) ||
-                `Index request failed (HTTP ${response.status}).`;
+                ("Index request failed (HTTP " + response.status + ").");
             const error = new Error(backendMessage);
             error.errorCode = data?.error_code || null;
             throw error;
@@ -328,7 +736,6 @@ async function handleIndexPreparation(videoId, sendResponse) {
         clearTimeout(timeoutId);
     }
 }
-
 
 async function handleIndexStatus(videoId, sendResponse) {
     const controller = new AbortController();

@@ -29,6 +29,7 @@ import json
 import math
 from typing import Optional
 
+from youtube_transcript_api._errors import IpBlocked, RequestBlocked
 from youtube_transcript_api import (
     InvalidVideoId,
     NoTranscriptFound,
@@ -42,6 +43,8 @@ from enum import Enum
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from .browser_transcripts import discard_browser_transcript, load_browser_transcript
 
 from .config import (
     CHUNK_OVERLAP,
@@ -141,6 +144,12 @@ def get_transcript(
 
     languages = normalize_transcript_languages(languages)
 
+    # Prefer the caption track captured by the active YouTube browser tab.
+    # This avoids depending on the backend's public IP for YouTube timed-text.
+    browser_transcript = load_browser_transcript(video_id)
+    if browser_transcript is not None:
+        return browser_transcript
+
     api = YouTubeTranscriptApi()
 
 
@@ -151,6 +160,12 @@ def get_transcript(
             languages=languages,
         )
 
+
+    except (IpBlocked, RequestBlocked) as error:
+        raise TranscriptAcquisitionError(
+            "YOUTUBE_IP_BLOCKED",
+            "YouTube blocked transcript requests from the backend IP. Keep the video open in YouTube and reload the extension so it can capture the player caption track in your browser.",
+        ) from error
 
     except TranscriptsDisabled as error:
         raise TranscriptAcquisitionError(
@@ -230,6 +245,9 @@ def transcript_to_documents(
 
                 "is_generated":
                     transcript.is_generated,
+
+                "source":
+                    getattr(transcript, "source", "youtube_transcript"),
 
                 "segment_id":
                     segment_id,
@@ -696,7 +714,7 @@ def split_into_timestamped_chunks(
                 transcript_segments,
 
             "source":
-                "youtube_transcript",
+                first_document.metadata.get("source", "youtube_transcript"),
         }
 
 
@@ -1697,6 +1715,10 @@ def ensure_index_with_action(
                     f"index is not valid. "
                     f"Final state: {final_state.value}"
                 )
+
+            # Keep a browser-acquired transcript across failed builds; remove it
+            # only after the new FAISS index has passed persisted-state checks.
+            discard_browser_transcript(video_id)
 
             return (
                 load_vector_store(video_id),

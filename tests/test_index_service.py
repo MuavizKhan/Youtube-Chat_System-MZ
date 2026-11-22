@@ -565,6 +565,7 @@ def test_not_ready_error_carries_durable_job_id():
         ("NO_SUPPORTED_TRANSCRIPT", "No transcript was found in the requested languages."),
         ("VIDEO_UNAVAILABLE", "This YouTube video is unavailable."),
         ("INVALID_VIDEO_ID", "The supplied YouTube video reference is invalid."),
+        ("YOUTUBE_IP_BLOCKED", "YouTube blocked transcript requests from the backend IP."),
     ],
 )
 def test_worker_persists_and_status_exposes_every_known_transcript_failure(

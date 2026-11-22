@@ -100,6 +100,12 @@ Request:
 
 Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation has failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes return `404 video_not_indexed` until `POST /index` is requested.
 
+## Browser-assisted caption ingestion
+
+The extension first reads caption tracks exposed by the active YouTube player in the user's browser. It sends timestamped caption segments to the local backend, where the existing indexing pipeline creates the same FAISS index used by chat. This avoids relying exclusively on the backend machine's IP for YouTube transcript requests. If browser caption extraction is unavailable, the backend transcript library remains a fallback. A backend IP block is reported distinctly rather than being mislabeled as a video with no captions. The official YouTube Data API caption download methods require OAuth authorization with permission to edit the video, so they are not a general transcript API for arbitrary public videos.
+
+Browser-staged caption files are temporary local inputs under the data/browser_transcripts directory and are ignored by Git. Browser uploads are bounded separately from normal chat/feedback request bodies (16 MiB, 100,000 segments, and 1.5 million caption characters). Videos that are private, unavailable, blocked in the user's browser, or have no usable caption track still need an audio-transcription fallback; this caption-ingestion path does not claim to solve those cases automatically.
+
 ## Supported transcript languages
 
 Indexing prefers English captions, then falls back to Hindi, Urdu, and Arabic (in that order) when English is unavailable. The default embedding model is multilingual so English questions can search transcripts in these languages. This uses available YouTube captions; videos without captions in a supported language may still fail to index.

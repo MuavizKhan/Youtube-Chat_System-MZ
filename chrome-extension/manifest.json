@@ -6,8 +6,12 @@
   "action": {
     "default_title": "Toggle YouTube AI Chat"
   },
+  "permissions": [
+    "scripting"
+  ],
   "host_permissions": [
-    "http://127.0.0.1:8000/*"
+    "http://127.0.0.1:8000/*",
+    "https://www.youtube.com/*"
   ],
   "background": {
     "service_worker": "background.js"

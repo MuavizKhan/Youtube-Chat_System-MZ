@@ -22,6 +22,11 @@ import socket
 import threading
 import uuid
 
+from .browser_transcripts import (
+    BrowserTranscriptSubmission,
+    discard_browser_transcript,
+    stage_browser_transcript,
+)
 from .config import (
     INDEX_JOB_DB_PATH,
     INDEX_JOB_LEASE_SECONDS,
@@ -80,6 +85,7 @@ _INDEX_FAILURE_CODES = {
     "NO_SUPPORTED_TRANSCRIPT",
     "VIDEO_UNAVAILABLE",
     "INVALID_VIDEO_ID",
+    "YOUTUBE_IP_BLOCKED",
     "INDEX_PREPARATION_FAILED",
 }
 
@@ -578,6 +584,33 @@ def submit_index(
         status.state,
         status.action,
     )
+
+    return status
+
+
+def submit_browser_transcript(
+    submission: BrowserTranscriptSubmission,
+) -> IndexStatus:
+    """Queue an index using caption segments captured by the active YouTube tab."""
+    canonical_video_id = validate_video_id(submission.video_id)
+    if canonical_video_id != submission.video_id:
+        raise ValueError("browser transcript video ID is not canonical.")
+
+    current = get_index_status(canonical_video_id)
+    if current.ready:
+        return current
+
+    stage_browser_transcript(submission)
+    if current.state in {JOB_QUEUED, JOB_BUILDING}:
+        return current
+    try:
+        status = submit_index(canonical_video_id)
+    except Exception:
+        discard_browser_transcript(canonical_video_id)
+        raise
+
+    if status.ready:
+        discard_browser_transcript(canonical_video_id)
 
     return status
 
