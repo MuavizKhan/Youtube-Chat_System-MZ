@@ -132,6 +132,20 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
 });
 
+// Chrome 157+ also reports manual reloads and re-enables through this event.
+// Keep it optional so older supported Chrome versions retain onInstalled
+// recovery without referencing an unavailable API.
+if (chrome.runtime.onExtensionLoaded?.addListener) {
+    chrome.runtime.onExtensionLoaded.addListener(() => {
+        void reconnectOpenYouTubeTabs().catch((error) => {
+            console.warn(
+                "Could not reconnect YouTube tabs after the extension was loaded.",
+                error
+            );
+        });
+    });
+}
+
 
 
 // ============================================================
