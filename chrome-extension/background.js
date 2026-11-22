@@ -160,35 +160,32 @@ chrome.action.onClicked.addListener(
             return;
         }
 
+        let ping = null;
         try {
+            ping = await chrome.tabs.sendMessage(tabId, {
+                type: "extension_ping"
+            });
+        } catch (_error) {
+            // The tab may still have a content script from an invalidated
+            // extension context.
+        }
 
-            await chrome.tabs.sendMessage(
-                tabId,
-                {
-                    type: "toggle_chat"
-                }
-            );
+        if (ping?.success !== true) {
+            const recovered = await injectFreshYouTubeContentScript(tabId);
+            if (!recovered) {
+                return;
+            }
+        }
 
+        try {
+            await chrome.tabs.sendMessage(tabId, {
+                type: "toggle_chat"
+            });
         } catch (error) {
-
             console.warn(
-                "Could not communicate with the existing YouTube content script; attempting recovery:",
+                "YouTube AI content script did not respond after recovery.",
                 error
             );
-
-            const recovered = await injectFreshYouTubeContentScript(tabId);
-            if (recovered) {
-                try {
-                    await chrome.tabs.sendMessage(tabId, {
-                        type: "toggle_chat"
-                    });
-                } catch (retryError) {
-                    console.warn(
-                        "YouTube AI content script was reattached but did not respond to the toolbar action.",
-                        retryError
-                    );
-                }
-            }
         }
     }
 );
