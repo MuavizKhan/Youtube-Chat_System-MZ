@@ -1649,6 +1649,318 @@ function renderMarkdown(text) {
 }
 
 // ============================================================
+// ============================================================
+// ANSWER FEEDBACK
+// ============================================================
+
+function createFeedbackAnswerId() {
+    try {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+            return window.crypto.randomUUID();
+        }
+    } catch (_error) {
+        // Use the bounded local fallback below when randomUUID is unavailable.
+    }
+    return "answer-" + Date.now().toString(36) + "-" +
+        Math.random().toString(36).slice(2, 14);
+}
+
+
+function buildFeedbackConversationHistory(messages) {
+    const recentMessages = Array.isArray(messages) ? messages.slice(-6) : [];
+    let remainingCharacters = 4000;
+    const boundedMessages = [];
+
+    for (let index = recentMessages.length - 1; index >= 0; index -= 1) {
+        if (remainingCharacters <= 0) {
+            break;
+        }
+        const message = recentMessages[index] || {};
+        const rawContent = typeof message.content === "string"
+            ? message.content.trim()
+            : "";
+        const content = rawContent.slice(-Math.min(1000, remainingCharacters));
+        if (!content) {
+            continue;
+        }
+        boundedMessages.unshift({
+            role: message.role === "assistant" ? "assistant" : "user",
+            content
+        });
+        remainingCharacters -= content.length;
+    }
+
+    return boundedMessages;
+}
+
+
+function renderAnswerFeedback(aiMessage, context) {
+    const card = document.createElement("section");
+    card.className = "answer-feedback";
+    card.setAttribute("aria-label", "Answer feedback");
+
+    const prompt = document.createElement("div");
+    prompt.className = "answer-feedback-prompt";
+    prompt.textContent = "Was this answer helpful?";
+
+    const disclosure = document.createElement("div");
+    disclosure.className = "answer-feedback-disclosure";
+    disclosure.textContent =
+        "Your rating, video ID and technical details are recorded. Sharing the question, answer, recent chat context and source times is optional.";
+
+    const actions = document.createElement("div");
+    actions.className = "answer-feedback-actions";
+
+    const yesButton = document.createElement("button");
+    yesButton.type = "button";
+    yesButton.className = "answer-feedback-button";
+    yesButton.textContent = "Yes";
+    yesButton.setAttribute("aria-label", "This answer was helpful");
+
+    const noButton = document.createElement("button");
+    noButton.type = "button";
+    noButton.className = "answer-feedback-button";
+    noButton.textContent = "No";
+    noButton.setAttribute("aria-label", "This answer was not helpful");
+
+    const status = document.createElement("div");
+    status.className = "answer-feedback-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+
+    actions.appendChild(yesButton);
+    actions.appendChild(noButton);
+    card.appendChild(prompt);
+    card.appendChild(disclosure);
+    card.appendChild(actions);
+    card.appendChild(status);
+
+    let submitted = false;
+    let detailsForm = null;
+    let contextConsentInput = null;
+    let aiConsentInput = null;
+
+    function setBusy(busy) {
+        yesButton.disabled = busy || Boolean(detailsForm);
+        noButton.disabled = busy || Boolean(detailsForm);
+        if (detailsForm) {
+            detailsForm.querySelectorAll("button, select, textarea, input").forEach((element) => {
+                element.disabled = busy;
+            });
+        }
+        if (aiConsentInput && contextConsentInput) {
+            aiConsentInput.disabled = busy || !contextConsentInput.checked;
+        }
+    }
+
+    function submitFeedback(helpful, reason, comment, shareContext, allowAiAssessment, submitButton) {
+        if (submitted) {
+            return;
+        }
+
+        setBusy(true);
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.textContent = "Sending...";
+        }
+        status.textContent = "Sending feedback...";
+        status.dataset.state = "pending";
+
+        const payload = {
+            answer_id: context.answerId,
+            video_id: context.videoId,
+            helpful,
+            reason,
+            comment: comment || null,
+            share_context: shareContext,
+            allow_ai_assessment: Boolean(shareContext && allowAiAssessment),
+            request_id: context.requestId || null,
+            model: context.model || null,
+            retrieval_method: context.retrievalMethod || null,
+            retrieval_config: context.retrievalConfig || {}
+        };
+
+        if (shareContext) {
+            payload.question = context.question;
+            payload.answer = context.answer;
+            payload.conversation_history = context.conversationHistory || [];
+            payload.sources = context.sources;
+        }
+
+        const payloadBytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+        if (payloadBytes > 14000) {
+            setBusy(false);
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = "Submit feedback";
+            }
+            status.textContent =
+                "The shared context is too large to send. Uncheck the sharing option and submit the report without the question and answer.";
+            status.dataset.state = "error";
+            return;
+        }
+
+        sendExtensionMessage(
+            { type: "feedback", feedback: payload },
+            (response, runtimeError) => {
+                if (runtimeError || !response || response.success !== true) {
+                    setBusy(false);
+                    if (submitButton) {
+                        submitButton.textContent = "Submit feedback";
+                    }
+                    status.textContent = response?.error ||
+                        "We could not send your feedback. Please try again.";
+                    status.dataset.state = "error";
+                    return;
+                }
+
+                submitted = true;
+                card.classList.add("answer-feedback-submitted");
+                actions.hidden = true;
+                if (detailsForm) {
+                    detailsForm.hidden = true;
+                }
+                status.textContent = "Thank you. Your feedback was received.";
+                status.dataset.state = "success";
+            },
+            (notice) => {
+                setBusy(false);
+                if (submitButton) {
+                    submitButton.textContent = "Submit feedback";
+                }
+                status.textContent = notice ||
+                    "We could not send your feedback. Please try again.";
+                status.dataset.state = "error";
+            }
+        );
+    }
+
+    yesButton.addEventListener("click", () => {
+        submitFeedback(true, null, null, false, false, yesButton);
+    });
+
+    noButton.addEventListener("click", () => {
+        if (detailsForm || submitted) {
+            return;
+        }
+
+        detailsForm = document.createElement("form");
+        detailsForm.className = "answer-feedback-details";
+
+        const reasonLabel = document.createElement("label");
+        reasonLabel.className = "answer-feedback-label";
+        reasonLabel.textContent = "What went wrong?";
+
+        const reasonSelect = document.createElement("select");
+        reasonSelect.className = "answer-feedback-select";
+        reasonSelect.required = true;
+        reasonSelect.required = true;
+
+        const placeholderOption = document.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = "Select a reason";
+        placeholderOption.disabled = true;
+        placeholderOption.selected = true;
+        reasonSelect.appendChild(placeholderOption);
+
+        const reasons = [
+            ["answer_incorrect_or_incomplete", "The answer was incorrect or incomplete"],
+            ["question_or_context_misunderstood", "The question or context was misunderstood"],
+            ["transcript_missing_or_inaccurate", "The transcript may be missing or inaccurate"],
+            ["source_or_timestamp_issue", "A source or timestamp was wrong"],
+            ["language_or_translation_issue", "There was a language or translation issue"],
+            ["other", "Something else"]
+        ];
+        reasons.forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            reasonSelect.appendChild(option);
+        });
+        reasonLabel.appendChild(reasonSelect);
+
+        const commentLabel = document.createElement("label");
+        commentLabel.className = "answer-feedback-label";
+        commentLabel.textContent = "Anything else? (optional)";
+
+        const commentPrivacy = document.createElement("span");
+        commentPrivacy.className = "answer-feedback-comment-note";
+        commentPrivacy.textContent =
+            "Your comment is submitted with this report. Please do not include sensitive personal information.";
+        commentLabel.appendChild(commentPrivacy);
+
+        const commentInput = document.createElement("textarea");
+        commentInput.className = "answer-feedback-comment";
+        commentInput.rows = 2;
+        commentInput.maxLength = 1000;
+        commentInput.placeholder = "Tell us what seemed wrong...";
+        commentLabel.appendChild(commentInput);
+
+        const consentLabel = document.createElement("label");
+        consentLabel.className = "answer-feedback-consent";
+        const consent = document.createElement("input");
+        consent.type = "checkbox";
+        contextConsentInput = consent;
+        consent.checked = false;
+        const consentText = document.createElement("span");
+        consentText.textContent =
+            "Share this question, answer, recent chat context and source timestamps so we can review the report.";
+        consentLabel.appendChild(consent);
+        consentLabel.appendChild(consentText);
+
+        const aiConsentLabel = document.createElement("label");
+        aiConsentLabel.className = "answer-feedback-consent";
+        const aiConsent = document.createElement("input");
+        aiConsent.type = "checkbox";
+        aiConsentInput = aiConsent;
+        aiConsent.checked = false;
+        aiConsent.disabled = true;
+        const aiConsentText = document.createElement("span");
+        aiConsentText.textContent =
+            "Allow the configured AI provider to check answer-claim support using the shared question, recent chat context and cited transcript passages.";
+        aiConsentLabel.appendChild(aiConsent);
+        aiConsentLabel.appendChild(aiConsentText);
+
+        consent.addEventListener("change", () => {
+            aiConsent.disabled = !consent.checked;
+            if (!consent.checked) {
+                aiConsent.checked = false;
+            }
+        });
+
+        const submitButton = document.createElement("button");
+        submitButton.type = "submit";
+        submitButton.className = "answer-feedback-submit";
+        submitButton.textContent = "Submit feedback";
+
+        detailsForm.appendChild(reasonLabel);
+        detailsForm.appendChild(commentLabel);
+        detailsForm.appendChild(consentLabel);
+        detailsForm.appendChild(aiConsentLabel);
+        detailsForm.appendChild(submitButton);
+        detailsForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            submitFeedback(
+                false,
+                reasonSelect.value,
+                commentInput.value.trim(),
+                consent.checked,
+                aiConsent.checked,
+                submitButton
+            );
+        });
+
+        card.appendChild(detailsForm);
+        noButton.disabled = true;
+        status.textContent = "Choose a reason. Sharing the question and answer is optional.";
+        status.dataset.state = "idle";
+    });
+
+    aiMessage.insertAdjacentElement("afterend", card);
+    return card;
+}
+
+
 // REQUEST STATE RESET
 // ============================================================
 
@@ -1809,6 +2121,8 @@ function sendMessage() {
                     typeof response.answer === "string"
                         ? response.answer.trim()
                         : "";
+                const previousConversationHistory =
+                    conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
 
                 aiMessage.innerHTML = renderMarkdown(
                     answer || "No answer was returned."
@@ -1837,6 +2151,48 @@ function sendMessage() {
                 );
 
                 renderSources();
+
+                if (answer) {
+                    const feedbackSources = (Array.isArray(response.sources) ? response.sources : [])
+                        .slice(0, 16)
+                        .map((source) => ({
+                            source_id: Number(source?.source_id),
+                            chunk_ids: Array.isArray(source?.chunk_ids)
+                                ? source.chunk_ids
+                                    .filter((chunkId) => Number.isInteger(chunkId) && chunkId >= 0)
+                                    .slice(0, 16)
+                                : [],
+                            video_id: typeof source?.video_id === "string"
+                                ? source.video_id
+                                : requestedVideoId,
+                            start: Number(source?.start),
+                            end: Number(source?.end)
+                        }))
+                        .filter((source) =>
+                            Number.isInteger(source.source_id) &&
+                            source.source_id >= 0 &&
+                            source.video_id === requestedVideoId &&
+                            Number.isFinite(source.start) &&
+                            source.start >= 0 &&
+                            Number.isFinite(source.end) &&
+                            source.end >= source.start
+                        );
+
+                    renderAnswerFeedback(aiMessage, {
+                        answerId: createFeedbackAnswerId(),
+                        videoId: requestedVideoId,
+                        question,
+                        answer,
+                        conversationHistory: buildFeedbackConversationHistory(
+                            previousConversationHistory
+                        ),
+                        sources: feedbackSources,
+                        requestId: response.request_id || null,
+                        model: response.model || null,
+                        retrievalMethod: response.retrieval_method || null,
+                        retrievalConfig: response.retrieval_config || {}
+                    });
+                }
 
                 if (chatBody) {
                     chatBody.scrollTop =

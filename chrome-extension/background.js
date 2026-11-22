@@ -28,6 +28,9 @@ const INDEX_URL =
 const INDEX_STATUS_URL =
     `${BACKEND_BASE_URL}/index`;
 
+const FEEDBACK_URL =
+    `${BACKEND_BASE_URL}/feedback`;
+
 const REQUEST_TIMEOUT_MS =
     15000;
 
@@ -129,6 +132,26 @@ chrome.runtime.onMessage.addListener(
             }
 
             handleIndexStatus(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type === "feedback") {
+            const senderUrl = sender?.tab?.url || "";
+            const feedback = message.feedback && typeof message.feedback === "object"
+                ? message.feedback
+                : null;
+            const videoId = normalizeString(feedback?.video_id);
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (!isYouTubeUrl(senderUrl) || !feedback || !videoId || pageVideoId !== videoId) {
+                sendResponse({
+                    success: false,
+                    error: "Feedback must originate from the YouTube video being rated."
+                });
+                return;
+            }
+
+            handleFeedbackSubmission(feedback, sendResponse);
             return true;
         }
 
@@ -359,8 +382,56 @@ async function handleIndexStatus(videoId, sendResponse) {
 }
 
 // ============================================================
-// 3. HANDLE CHAT REQUEST
+// 3. HANDLE ANSWER FEEDBACK
 // ============================================================
+
+async function handleFeedbackSubmission(feedback, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(FEEDBACK_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(feedback),
+            signal: controller.signal
+        });
+        const data = await parseResponse(response);
+
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                `Feedback submission failed (HTTP ${response.status}).`
+            );
+        }
+
+        sendResponse({
+            success: true,
+            feedback_id: typeof data?.feedback_id === "string" ? data.feedback_id : null,
+            status: typeof data?.status === "string" ? data.status : "received"
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Feedback submission timed out. Please retry."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to submit feedback.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+
+// ============================================================
+// 4. HANDLE CHAT REQUEST
+// ============================================================
+
 
 async function handleChatRequest(
     {
@@ -469,6 +540,9 @@ async function handleChatRequest(
 
             success:
                 true,
+
+            request_id:
+                response.headers.get("X-Request-ID") || null,
 
             answer:
                 answer,
