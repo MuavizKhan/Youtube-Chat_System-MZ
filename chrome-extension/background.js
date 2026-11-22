@@ -799,8 +799,10 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
     // The browser tab uses the same YouTube session and network path that
     // loaded the video. This is the primary transcript source.
     let browserFailure = null;
+    let browserFailureStage = "capture";
     try {
         const transcript = await fetchBrowserTranscriptFromTab(tabId, videoId);
+        browserFailureStage = "upload";
         const data = await postBrowserTranscript(transcript);
         sendResponse({
             success: true,
@@ -814,7 +816,12 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
         return;
     } catch (browserError) {
         browserFailure = {
-            code: browserError?.errorCode || "BROWSER_CAPTURE_FAILED",
+            stage: browserFailureStage,
+            code: browserError?.errorCode || (
+                browserFailureStage === "upload"
+                    ? "BROWSER_TRANSCRIPT_UPLOAD_FAILED"
+                    : "BROWSER_CAPTURE_FAILED"
+            ),
             message: String(browserError?.message || browserError || "Unknown browser caption failure.")
         };
         console.warn(
@@ -877,7 +884,7 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
                 ? error.message
                 : "Unable to contact the index service.");
         const browserDiagnostic = browserFailure
-            ? "\n\nBrowser caption capture also failed (" +
+            ? "\n\nBrowser transcript " + browserFailure.stage + " failed (" +
                 browserFailure.code + "): " + browserFailure.message
             : "";
         sendResponse({
