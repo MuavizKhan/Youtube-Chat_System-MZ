@@ -53,3 +53,13 @@ def test_extension_content_script_is_safe_to_inject_more_than_once():
     assert 'if (existingVersion === CONTENT_SCRIPT_VERSION)' in content
     assert 'document.getElementById("youtube-ai-chat-launcher")?.remove()' in content
     assert content.rstrip().endswith("})();")
+
+
+def test_browser_caption_failure_is_visible_when_server_fallback_fails():
+    background = BACKGROUND.read_text(encoding="utf-8")
+
+    assert 'error.errorCode = capture?.code || "BROWSER_CAPTURE_FAILED"' in background
+    assert "browserFailure = {" in background
+    assert "Browser caption capture also failed (" in background
+    assert "browserErrorCode: browserFailure.code" in background
+
