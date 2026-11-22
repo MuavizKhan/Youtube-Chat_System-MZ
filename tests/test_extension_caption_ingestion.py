@@ -60,6 +60,8 @@ def test_browser_caption_failure_is_visible_when_server_fallback_fails():
 
     assert 'error.errorCode = capture?.code || "BROWSER_CAPTURE_FAILED"' in background
     assert "browserFailure = {" in background
-    assert "Browser caption capture also failed (" in background
+    assert "stage: browserFailureStage" in background
+    assert "Browser transcript " in background
+    assert "BROWSER_TRANSCRIPT_UPLOAD_FAILED" in background
     assert "browserErrorCode: browserFailure.code" in background
 
