@@ -1064,8 +1064,8 @@ function dispatchIndexPreparation(videoId, tabId, sendResponse) {
 
 
 async function handleIndexPreparation(videoId, tabId, sendResponse) {
-    // Avoid fetching the same captions again when an index is already ready
-    // or a durable worker is already preparing this video.
+    // Skip browser acquisition only when the index is already ready.
+    // An active server-backed job can still be upgraded to browser captions.
     try {
         const current = await fetchIndexStatusForPreparation(videoId);
         if (
