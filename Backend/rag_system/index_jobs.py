@@ -599,11 +599,45 @@ class IndexJobStore:
 
         return cursor.rowcount == 1
 
+    def requeue_for_browser_transcript(
+        self,
+        job_id: str,
+        worker_id: str,
+    ) -> bool:
+        """Release a failed worker lease when a newer browser revision is pending."""
+        now = time.time()
+        with self._managed_connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET
+                    status = ?,
+                    updated_at = ?,
+                    lease_until = 0,
+                    worker_id = NULL,
+                    error = NULL
+                WHERE
+                    job_id = ?
+                    AND worker_id = ?
+                    AND status = ?
+                    AND browser_transcript_fingerprint IS NOT NULL
+                """,
+                (
+                    JOB_QUEUED,
+                    now,
+                    job_id,
+                    worker_id,
+                    JOB_BUILDING,
+                ),
+            )
+        return cursor.rowcount == 1
+
     def mark_failed(
         self,
         job_id: str,
         worker_id: str,
         error: str,
+        expected_browser_transcript_fingerprint: str | None = None,
     ) -> bool:
         now = time.time()
 
@@ -621,6 +655,7 @@ class IndexJobStore:
                     job_id = ?
                     AND worker_id = ?
                     AND status = ?
+                    AND browser_transcript_fingerprint IS ?
                 """,
                 (
                     JOB_FAILED,
@@ -629,6 +664,7 @@ class IndexJobStore:
                     job_id,
                     worker_id,
                     JOB_BUILDING,
+                    expected_browser_transcript_fingerprint,
                 ),
             )
 

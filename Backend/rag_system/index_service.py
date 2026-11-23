@@ -290,11 +290,29 @@ def _run_index_job(video_id: str) -> None:
                 )
                 return
 
-            _vector_store, actual_action = ensure_index_with_action(
-                job.video_id,
-                languages=job.languages,
-                force_rebuild=reconciliation_attempt > 0,
-            )
+            try:
+                _vector_store, actual_action = ensure_index_with_action(
+                    job.video_id,
+                    languages=job.languages,
+                    force_rebuild=reconciliation_attempt > 0,
+                )
+            except Exception:
+                latest_job = _JOB_STORE.get(job.video_id)
+                if (
+                    latest_job is not None
+                    and latest_job.job_id == job.job_id
+                    and latest_job.status == JOB_BUILDING
+                    and latest_job.browser_transcript_fingerprint
+                    and reconciliation_attempt < MAX_BROWSER_TRANSCRIPT_RECONCILIATIONS
+                ):
+                    logger.info(
+                        "Retrying failed server transcript acquisition with the newly "
+                        "registered browser transcript video_id=%s job_id=%s",
+                        job.video_id,
+                        job.job_id,
+                    )
+                    continue
+                raise
 
             final_state = get_index_state(job.video_id)
             if final_state is not IndexState.VALID:
@@ -404,15 +422,28 @@ def _run_index_job(video_id: str) -> None:
             job.job_id,
             worker_id=_WORKER_ID,
             error=_serialize_index_failure(error),
+            expected_browser_transcript_fingerprint=job.browser_transcript_fingerprint,
         )
 
         if not marked_failed:
-            logger.warning(
-                "Index job failure could not be recorded because "
-                "its lease changed. video_id=%s job_id=%s",
-                job.video_id,
+            requeued = _JOB_STORE.requeue_for_browser_transcript(
                 job.job_id,
+                worker_id=_WORKER_ID,
             )
+            if requeued:
+                logger.info(
+                    "Re-queued index job after a browser transcript raced worker failure "
+                    "video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
+            else:
+                logger.warning(
+                    "Index job failure could not be recorded because its lease changed. "
+                    "video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1.0)
@@ -448,6 +479,18 @@ def shutdown_index_workers() -> None:
 # ============================================================
 # STATUS
 # ============================================================
+
+def _browser_revision_matches_index(job) -> bool:
+    """Whether this job's requested browser revision is the one persisted in FAISS."""
+    requested = getattr(job, "browser_transcript_fingerprint", None)
+    if requested is None:
+        return True
+    provenance = get_index_transcript_provenance(job.video_id) or {}
+    return (
+        provenance.get("source") == "youtube_browser_captions"
+        and provenance.get("fingerprint") == requested
+    )
+
 
 def get_index_status(
     video_id: str,
@@ -499,7 +542,7 @@ def get_index_status(
                     canonical_video_id,
                     job.languages,
                 )
-            ):
+            ) and _browser_revision_matches_index(job):
                 return IndexStatus(
                     video_id=canonical_video_id,
                     state="ready",
@@ -530,7 +573,7 @@ def get_index_status(
                     canonical_video_id,
                     job.languages,
                 )
-            ):
+            ) and _browser_revision_matches_index(job):
                 return IndexStatus(
                     video_id=canonical_video_id,
                     state="ready",
