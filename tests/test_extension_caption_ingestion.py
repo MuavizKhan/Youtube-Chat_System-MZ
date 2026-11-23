@@ -65,3 +65,37 @@ def test_browser_caption_failure_is_visible_when_server_fallback_fails():
     assert "BROWSER_TRANSCRIPT_UPLOAD_FAILED" in background
     assert "browserErrorCode: browserFailure.code" in background
 
+@pytest.mark.unit
+def test_browser_capture_uses_youtubes_native_transcript_panel_for_gated_tracks():
+    background = BACKGROUND.read_text(encoding="utf-8")
+
+    assert 'captionUrl.searchParams.get("exp") === "xpe"' in background
+    assert "captureTranscriptFromPanel" in background
+    assert "transcript-segment-view-model" in background
+    assert "ytd-transcript-segment-renderer" in background
+    assert "ytd-video-description-transcript-section-renderer" in background
+    assert "TRANSCRIPT_PANEL_INCOMPLETE" in background
+    assert 'source: "youtube_transcript_panel"' in background
+
+
+@pytest.mark.unit
+def test_browser_failure_diagnostic_survives_queued_server_fallback():
+    background = BACKGROUND.read_text(encoding="utf-8")
+    content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
+
+    assert "browser_diagnostic: browserFailure" in background
+    assert "describeBrowserAcquisitionDiagnostic" in content
+    assert "indexAcquisitionDiagnosticVideoId === videoId" in content
+    assert "Browser transcript " in content
+
+
+@pytest.mark.unit
+def test_index_status_polling_uses_backoff_and_prevents_overlapping_requests():
+    content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
+
+    assert "INDEX_POLL_INITIAL_INTERVAL_MS = 3000" in content
+    assert "INDEX_POLL_MAX_INTERVAL_MS = 10000" in content
+    assert "Math.ceil(delayMs * 1.5)" in content
+    assert "indexPollInFlight" in content
+    assert "indexPollGeneration" in content
+    assert "INDEX_POLL_INTERVAL_MS" not in content
