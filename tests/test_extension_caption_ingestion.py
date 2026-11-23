@@ -74,6 +74,7 @@ def test_browser_capture_uses_youtubes_native_transcript_panel_for_gated_tracks(
 
     assert 'captionUrl.searchParams.get("exp") === "xpe"' in background
     assert "captureTranscriptFromPanel" in background
+    assert "openedPanel = !panel" in background
     assert "transcript-segment-view-model" in background
     assert "ytd-transcript-segment-renderer" in background
     assert "ytd-video-description-transcript-section-renderer" in background
