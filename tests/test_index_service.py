@@ -902,3 +902,78 @@ def test_ready_job_is_reported_ready_when_browser_revision_matches(monkeypatch):
 
     assert status.ready is True
     assert status.state == "ready"
+
+
+
+@pytest.mark.unit
+def test_browser_upload_between_worker_failure_check_and_mark_failed_is_requeued(monkeypatch):
+    job = IndexJob(
+        job_id="job-failure-finalization-race",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+
+    class FailureRaceStore:
+        def __init__(self):
+            self.job = job
+            self.mark_failed_expected = "not-called"
+            self.requeued = False
+
+        def claim(self, video_id, worker_id):
+            return self.job
+
+        def get(self, video_id):
+            return self.job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
+            # A browser request commits just before SQLite applies the failure CAS.
+            self.mark_failed_expected = expected_browser_transcript_fingerprint
+            self.job = replace(
+                self.job,
+                browser_transcript_fingerprint="c" * 64,
+            )
+            return (
+                self.job.browser_transcript_fingerprint
+                == expected_browser_transcript_fingerprint
+            )
+
+        def requeue_for_browser_transcript(self, job_id, worker_id):
+            self.requeued = True
+            self.job = replace(self.job, status=JOB_QUEUED)
+            return True
+
+    store = FailureRaceStore()
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "ensure_index_with_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TranscriptAcquisitionError(
+                "YOUTUBE_IP_BLOCKED",
+                "YouTube blocked transcript requests from the backend IP.",
+            )
+        ),
+    )
+
+    index_service._run_index_job(VIDEO_ID)
+
+    assert store.mark_failed_expected is None
+    assert store.requeued is True
+    assert store.job.status == JOB_QUEUED
