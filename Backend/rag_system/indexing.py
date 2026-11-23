@@ -20,6 +20,8 @@ FAISS vector store
 Local persistence
 """
 
+import hashlib
+import re
 import shutil
 import uuid
 
@@ -44,7 +46,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .browser_transcripts import discard_browser_transcript, load_browser_transcript
+from .browser_transcripts import load_browser_transcript
 
 from .config import (
     CHUNK_OVERLAP,
@@ -67,6 +69,32 @@ class TranscriptAcquisitionError(RuntimeError):
         self.code = code
         self.public_message = public_message
         super().__init__(public_message)
+
+
+def _fingerprint_transcript(transcript) -> str:
+    """Hash transcript identity and ordered caption content deterministically."""
+    digest = hashlib.sha256()
+    identity = {
+        "video_id": str(getattr(transcript, "video_id", "")),
+        "language": str(getattr(transcript, "language", "")),
+        "language_code": str(getattr(transcript, "language_code", "")),
+        "is_generated": bool(getattr(transcript, "is_generated", False)),
+    }
+    digest.update(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    digest.update(b"\\n")
+    for snippet in transcript.snippets:
+        segment = {
+            "text": str(snippet.text),
+            "start": float(snippet.start),
+            "duration": float(snippet.duration),
+        }
+        digest.update(
+            json.dumps(segment, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        )
+        digest.update(b"\\n")
+    return digest.hexdigest()
 
 
 # ============================================================
@@ -207,7 +235,11 @@ def transcript_to_documents(
     """
 
     documents = []
-
+    transcript_source = getattr(transcript, "source", "youtube_transcript_api")
+    transcript_fingerprint = (
+        getattr(transcript, "fingerprint", None)
+        or _fingerprint_transcript(transcript)
+    )
 
     for segment_id, snippet in enumerate(transcript.snippets):
 
@@ -248,6 +280,12 @@ def transcript_to_documents(
 
                 "source":
                     getattr(transcript, "source", "youtube_transcript"),
+
+                "transcript_source":
+                    transcript_source,
+
+                "transcript_fingerprint":
+                    transcript_fingerprint,
 
                 "segment_id":
                     segment_id,
@@ -715,6 +753,12 @@ def split_into_timestamped_chunks(
 
             "source":
                 first_document.metadata.get("source", "youtube_transcript"),
+
+            "transcript_source":
+                first_document.metadata.get("transcript_source", "youtube_transcript_api"),
+
+            "transcript_fingerprint":
+                first_document.metadata.get("transcript_fingerprint"),
         }
 
 
@@ -921,7 +965,7 @@ def build_index_metadata(
         for segment in ordered_segments
     )
 
-    return {
+    metadata_result = {
         "metadata_version": INDEX_METADATA_VERSION,
         "transcript_segment_schema_version": TRANSCRIPT_SEGMENT_SCHEMA_VERSION,
         "video_id": metadata["video_id"],
@@ -943,6 +987,46 @@ def build_index_metadata(
             requested_languages
         ),
     }
+
+    transcript_sources = {
+        chunk.metadata.get("transcript_source")
+        for chunk in chunks
+    }
+    transcript_fingerprints = {
+        chunk.metadata.get("transcript_fingerprint")
+        for chunk in chunks
+    }
+    has_provenance = any(
+        value is not None
+        for value in transcript_sources | transcript_fingerprints
+    )
+    if has_provenance:
+        if (
+            len(transcript_sources) != 1
+            or len(transcript_fingerprints) != 1
+            or None in transcript_sources
+            or None in transcript_fingerprints
+        ):
+            raise ValueError(
+                "Cannot build index metadata because transcript provenance "
+                "must be consistent across all chunks."
+            )
+        transcript_source = next(iter(transcript_sources))
+        transcript_fingerprint = next(iter(transcript_fingerprints))
+        if transcript_source not in {
+            "youtube_browser_captions",
+            "youtube_transcript_api",
+        }:
+            raise ValueError("Cannot build index metadata because transcript source is unsupported.")
+        if (
+            not isinstance(transcript_fingerprint, str)
+            or re.fullmatch(r"[0-9a-f]{64}", transcript_fingerprint) is None
+        ):
+            raise ValueError("Cannot build index metadata because the transcript fingerprint is invalid.")
+        metadata_result["transcript_source"] = transcript_source
+        metadata_result["transcript_fingerprint"] = transcript_fingerprint
+
+    return metadata_result
 
 # private validation helper
 def _validate_vector_store_contents(
@@ -1073,6 +1157,22 @@ def _validate_vector_store_contents(
         ):
             return False, False
 
+    provenance_fields = {"transcript_source", "transcript_fingerprint"}
+    present_provenance_fields = provenance_fields & metadata.keys()
+    if present_provenance_fields:
+        if present_provenance_fields != provenance_fields:
+            return False, False
+        if metadata["transcript_source"] not in {
+            "youtube_browser_captions",
+            "youtube_transcript_api",
+        }:
+            return False, False
+        if (
+            not isinstance(metadata["transcript_fingerprint"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", metadata["transcript_fingerprint"]) is None
+        ):
+            return False, False
+
     # Additive field: legacy indexes without this key remain loadable, but
     # explicit language-selection requests will rebuild them because their
     # original preference order is unknown.
@@ -1120,6 +1220,35 @@ def _validate_vector_store_contents(
     )
 
     return True, is_stale
+
+
+def get_index_transcript_provenance(
+    video_id: str,
+) -> dict[str, str] | None:
+    """Read the acquisition source and content fingerprint of a persisted index."""
+    if not video_id or not video_id.strip():
+        return None
+
+    metadata_path = VECTOR_STORE_ROOT / video_id.strip() / "metadata.json"
+    try:
+        with metadata_path.open("r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(metadata, dict):
+        return None
+
+    source = metadata.get("transcript_source")
+    fingerprint = metadata.get("transcript_fingerprint")
+    if (
+        source not in {"youtube_browser_captions", "youtube_transcript_api"}
+        or not isinstance(fingerprint, str)
+        or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+    ):
+        return None
+
+    return {"source": source, "fingerprint": fingerprint}
 
 
 def get_index_language_preferences(
@@ -1630,6 +1759,7 @@ def ensure_index(
 def ensure_index_with_action(
     video_id: str,
     languages: Optional[list[str]] = None,
+    force_rebuild: bool = False,
 ):
     """
     Ensure a usable index exists and return (vector_store, actual_action).
@@ -1660,13 +1790,7 @@ def ensure_index_with_action(
             video_id
         )
 
-        action = get_index_action(
-            state
-        )
-
-        if (
-            state is IndexState.VALID
-            and languages is not None
+force rebuild            and languages is not None
             and not index_matches_requested_languages(
                 video_id,
                 languages,
@@ -1716,10 +1840,8 @@ def ensure_index_with_action(
                     f"Final state: {final_state.value}"
                 )
 
-            # Keep a browser-acquired transcript across failed builds; remove it
-            # only after the new FAISS index has passed persisted-state checks.
-            discard_browser_transcript(video_id)
-
+            # Browser transcripts remain a per-video cache so retries and
+            # later rebuilds do not require another YouTube network acquisition.
             return (
                 load_vector_store(video_id),
                 action,

@@ -50,6 +50,7 @@ class IndexJob:
     updated_at: float
     lease_until: float
     worker_id: str | None
+    browser_transcript_fingerprint: str | None = None
 
 
 class IndexJobStore:
@@ -119,10 +120,23 @@ class IndexJobStore:
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
                     lease_until REAL NOT NULL DEFAULT 0,
-                    worker_id TEXT
+                    worker_id TEXT,
+                    browser_transcript_fingerprint TEXT
                 )
                 """
             )
+
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(index_jobs)"
+                ).fetchall()
+            }
+            if "browser_transcript_fingerprint" not in columns:
+                connection.execute(
+                    "ALTER TABLE index_jobs "
+                    "ADD COLUMN browser_transcript_fingerprint TEXT"
+                )
 
             connection.execute(
                 """
@@ -155,6 +169,7 @@ class IndexJobStore:
             updated_at=row["updated_at"],
             lease_until=row["lease_until"],
             worker_id=row["worker_id"],
+            browser_transcript_fingerprint=row["browser_transcript_fingerprint"],
         )
 
     def get(self, video_id: str) -> IndexJob | None:
@@ -263,7 +278,8 @@ class IndexJobStore:
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at,
                     lease_until = excluded.lease_until,
-                    worker_id = excluded.worker_id
+                    worker_id = excluded.worker_id,
+                    browser_transcript_fingerprint = NULL
                 """,
                 (
                     job.video_id,
@@ -280,6 +296,94 @@ class IndexJobStore:
                 ),
             )
 
+        return job
+
+    def enqueue_browser_transcript(
+        self,
+        video_id: str,
+        action: str,
+        fingerprint: str,
+    ) -> IndexJob:
+        """Attach a browser caption revision to an active job or queue a rebuild."""
+        if len(fingerprint) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in fingerprint
+        ):
+            raise ValueError("browser transcript fingerprint must be a lowercase SHA-256 digest.")
+
+        now = time.time()
+        with self._managed_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM index_jobs WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+
+            if existing is not None and existing["status"] in _ACTIVE_STATUSES:
+                connection.execute(
+                    """
+                    UPDATE index_jobs
+                    SET browser_transcript_fingerprint = ?, updated_at = ?
+                    WHERE video_id = ? AND status IN (?, ?)
+                    """,
+                    (fingerprint, now, video_id, JOB_QUEUED, JOB_BUILDING),
+                )
+                updated = connection.execute(
+                    "SELECT * FROM index_jobs WHERE video_id = ?",
+                    (video_id,),
+                ).fetchone()
+                return self._row_to_job(updated)
+
+            job = IndexJob(
+                job_id=uuid.uuid4().hex,
+                video_id=video_id,
+                status=JOB_QUEUED,
+                action=action,
+                languages=None,
+                attempt=0,
+                error=None,
+                created_at=now,
+                updated_at=now,
+                lease_until=0.0,
+                worker_id=None,
+                browser_transcript_fingerprint=fingerprint,
+            )
+            connection.execute(
+                """
+                INSERT INTO index_jobs (
+                    video_id, job_id, status, action, languages_json,
+                    attempt, error, created_at, updated_at, lease_until,
+                    worker_id, browser_transcript_fingerprint
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    status = excluded.status,
+                    action = excluded.action,
+                    languages_json = excluded.languages_json,
+                    attempt = excluded.attempt,
+                    error = excluded.error,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    lease_until = excluded.lease_until,
+                    worker_id = excluded.worker_id,
+                    browser_transcript_fingerprint = excluded.browser_transcript_fingerprint
+                """,
+                (
+                    job.video_id,
+                    job.job_id,
+                    job.status,
+                    job.action,
+                    None,
+                    job.attempt,
+                    job.error,
+                    job.created_at,
+                    job.updated_at,
+                    job.lease_until,
+                    job.worker_id,
+                    job.browser_transcript_fingerprint,
+                ),
+            )
         return job
 
     def list_queued(
@@ -458,6 +562,7 @@ class IndexJobStore:
         job_id: str,
         worker_id: str,
         action: str,
+        indexed_transcript_fingerprint: str | None = None,
     ) -> bool:
         now = time.time()
 
@@ -476,6 +581,10 @@ class IndexJobStore:
                     job_id = ?
                     AND worker_id = ?
                     AND status = ?
+                    AND (
+                        browser_transcript_fingerprint IS NULL
+                        OR browser_transcript_fingerprint = ?
+                    )
                 """,
                 (
                     JOB_READY,
@@ -484,6 +593,7 @@ class IndexJobStore:
                     job_id,
                     worker_id,
                     JOB_BUILDING,
+                    indexed_transcript_fingerprint,
                 ),
             )
 

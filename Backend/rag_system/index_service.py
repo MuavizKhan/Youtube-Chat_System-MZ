@@ -24,7 +24,7 @@ import uuid
 
 from .browser_transcripts import (
     BrowserTranscriptSubmission,
-    discard_browser_transcript,
+    fingerprint_browser_transcript,
     stage_browser_transcript,
 )
 from .config import (
@@ -47,6 +47,7 @@ from .indexing import (
     ensure_index_with_action,
     get_index_action,
     get_index_state,
+    get_index_transcript_provenance,
     index_matches_requested_languages,
     normalize_transcript_languages,
 )
@@ -155,6 +156,8 @@ _EXECUTOR: ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = threading.Lock()
 _DISPATCHED_VIDEOS: set[str] = set()
 _DISPATCHED_LOCK = threading.Lock()
+
+MAX_BROWSER_TRANSCRIPT_RECONCILIATIONS = 3
 
 _WORKER_ID = (
     f"{socket.gethostname()}:"
@@ -269,42 +272,125 @@ def _run_index_job(video_id: str) -> None:
     heartbeat_thread.start()
 
     try:
-        _vector_store, actual_action = ensure_index_with_action(
-            job.video_id,
-            languages=job.languages,
-        )
+        completed = False
+        for reconciliation_attempt in range(
+            MAX_BROWSER_TRANSCRIPT_RECONCILIATIONS + 1
+        ):
+            current_job = _JOB_STORE.get(job.video_id)
+            if (
+                current_job is None
+                or current_job.job_id != job.job_id
+                or current_job.status != JOB_BUILDING
+            ):
+                logger.warning(
+                    "Index worker no longer owns the active job "
+                    "video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
+                return
 
-        final_state = get_index_state(
-            job.video_id
-        )
-
-        if final_state is not IndexState.VALID:
-            raise RuntimeError(
-                "Index preparation completed, but the persisted "
-                f"index is not valid. Final state: "
-                f"{final_state.value}"
+            _vector_store, actual_action = ensure_index_with_action(
+                job.video_id,
+                languages=job.languages,
+                force_rebuild=reconciliation_attempt > 0,
             )
 
-        marked_ready = _JOB_STORE.mark_ready(
-            job.job_id,
-            worker_id=_WORKER_ID,
-            action=actual_action.value,
-        )
+            final_state = get_index_state(job.video_id)
+            if final_state is not IndexState.VALID:
+                raise RuntimeError(
+                    "Index preparation completed, but the persisted "
+                    f"index is not valid. Final state: {final_state.value}"
+                )
 
-        if not marked_ready:
+            provenance = get_index_transcript_provenance(job.video_id) or {}
+            indexed_fingerprint = provenance.get("fingerprint")
+            indexed_source = provenance.get("source")
+
+            latest_job = _JOB_STORE.get(job.video_id)
+            if (
+                latest_job is None
+                or latest_job.job_id != job.job_id
+                or latest_job.status != JOB_BUILDING
+            ):
+                logger.warning(
+                    "Index job ownership changed before readiness "
+                    "video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
+                return
+
+            requested_fingerprint = latest_job.browser_transcript_fingerprint
+            if requested_fingerprint and (
+                indexed_source != "youtube_browser_captions"
+                or indexed_fingerprint != requested_fingerprint
+            ):
+                if reconciliation_attempt >= MAX_BROWSER_TRANSCRIPT_RECONCILIATIONS:
+                    raise RuntimeError(
+                        "The browser transcript changed repeatedly while its index "
+                        "was being prepared. Retry video preparation."
+                    )
+                logger.info(
+                    "Reconciling browser transcript uploaded during index build "
+                    "video_id=%s job_id=%s attempt=%s",
+                    job.video_id,
+                    job.job_id,
+                    reconciliation_attempt + 1,
+                )
+                continue
+
+            marked_ready = _JOB_STORE.mark_ready(
+                job.job_id,
+                worker_id=_WORKER_ID,
+                action=actual_action.value,
+                indexed_transcript_fingerprint=indexed_fingerprint,
+            )
+            if marked_ready:
+                logger.info(
+                    "Index job completed video_id=%s action=%s attempt=%s "
+                    "transcript_source=%s transcript_fingerprint=%s",
+                    job.video_id,
+                    actual_action.value,
+                    job.attempt,
+                    indexed_source or "unknown",
+                    indexed_fingerprint or "unavailable",
+                )
+                completed = True
+                break
+
+            # The SQL readiness update is a compare-and-swap. A newer
+            # browser revision may have been registered since the prior read.
+            latest_job = _JOB_STORE.get(job.video_id)
+            if (
+                latest_job is not None
+                and latest_job.job_id == job.job_id
+                and latest_job.status == JOB_BUILDING
+            ):
+                if reconciliation_attempt >= MAX_BROWSER_TRANSCRIPT_RECONCILIATIONS:
+                    raise RuntimeError(
+                        "A newer browser transcript arrived repeatedly during index finalization."
+                    )
+                logger.info(
+                    "Index readiness compare-and-swap detected a newer transcript "
+                    "video_id=%s job_id=%s",
+                    job.video_id,
+                    job.job_id,
+                )
+                continue
+
             logger.warning(
-                "Index job completion could not be recorded "
-                "because its lease changed. video_id=%s job_id=%s",
+                "Index job completion could not be recorded because its lease changed. "
+                "video_id=%s job_id=%s",
                 job.video_id,
                 job.job_id,
             )
+            return
 
-        logger.info(
-            "Index job completed video_id=%s action=%s attempt=%s",
-            job.video_id,
-            actual_action.value,
-            job.attempt,
-        )
+        if not completed:
+            raise RuntimeError(
+                "Index job could not converge on a stable transcript source."
+            )
 
     except Exception as error:
         logger.exception(
@@ -591,28 +677,61 @@ def submit_index(
 def submit_browser_transcript(
     submission: BrowserTranscriptSubmission,
 ) -> IndexStatus:
-    """Queue an index using caption segments captured by the active YouTube tab."""
+    """
+    Register browser captions as the desired transcript revision.
+
+    An active worker observes the durable fingerprint and reconciles its
+    index before it can mark the job ready. If a prior job already completed,
+    a new rebuild is queued instead of silently reusing an API-backed index.
+    """
     canonical_video_id = validate_video_id(submission.video_id)
     if canonical_video_id != submission.video_id:
         raise ValueError("browser transcript video ID is not canonical.")
 
+    fingerprint = fingerprint_browser_transcript(submission)
     current = get_index_status(canonical_video_id)
-    if current.ready:
+    provenance = get_index_transcript_provenance(canonical_video_id) or {}
+    if (
+        current.ready
+        and provenance.get("source") == "youtube_browser_captions"
+        and provenance.get("fingerprint") == fingerprint
+    ):
         return current
 
+    # Keep the validated transcript as a per-video cache. If a worker
+    # finishes before the following SQLite transaction, it won't delete it;
+    # the transaction then creates a follow-up rebuild if necessary.
     stage_browser_transcript(submission)
-    if current.state in {JOB_QUEUED, JOB_BUILDING}:
-        return current
-    try:
-        status = submit_index(canonical_video_id)
-    except Exception:
-        discard_browser_transcript(canonical_video_id)
-        raise
 
-    if status.ready:
-        discard_browser_transcript(canonical_video_id)
+    persisted_state = get_index_state(canonical_video_id)
+    action = (
+        IndexAction.REBUILD
+        if persisted_state is IndexState.VALID
+        else get_index_action(persisted_state)
+    )
+    job = _JOB_STORE.enqueue_browser_transcript(
+        canonical_video_id,
+        action=action.value,
+        fingerprint=fingerprint,
+    )
+    _dispatch_video(canonical_video_id)
 
-    return status
+    logger.info(
+        "Browser transcript revision registered video_id=%s job_id=%s "
+        "state=%s fingerprint=%s segments=%s",
+        canonical_video_id,
+        job.job_id,
+        job.status,
+        fingerprint,
+        len(submission.snippets),
+    )
+    return IndexStatus(
+        video_id=canonical_video_id,
+        state=job.status,
+        action=job.action,
+        ready=False,
+        job_id=job.job_id,
+    )
 
 
 # ============================================================

@@ -7,6 +7,7 @@ index worker can consume it without changing the RAG or FAISS pipeline.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -87,6 +88,17 @@ class BrowserTranscriptSubmission(BaseModel):
         return self
 
 
+def fingerprint_browser_transcript(submission: BrowserTranscriptSubmission) -> str:
+    """Return a stable SHA-256 fingerprint for a validated browser transcript."""
+    canonical_payload = json.dumps(
+        submission.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+
+
 def _transcript_path(video_id: str) -> Path:
     if not re.fullmatch(VIDEO_ID_PATTERN, video_id or ""):
         raise ValueError("invalid YouTube video ID for browser transcript staging.")
@@ -102,9 +114,11 @@ def stage_browser_transcript(submission: BrowserTranscriptSubmission) -> Path:
     )
 
     try:
+        payload = submission.model_dump(mode="json")
+        payload["fingerprint"] = fingerprint_browser_transcript(submission)
         with temporary.open("x", encoding="utf-8") as stream:
             json.dump(
-                submission.model_dump(),
+                payload,
                 stream,
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -124,7 +138,7 @@ def discard_browser_transcript(video_id: str) -> None:
 
 
 def load_browser_transcript(video_id: str) -> Any | None:
-    """Read a staged transcript without deleting it before index success."""
+    """Read the persistent browser transcript cache for one video."""
     source = _transcript_path(video_id)
     try:
         with source.open("r", encoding="utf-8") as stream:
@@ -132,23 +146,36 @@ def load_browser_transcript(video_id: str) -> Any | None:
     except FileNotFoundError:
         return None
 
-    if payload.get("video_id") != video_id:
+    stored_fingerprint = payload.get("fingerprint")
+    validated = BrowserTranscriptSubmission.model_validate(
+        {
+            key: value
+            for key, value in payload.items()
+            if key != "fingerprint"
+        }
+    )
+    if validated.video_id != video_id:
         raise ValueError("staged browser transcript video ID did not match the index job.")
+
+    fingerprint = fingerprint_browser_transcript(validated)
+    if stored_fingerprint is not None and stored_fingerprint != fingerprint:
+        raise ValueError("staged browser transcript fingerprint did not match its contents.")
 
     snippets = [
         SimpleNamespace(
-            text=item["text"],
-            start=float(item["start"]),
-            duration=float(item["duration"]),
+            text=item.text,
+            start=float(item.start),
+            duration=float(item.duration),
         )
-        for item in payload["snippets"]
+        for item in validated.snippets
     ]
 
     return SimpleNamespace(
         video_id=video_id,
-        language=payload["language"],
-        language_code=payload["language_code"],
-        is_generated=bool(payload["is_generated"]),
+        language=validated.language,
+        language_code=validated.language_code,
+        is_generated=validated.is_generated,
         snippets=snippets,
         source="youtube_browser_captions",
+        fingerprint=fingerprint,
     )
