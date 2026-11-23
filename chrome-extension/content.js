@@ -82,9 +82,19 @@ let indexPollVideoId = null;
 
 let indexPollAttempts = 0;
 
-const INDEX_POLL_INTERVAL_MS = 2000;
+const INDEX_POLL_INITIAL_INTERVAL_MS = 3000;
 
-const INDEX_POLL_MAX_ATTEMPTS = 90;
+const INDEX_POLL_MAX_INTERVAL_MS = 10000;
+
+const INDEX_POLL_MAX_ATTEMPTS = 60;
+
+let indexPollInFlight = false;
+
+let indexPollGeneration = 0;
+
+let indexAcquisitionDiagnostic = null;
+
+let indexAcquisitionDiagnosticVideoId = null;
 
 // Floating launcher and panel geometry. The launcher remains visible while
 // the chat is open so it can always be repositioned.
@@ -1007,6 +1017,9 @@ function updateIndexStatus(videoId, status, message = "") {
 
 
 function clearIndexPolling() {
+    indexPollGeneration += 1;
+    indexPollInFlight = false;
+
     if (indexPollTimer) {
         clearTimeout(indexPollTimer);
         indexPollTimer = null;
@@ -1017,9 +1030,44 @@ function clearIndexPolling() {
 }
 
 
-function pollIndexStatus(videoId) {
+function describeBrowserAcquisitionDiagnostic(diagnostic) {
+    if (!diagnostic || typeof diagnostic !== "object") {
+        return "";
+    }
+
+    const stage = String(diagnostic.stage || "capture");
+    const code = String(diagnostic.code || "BROWSER_CAPTURE_FAILED");
+    const message = String(diagnostic.message || "No additional browser diagnostic was returned.");
+
+    return "Browser transcript " + stage + " failed (" + code + "): " + message;
+}
+
+
+function scheduleNextIndexPoll(videoId, delayMs, generation) {
+    const nextDelay = Math.min(
+        Math.ceil(delayMs * 1.5),
+        INDEX_POLL_MAX_INTERVAL_MS
+    );
+
+    indexPollTimer = setTimeout(() => {
+        if (generation !== indexPollGeneration) {
+            return;
+        }
+        pollIndexStatus(videoId, nextDelay);
+    }, nextDelay);
+}
+
+
+function pollIndexStatus(
+    videoId,
+    delayMs = INDEX_POLL_INITIAL_INTERVAL_MS
+) {
     if (!videoId || videoId !== getVideoId()) {
         clearIndexPolling();
+        return;
+    }
+
+    if (indexPollInFlight) {
         return;
     }
 
@@ -1035,6 +1083,8 @@ function pollIndexStatus(videoId) {
 
     indexPollVideoId = videoId;
     indexPollAttempts += 1;
+    indexPollInFlight = true;
+    const generation = indexPollGeneration;
 
     sendExtensionMessage(
         {
@@ -1042,6 +1092,10 @@ function pollIndexStatus(videoId) {
             video_id: videoId
         },
         (response, runtimeError) => {
+            if (generation !== indexPollGeneration) {
+                return;
+            }
+            indexPollInFlight = false;
 
             if (videoId !== getVideoId()) {
                 clearIndexPolling();
@@ -1049,26 +1103,33 @@ function pollIndexStatus(videoId) {
             }
 
             if (runtimeError || !response || response.success !== true) {
-                indexPollTimer = setTimeout(
-                    () => pollIndexStatus(videoId),
-                    INDEX_POLL_INTERVAL_MS
-                );
+                scheduleNextIndexPoll(videoId, delayMs, generation);
                 return;
             }
 
             if (response.ready === true || response.state === "ready") {
                 clearIndexPolling();
+                indexAcquisitionDiagnostic = null;
+                indexAcquisitionDiagnosticVideoId = null;
                 updateIndexStatus(videoId, "ready");
                 return;
             }
 
             if (response.state === "failed") {
                 clearIndexPolling();
+                const browserDiagnostic = indexAcquisitionDiagnosticVideoId === videoId
+                    ? describeBrowserAcquisitionDiagnostic(indexAcquisitionDiagnostic)
+                    : "";
+                const failureMessage = [
+                    response.error_message ||
+                        "Could not prepare this video. Check that captions are available, then retry.",
+                    browserDiagnostic
+                ].filter(Boolean).join("\n\n");
+
                 updateIndexStatus(
                     videoId,
                     "failed",
-                    response.error_message ||
-                        "Could not prepare this video. Check that captions are available in a supported language, then retry."
+                    failureMessage
                 );
                 return;
             }
@@ -1079,12 +1140,13 @@ function pollIndexStatus(videoId) {
                 updateIndexStatus(videoId, "preparing");
             }
 
-            indexPollTimer = setTimeout(
-                () => pollIndexStatus(videoId),
-                INDEX_POLL_INTERVAL_MS
-            );
+            scheduleNextIndexPoll(videoId, delayMs, generation);
         },
         () => {
+            if (generation !== indexPollGeneration) {
+                return;
+            }
+            indexPollInFlight = false;
             clearIndexPolling();
             updateIndexStatus(
                 videoId,
@@ -1109,6 +1171,8 @@ function requestIndexPreparation(videoId) {
     }
 
     clearIndexPolling();
+    indexAcquisitionDiagnostic = null;
+    indexAcquisitionDiagnosticVideoId = videoId;
 
     indexPreparationInProgressFor = videoId;
     updateIndexStatus(videoId, "preparing");
@@ -1119,7 +1183,6 @@ function requestIndexPreparation(videoId) {
             video_id: videoId
         },
         (response, runtimeError) => {
-
             if (indexPreparationInProgressFor === videoId) {
                 indexPreparationInProgressFor = null;
             }
@@ -1138,16 +1201,31 @@ function requestIndexPreparation(videoId) {
             }
 
             if (!response || response.success !== true) {
+                const browserDiagnostic = describeBrowserAcquisitionDiagnostic(
+                    response?.browser_diagnostic
+                );
+                const failureMessage = [
+                    response?.error || "Could not start video preparation. Reopen the chat to retry.",
+                    browserDiagnostic
+                ].filter(Boolean).join("\n\n");
+
                 updateIndexStatus(
                     videoId,
                     "failed",
-                    response?.error || "Could not start video preparation. Reopen the chat to retry."
+                    failureMessage
                 );
                 return;
             }
 
+            indexAcquisitionDiagnostic = response.browser_diagnostic || null;
+            indexAcquisitionDiagnosticVideoId = indexAcquisitionDiagnostic
+                ? videoId
+                : null;
+
             if (response.ready === true || response.state === "ready") {
                 clearIndexPolling();
+                indexAcquisitionDiagnostic = null;
+                indexAcquisitionDiagnosticVideoId = null;
                 updateIndexStatus(videoId, "ready");
                 return;
             }
