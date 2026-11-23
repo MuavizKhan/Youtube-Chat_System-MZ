@@ -1790,7 +1790,16 @@ def ensure_index_with_action(
             video_id
         )
 
-force rebuild            and languages is not None
+        action = get_index_action(
+            state
+        )
+
+        if force_rebuild and state is IndexState.VALID:
+            action = IndexAction.REBUILD
+
+        if (
+            state is IndexState.VALID
+            and languages is not None
             and not index_matches_requested_languages(
                 video_id,
                 languages,
