@@ -83,7 +83,7 @@ def _fingerprint_transcript(transcript) -> str:
     digest.update(
         json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
-    digest.update(b"\\n")
+    digest.update(b"\n")
     for snippet in transcript.snippets:
         segment = {
             "text": str(snippet.text),

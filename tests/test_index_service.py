@@ -833,3 +833,72 @@ def test_worker_retries_server_transcript_failure_when_browser_revision_arrives(
     assert calls == [False, True]
     assert store.ready_fingerprint == "f" * 64
     assert store.failed_error is None
+
+
+
+@pytest.mark.unit
+def test_ready_job_is_not_reported_ready_for_a_different_transcript_source(monkeypatch):
+    job = IndexJob(
+        job_id="job-provenance-mismatch",
+        video_id=VIDEO_ID,
+        status=JOB_READY,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+        browser_transcript_fingerprint="b" * 64,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_transcript_provenance",
+        lambda video_id: {
+            "source": "youtube_transcript_api",
+            "fingerprint": "a" * 64,
+        },
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.ready is False
+    assert status.state == "failed"
+
+
+@pytest.mark.unit
+def test_ready_job_is_reported_ready_when_browser_revision_matches(monkeypatch):
+    job = IndexJob(
+        job_id="job-provenance-match",
+        video_id=VIDEO_ID,
+        status=JOB_READY,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+        browser_transcript_fingerprint="b" * 64,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_transcript_provenance",
+        lambda video_id: {
+            "source": "youtube_browser_captions",
+            "fingerprint": "b" * 64,
+        },
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.ready is True
+    assert status.state == "ready"

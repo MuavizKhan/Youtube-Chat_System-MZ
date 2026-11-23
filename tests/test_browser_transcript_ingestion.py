@@ -308,3 +308,31 @@ def test_browser_upload_requeues_a_ready_api_index(monkeypatch):
     assert result.state == "queued"
     assert result.job_id == "replacement-browser-job"
     assert dispatched == [VIDEO_ID]
+
+
+
+@pytest.mark.unit
+def test_browser_transcript_provenance_is_propagated_to_documents_and_chunks():
+    transcript = SimpleNamespace(
+        video_id=VIDEO_ID,
+        language="English",
+        language_code="en",
+        is_generated=True,
+        source="youtube_browser_captions",
+        fingerprint="f" * 64,
+        snippets=[
+            SimpleNamespace(
+                text="This is a browser-captured caption segment.",
+                start=3.0,
+                duration=2.0,
+            )
+        ],
+    )
+
+    documents = indexing.transcript_to_documents(transcript)
+    assert documents[0].metadata["transcript_source"] == "youtube_browser_captions"
+    assert documents[0].metadata["transcript_fingerprint"] == "f" * 64
+
+    chunks = indexing.split_into_timestamped_chunks(documents)
+    assert chunks[0].metadata["transcript_source"] == "youtube_browser_captions"
+    assert chunks[0].metadata["transcript_fingerprint"] == "f" * 64
