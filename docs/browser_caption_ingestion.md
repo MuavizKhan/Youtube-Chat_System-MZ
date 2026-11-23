@@ -18,7 +18,7 @@ The official YouTube Data API captions.list and captions.download methods are OA
 
 ## Limits
 
-The browser-caption upload is limited to 16 MiB, 100,000 segments, and 1.5 million caption characters. The backend stages the transcript under data/browser_transcripts/, consumes it once, and that directory is ignored by Git. The normal request-body limit for chat and feedback remains unchanged.
+The browser-caption upload is limited to 16 MiB, 100,000 segments, and 1.5 million caption characters. The backend retains the validated transcript under the Git-ignored data/browser_transcripts/ directory as a per-video local cache so retries and later rebuilds can reuse it. This cache is local machine data, not part of Git or the vector index. A bounded retention/cleanup policy should be added before operating this on a large shared server. The normal request-body limit for chat and feedback remains unchanged.
 
 This does not make private, unavailable, age-gated, browser-blocked, or no-caption videos transcribable. A separate audio-to-text fallback would be required for those cases. This change improves coverage for public videos whose caption tracks are available in the YouTube player, including auto-generated tracks.
 
@@ -29,4 +29,31 @@ This does not make private, unavailable, age-gated, browser-blocked, or no-capti
 3. Confirm browser caption ingestion creates an index and status becomes ready.
 4. Ask a question and confirm timestamped sources still work.
 5. Test a video without a caption track and verify the backend fallback reports the actual failure category.
-6. Check data/browser_transcripts/ is empty after successful indexing.
+6. Inspect Backend/rag_system/vector_stores/{video_id}/metadata.json and the worker log. Confirm transcript_source and transcript_fingerprint identify the source that actually built the ready index. For a successful browser-capture test the source must be youtube_browser_captions; an API fallback should be labelled youtube_transcript_api.
+
+
+## Race-safe handoff, duplicate suppression and provenance
+
+A browser transcript is assigned a canonical SHA-256 fingerprint over its video,
+language, generated/manual flag, ordered caption text and timestamps. The
+fingerprint is stored in the staged transcript and in the durable SQLite index
+job. If an API-backed job is already queued or building, the browser upload
+updates that job's desired fingerprint. The worker verifies the transcript
+source and fingerprint after the build and rebuilds from the staged browser
+captions before it can mark the job ready. The SQLite ready transition is
+conditional on the indexed fingerprint still matching the requested one.
+If a job completed just before the upload was registered, a new rebuild is
+queued. If server transcript acquisition fails while the browser request
+arrives, the worker retries from the staged browser transcript.
+
+The extension service worker coalesces concurrent prepare_index messages for
+the same video into one in-flight capture/upload/fallback operation. This
+prevents duplicate work when several YouTube tabs request the same video
+during one service-worker lifetime. The backend SQLite job store remains the
+cross-process deduplication authority.
+
+New index metadata contains transcript_source and transcript_fingerprint, and
+worker completion logs emit both fields. Legacy indexes without provenance
+remain valid; new builds validate that every chunk has the same source and
+fingerprint. This instrumentation is intentionally additive and does not
+change retrieval, chunking, embeddings or answer generation.

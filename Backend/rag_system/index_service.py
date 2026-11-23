@@ -418,11 +418,19 @@ def _run_index_job(video_id: str) -> None:
             job.attempt,
         )
 
+        latest_failure_job = _JOB_STORE.get(job.video_id)
+        expected_browser_fingerprint = (
+            latest_failure_job.browser_transcript_fingerprint
+            if latest_failure_job is not None
+            and latest_failure_job.job_id == job.job_id
+            and latest_failure_job.status == JOB_BUILDING
+            else job.browser_transcript_fingerprint
+        )
         marked_failed = _JOB_STORE.mark_failed(
             job.job_id,
             worker_id=_WORKER_ID,
             error=_serialize_index_failure(error),
-            expected_browser_transcript_fingerprint=job.browser_transcript_fingerprint,
+            expected_browser_transcript_fingerprint=expected_browser_fingerprint,
         )
 
         if not marked_failed:

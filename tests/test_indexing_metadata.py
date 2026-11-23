@@ -228,6 +228,29 @@ def test_build_index_metadata_rejects_conflicting_duplicate_segment_ids():
         build_index_metadata(chunks)
 
 
+def test_build_index_metadata_records_transcript_provenance():
+    chunks = make_chunks()
+    for chunk in chunks:
+        chunk.metadata["transcript_source"] = "youtube_browser_captions"
+        chunk.metadata["transcript_fingerprint"] = "d" * 64
+
+    metadata = build_index_metadata(chunks)
+
+    assert metadata["transcript_source"] == "youtube_browser_captions"
+    assert metadata["transcript_fingerprint"] == "d" * 64
+
+
+def test_build_index_metadata_rejects_inconsistent_transcript_provenance():
+    chunks = make_chunks()
+    chunks[0].metadata["transcript_source"] = "youtube_browser_captions"
+    chunks[0].metadata["transcript_fingerprint"] = "d" * 64
+    chunks[1].metadata["transcript_source"] = "youtube_transcript_api"
+    chunks[1].metadata["transcript_fingerprint"] = "e" * 64
+
+    with pytest.raises(ValueError, match="consistent across all chunks"):
+        build_index_metadata(chunks)
+
+
 def test_build_index_metadata_preserves_explicit_language_order():
     metadata = build_index_metadata(
         make_chunks(),

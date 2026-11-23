@@ -257,3 +257,117 @@ def test_separate_store_instances_coordinate_claims(tmp_path):
     assert len(successful) == 1
     assert successful[0].status == JOB_BUILDING
 
+
+
+
+@pytest.mark.unit
+def test_browser_transcript_revision_blocks_stale_ready_transition(tmp_path):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    first = store.enqueue(VIDEO_ID, action="create")
+    assert store.claim(VIDEO_ID, "worker-a") is not None
+
+    updated = store.enqueue_browser_transcript(
+        VIDEO_ID,
+        action="create",
+        fingerprint="b" * 64,
+    )
+    assert updated.job_id == first.job_id
+    assert updated.status == JOB_BUILDING
+    assert updated.browser_transcript_fingerprint == "b" * 64
+
+    assert store.mark_ready(
+        first.job_id,
+        "worker-a",
+        "create",
+        indexed_transcript_fingerprint="a" * 64,
+    ) is False
+    assert store.get(VIDEO_ID).status == JOB_BUILDING
+
+    assert store.mark_ready(
+        first.job_id,
+        "worker-a",
+        "create",
+        indexed_transcript_fingerprint="b" * 64,
+    ) is True
+    assert store.get(VIDEO_ID).status == JOB_READY
+
+
+@pytest.mark.unit
+def test_browser_transcript_upload_after_completion_queues_rebuild(tmp_path):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    first = store.enqueue(VIDEO_ID, action="create")
+    assert store.claim(VIDEO_ID, "worker-a") is not None
+    assert store.mark_ready(
+        first.job_id,
+        "worker-a",
+        "create",
+        indexed_transcript_fingerprint=None,
+    ) is True
+
+    replacement = store.enqueue_browser_transcript(
+        VIDEO_ID,
+        action="rebuild",
+        fingerprint="c" * 64,
+    )
+
+    assert replacement.job_id != first.job_id
+    assert replacement.status == JOB_QUEUED
+    assert replacement.action == "rebuild"
+    assert replacement.browser_transcript_fingerprint == "c" * 64
+
+
+@pytest.mark.unit
+def test_browser_transcript_revision_prevents_failure_from_clobbering_newer_request(tmp_path):
+    store = IndexJobStore(tmp_path / "jobs.sqlite3", lease_seconds=60)
+    job = store.enqueue(VIDEO_ID, action="create")
+    assert store.claim(VIDEO_ID, "worker-a") is not None
+    store.enqueue_browser_transcript(
+        VIDEO_ID,
+        action="create",
+        fingerprint="e" * 64,
+    )
+
+    assert store.mark_failed(
+        job.job_id,
+        "worker-a",
+        "stale failure",
+        expected_browser_transcript_fingerprint=None,
+    ) is False
+    assert store.requeue_for_browser_transcript(job.job_id, "worker-a") is True
+    assert store.get(VIDEO_ID).status == JOB_QUEUED
+
+
+@pytest.mark.unit
+def test_legacy_job_database_is_migrated_with_browser_fingerprint_column(tmp_path):
+    database = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE index_jobs (
+            video_id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            action TEXT NOT NULL,
+            languages_json TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            lease_until REAL NOT NULL DEFAULT 0,
+            worker_id TEXT
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = IndexJobStore(database, lease_seconds=60)
+    job = store.enqueue(VIDEO_ID, action="create")
+    assert job.browser_transcript_fingerprint is None
+
+    with store._managed_connection() as managed:
+        columns = {
+            row["name"]
+            for row in managed.execute("PRAGMA table_info(index_jobs)").fetchall()
+        }
+    assert "browser_transcript_fingerprint" in columns

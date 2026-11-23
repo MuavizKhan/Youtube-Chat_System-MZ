@@ -94,6 +94,15 @@ def test_browser_failure_diagnostic_survives_queued_server_fallback():
 
 
 @pytest.mark.unit
+def test_parallel_tabs_share_one_index_preparation_per_video():
+    background = BACKGROUND.read_text(encoding="utf-8")
+
+    assert "const indexPreparationFlights = new Map()" in background
+    assert "function dispatchIndexPreparation(videoId, tabId, sendResponse)" in background
+    assert "dispatchIndexPreparation(" in background
+    assert "handleIndexPreparation(videoId, tabId, resolveFlight)" in background
+
+
 def test_index_status_polling_uses_backoff_and_prevents_overlapping_requests():
     content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
 

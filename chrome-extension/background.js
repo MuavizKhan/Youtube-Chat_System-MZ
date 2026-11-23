@@ -45,6 +45,10 @@ const CHAT_REQUEST_TIMEOUT_MS =
 const CONTENT_SCRIPT_MARKER =
     "data-youtube-ai-chat-content-version";
 
+// Multiple YouTube tabs can request the same video simultaneously. Share one
+// capture/upload/fallback flow per video during this service-worker lifetime.
+const indexPreparationFlights = new Map();
+
 async function injectFreshYouTubeContentScript(tabId) {
     if (typeof tabId !== "number" || !chrome.scripting?.executeScript) {
         return false;
@@ -233,7 +237,11 @@ chrome.runtime.onMessage.addListener(
                 return;
             }
 
-            handleIndexPreparation(videoId, sender?.tab?.id, sendResponse);
+            dispatchIndexPreparation(
+                videoId,
+                sender?.tab?.id,
+                sendResponse
+            );
             return true;
         }
 
@@ -1018,6 +1026,40 @@ async function postBrowserTranscript(transcript) {
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+
+function dispatchIndexPreparation(videoId, tabId, sendResponse) {
+    let pending = indexPreparationFlights.get(videoId);
+    if (!pending) {
+        let resolveFlight;
+        pending = new Promise((resolve) => {
+            resolveFlight = resolve;
+        });
+        indexPreparationFlights.set(videoId, pending);
+
+        void handleIndexPreparation(videoId, tabId, resolveFlight).catch((error) => {
+            resolveFlight({
+                success: false,
+                error: String(error?.message || error || "Video preparation failed.")
+            });
+        });
+
+        const clearFlight = () => {
+            if (indexPreparationFlights.get(videoId) === pending) {
+                indexPreparationFlights.delete(videoId);
+            }
+        };
+        pending.then(clearFlight, clearFlight);
+    }
+
+    pending.then(
+        (result) => sendResponse(result),
+        (error) => sendResponse({
+            success: false,
+            error: String(error?.message || error || "Video preparation failed.")
+        })
+    );
 }
 
 

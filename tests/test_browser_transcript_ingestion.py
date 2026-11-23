@@ -5,6 +5,7 @@ import pytest
 from Backend.rag_system import browser_transcripts, indexing
 from Backend.rag_system.browser_transcripts import (
     BrowserTranscriptSubmission,
+    fingerprint_browser_transcript,
     load_browser_transcript,
     stage_browser_transcript,
 )
@@ -51,6 +52,7 @@ def test_browser_transcript_is_staged_and_retained_until_index_success(tmp_path,
     assert transcript.language_code == "en"
     assert transcript.is_generated is True
     assert transcript.source == "youtube_browser_captions"
+    assert transcript.fingerprint == fingerprint_browser_transcript(submission)
     assert [item.text for item in transcript.snippets] == [
         "First caption",
         "Second caption",
@@ -151,19 +153,31 @@ def test_submit_browser_transcript_stages_before_dispatching_index_job(monkeypat
         "stage_browser_transcript",
         lambda submission: calls.append(("stage", submission.video_id)),
     )
+    class FakeJobStore:
+        def enqueue_browser_transcript(self, video_id, action, fingerprint):
+            calls.append(("enqueue", video_id, action, fingerprint))
+            return SimpleNamespace(
+                job_id=queued.job_id,
+                status=queued.state,
+                action=queued.action,
+            )
+
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore())
     monkeypatch.setattr(
         index_service,
-        "submit_index",
-        lambda video_id: calls.append(("submit", video_id)) or queued,
+        "_dispatch_video",
+        lambda video_id: calls.append(("dispatch", video_id)),
     )
+    monkeypatch.setattr(index_service, "get_index_transcript_provenance", lambda video_id: None)
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: indexing.IndexState.MISSING)
 
     result = index_service.submit_browser_transcript(make_submission())
 
     assert result == queued
-    assert calls == [
-        ("stage", VIDEO_ID),
-        ("submit", VIDEO_ID),
-    ]
+    assert calls[0] == ("stage", VIDEO_ID)
+    assert calls[1][0:3] == ("enqueue", VIDEO_ID, "create")
+    assert calls[1][3] == fingerprint_browser_transcript(make_submission())
+    assert calls[2] == ("dispatch", VIDEO_ID)
 
 
 @pytest.mark.unit
@@ -213,13 +227,84 @@ def test_submit_browser_transcript_stages_for_an_existing_active_job(monkeypatch
         "stage_browser_transcript",
         lambda submission: staged.append(submission.video_id),
     )
-    monkeypatch.setattr(
-        index_service,
-        "submit_index",
-        lambda video_id: pytest.fail("An active durable job must not be duplicated."),
-    )
+    class ActiveJobStore:
+        def enqueue_browser_transcript(self, video_id, action, fingerprint):
+            staged.append(("registered", video_id, fingerprint))
+            return SimpleNamespace(
+                job_id=active.job_id,
+                status=active.state,
+                action=active.action,
+            )
+
+    monkeypatch.setattr(index_service, "_JOB_STORE", ActiveJobStore())
+    monkeypatch.setattr(index_service, "_dispatch_video", lambda video_id: None)
+    monkeypatch.setattr(index_service, "get_index_transcript_provenance", lambda video_id: None)
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: indexing.IndexState.MISSING)
 
     result = index_service.submit_browser_transcript(make_submission())
 
     assert result == active
-    assert staged == [VIDEO_ID]
+    assert staged[0] == VIDEO_ID
+    assert staged[1][0:2] == ("registered", VIDEO_ID)
+    assert staged[1][2] == fingerprint_browser_transcript(make_submission())
+
+
+
+@pytest.mark.unit
+def test_browser_transcript_fingerprint_changes_when_caption_content_changes():
+    original = make_submission()
+    changed = make_submission(
+        snippets=[
+            {"text": "Changed caption", "start": 0.0, "duration": 1.2},
+            {"text": "Second caption", "start": 1.2, "duration": 2.0},
+        ]
+    )
+
+    assert fingerprint_browser_transcript(original) != fingerprint_browser_transcript(changed)
+
+
+@pytest.mark.unit
+def test_browser_upload_requeues_a_ready_api_index(monkeypatch):
+    submission = make_submission()
+    dispatched = []
+    queued = SimpleNamespace(
+        job_id="replacement-browser-job",
+        status="queued",
+        action="rebuild",
+    )
+
+    monkeypatch.setattr(
+        index_service,
+        "get_index_status",
+        lambda video_id: index_service.IndexStatus(
+            video_id=video_id,
+            state="ready",
+            action="reuse",
+            ready=True,
+        ),
+    )
+    monkeypatch.setattr(
+        index_service,
+        "get_index_transcript_provenance",
+        lambda video_id: {
+            "source": "youtube_transcript_api",
+            "fingerprint": "a" * 64,
+        },
+    )
+    monkeypatch.setattr(index_service, "stage_browser_transcript", lambda item: None)
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: indexing.IndexState.VALID)
+
+    class ReadyJobStore:
+        def enqueue_browser_transcript(self, video_id, action, fingerprint):
+            assert action == "rebuild"
+            assert fingerprint == fingerprint_browser_transcript(submission)
+            return queued
+
+    monkeypatch.setattr(index_service, "_JOB_STORE", ReadyJobStore())
+    monkeypatch.setattr(index_service, "_dispatch_video", lambda video_id: dispatched.append(video_id))
+
+    result = index_service.submit_browser_transcript(submission)
+
+    assert result.state == "queued"
+    assert result.job_id == "replacement-browser-job"
+    assert dispatched == [VIDEO_ID]
