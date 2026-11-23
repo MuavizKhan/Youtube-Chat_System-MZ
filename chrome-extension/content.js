@@ -1122,7 +1122,7 @@ function pollIndexStatus(
                     : "";
                 const failureMessage = [
                     response.error_message ||
-                        "Could not prepare this video. Check that captions are available, then retry.",
+                        "Could not prepare this video. Check that captions are available in a supported language, then retry.",
                     browserDiagnostic
                 ].filter(Boolean).join("\n\n");
 
