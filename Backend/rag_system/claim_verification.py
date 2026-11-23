@@ -1,7 +1,6 @@
 """Generic, fail-closed assessment of generated claims against transcript passages."""
 from __future__ import annotations
 
-import logging
 import math
 import re
 from typing import Any, Sequence
@@ -13,7 +12,6 @@ MAX_CLAIMS = 8
 MAX_PASSAGES = 8
 MAX_PASSAGE_CHARS = 480
 MAX_INPUT_CHARS = 8_000
-logger = logging.getLogger(__name__)
 _STOP = set(
     "a an and are as at be been but by can did do does for from had has have "
     "he her his how i if in into is it its may might not of on or our she so "
@@ -82,7 +80,7 @@ def should_verify_answer(answer: str, question: str) -> bool:
         return True
     return bool(re.search(
         r"\b(?:study|studies|source|sources|research|authentic|genuine|statistics?|"
-        r"evidence|released|release date|who is|which person|which company|what happened)\b",
+        r"evidence|released|release date|who is|which person|which company)\b",
         question,
         re.IGNORECASE,
     ))
@@ -207,14 +205,7 @@ def verify_answer_claims(
     all_claims = split_answer_claims(answer, max_claims=None)
     claims = all_claims[:MAX_CLAIMS]
     truncated_claim_count = max(0, len(all_claims) - len(claims))
-    if (
-        not should_verify_answer(answer, question)
-        or (
-            isinstance(fallback_answer, str)
-            and isinstance(answer, str)
-            and answer.strip() == fallback_answer.strip()
-        )
-    ):
+    if not should_verify_answer(answer, question):
         return {
             "answer": answer, "performed": False, "status": "not_required",
             "claim_count": len(claims), "truncated_claim_count": truncated_claim_count, "supported_claim_count": 0,
@@ -275,29 +266,14 @@ def verify_answer_claims(
         subject=question[:240],
         analysis_source="generated_answer_claim_audit",
     )
-    try:
-        result = assess_evidence_support(
-            analysis,
-            passages,
-            client,
-            max_input_chars=MAX_INPUT_CHARS,
-            max_passages=MAX_PASSAGES,
-            max_aspects=MAX_CLAIMS,
-        )
-    except Exception:
-        logger.exception("Unexpected answer claim assessment failure.")
-        return {
-            "answer": answer,
-            "performed": True,
-            "status": AssessmentRunStatus.PROVIDER_ERROR.value,
-            "claim_count": len(claims),
-            "truncated_claim_count": truncated_claim_count,
-            "supported_claim_count": 0,
-            "partial_claim_count": 0,
-            "removed_claim_count": 0,
-            "supported_chunk_ids": [],
-            "error_code": "unexpected_assessment_error",
-        }
+    result = assess_evidence_support(
+        analysis,
+        passages,
+        client,
+        max_input_chars=MAX_INPUT_CHARS,
+        max_passages=MAX_PASSAGES,
+        max_aspects=MAX_CLAIMS,
+    )
     diagnostic = result.diagnostics
     if diagnostic.status is not AssessmentRunStatus.COMPLETED:
         return {
