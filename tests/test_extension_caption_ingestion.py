@@ -1,6 +1,7 @@
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,7 @@ def test_extension_can_read_caption_tracks_in_the_youtube_page_world():
 
     assert "scripting" in manifest["permissions"]
     assert "https://www.youtube.com/*" in manifest["host_permissions"]
+    assert manifest["version"] == "1.4.2"
     assert "chrome.scripting.executeScript" in background
     assert 'world: "MAIN"' in background
     assert "playerCaptionsTracklistRenderer" in background
