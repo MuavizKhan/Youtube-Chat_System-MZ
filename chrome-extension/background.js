@@ -692,7 +692,7 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                     }
                     if (showButton) {
                         showButton.click();
-                        openedPanel = true;
+                        openedPanel = !panel;
                     }
                 }
 
