@@ -494,14 +494,6 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                 };
             }
 
-            if (!captionTracks.length) {
-                return {
-                    ok: false,
-                    code: "NO_CAPTION_TRACKS",
-                    message: "The YouTube player did not expose a caption track for this video."
-                };
-            }
-
             const languagePriority = ["en", "hi", "ur", "ar"];
             const languageBase = (track) =>
                 String(track.languageCode || "").toLowerCase().split("-")[0];
@@ -582,6 +574,250 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                     );
             };
 
+            // YouTube's timed-text endpoint can return HTTP 200 with an empty
+            // body for exp=xpe tracks because it expects a player-issued PO token.
+            // The native transcript panel already has YouTube's own authenticated
+            // request path, so use the rendered segments as a browser-side fallback.
+            const captureTranscriptFromPanel = async () => {
+                const segmentSelector =
+                    "transcript-segment-view-model, ytd-transcript-segment-renderer";
+                const expandedPanel = () => {
+                    const panels = Array.from(
+                        document.querySelectorAll("ytd-engagement-panel-section-list-renderer")
+                    ).filter((panel) =>
+                        panel.getAttribute("visibility") === "ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"
+                    );
+                    return panels.find((panel) => panel.querySelector(segmentSelector)) ||
+                        panels.find((panel) =>
+                            /transcript/i.test(panel.getAttribute("target-id") || "")
+                        ) ||
+                        null;
+                };
+                const panelHasSegments = (panel) =>
+                    Boolean(panel && panel.querySelector(segmentSelector));
+                const pageStillMatches = () => {
+                    if (currentVideoId() !== expectedVideoId) {
+                        return false;
+                    }
+                    const renderedId = document.querySelector("ytd-watch-flexy")
+                        ?.getAttribute("video-id");
+                    return !renderedId || renderedId === expectedVideoId;
+                };
+                const parseTimestampSeconds = (value) => {
+                    const text = String(value || "").trim();
+                    const hours = text.match(/(\d+)\s*(?:h|hours?)/i);
+                    const minutes = text.match(/(\d+)\s*(?:m|min|minutes?)/i);
+                    const seconds = text.match(/(\d+)\s*(?:s|sec|seconds?)/i);
+                    if (hours || minutes || seconds) {
+                        return Number(hours?.[1] || 0) * 3600 +
+                            Number(minutes?.[1] || 0) * 60 +
+                            Number(seconds?.[1] || 0);
+                    }
+                    const clock = text.match(/\d+(?::\d{1,2}){1,2}/);
+                    if (!clock) {
+                        return null;
+                    }
+                    const parts = clock[0].split(":").map(Number);
+                    if (parts.some((part) => !Number.isFinite(part))) {
+                        return null;
+                    }
+                    return parts.length === 3
+                        ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+                        : parts[0] * 60 + parts[1];
+                };
+                const readSegment = (segment) => {
+                    const isModern =
+                        segment.tagName.toLowerCase() === "transcript-segment-view-model";
+                    const timestampElement = isModern
+                        ? (
+                            segment.querySelector(".ytwTranscriptSegmentViewModelTimestamp") ||
+                            Array.from(segment.querySelectorAll("[class*='Timestamp']"))
+                                .find((element) => !/A11y/i.test(String(element.className || "")))
+                        )
+                        : segment.querySelector(".segment-timestamp");
+                    const textElement = isModern
+                        ? segment.querySelector(".ytAttributedStringHost, [role='text']")
+                        : segment.querySelector(".segment-text") ||
+                            segment.querySelector("yt-formatted-string");
+                    let text = "";
+                    if (textElement) {
+                        text = textElement.textContent || "";
+                    } else {
+                        const clone = segment.cloneNode(true);
+                        clone.querySelectorAll(
+                            "script, style, template, [class*='Timestamp']"
+                        ).forEach((element) => element.remove());
+                        text = clone.textContent || "";
+                    }
+                    const timestampText = timestampElement
+                        ? (timestampElement.textContent || timestampElement.getAttribute("aria-label") || "")
+                        : "";
+                    return {
+                        text: String(text).replace(/\s+/g, " ").trim(),
+                        start: parseTimestampSeconds(timestampText)
+                    };
+                };
+
+                let panel = expandedPanel();
+                let openedPanel = false;
+                if (!panelHasSegments(panel)) {
+                    let showButton = document.querySelector(
+                        "ytd-video-description-transcript-section-renderer button, " +
+                        "ytd-video-description-transcript-section-renderer [role='button']"
+                    );
+                    if (!showButton) {
+                        const expandDescription = document.querySelector(
+                            "ytd-text-inline-expander#description-inline-expander #expand, " +
+                            "ytd-text-inline-expander #expand"
+                        );
+                        if (expandDescription) {
+                            expandDescription.click();
+                            await new Promise((resolve) => setTimeout(resolve, 350));
+                            showButton = document.querySelector(
+                                "ytd-video-description-transcript-section-renderer button, " +
+                                "ytd-video-description-transcript-section-renderer [role='button']"
+                            );
+                        }
+                    }
+                    if (!showButton) {
+                        showButton = Array.from(
+                            document.querySelectorAll("button, [role='button']")
+                        ).find((element) =>
+                            /show transcript/i.test(
+                                (element.getAttribute("aria-label") || "") + " " +
+                                (element.getAttribute("title") || "") + " " +
+                                (element.textContent || "")
+                            )
+                        );
+                    }
+                    if (showButton) {
+                        showButton.click();
+                        openedPanel = true;
+                    }
+                }
+
+                let previousSignature = "";
+                let stableChecks = 0;
+                let sawPanel = Boolean(panel);
+                for (let waited = 0; waited < 20000; waited += 250) {
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    if (!pageStillMatches()) {
+                        return {
+                            ok: false,
+                            code: "VIDEO_CHANGED",
+                            message: "The YouTube page changed while its transcript panel was loading."
+                        };
+                    }
+
+                    panel = expandedPanel();
+                    if (panel) {
+                        sawPanel = true;
+                    }
+                    const elements = panel
+                        ? Array.from(panel.querySelectorAll(segmentSelector))
+                        : [];
+                    const segments = elements
+                        .map(readSegment)
+                        .filter((segment) =>
+                            segment.text &&
+                            Number.isFinite(segment.start) &&
+                            segment.start >= 0
+                        );
+                    const loading = Boolean(panel && panel.querySelector(
+                        "ytd-continuation-item-renderer, yt-content-loading-renderer"
+                    ));
+                    const last = segments[segments.length - 1];
+                    const signature = segments.length
+                        ? [
+                            segments.length,
+                            segments[0].start,
+                            last.start,
+                            last.text.slice(0, 100),
+                            segments.reduce((sum, item) => sum + item.text.length, 0)
+                        ].join("|")
+                        : "";
+
+                    if (signature && !loading && signature === previousSignature) {
+                        stableChecks += 1;
+                    } else {
+                        stableChecks = 0;
+                    }
+                    previousSignature = signature;
+
+                    if (stableChecks >= 4) {
+                        for (let index = 1; index < segments.length; index += 1) {
+                            if (segments[index].start < segments[index - 1].start) {
+                                return {
+                                    ok: false,
+                                    code: "TRANSCRIPT_PANEL_INCONSISTENT",
+                                    message: "YouTube's transcript panel returned timestamps out of order."
+                                };
+                            }
+                        }
+
+                        const totalCharacters = segments.reduce(
+                            (total, item) => total + item.text.length,
+                            0
+                        );
+                        if (
+                            segments.length > 100000 ||
+                            totalCharacters > 1500000
+                        ) {
+                            return {
+                                ok: false,
+                                code: "CAPTION_LIMIT_EXCEEDED",
+                                message: "This video's transcript exceeds the current indexing limit."
+                            };
+                        }
+
+                        const snippets = segments.map((segment, index) => ({
+                            text: segment.text,
+                            start: segment.start,
+                            duration: index + 1 < segments.length
+                                ? Math.max(0, segments[index + 1].start - segment.start)
+                                : 0
+                        }));
+
+                        const panelLanguage = panel.querySelector(
+                            "ytd-transcript-footer-renderer #label-text"
+                        )?.textContent?.trim() || "";
+                        const selectedTrack = orderedTracks.find((track) => {
+                            const label = captionText(track).toLowerCase();
+                            const panelLabel = panelLanguage.toLowerCase();
+                            return panelLabel &&
+                                (panelLabel.includes(label) || label.includes(panelLabel));
+                        }) || orderedTracks[0] || null;
+                        const closeButton = panel.querySelector(
+                            "yt-icon-button#visibility-button button, " +
+                            "button[aria-label*='Close' i], [role='button'][aria-label*='Close' i]"
+                        );
+
+                        if (openedPanel && closeButton) {
+                            closeButton.click();
+                        }
+
+                        return {
+                            ok: true,
+                            video_id: expectedVideoId,
+                            language: panelLanguage ||
+                                (selectedTrack ? captionText(selectedTrack) : "YouTube transcript"),
+                            language_code: selectedTrack?.languageCode || "und",
+                            is_generated: selectedTrack?.kind === "asr",
+                            snippets,
+                            source: "youtube_transcript_panel"
+                        };
+                    }
+                }
+
+                return {
+                    ok: false,
+                    code: sawPanel ? "TRANSCRIPT_PANEL_INCOMPLETE" : "NO_TRANSCRIPT_PANEL",
+                    message: sawPanel
+                        ? "YouTube opened the transcript panel but its timed segments did not finish loading."
+                        : "YouTube did not expose its built-in transcript panel for this video."
+                };
+            };
+
             // Try up to six highest-priority tracks so one unavailable track does not
             // prevent the remaining preferred languages and fallbacks from being tried.
             const attempts = orderedTracks.slice(0, 6);
@@ -592,6 +828,12 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                 }
                 try {
                     const captionUrl = new URL(track.baseUrl, window.location.origin);
+                    if (captionUrl.searchParams.get("exp") === "xpe") {
+                        failures.push(
+                            "This caption URL requires YouTube's runtime proof-of-origin token (exp=xpe)."
+                        );
+                        continue;
+                    }
                     captionUrl.searchParams.set("fmt", "json3");
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -669,12 +911,23 @@ async function fetchBrowserTranscriptFromTab(tabId, videoId) {
                 }
             }
 
+            // Prefer YouTube's own rendered transcript over returning a generic
+            // failure. It uses the same authenticated player flow that works in
+            // the page even when direct timed-text URLs are proof-token gated.
+            const panelCapture = await captureTranscriptFromPanel();
+            if (panelCapture.ok) {
+                return panelCapture;
+            }
+            failures.push(panelCapture.message);
+
             return {
                 ok: false,
-                code: "CAPTION_FETCH_FAILED",
+                code: panelCapture.code || (
+                    captionTracks.length ? "CAPTION_FETCH_FAILED" : "NO_CAPTION_TRACKS"
+                ),
                 message: failures.length
-                    ? "The YouTube player exposed captions but they could not be fetched: " + failures.join("; ")
-                    : "The YouTube player did not expose a usable caption URL."
+                    ? "Browser caption acquisition failed. " + failures.join("; ")
+                    : "The YouTube player did not expose a usable caption source."
             };
         }
     });
@@ -875,7 +1128,8 @@ async function handleIndexPreparation(videoId, tabId, sendResponse) {
             action: data.action,
             ready: data.ready === true,
             error_code: data.error_code || null,
-            error_message: data.error_message || null
+            error_message: data.error_message || null,
+            browser_diagnostic: browserFailure
         });
     } catch (error) {
         const serverErrorMessage = error?.name === "AbortError"
