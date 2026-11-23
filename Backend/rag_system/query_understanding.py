@@ -125,6 +125,14 @@ def is_likely_follow_up(question: str) -> bool:
         r"\bthose\b",
         r"\bhere\b",
         r"\bthere\b",
+        r"\bwhat about\b",
+        r"\bhow about\b",
+        r"\bwhich one\b",
+        r"\bwhat does that mean\b",
+        r"\bwhy is that\b",
+        r"\b(?:which|what)\s+(?:study|studies|source|sources|paper|papers|research|"
+        r"result|results|method|methods|number|figure|claim|claims|person|people|"
+        r"company|companies|product|products|event|events|place|places)\b",
     )
 
     return any(

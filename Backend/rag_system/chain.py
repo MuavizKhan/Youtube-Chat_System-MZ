@@ -109,6 +109,7 @@ from .gold_evidence import (
 from .retrieval import (
     extract_video_id,
     expand_question_context,
+    get_all_documents,
     is_evidence_dense_question,
     is_overview_question,
     passes_strong_semantic_gate,
@@ -116,6 +117,9 @@ from .retrieval import (
     retrieve_question_context,
     retrieve_temporal_context,
 )
+
+from .overview_summarization import OverviewError, summarize_video_overview
+from .claim_verification import verify_answer_claims
 
 from .index_service import load_ready_index
 
@@ -1461,11 +1465,25 @@ def append_verified_response_timestamps(
     if temporal_answer != substantive_answer:
         return temporal_answer
 
+    verified_claim_count = 0
+    if isinstance(retrieval_trace, dict):
+        try:
+            verified_claim_count = int(retrieval_trace.get("verified_claim_count", 0))
+        except (TypeError, ValueError):
+            verified_claim_count = 0
+    if isinstance(retrieval_trace, dict) and retrieval_trace.get("route") == "video_wide_overview":
+        max_ranges = 8
+    elif verified_claim_count >= 4:
+        max_ranges = min(8, verified_claim_count)
+    else:
+        max_ranges = 3
+
     return append_relevant_source_timestamps(
         answer=temporal_answer,
         sources=sources,
         has_evidence=has_evidence,
         question=question,
+        max_ranges=max_ranges,
     )
 
 
@@ -9585,6 +9603,7 @@ def _retrieve_with_query_recovery_trace(
     question: str,
     llm_client: InferenceClient | Groq | None = None,
     video_id: str | None = None,
+    query_variants: list[str] | None = None,
 ) -> tuple[list, dict[str, object]]:
     """Run the bounded recovery ladder and capture stage diagnostics."""
 
@@ -9597,6 +9616,9 @@ def _retrieve_with_query_recovery_trace(
     weak_recovery_candidates_rejected = False
     weak_initial_recovery_attempted = False
     weak_initial_recovery_accepted = False
+    conversation_variant_attempted = False
+    conversation_variant_accepted = False
+    conversation_variant_count = 0
     planner_overview_rejected = False
     best_effort_overview_suppressed = False
     deterministic_fallback_attempted = False
@@ -9707,7 +9729,80 @@ def _retrieve_with_query_recovery_trace(
         )
     )
 
-    if initial_results:
+    # A history-aware query planner may supply alternate phrasings for a
+    # follow-up. They are retrieval hints only: each attempt must pass the
+    # existing strict semantic evidence gate before it can affect generation.
+    follow_up_anchors = []
+    weak_initial_for_follow_up = bool(citation_results) and not passes_strong_semantic_gate(
+        citation_results,
+        MAX_DISTANCE,
+    )
+    if query_variants:
+        seen_follow_up_queries = {question.strip().casefold()}
+        for variant in query_variants[:3]:
+            variant = (variant or "").strip()
+            key = variant.casefold()
+            if not variant or key in seen_follow_up_queries:
+                continue
+            seen_follow_up_queries.add(key)
+            conversation_variant_attempted = True
+            variant_bundle = retrieve_question_context(
+                vector_store=vector_store,
+                query=variant,
+                k=TOP_K,
+                fetch_k=MMR_FETCH_K,
+                lambda_mult=MMR_LAMBDA,
+                max_distance=MAX_DISTANCE,
+                expand_context=False,
+                allow_overview=False,
+                return_anchors=True,
+                return_status=True,
+            )
+            if isinstance(variant_bundle, tuple) and len(variant_bundle) == 3:
+                _variant_context, variant_anchors, variant_status = variant_bundle
+            elif isinstance(variant_bundle, tuple) and len(variant_bundle) == 2:
+                _variant_context, variant_anchors = variant_bundle
+                variant_status = {}
+            else:
+                variant_anchors = variant_bundle
+                variant_status = {}
+            gate_passed = passes_strong_semantic_gate(variant_anchors, MAX_DISTANCE)
+            variant_attempt = _build_retrieval_attempt_trace(
+                "conversation_history_query_variant",
+                variant_anchors,
+                query=variant,
+            )
+            variant_attempt["semantic_gate_passed"] = gate_passed
+            variant_attempt["accepted_for_generation"] = bool(variant_anchors and gate_passed)
+            if variant_status.get("weak_native_query_rejected"):
+                variant_attempt["rejection_reason"] = "weak_native_semantic_match"
+            elif variant_anchors and not gate_passed:
+                variant_attempt["rejection_reason"] = "weak_semantic_support"
+            attempts.append(variant_attempt)
+            conversation_variant_count += 1
+            if variant_anchors and gate_passed:
+                follow_up_anchors.extend(variant_anchors)
+        if follow_up_anchors:
+            initial_follow_up_anchors = (
+                []
+                if weak_initial_for_follow_up
+                else citation_results
+            )
+            citation_results = _merge_retrieval_pairs_by_chunk(
+                initial_follow_up_anchors,
+                follow_up_anchors,
+            )
+            final_results = expand_question_context(
+                vector_store,
+                question,
+                citation_results,
+            )
+            final_stage = "conversation_history_query_variants"
+            conversation_variant_accepted = True
+
+    if conversation_variant_accepted:
+        pass
+    elif initial_results:
         final_results = initial_results
         final_stage = "initial_strict"
 
@@ -10249,6 +10344,9 @@ def _retrieve_with_query_recovery_trace(
         "planner_latency_ms": round(planner_latency_ms, 2),
         "weak_initial_recovery_attempted": weak_initial_recovery_attempted,
         "weak_initial_recovery_accepted": weak_initial_recovery_accepted,
+        "conversation_variant_attempted": conversation_variant_attempted,
+        "conversation_variant_accepted": conversation_variant_accepted,
+        "conversation_variant_count": conversation_variant_count,
         "planner_overview_rejected": planner_overview_rejected,
         "best_effort_overview_suppressed": best_effort_overview_suppressed,
         "deterministic_fallback_attempted": deterministic_fallback_attempted,
@@ -10349,6 +10447,7 @@ def build_rag_chain(
             question=inputs["question"],
             llm_client=llm_client,
             video_id=inputs.get("video_id"),
+            query_variants=inputs.get("query_variants"),
         )
     )
 
@@ -11680,30 +11779,36 @@ def build_rag_chain(
                     lambda inputs:
                         inputs["answer_bundle"]["generation_trace"]
                 ),
+
+            prompt_visible_context=
+                RunnableLambda(
+                    lambda inputs:
+                        inputs["context"]
+                ),
         )
     )
 
     return final_chain
 
 
-def resolve_conversational_question(
+def resolve_conversational_query_plan(
     question: str,
     conversation_history: list[dict[str, str]] | None,
     llm_client: InferenceClient | Groq | None = None,
-) -> str:
-    """Resolve a likely follow-up into the standalone RAG question."""
+) -> tuple[str, list[str]]:
+    """Resolve a follow-up and retain bounded alternative transcript searches.
 
+    Conversation turns interpret references; only transcript retrieval results
+    passing the normal semantic evidence gate can support the final answer.
+    """
     if not conversation_history:
-        return question
+        return question, []
 
     from .query_understanding import is_likely_follow_up
 
     if not is_likely_follow_up(question):
-        return question
+        return question, []
 
-    # Query understanding uses the same configured provider as generation.
-    # Create it lazily only when the question actually needs follow-up
-    # resolution.
     if llm_client is None:
         llm_client = create_llm_client()
 
@@ -11714,10 +11819,28 @@ def resolve_conversational_question(
             conversation_history=conversation_history,
         )
         resolved = plan.standalone_question.strip()
+        if not resolved:
+            return question, []
 
-        if resolved and resolved.casefold() != question.casefold():
-            logger.info("Resolved conversational follow-up before RAG")
-            return resolved
+        variants = []
+        seen = {question.strip().casefold(), resolved.casefold()}
+        for candidate in plan.search_queries:
+            normalized = " ".join(candidate.split()).strip()
+            key = normalized.casefold()
+            if not normalized or key in seen:
+                continue
+            seen.add(key)
+            variants.append(normalized)
+            if len(variants) >= 2:
+                break
+
+        if resolved.casefold() != question.casefold():
+            logger.info(
+                "Resolved conversational follow-up before RAG; retained %s "
+                "alternative retrieval queries",
+                len(variants),
+            )
+        return resolved, variants
 
     except QueryUnderstandingError as error:
         logger.warning(
@@ -11727,7 +11850,21 @@ def resolve_conversational_question(
     except Exception:
         logger.exception("Unexpected follow-up resolution failure")
 
-    return question
+    return question, []
+
+
+def resolve_conversational_question(
+    question: str,
+    conversation_history: list[dict[str, str]] | None,
+    llm_client: InferenceClient | Groq | None = None,
+) -> str:
+    """Backward-compatible helper returning only the standalone question."""
+    resolved, _variants = resolve_conversational_query_plan(
+        question,
+        conversation_history,
+        llm_client,
+    )
+    return resolved
 
 
 # ============================================================
@@ -11830,7 +11967,7 @@ def answer_question(
     # Resolve follow-up before retrieval and generation
     # --------------------------------------------------------
 
-    question = resolve_conversational_question(
+    question, query_variants = resolve_conversational_query_plan(
         question=question,
         conversation_history=conversation_history,
         llm_client=llm_client,
@@ -11840,30 +11977,104 @@ def answer_question(
         question.casefold() != original_question.casefold()
     )
 
-    # --------------------------------------------------------
-    # Invoke chain
-    # --------------------------------------------------------
+    # Broad overview requests use a bounded map/reduce path over transcript
+    # chunks in chronological order. Targeted questions use existing RAG.
+    result = None
+    if _is_explicit_overview_request(question) and is_overview_question(question):
+        try:
+            overview_result = summarize_video_overview(
+                documents=get_all_documents(vector_store),
+                question=question,
+                generate_text=lambda prompt_value: generate_with_llm(
+                    client=generation_client,
+                    prompt_value=prompt_value,
+                ),
+            )
+            overview_retrieved = overview_result["retrieved_results"]
+            result = {
+                **overview_result,
+                "source_groups": merge_overlapping_results(overview_retrieved),
+            }
+        except Exception:
+            logger.exception(
+                "Video-wide overview path failed; falling back to the standard "
+                "evidence-gated retrieval chain."
+            )
 
-    result = rag_chain.invoke(
-
-        {
-            "question": question,
-            "video_id": video_id,
-        }
-    )
+    if result is None:
+        result = rag_chain.invoke(
+            {
+                "question": question,
+                "video_id": video_id,
+                "query_variants": query_variants,
+            }
+        )
 
 
     # --------------------------------------------------------
     # Retrieved results
     # --------------------------------------------------------
 
-    retrieved_results = result[
-        "retrieved_results"
-    ]
+    generation_trace = result.get("generation_trace", {})
+    if not isinstance(generation_trace, dict):
+        generation_trace = {}
+        result["generation_trace"] = generation_trace
+    context_budget = generation_trace.get("context_budget", {})
+    if not isinstance(context_budget, dict):
+        context_budget = {}
+        generation_trace["context_budget"] = context_budget
 
-    source_groups = result[
-    "source_groups"
-    ]
+    verification = verify_answer_claims(
+        answer=result.get("answer", ""),
+        question=question,
+        video_id=video_id,
+        retrieved_results=result.get("retrieved_results", []),
+        included_chunk_ids=context_budget.get("included_chunk_ids"),
+        prompt_visible_context=result.get("prompt_visible_context"),
+        client=generation_client,
+        fallback_answer=FALLBACK_ANSWER,
+    )
+    if verification.get("performed"):
+        generation_trace["answer_evidence_verification"] = {
+            key: value
+            for key, value in verification.items()
+            if key not in {"answer", "supported_chunk_ids"}
+        }
+        if verification.get("status") in {"completed", "no_prompt_visible_evidence"}:
+            result["answer"] = verification["answer"]
+            supported_chunk_ids = {
+                str(value) for value in verification.get("supported_chunk_ids", [])
+            }
+            filtered_results = [
+                pair
+                for pair in result.get("retrieved_results", [])
+                if isinstance(pair, (tuple, list))
+                and pair
+                and str(getattr(pair[0], "metadata", {}).get("chunk_id")) in supported_chunk_ids
+            ]
+            result["retrieved_results"] = filtered_results
+            context_budget["included_chunk_ids"] = sorted(supported_chunk_ids)
+            verification_trace = result.get("retrieval_trace", {})
+            if not isinstance(verification_trace, dict):
+                verification_trace = {}
+            filtered_ids = list(context_budget["included_chunk_ids"])
+            verification_trace["final_chunk_ids"] = filtered_ids
+            verification_trace["citation_chunk_ids"] = filtered_ids
+            verification_trace["verified_claim_count"] = (
+                verification.get("supported_claim_count", 0)
+                + verification.get("partial_claim_count", 0)
+            )
+            result["retrieval_trace"] = verification_trace
+            result["source_groups"] = merge_overlapping_results(filtered_results)
+
+    # This value is internal-only and is deliberately not included in the API
+    # response or observability payload.
+    result.pop("prompt_visible_context", None)
+    retrieved_results = result.get("retrieved_results", [])
+    source_groups = result.get(
+        "source_groups",
+        merge_overlapping_results(retrieved_results),
+    )
 
     retrieval_trace = result.get("retrieval_trace", {})
     citation_results = _select_citation_results(

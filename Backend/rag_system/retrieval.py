@@ -1605,6 +1605,14 @@ OVERVIEW_PATTERNS = (
     r"\bwhat is the main topic of (?:this|the) video\b",
     r"\bwhat is the primary topic of (?:this|the) video\b",
     r"\bwhat topics are covered\b",
+    r"\b(?:summarize|summarise|recap) (?:the )?(?:complete|full|entire) (?:video|story)\b",
+    r"\b(?:complete|full|entire) (?:video )?(?:summary|recap|story)\b",
+    r"\b(?:summarize|summarise|recap) everything (?:in|from) (?:this|the) video\b",
+    r"\b(?:main|key) (?:takeaways|highlights|events|moments) (?:from|of) (?:this|the) video\b",
+    r"\b(?:summarize|summarise) (?:the )?(?:whole|entire) (?:thing|video|story)\b",
+    r"\b(?:give|provide) me (?:the )?(?:complete|full|overall) summary\b",
+    r"\b(?:in|using) \d{1,2} (?:useful )?(?:points|pointers|bullets|takeaways)\b",
+    r"\b(?:key points|useful points) (?:from|of) (?:this|the) video\b",
 )
 
 
