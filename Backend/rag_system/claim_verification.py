@@ -274,6 +274,9 @@ def verify_answer_claims(
         240,
         200,
         160,
+        128,
+        96,
+        64,
     )))
     result = None
     selected_excerpt_limit = MAX_PASSAGE_CHARS
