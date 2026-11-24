@@ -3880,6 +3880,63 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert captured_clients["generation"] is groq_generation_client
     assert groq_factory_kwargs == {"max_retries": 0}
 
+
+@pytest.mark.regression
+def test_answer_question_propagates_overview_provider_rate_limit_without_rag_fallback(
+    monkeypatch,
+):
+    vector_store = object()
+    generation_client = object()
+    fallback_calls = []
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: vector_store)
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(
+        chain,
+        "create_groq_client",
+        lambda **_kwargs: generation_client,
+    )
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            fallback_calls.append("invoked")
+            raise AssertionError(
+                "Provider rate limits must not trigger a second RAG generation path."
+            )
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+    monkeypatch.setattr(chain, "_build_overview_continuation_plan", lambda *_args: None)
+    monkeypatch.setattr(chain, "_build_answer_revision_plan", lambda *_args: None)
+    monkeypatch.setattr(
+        chain,
+        "resolve_conversational_query_plan",
+        lambda *, question, **_kwargs: (question, []),
+    )
+    monkeypatch.setattr(chain, "_is_explicit_overview_request", lambda _question: True)
+    monkeypatch.setattr(chain, "is_overview_question", lambda _question: True)
+    monkeypatch.setattr(chain, "get_all_documents", lambda _vector_store: [doc(
+        1, 0, 30, "A transcript passage."
+    )])
+
+    def rate_limited_overview(**_kwargs):
+        raise chain.ProviderRateLimitError(retry_after_seconds=11)
+
+    monkeypatch.setattr(chain, "summarize_video_overview", rate_limited_overview)
+
+    with pytest.raises(chain.ProviderRateLimitError, match="Retry after about 11 seconds"):
+        chain.answer_question(
+            video_reference="Gfr50f6ZBvo",
+            question="Summarize this entire video chronologically.",
+        )
+
+    assert fallback_calls == []
+
 @pytest.mark.regression
 def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch):
     expanded_documents = [

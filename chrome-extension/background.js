@@ -37,10 +37,11 @@ const FEEDBACK_URL =
 const REQUEST_TIMEOUT_MS =
     15000;
 
-// Chat may include retrieval plus several model calls. Keep index requests
-// on the shorter timeout, but allow a normal slow generation to finish.
+// A whole-video overview can make multiple sequential Groq calls and may
+// need to wait through TPM retry windows. A 90-second abort left the synchronous
+// backend running after the UI had already offered the user another retry.
 const CHAT_REQUEST_TIMEOUT_MS =
-    90000;
+    240000;
 
 const CONTENT_SCRIPT_MARKER =
     "data-youtube-ai-chat-content-version";

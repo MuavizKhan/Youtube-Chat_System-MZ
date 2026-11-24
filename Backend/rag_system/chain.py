@@ -12182,6 +12182,11 @@ def answer_question(
                 **overview_result,
                 "source_groups": merge_overlapping_results(overview_retrieved),
             }
+        except ProviderRateLimitError:
+            # Provider throttling is not an overview-content failure. Let the
+            # API return the provider's Retry-After response instead of starting
+            # another generation path that consumes more of the same quota.
+            raise
         except Exception:
             logger.exception(
                 "Video-wide overview path failed; falling back to the standard "
