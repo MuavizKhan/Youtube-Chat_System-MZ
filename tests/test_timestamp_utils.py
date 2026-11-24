@@ -226,7 +226,6 @@ def test_timestamp_sanitizer_preserves_semicolon_in_sampling_disclaimer():
     )
 
     assert strip_unverified_timestamp_claims(answer) == answer
-\n
 
 
 def test_timestamp_sanitizer_removes_timecode_glued_to_closing_quote():
@@ -235,4 +234,3 @@ def test_timestamp_sanitizer_removes_timecode_glued_to_closing_quote():
     assert strip_unverified_timestamp_claims(answer) == (
         "She ends by choosing the word “peace”."
     )
-\n

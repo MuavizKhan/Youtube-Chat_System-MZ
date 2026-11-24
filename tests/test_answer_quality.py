@@ -738,4 +738,3 @@ def test_claim_verification_compacts_visible_excerpts_to_fit_assessment_budget(m
     assert result["assessment_input_chars"] == 7_900
     assert result["assessment_input_limit_chars"] == 8_000
     assert set(result["supported_chunk_ids"]) == {"1", "2"}
-\n
