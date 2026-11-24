@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 import json
+import logging
 import math
 import re
 import time
@@ -33,6 +34,8 @@ DEFAULT_MAX_ASSESSMENT_ASPECTS = 8
 DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS = 900
 DEFAULT_MINIMUM_SUPPORT_SCORE = 0.75
 MAX_ASSESSMENT_SUMMARY_CHARS = 320
+MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 30.0
+logger = logging.getLogger(__name__)
 
 _LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
@@ -402,7 +405,7 @@ def _token_usage(response: Any) -> tuple[int | None, int | None]:
 
 def _error_code(error: Exception) -> str:
     """Return a stable, non-sensitive provider error category."""
-    status_code = getattr(error, "status_code", None)
+    status_code = _provider_status_code(error)
     if status_code == 429 or "429" in str(error):
         return "provider_rate_limited"
     if status_code in {408, 504} or "timeout" in type(error).__name__.lower():
@@ -410,6 +413,50 @@ def _error_code(error: Exception) -> str:
     if status_code in {401, 403}:
         return "provider_authentication_error"
     return "provider_request_error"
+
+
+def _provider_status_code(error: Exception) -> int | None:
+    """Read an upstream HTTP status from the SDK exception or its response."""
+    for candidate in (error, getattr(error, "response", None)):
+        status = getattr(candidate, "status_code", None)
+        if status is None:
+            continue
+        try:
+            return int(status)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _provider_retry_after_seconds(error: Exception) -> float | None:
+    """Read the numeric Retry-After header supplied by the provider."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        headers = getattr(error, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw_value = headers.get("retry-after")
+        seconds = float(raw_value) if raw_value is not None else None
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    if seconds is None or not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+def _is_daily_token_quota_error(error: Exception) -> bool:
+    """Daily token exhaustion cannot be resolved by retrying this request."""
+    message = str(error).casefold()
+    return (
+        ("tokens per day" in message or re.search(r"\\btpd\\b", message) is not None)
+        and (
+            _provider_status_code(error) == 429
+            or "rate limit" in message
+            or "rate_limit_exceeded" in message
+        )
+    )
 
 
 def _passage_payload(passage: EvidencePassage) -> dict[str, Any]:
@@ -790,29 +837,75 @@ def assess_evidence_support(
             "extra_body": {"reasoning_effort": config.HF_REASONING_EFFORT},
         }
 
-    try:
-        response = client.chat.completions.create(**request_kwargs)
-    except Exception as error:
-        diagnostics = EvidenceAssessmentDiagnostics(
-            status=AssessmentRunStatus.PROVIDER_ERROR,
-            provider=provider_name,
-            model=model_name,
-            video_id=target_video_id,
-            request_count=1,
-            elapsed_ms=(time.perf_counter() - started) * 1000,
-            input_chars=input_chars,
-            input_limit_chars=max_input_chars,
-            passage_count=len(passage_values),
-            aspect_count=len(analysis.aspects),
-            error_code=_error_code(error),
-        )
-        assessments, notes = _unknown_assessments(
-            analysis,
-            f"Assessment unavailable ({diagnostics.error_code}).",
-        )
-        return _make_result(
-            analysis, assessments, notes, diagnostics, minimum_support_score
-        )
+    request_count = 0
+    cumulative_retry_wait_seconds = 0.0
+    while True:
+        request_count += 1
+        try:
+            response = client.chat.completions.create(**request_kwargs)
+            break
+        except Exception as error:
+            status_code = _provider_status_code(error)
+            is_groq_rate_limit = (
+                provider_name == "groq"
+                and status_code == 429
+                and not _is_daily_token_quota_error(error)
+            )
+            retry_after = _provider_retry_after_seconds(error)
+            configured_delay = config.GROQ_RETRY_DELAY_SECONDS * request_count
+            retry_delay = max(
+                configured_delay,
+                retry_after if retry_after is not None else 0.0,
+            )
+            can_retry = (
+                is_groq_rate_limit
+                and request_count <= config.GROQ_MAX_RETRIES
+                and cumulative_retry_wait_seconds + retry_delay
+                <= MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS
+            )
+            if can_retry:
+                cumulative_retry_wait_seconds += retry_delay
+                logger.warning(
+                    "Groq evidence assessment rate-limited; retrying "
+                    "attempt=%s max_attempts=%s retry_after_seconds=%s "
+                    "retry_delay_seconds=%.2f cumulative_retry_wait_seconds=%.2f",
+                    request_count,
+                    config.GROQ_MAX_RETRIES + 1,
+                    retry_after,
+                    retry_delay,
+                    cumulative_retry_wait_seconds,
+                )
+                time.sleep(retry_delay)
+                continue
+
+            if is_groq_rate_limit and request_count <= config.GROQ_MAX_RETRIES:
+                logger.warning(
+                    "Groq evidence assessment retry budget exhausted "
+                    "attempts=%s retry_after_seconds=%s waited_seconds=%.2f",
+                    request_count,
+                    retry_after,
+                    cumulative_retry_wait_seconds,
+                )
+            diagnostics = EvidenceAssessmentDiagnostics(
+                status=AssessmentRunStatus.PROVIDER_ERROR,
+                provider=provider_name,
+                model=model_name,
+                video_id=target_video_id,
+                request_count=request_count,
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+                input_chars=input_chars,
+                input_limit_chars=max_input_chars,
+                passage_count=len(passage_values),
+                aspect_count=len(analysis.aspects),
+                error_code=_error_code(error),
+            )
+            assessments, notes = _unknown_assessments(
+                analysis,
+                f"Assessment unavailable ({diagnostics.error_code}).",
+            )
+            return _make_result(
+                analysis, assessments, notes, diagnostics, minimum_support_score
+            )
 
     input_tokens, output_tokens = _token_usage(response)
     try:
