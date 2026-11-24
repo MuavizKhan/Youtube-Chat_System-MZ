@@ -27,9 +27,16 @@ def _duplicate_point(candidate: str, existing: Sequence[dict]) -> bool:
     normalized = _normalized_point_text(candidate)
     if not normalized:
         return True
+    candidate_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", normalized)
     for item in existing:
         current = _normalized_point_text(str(item.get("text", "")))
         if not current:
+            continue
+        current_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", current)
+        # Different numeric claims are materially distinct evidence, even when
+        # the surrounding wording is almost identical. Preserve them for the
+        # transcript claim verifier rather than fuzzy-collapsing their values.
+        if candidate_numbers != current_numbers:
             continue
         if normalized == current or SequenceMatcher(None, normalized, current).ratio() >= 0.88:
             return True
