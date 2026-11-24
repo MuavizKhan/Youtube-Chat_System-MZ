@@ -73,12 +73,31 @@ def parse_points(
     if content.startswith(fence):
         content = re.sub(r"^" + fence + r"(?:json)?\s*", "", content, flags=re.IGNORECASE)
         content = re.sub(r"\s*" + fence + r"$", "", content)
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise OverviewError("Overview model returned invalid JSON.") from error
-    if not isinstance(payload, dict) or set(payload) != {"points"} or not isinstance(payload["points"], list):
-        raise OverviewError("Overview model returned an invalid response schema.")
+    # Some chat-model completions append a short explanation or other
+    # trailing text after a valid JSON object despite the JSON-only prompt.
+    # Decode candidate objects independently and accept exactly one object
+    # with the required top-level schema. The unparsed prefix/suffix is never
+    # treated as evidence; every point still passes the strict ID/schema checks
+    # below. Multiple matching objects remain ambiguous and fail closed.
+    decoder = json.JSONDecoder()
+    payload_candidates = []
+    for match in re.finditer(r"\\{", content):
+        try:
+            candidate, _end = decoder.raw_decode(content, match.start())
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(candidate, dict)
+            and set(candidate) == {"points"}
+            and isinstance(candidate.get("points"), list)
+        ):
+            payload_candidates.append(candidate)
+
+    if not payload_candidates:
+        raise OverviewError("Overview model returned invalid JSON.")
+    if len(payload_candidates) != 1:
+        raise OverviewError("Overview model returned multiple ambiguous JSON payloads.")
+    payload = payload_candidates[0]
     result = []
     for item in payload["points"]:
         if not isinstance(item, dict) or set(item) != {"text", "evidence_ids"}:
