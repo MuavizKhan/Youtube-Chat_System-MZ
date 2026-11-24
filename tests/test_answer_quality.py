@@ -753,7 +753,7 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
         )
         for index in range(1, 9)
     ]
-    visible_context = "\\n".join(item.page_content for item in documents)
+    visible_context = "\n".join(item.page_content for item in documents)
     claims = [
         (
             f"The speaker describes timeline event {index} and explains "
@@ -761,7 +761,7 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
         )
         for index in range(1, 9)
     ]
-    answer = "\\n".join(
+    answer = "\n".join(
         f"{index}. {claim}" for index, claim in enumerate(claims, start=1)
     )
     attempted = []
