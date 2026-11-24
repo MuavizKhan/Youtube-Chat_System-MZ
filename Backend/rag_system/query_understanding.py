@@ -67,15 +67,19 @@ Return JSON with exactly these fields:
 Rules:
 1. Preserve the user's meaning.
 2. Do not invent names, events, facts, relationships, or conclusions.
-3. When conversation history is provided, use it only to resolve references
-   in the current question.
+3. When conversation history is provided, use it to resolve references and
+   understand whether the user is revising or continuing a previous answer.
 4. Never invent a referent when the conversation history does not establish
    one. Preserve the ambiguity instead.
 5. Do not treat conversation history as transcript evidence.
 6. Search queries should focus on concepts likely to appear in a transcript.
 7. For broad overview requests, set intent to "overview".
-8. Do not answer the question.
-9. Return JSON only.
+8. For a request to simplify, shorten, or rephrase an earlier answer, preserve
+   that answer's subject and scope in the standalone question and search terms.
+9. For a request for the remaining points of a prior overview, retrieve the
+   same full-video scope and avoid repeating points already returned.
+10. Do not answer the question.
+11. Return JSON only.
 """
 
 
@@ -105,10 +109,40 @@ def _format_conversation_history(
 def is_likely_follow_up(question: str) -> bool:
     """Return True for lightweight linguistic signals of a follow-up."""
 
+def is_answer_revision_request(question: str) -> bool:
+    """Return True when the user asks to change the presentation of a prior answer."""
+    normalized = " ".join(str(question or "").casefold().split())
+    return bool(re.search(
+        r"\b(?:simpler|more simply|plain english|plain language|easy words|"
+        r"easier to understand|less technical|shorter|more concise|brief version|"
+        r"rephrase|rewrite|simplify)\b",
+        normalized,
+    ))
+
+
+def is_overview_continuation_request(question: str) -> bool:
+    """Recognise requests to continue an earlier multi-point overview."""
+    normalized = " ".join(str(question or "").casefold().split())
+    return bool(re.search(
+        r"\b(?:rest|remaining|other|next|more)\b.{0,60}\b"
+        r"(?:points?|pointers?|bullets?|takeaways|items?|parts?)\b|"
+        r"\b(?:continue|carry on)\b.{0,60}\b"
+        r"(?:summary|overview|list|points?|pointers?|bullets?)\b",
+        normalized,
+    ))
+
+
+
     normalized = " ".join(question.lower().split())
 
     if not normalized:
         return False
+
+    if (
+        is_answer_revision_request(normalized)
+        or is_overview_continuation_request(normalized)
+    ):
+        return True
 
     follow_up_patterns = (
         r"\bthey\b",
@@ -132,7 +166,8 @@ def is_likely_follow_up(question: str) -> bool:
         r"\bwhy is that\b",
         r"\b(?:which|what)\s+(?:study|studies|source|sources|paper|papers|research|"
         r"result|results|method|methods|number|figure|claim|claims|person|people|"
-        r"company|companies|product|products|event|events|place|places)\b",
+        r"company|companies|product|products|event|events|place|places|religion|"
+        r"prophet|country|language|era|period|tradition|belief|series|episode)\b",
     )
 
     return any(

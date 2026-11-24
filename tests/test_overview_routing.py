@@ -13,6 +13,8 @@ from Backend.rag_system import chain, retrieval
         "Summarize the video in 5 pointers.",
         "Give me the main events from this video.",
         "Recap the entire video.",
+        "What is the context of this video?",
+        "Explain the context of this video.",
     ],
 )
 def test_generic_full_video_requests_use_overview_intent(question):

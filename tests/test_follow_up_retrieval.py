@@ -15,6 +15,12 @@ from Backend.rag_system import chain, query_understanding
         "How about the second example?",
         "What does that result mean?",
         "Which company was involved?",
+        "Which religion is this about?",
+        "What is a prophet?",
+        "Make the language simpler.",
+        "Can you say that in plain English?",
+        "What about the rest of the pointers?",
+        "Continue with the remaining points.",
     ],
 )
 def test_generic_follow_up_language_is_detected(question):
@@ -54,6 +60,62 @@ def test_follow_up_query_plan_retains_alternative_searches(monkeypatch):
         "study publication source and methods",
     ]
     assert calls[0]["conversation_history"] == history
+
+
+
+def test_answer_revision_uses_the_previous_question_and_answer_without_query_planner():
+    history = [
+        {"role": "user", "content": "What is the 250-year cycle?"},
+        {"role": "assistant", "content": "The video describes six stages of a civilization."},
+    ]
+    plan = chain._build_answer_revision_plan(
+        "Make the language simpler.",
+        history,
+    )
+    assert plan is not None
+    assert plan["question"] == "What is the 250-year cycle?"
+    assert plan["prior_answer"] == "The video describes six stages of a civilization."
+    assert plan["query_variants"][0] == "What is the 250-year cycle?"
+    assert plan["revision_instruction"] == "Make the language simpler."
+
+
+def test_answer_revision_ignores_fallback_and_rate_limit_messages():
+    history = [
+        {"role": "user", "content": "What is this about?"},
+        {"role": "assistant", "content": "I couldn't find enough information about that in the video."},
+    ]
+    assert chain._build_answer_revision_plan("Make it simpler.", history) is None
+
+
+def test_overview_continuation_returns_only_uncovered_point_budget():
+    history = [
+        {"role": "user", "content": "Summarize this video in 5 pointers."},
+        {
+            "role": "assistant",
+            "content": "1. The first supported development.\n\nRelevant timestamps: 00:00–00:30",
+        },
+    ]
+    plan = chain._build_overview_continuation_plan(
+        "What about the rest of the pointers?",
+        history,
+    )
+    assert plan is not None
+    assert plan["question"] == "Summarize this video in 5 pointers."
+    assert plan["requested_points"] == 4
+    assert plan["start_index"] == 2
+    assert "The first supported development" in plan["exclude_points"]
+
+
+def test_revision_prompt_marks_previous_answer_as_non_evidence():
+    prompt = chain.RAG_PROMPT.invoke({
+        "context": "Transcript fact.",
+        "question": "What is the cycle?",
+        "prior_answer": "Earlier answer text.",
+        "revision_instruction": "Make it simpler.",
+    })
+    user_prompt = chain.prompt_to_messages(prompt)[1]["content"]
+    assert "Earlier answer text." in user_prompt
+    assert "Make it simpler." in user_prompt
 
 
 def test_non_follow_up_does_not_call_query_planner(monkeypatch):

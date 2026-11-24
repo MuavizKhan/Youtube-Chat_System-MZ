@@ -367,3 +367,54 @@ def test_claim_audit_does_not_silently_merge_unchecked_overflow_claims(monkeypat
     assert result["truncated_claim_count"] == 2
     assert "Supported independent statement 9" not in result["answer"]
     assert "exceeded the 8-claim verification limit" in result["answer"]
+
+
+
+def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
+    documents = [
+        make_doc(
+            index,
+            index * 120,
+            f"Distinct section {index} describes a separate event. " + (f"detail-{index} " * 390),
+        )
+        for index in range(1, 7)
+    ]
+    map_calls = 0
+
+    def generate(prompt):
+        nonlocal map_calls
+        prompt_text = "\n".join(message.content for message in prompt.to_messages())
+        if "Section findings:" in prompt_text:
+            return json.dumps({
+                "points": [{
+                    "text": "Distinct section 1 describes a separate event.",
+                    "evidence_ids": ["P00001"],
+                }]
+            })
+
+        map_calls += 1
+        section_match = re.search(r"Chronological section (\d+) of", prompt_text)
+        assert section_match
+        section_number = int(section_match.group(1))
+        evidence_id = re.search(r"\[(P\d{5})\]", prompt_text).group(1)
+        return json.dumps({
+            "points": [{
+                "text": f"Distinct section {section_number} describes a separate event.",
+                "evidence_ids": [evidence_id],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize this video in 5 pointers.",
+        generate_text=generate,
+    )
+
+    stats = result["retrieval_trace"]["overview"]
+    assert stats["section_count"] == 6
+    assert stats["reducer_returned_point_count"] == 1
+    assert stats["map_fallback_points_added"] == 4
+    assert stats["returned_point_count"] == 5
+    assert stats["point_count_satisfied"] is True
+    assert map_calls == 6
+    assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [1, 2, 3, 4, 5]
