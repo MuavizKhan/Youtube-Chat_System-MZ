@@ -118,4 +118,3 @@ def overview_response_format_for_model(model_id: str) -> dict:
     if normalized_model_id in OVERVIEW_STRICT_JSON_MODELS:
         return OVERVIEW_STRICT_JSON_RESPONSE_FORMAT
     return OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT
-
