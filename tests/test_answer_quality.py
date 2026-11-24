@@ -5,7 +5,7 @@ import re
 import pytest
 from langchain_core.documents import Document
 
-from Backend.rag_system import claim_verification, overview_core, overview_summarization
+from Backend.rag_system import chain, claim_verification, overview_core, overview_prompts, overview_summarization
 from Backend.rag_system.evidence_assessment import AssessmentRunStatus
 from Backend.rag_system.evidence_contracts import EvidenceReference, EvidenceSupportStatus
 
@@ -508,3 +508,72 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
     assert stats["point_count_satisfied"] is True
     assert map_calls == 6
     assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [1, 2, 3, 4, 5]
+
+
+def test_overview_response_format_uses_strict_schema_for_gpt_oss():
+    response_format = overview_prompts.overview_response_format_for_model(
+        "openai/gpt-oss-20b"
+    )
+
+    assert response_format["type"] == "json_schema"
+    schema = response_format["json_schema"]
+    assert schema["strict"] is True
+    assert schema["schema"]["required"] == ["points"]
+    assert schema["schema"]["additionalProperties"] is False
+    point_schema = schema["schema"]["properties"]["points"]["items"]
+    assert point_schema["required"] == ["text", "evidence_ids"]
+    assert point_schema["additionalProperties"] is False
+
+
+def test_overview_response_format_uses_json_mode_for_other_groq_models():
+    assert overview_prompts.overview_response_format_for_model(
+        "llama-3.3-70b-versatile"
+    ) == {"type": "json_object"}
+
+
+def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
+    expected_answer = json.dumps({"points": []})
+    captured = {}
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=expected_answer),
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return response
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    prompt_value = SimpleNamespace(
+        messages=[
+            SimpleNamespace(type="system", content="Return JSON only."),
+            SimpleNamespace(type="human", content="Summarize this section."),
+        ]
+    )
+    response_format = overview_prompts.overview_response_format_for_model(
+        "openai/gpt-oss-20b"
+    )
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+
+    answer = chain.generate_with_groq(
+        client=client,
+        prompt_value=prompt_value,
+        response_format=response_format,
+    )
+
+    assert answer == expected_answer
+    assert captured["response_format"] == response_format
+    assert captured["model"] == chain.GROQ_MODEL_ID
+
