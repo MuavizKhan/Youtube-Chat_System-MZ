@@ -106,9 +106,6 @@ def _format_conversation_history(
     return "\n".join(lines) or "No previous conversation."
 
 
-def is_likely_follow_up(question: str) -> bool:
-    """Return True for lightweight linguistic signals of a follow-up."""
-
 def is_answer_revision_request(question: str) -> bool:
     """Return True when the user asks to change the presentation of a prior answer."""
     normalized = " ".join(str(question or "").casefold().split())
@@ -132,8 +129,9 @@ def is_overview_continuation_request(question: str) -> bool:
     ))
 
 
-
-    normalized = " ".join(question.lower().split())
+def is_likely_follow_up(question: str) -> bool:
+    """Return True for lightweight linguistic signals of a follow-up."""
+    normalized = " ".join(str(question or "").casefold().split())
 
     if not normalized:
         return False
@@ -168,13 +166,13 @@ def is_overview_continuation_request(question: str) -> bool:
         r"result|results|method|methods|number|figure|claim|claims|person|people|"
         r"company|companies|product|products|event|events|place|places|religion|"
         r"prophet|country|language|era|period|tradition|belief|series|episode)\b",
+        r"\bwhat\s+is\s+(?:a|the)\s+(?:prophet|religion|series|episode|tradition)\b",
     )
 
     return any(
         re.search(pattern, normalized)
         for pattern in follow_up_patterns
     )
-
 
 def _extract_response_content(response: Any) -> str:
     try:
