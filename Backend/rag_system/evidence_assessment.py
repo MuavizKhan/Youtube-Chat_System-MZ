@@ -450,7 +450,7 @@ def _is_daily_token_quota_error(error: Exception) -> bool:
     """Daily token exhaustion cannot be resolved by retrying this request."""
     message = str(error).casefold()
     return (
-        ("tokens per day" in message or re.search(r"\\btpd\\b", message) is not None)
+        ("tokens per day" in message or re.search(r"\btpd\b", message) is not None)
         and (
             _provider_status_code(error) == 429
             or "rate limit" in message
