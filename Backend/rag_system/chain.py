@@ -122,6 +122,7 @@ from .retrieval import (
 )
 
 from .overview_core import requested_count
+from .overview_prompts import overview_response_format_for_model
 from .overview_summarization import OverviewError, summarize_video_overview
 from .claim_verification import verify_answer_claims
 
@@ -8606,6 +8607,8 @@ def generate_with_huggingface(
 def generate_with_groq(
     client: Groq,
     prompt_value,
+    *,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     """Send the LangChain prompt to Groq and return the visible answer."""
 
@@ -8614,19 +8617,17 @@ def generate_with_groq(
 
     for attempt in range(GROQ_MAX_RETRIES + 1):
         try:
-            response = (
-                client
-                .chat
-                .completions
-                .create(
-                    model=GROQ_MODEL_ID,
-                    messages=messages,
-                    max_completion_tokens=GROQ_MAX_TOKENS,
-                    temperature=GROQ_TEMPERATURE,
-                    reasoning_effort=GROQ_REASONING_EFFORT,
-                    include_reasoning=False,
-                )
-            )
+            completion_options = {
+                "model": GROQ_MODEL_ID,
+                "messages": messages,
+                "max_completion_tokens": GROQ_MAX_TOKENS,
+                "temperature": GROQ_TEMPERATURE,
+                "reasoning_effort": GROQ_REASONING_EFFORT,
+                "include_reasoning": False,
+            }
+            if response_format is not None:
+                completion_options["response_format"] = response_format
+            response = client.chat.completions.create(**completion_options)
 
         except Exception as error:
             error_text = str(error).lower()
@@ -8780,6 +8781,8 @@ def generate_with_groq(
 def generate_with_llm(
     client,
     prompt_value,
+    *,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     """Dispatch generation to the configured inference provider."""
 
@@ -8787,6 +8790,7 @@ def generate_with_llm(
         return generate_with_groq(
             client=client,
             prompt_value=prompt_value,
+            response_format=response_format,
         )
 
     return generate_with_huggingface(
@@ -12159,6 +12163,11 @@ def answer_question(
                 generate_text=lambda prompt_value: generate_with_llm(
                     client=generation_client,
                     prompt_value=prompt_value,
+                    response_format=(
+                        overview_response_format_for_model(GROQ_MODEL_ID)
+                        if LLM_PROVIDER == "groq"
+                        else None
+                    ),
                 ),
             )
             overview_retrieved = overview_result["retrieved_results"]
