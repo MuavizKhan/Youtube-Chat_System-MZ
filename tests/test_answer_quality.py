@@ -105,8 +105,8 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
 
     def generate(prompt):
         calls.append(prompt)
-        prompt_text = "\\n".join(message.content for message in prompt.to_messages())
-        evidence_ids = re.findall(r"\\bP\\d{5}\\b", prompt_text)
+        prompt_text = "\n".join(message.content for message in prompt.to_messages())
+        evidence_ids = re.findall(r"\bP\d{5}\b", prompt_text)
         assert evidence_ids
         return json.dumps({
             "points": [{
