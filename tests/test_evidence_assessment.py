@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from Backend.rag_system import config
+from Backend.rag_system import config, evidence_assessment
 from Backend.rag_system.evidence_assessment import (
     AssessmentRunStatus,
     EvidenceAssessmentOutputError,
@@ -652,4 +652,128 @@ def test_unknown_model_status_is_not_silently_normalized():
     result = assess_evidence_support(parsed, (source,), client)
 
     assert result.diagnostics.status is AssessmentRunStatus.INVALID_RESPONSE
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
+
+@pytest.mark.unit
+def test_groq_assessment_retries_rate_limit_after_retry_after_and_succeeds(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "The transcript supports aspect A.", "c1")
+    rate_limit_error = RuntimeError("429 rate limit")
+    rate_limit_error.status_code = 429
+    rate_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "2"}
+    )
+
+    class RetryCompletions:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise rate_limit_error
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=output(
+                            output_item("a", "supported", 0.91, support=("p1",))
+                        ))
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=60),
+            )
+
+    completions = RetryCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.COMPLETED
+    assert result.diagnostics.request_count == 2
+    assert result.diagnostics.input_tokens == 120
+    assert result.diagnostics.output_tokens == 60
+    assert len(completions.calls) == 2
+    assert sleeps == [2.0]
+    assert result.assessments[0].status is EvidenceSupportStatus.SUPPORTED
+
+
+@pytest.mark.unit
+def test_groq_assessment_retry_wait_is_bounded(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    rate_limit_error = RuntimeError("429 rate limit")
+    rate_limit_error.status_code = 429
+    rate_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "20"}
+    )
+
+    class AlwaysLimitedCompletions:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise rate_limit_error
+
+    completions = AlwaysLimitedCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "provider_rate_limited"
+    assert result.diagnostics.request_count == 2
+    assert len(completions.calls) == 2
+    assert sleeps == [20.0]
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
+
+
+@pytest.mark.unit
+def test_groq_daily_token_quota_is_not_retried(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    daily_limit_error = RuntimeError("429 rate limit: tokens per day quota exhausted")
+    daily_limit_error.status_code = 429
+    daily_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "10"}
+    )
+    client, completions = fake_client(error=daily_limit_error)
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "provider_rate_limited"
+    assert result.diagnostics.request_count == 1
+    assert len(completions.calls) == 1
+    assert sleeps == []
     assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
