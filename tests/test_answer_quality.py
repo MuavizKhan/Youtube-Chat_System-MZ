@@ -140,10 +140,10 @@ def test_parse_points_accepts_one_valid_json_payload_with_model_wrapping_text():
         }]
     }
     raw = (
-        "Here is the requested response:\\n"
-        "```json\\n"
+        "Here is the requested response:\n"
+        "```json\n"
         + json.dumps(payload)
-        + "\\n```\\n"
+        + "\n```\n"
         "The response is complete."
     )
 
@@ -163,7 +163,7 @@ def test_parse_points_rejects_multiple_ambiguous_json_payloads():
             "evidence_ids": ["P00001"],
         }]
     }
-    raw = json.dumps(payload) + "\\n" + json.dumps(payload)
+    raw = json.dumps(payload) + "\n" + json.dumps(payload)
 
     with pytest.raises(overview_core.OverviewError, match="multiple ambiguous"):
         overview_core.parse_points(
