@@ -37,6 +37,7 @@ from typing import Any, Literal
 
 from Backend.rag_system.chain import ProviderRateLimitError, answer_question
 from Backend.rag_system.retrieval import extract_video_id
+from Backend.rag_system.browser_transcripts import BrowserTranscriptSubmission
 from Backend.rag_system.feedback import (
     FeedbackReceipt,
     FeedbackStore,
@@ -49,6 +50,7 @@ from Backend.rag_system.index_service import (
     recover_index_jobs,
     shutdown_index_workers,
     submit_index,
+    submit_browser_transcript,
 )
 
 from Backend.rag_system.config import (
@@ -73,6 +75,9 @@ from Backend.rag_system.config import (
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+
+# Browser caption uploads have a separate bounded request-size allowance.
+MAX_BROWSER_TRANSCRIPT_BODY_BYTES = 16 * 1024 * 1024
 
 # ============================================================
 # LOGGING
@@ -214,6 +219,12 @@ async def request_context_middleware(
 
     content_length = request.headers.get("content-length")
 
+    request_body_limit = (
+        MAX_BROWSER_TRANSCRIPT_BODY_BYTES
+        if request.url.path == "/index/browser-transcript"
+        else MAX_REQUEST_BODY_BYTES
+    )
+
     if content_length:
         try:
             request_size = int(content_length)
@@ -222,14 +233,14 @@ async def request_context_middleware(
 
         if (
             request_size is not None
-            and request_size > MAX_REQUEST_BODY_BYTES
+            and request_size > request_body_limit
         ):
             logger.warning(
                 "request rejected: body too large "
                 "request_id=%s size=%s limit=%s method=%s path=%s",
                 request_id,
                 request_size,
-                MAX_REQUEST_BODY_BYTES,
+                request_body_limit,
                 request.method,
                 request.url.path,
             )
@@ -679,6 +690,49 @@ def readiness():
 # ============================================================
 # INDEX PREPARATION AND STATUS
 # ============================================================
+
+@app.post(
+    "/index/browser-transcript",
+    response_model=IndexStatusResponse,
+    response_model_exclude_unset=True,
+)
+@limiter.limit(RATE_LIMIT)
+def index_browser_transcript(
+    submission: BrowserTranscriptSubmission,
+    request: Request,
+    response: Response,
+):
+    """Accept timestamped captions captured from the active YouTube tab."""
+    result = submit_browser_transcript(submission)
+    logger.info(
+        "Browser caption transcript accepted request_id=%s video_id=%s "
+        "state=%s language=%s generated=%s segments=%s",
+        request.state.request_id,
+        result.video_id,
+        result.state,
+        submission.language_code,
+        submission.is_generated,
+        len(submission.snippets),
+    )
+
+    if result.state == "failed":
+        response.status_code = 503
+    elif not result.ready:
+        response.status_code = 202
+
+    payload = {
+        "video_id": result.video_id,
+        "state": result.state,
+        "action": result.action,
+        "ready": result.ready,
+        "job_id": result.job_id,
+    }
+    if result.error_code:
+        payload["error_code"] = result.error_code
+    if result.error_message:
+        payload["error_message"] = result.error_message
+    return payload
+
 
 @app.post(
     "/index",

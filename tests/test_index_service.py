@@ -6,6 +6,7 @@ from Backend.rag_system.index_jobs import (
     JOB_BUILDING,
     JOB_FAILED,
     JOB_QUEUED,
+    JOB_READY,
     IndexJob,
 )
 from Backend.rag_system.indexing import (
@@ -393,12 +394,24 @@ def test_worker_persists_known_transcript_failure_as_safe_record(monkeypatch):
         def claim(self, video_id, worker_id):
             return job
 
+        def get(self, video_id):
+            return job
+
         def renew_lease(self, job_id, worker_id):
             return True
 
-        def mark_failed(self, job_id, worker_id, error):
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
             self.failed_error = error
             return True
+
+        def requeue_for_browser_transcript(self, job_id, worker_id):
+            return False
 
     store = FailedWorkerStore()
     monkeypatch.setattr(index_service, "_JOB_STORE", store)
@@ -565,6 +578,7 @@ def test_not_ready_error_carries_durable_job_id():
         ("NO_SUPPORTED_TRANSCRIPT", "No transcript was found in the requested languages."),
         ("VIDEO_UNAVAILABLE", "This YouTube video is unavailable."),
         ("INVALID_VIDEO_ID", "The supplied YouTube video reference is invalid."),
+        ("YOUTUBE_IP_BLOCKED", "YouTube blocked transcript requests from the backend IP."),
     ],
 )
 def test_worker_persists_and_status_exposes_every_known_transcript_failure(
@@ -599,7 +613,13 @@ def test_worker_persists_and_status_exposes_every_known_transcript_failure(
         def renew_lease(self, job_id, worker_id):
             return True
 
-        def mark_failed(self, job_id, worker_id, error):
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
             self.job = replace(
                 self.job,
                 status=JOB_FAILED,
@@ -634,3 +654,326 @@ def test_worker_persists_and_status_exposes_every_known_transcript_failure(
     assert status.error_code == error_code
     assert status.error_message == message
 
+
+
+
+@pytest.mark.unit
+def test_worker_rebuilds_when_browser_transcript_arrives_during_api_build(monkeypatch):
+    original_job = IndexJob(
+        job_id="job-browser-race",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+
+    class ReconciliationStore:
+        def __init__(self):
+            self.job = original_job
+            self.ready_fingerprint = None
+
+        def claim(self, video_id, worker_id):
+            return self.job
+
+        def get(self, video_id):
+            return self.job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_ready(
+            self,
+            job_id,
+            worker_id,
+            action,
+            indexed_transcript_fingerprint=None,
+        ):
+            if self.job.browser_transcript_fingerprint != indexed_transcript_fingerprint:
+                return False
+            self.ready_fingerprint = indexed_transcript_fingerprint
+            self.job = replace(
+                self.job,
+                status=JOB_READY,
+                worker_id=None,
+                lease_until=0.0,
+            )
+            return True
+
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
+            self.failed_error = error
+            return True
+
+        def requeue_for_browser_transcript(self, job_id, worker_id):
+            return False
+
+    store = ReconciliationStore()
+    calls = []
+    provenance = {
+        "source": "youtube_transcript_api",
+        "fingerprint": "a" * 64,
+    }
+
+    def build(video_id, languages=None, force_rebuild=False):
+        calls.append(force_rebuild)
+        if len(calls) == 1:
+            store.job = replace(
+                store.job,
+                browser_transcript_fingerprint="b" * 64,
+            )
+        else:
+            provenance.update(
+                source="youtube_browser_captions",
+                fingerprint="b" * 64,
+            )
+        return object(), IndexAction.CREATE
+
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(index_service, "ensure_index_with_action", build)
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(index_service, "get_index_transcript_provenance", lambda video_id: dict(provenance))
+
+    index_service._run_index_job(VIDEO_ID)
+
+    assert calls == [False, True]
+    assert store.ready_fingerprint == "b" * 64
+    assert store.job.status == JOB_READY
+
+
+@pytest.mark.unit
+def test_worker_retries_server_transcript_failure_when_browser_revision_arrives(monkeypatch):
+    original_job = IndexJob(
+        job_id="job-browser-fetch-race",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+
+    class ReconciliationStore:
+        def __init__(self):
+            self.job = original_job
+            self.ready_fingerprint = None
+            self.failed_error = None
+
+        def claim(self, video_id, worker_id):
+            return self.job
+
+        def get(self, video_id):
+            return self.job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_ready(
+            self,
+            job_id,
+            worker_id,
+            action,
+            indexed_transcript_fingerprint=None,
+        ):
+            self.ready_fingerprint = indexed_transcript_fingerprint
+            self.job = replace(self.job, status=JOB_READY)
+            return True
+
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
+            self.failed_error = error
+            return True
+
+        def requeue_for_browser_transcript(self, job_id, worker_id):
+            return False
+
+    store = ReconciliationStore()
+    calls = []
+    provenance = {
+        "source": "youtube_browser_captions",
+        "fingerprint": "f" * 64,
+    }
+
+    def build(video_id, languages=None, force_rebuild=False):
+        calls.append(force_rebuild)
+        if len(calls) == 1:
+            store.job = replace(
+                store.job,
+                browser_transcript_fingerprint="f" * 64,
+            )
+            raise RuntimeError("API acquisition failed before browser upload.")
+        return object(), IndexAction.CREATE
+
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(index_service, "ensure_index_with_action", build)
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(index_service, "get_index_transcript_provenance", lambda video_id: dict(provenance))
+
+    index_service._run_index_job(VIDEO_ID)
+
+    assert calls == [False, True]
+    assert store.ready_fingerprint == "f" * 64
+    assert store.failed_error is None
+
+
+
+@pytest.mark.unit
+def test_ready_job_is_not_reported_ready_for_a_different_transcript_source(monkeypatch):
+    job = IndexJob(
+        job_id="job-provenance-mismatch",
+        video_id=VIDEO_ID,
+        status=JOB_READY,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+        browser_transcript_fingerprint="b" * 64,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_transcript_provenance",
+        lambda video_id: {
+            "source": "youtube_transcript_api",
+            "fingerprint": "a" * 64,
+        },
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.ready is False
+    assert status.state == "failed"
+
+
+@pytest.mark.unit
+def test_ready_job_is_reported_ready_when_browser_revision_matches(monkeypatch):
+    job = IndexJob(
+        job_id="job-provenance-match",
+        video_id=VIDEO_ID,
+        status=JOB_READY,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=0.0,
+        worker_id=None,
+        browser_transcript_fingerprint="b" * 64,
+    )
+    monkeypatch.setattr(index_service, "recover_index_jobs", lambda: None)
+    monkeypatch.setattr(index_service, "_JOB_STORE", FakeJobStore(job))
+    monkeypatch.setattr(index_service, "get_index_state", lambda video_id: IndexState.VALID)
+    monkeypatch.setattr(
+        index_service,
+        "get_index_transcript_provenance",
+        lambda video_id: {
+            "source": "youtube_browser_captions",
+            "fingerprint": "b" * 64,
+        },
+    )
+
+    status = index_service.get_index_status(VIDEO_ID)
+
+    assert status.ready is True
+    assert status.state == "ready"
+
+
+
+@pytest.mark.unit
+def test_browser_upload_between_worker_failure_check_and_mark_failed_is_requeued(monkeypatch):
+    job = IndexJob(
+        job_id="job-failure-finalization-race",
+        video_id=VIDEO_ID,
+        status=JOB_BUILDING,
+        action=IndexAction.CREATE.value,
+        languages=None,
+        attempt=1,
+        error=None,
+        created_at=0.0,
+        updated_at=0.0,
+        lease_until=9999999999.0,
+        worker_id="worker-1",
+    )
+
+    class FailureRaceStore:
+        def __init__(self):
+            self.job = job
+            self.mark_failed_expected = "not-called"
+            self.requeued = False
+
+        def claim(self, video_id, worker_id):
+            return self.job
+
+        def get(self, video_id):
+            return self.job
+
+        def renew_lease(self, job_id, worker_id):
+            return True
+
+        def mark_failed(
+            self,
+            job_id,
+            worker_id,
+            error,
+            expected_browser_transcript_fingerprint=None,
+        ):
+            # A browser request commits just before SQLite applies the failure CAS.
+            self.mark_failed_expected = expected_browser_transcript_fingerprint
+            self.job = replace(
+                self.job,
+                browser_transcript_fingerprint="c" * 64,
+            )
+            return (
+                self.job.browser_transcript_fingerprint
+                == expected_browser_transcript_fingerprint
+            )
+
+        def requeue_for_browser_transcript(self, job_id, worker_id):
+            self.requeued = True
+            self.job = replace(self.job, status=JOB_QUEUED)
+            return True
+
+    store = FailureRaceStore()
+    monkeypatch.setattr(index_service, "_JOB_STORE", store)
+    monkeypatch.setattr(
+        index_service,
+        "ensure_index_with_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TranscriptAcquisitionError(
+                "YOUTUBE_IP_BLOCKED",
+                "YouTube blocked transcript requests from the backend IP.",
+            )
+        ),
+    )
+
+    index_service._run_index_job(VIDEO_ID)
+
+    assert store.mark_failed_expected is None
+    assert store.requeued is True
+    assert store.job.status == JOB_QUEUED
