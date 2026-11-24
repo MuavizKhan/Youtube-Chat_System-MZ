@@ -5,7 +5,7 @@ import re
 import pytest
 from langchain_core.documents import Document
 
-from Backend.rag_system import claim_verification, overview_summarization
+from Backend.rag_system import claim_verification, overview_core, overview_summarization
 from Backend.rag_system.evidence_assessment import AssessmentRunStatus
 from Backend.rag_system.evidence_contracts import EvidenceReference, EvidenceSupportStatus
 
@@ -126,9 +126,7 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     assert stats["section_limit_sampling"] is True
     assert stats["selected_document_count"] < len(documents)
     assert stats["selected_fraction"] < 1
-    assert 1 <= stats["section_count"] <= overview_summarization.MAX_SECTIONS if hasattr(
-        overview_summarization, "MAX_SECTIONS"
-    ) else 1 <= stats["section_count"] <= 12
+    assert 1 <= stats["section_count"] <= overview_core.MAX_SECTIONS
     assert stats["map_calls"] == stats["section_count"]
     assert len(calls) == stats["map_calls"] + 1
     assert "samples sections across the full timeline" in result["answer"]
