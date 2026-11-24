@@ -311,7 +311,7 @@ def verify_answer_claims(
                 max_passages=MAX_PASSAGES,
                 max_aspects=MAX_CLAIMS,
             )
-            except Exception:
+        except Exception:
             logger.exception("Unexpected answer claim assessment failure.")
             return {
                 "answer": answer,
