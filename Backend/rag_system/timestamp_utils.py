@@ -43,7 +43,7 @@ _TIMESTAMP_LOCATION_CUE_WORD_PATTERN = re.compile(
     r"\b(?:timestamp(?:s)?|timecode|time\s*stamp|mark)\b",
     re.IGNORECASE,
 )
-_TIMESTAMP_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?؟؛;])\s+")
+_TIMESTAMP_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?؟])\s+")
 _TIMESTAMP_STRIP_EDGE_CHARS = " \t,;:—–-()[]{}•*"
 
 
