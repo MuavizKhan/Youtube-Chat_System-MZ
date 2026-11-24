@@ -102,7 +102,7 @@ def test_chat_timeout_allows_slow_generation_without_changing_index_timeout():
     ).read_text(encoding="utf-8")
 
     assert "const REQUEST_TIMEOUT_MS =\n    15000;" in background
-    assert "const CHAT_REQUEST_TIMEOUT_MS =\n    90000;" in background
+    assert "const CHAT_REQUEST_TIMEOUT_MS =\n    240000;" in background
 
     start = background.index("async function handleChatRequest(")
     end = background.index("// 4.", start)
