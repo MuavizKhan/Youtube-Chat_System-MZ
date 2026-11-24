@@ -577,3 +577,30 @@ def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
     assert captured["response_format"] == response_format
     assert captured["model"] == chain.GROQ_MODEL_ID
 
+
+def test_generate_with_llm_forwards_response_format_to_groq(monkeypatch):
+    captured = {}
+    response_format = overview_prompts.overview_response_format_for_model(
+        "openai/gpt-oss-20b"
+    )
+
+    def fake_generate_with_groq(*, client, prompt_value, response_format=None):
+        captured["client"] = client
+        captured["prompt_value"] = prompt_value
+        captured["response_format"] = response_format
+        return "generated"
+
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(chain, "generate_with_groq", fake_generate_with_groq)
+
+    result = chain.generate_with_llm(
+        client="test-client",
+        prompt_value="test-prompt",
+        response_format=response_format,
+    )
+
+    assert result == "generated"
+    assert captured["client"] == "test-client"
+    assert captured["prompt_value"] == "test-prompt"
+    assert captured["response_format"] == response_format
+
