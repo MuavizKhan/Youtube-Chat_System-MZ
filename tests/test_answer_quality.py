@@ -83,6 +83,57 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
     assert len(result["retrieved_results"]) <= stats["selected_document_count"]
 
 
+def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
+    # The full transcript is exactly at the 48,000-character source budget,
+    # but its uneven chunk sizes require 15 chronological sections at the
+    # 4,500-character per-section limit (12 large chunks + 3 small-chunk
+    # sections). The overview must sample more coarsely instead of falling
+    # back to sparse similarity retrieval.
+    documents = [
+        make_doc(
+            index,
+            index * 15,
+            (
+                "Opening development " + ("x" * (3000 - len("Opening development")))
+                if index <= 12
+                else "Later development " + ("y" * (1000 - len("Later development")))
+            ),
+        )
+        for index in range(1, 25)
+    ]
+    calls = []
+
+    def generate(prompt):
+        calls.append(prompt)
+        prompt_text = "\\n".join(message.content for message in prompt.to_messages())
+        evidence_ids = re.findall(r"\\bP\\d{5}\\b", prompt_text)
+        assert evidence_ids
+        return json.dumps({
+            "points": [{
+                "text": "A transcript-supported development.",
+                "evidence_ids": [evidence_ids[0]],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize this entire video chronologically.",
+        generate_text=generate,
+    )
+
+    stats = result["retrieval_trace"]["overview"]
+    assert stats["coverage_mode"] == "timeline_stratified"
+    assert stats["section_limit_sampling"] is True
+    assert stats["selected_document_count"] < len(documents)
+    assert stats["selected_fraction"] < 1
+    assert 1 <= stats["section_count"] <= overview_summarization.MAX_SECTIONS if hasattr(
+        overview_summarization, "MAX_SECTIONS"
+    ) else 1 <= stats["section_count"] <= 12
+    assert stats["map_calls"] == stats["section_count"]
+    assert len(calls) == stats["map_calls"] + 1
+    assert "samples sections across the full timeline" in result["answer"]
+
+
 def test_overview_rejects_model_invented_evidence_ids():
     with pytest.raises(overview_summarization.OverviewError):
         overview_summarization.summarize_video_overview(
