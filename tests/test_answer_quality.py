@@ -738,3 +738,110 @@ def test_claim_verification_compacts_visible_excerpts_to_fit_assessment_budget(m
     assert result["assessment_input_chars"] == 7_900
     assert result["assessment_input_limit_chars"] == 8_000
     assert set(result["supported_chunk_ids"]) == {"1", "2"}
+
+
+def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monkeypatch):
+    documents = [
+        make_doc(
+            index,
+            index * 30,
+            (
+                f"The speaker describes timeline event {index} in detail, including "
+                "the people, place, and circumstances around this development. "
+                + (f"Supporting transcript context for timeline event {index}. " * 20)
+            ),
+        )
+        for index in range(1, 9)
+    ]
+    visible_context = "\\n".join(item.page_content for item in documents)
+    claims = [
+        (
+            f"The speaker describes timeline event {index} and explains "
+            "the main development during this part of the interview."
+        )
+        for index in range(1, 9)
+    ]
+    answer = "\\n".join(
+        f"{index}. {claim}" for index, claim in enumerate(claims, start=1)
+    )
+    attempted = []
+
+    def fake_assessment(analysis, passages, client, **kwargs):
+        lengths = [len(item.text) for item in passages]
+        attempted.append((lengths, len(analysis.aspects)))
+        assert len(passages) == 8
+        assert len(analysis.aspects) == 8
+        assert all(item.text in visible_context for item in passages)
+
+        # Reproduce the live 8,131-character failure at eight 160-character
+        # excerpts, keeping the assessor's fixed prompt/claim overhead constant.
+        input_chars = 6_851 + sum(lengths)
+        over_budget = input_chars > 8_000
+        diagnostics = SimpleNamespace(
+            status=(
+                AssessmentRunStatus.BUDGET_EXCEEDED
+                if over_budget
+                else AssessmentRunStatus.COMPLETED
+            ),
+            error_code=(
+                "assessment_input_character_budget_exceeded"
+                if over_budget
+                else None
+            ),
+            input_chars=input_chars,
+            input_limit_chars=8_000,
+            passage_count=len(passages),
+            aspect_count=len(analysis.aspects),
+            request_count=0 if over_budget else 1,
+        )
+        if over_budget:
+            return SimpleNamespace(diagnostics=diagnostics, assessments=[])
+
+        assessments = [
+            SimpleNamespace(
+                aspect_id=aspect.aspect_id,
+                status=EvidenceSupportStatus.SUPPORTED,
+                supporting_evidence=(passages[index].references[0],),
+            )
+            for index, aspect in enumerate(analysis.aspects)
+        ]
+        return SimpleNamespace(
+            diagnostics=diagnostics,
+            assessments=assessments,
+        )
+
+    monkeypatch.setattr(
+        claim_verification,
+        "assess_evidence_support",
+        fake_assessment,
+    )
+
+    result = claim_verification.verify_answer_claims(
+        answer=answer,
+        question="Summarize this entire video chronologically.",
+        video_id="video-1",
+        retrieved_results=[
+            (document, float(index))
+            for index, document in enumerate(documents, start=1)
+        ],
+        included_chunk_ids=[str(index) for index in range(1, 9)],
+        prompt_visible_context=visible_context,
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+    )
+
+    assert [max(lengths) for lengths, _ in attempted] == [
+        480, 400, 320, 240, 200, 160, 128
+    ]
+    assert all(aspect_count == 8 for _, aspect_count in attempted)
+    assert result["status"] == "completed"
+    assert result["claim_count"] == 8
+    assert result["truncated_claim_count"] == 0
+    assert result["supported_claim_count"] == 8
+    assert result["partial_claim_count"] == 0
+    assert result["removed_claim_count"] == 0
+    assert result["assessment_input_chars"] == 7_875
+    assert result["assessment_input_limit_chars"] == 8_000
+    assert result["assessment_compaction_attempts"] == 7
+    assert result["assessment_passage_excerpt_limit"] == 128
+    assert len(result["supported_chunk_ids"]) == 8
