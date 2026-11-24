@@ -88,17 +88,23 @@ def should_verify_answer(answer: str, question: str) -> bool:
     ))
 
 
-def _excerpt(text: str, terms: set[str]) -> str:
+def _excerpt(
+    text: str,
+    terms: set[str],
+    *,
+    max_chars: int = MAX_PASSAGE_CHARS,
+) -> str:
+    """Choose a bounded, claim-relevant excerpt from text already shown to generation."""
     content = " ".join(text.split())
-    if len(content) <= MAX_PASSAGE_CHARS:
+    if len(content) <= max_chars:
         return content
-    step = max(80, MAX_PASSAGE_CHARS // 3)
+    step = max(40, max_chars // 3)
     windows = [
-        content[start : start + MAX_PASSAGE_CHARS]
-        for start in range(0, max(1, len(content) - MAX_PASSAGE_CHARS + 1), step)
+        content[start : start + max_chars]
+        for start in range(0, max(1, len(content) - max_chars + 1), step)
     ]
     if not windows:
-        return content[:MAX_PASSAGE_CHARS]
+        return content[:max_chars]
     return max(windows, key=lambda value: len(terms & _terms(value)))
 
 
@@ -238,27 +244,6 @@ def verify_answer_claims(
         }
 
     terms = _terms(question + " " + answer)
-    passages = []
-    for index, (document, visible_text) in enumerate(documents, start=1):
-        meta = _meta(document)
-        chunk_id = meta.get("chunk_id")
-        try:
-            start, end = float(meta.get("start")), float(meta.get("end"))
-            if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
-                start = end = None
-        except (TypeError, ValueError, OverflowError):
-            start = end = None
-        passages.append(EvidencePassage(
-            passage_id=f"A{index:02d}",
-            text=visible_text,
-            references=(EvidenceReference(
-                video_id=video_id,
-                chunk_id=str(chunk_id),
-                start_seconds=start,
-                end_seconds=end,
-            ),),
-        ))
-
     aspects = tuple(
         EvidenceAspect(
             aspect_id=f"claim_{index:02d}",
@@ -275,36 +260,97 @@ def verify_answer_claims(
         subject=question[:240],
         analysis_source="generated_answer_claim_audit",
     )
-    try:
-        result = assess_evidence_support(
-            analysis,
-            passages,
-            client,
-            max_input_chars=MAX_INPUT_CHARS,
-            max_passages=MAX_PASSAGES,
-            max_aspects=MAX_CLAIMS,
-        )
-    except Exception:
-        logger.exception("Unexpected answer claim assessment failure.")
-        return {
-            "answer": answer,
-            "performed": True,
-            "status": AssessmentRunStatus.PROVIDER_ERROR.value,
-            "claim_count": len(claims),
-            "truncated_claim_count": truncated_claim_count,
-            "supported_claim_count": 0,
-            "partial_claim_count": 0,
-            "removed_claim_count": 0,
-            "supported_chunk_ids": [],
-            "error_code": "unexpected_assessment_error",
-        }
+
+    # The assessor budget includes its fixed system instructions, the entire
+    # claim list, passage metadata and transcript excerpts. A set of eight
+    # otherwise valid passages can therefore exceed the hard 8,000-character
+    # limit. Repack only the already prompt-visible excerpts into progressively
+    # smaller exact windows; do not drop claims, admit hidden transcript text,
+    # or raise the assessor's hard budget.
+    excerpt_limits = tuple(dict.fromkeys((
+        MAX_PASSAGE_CHARS,
+        400,
+        320,
+        240,
+        200,
+        160,
+    )))
+    result = None
+    selected_excerpt_limit = MAX_PASSAGE_CHARS
+    assessment_compaction_attempts = 0
+    for excerpt_limit in excerpt_limits:
+        selected_excerpt_limit = excerpt_limit
+        assessment_compaction_attempts += 1
+        passages = []
+        for index, (document, visible_text) in enumerate(documents, start=1):
+            meta = _meta(document)
+            chunk_id = meta.get("chunk_id")
+            try:
+                start, end = float(meta.get("start")), float(meta.get("end"))
+                if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                    start = end = None
+            except (TypeError, ValueError, OverflowError):
+                start = end = None
+            passages.append(EvidencePassage(
+                passage_id=f"A{index:02d}",
+                text=_excerpt(visible_text, terms, max_chars=excerpt_limit),
+                references=(EvidenceReference(
+                    video_id=video_id,
+                    chunk_id=str(chunk_id),
+                    start_seconds=start,
+                    end_seconds=end,
+                ),),
+            ))
+
+        try:
+            result = assess_evidence_support(
+                analysis,
+                passages,
+                client,
+                max_input_chars=MAX_INPUT_CHARS,
+                max_passages=MAX_PASSAGES,
+                max_aspects=MAX_CLAIMS,
+            )
+            except Exception:
+            logger.exception("Unexpected answer claim assessment failure.")
+            return {
+                "answer": answer,
+                "performed": True,
+                "status": AssessmentRunStatus.PROVIDER_ERROR.value,
+                "claim_count": len(claims),
+                "truncated_claim_count": truncated_claim_count,
+                "supported_claim_count": 0,
+                "partial_claim_count": 0,
+                "removed_claim_count": 0,
+                "supported_chunk_ids": [],
+                "assessment_compaction_attempts": assessment_compaction_attempts,
+                "assessment_passage_excerpt_limit": excerpt_limit,
+                "error_code": "unexpected_assessment_error",
+            }
+        diagnostic = result.diagnostics
+        if not (
+            diagnostic.status is AssessmentRunStatus.BUDGET_EXCEEDED
+            and diagnostic.error_code == "assessment_input_character_budget_exceeded"
+        ):
+            break
+
     diagnostic = result.diagnostics
+    assessment_diagnostics = {
+        "assessment_input_chars": getattr(diagnostic, "input_chars", None),
+        "assessment_input_limit_chars": getattr(diagnostic, "input_limit_chars", MAX_INPUT_CHARS),
+        "assessment_passage_count": getattr(diagnostic, "passage_count", len(documents)),
+        "assessment_aspect_count": getattr(diagnostic, "aspect_count", len(claims)),
+        "assessment_request_count": getattr(diagnostic, "request_count", None),
+        "assessment_compaction_attempts": assessment_compaction_attempts,
+        "assessment_passage_excerpt_limit": selected_excerpt_limit,
+    }
     if diagnostic.status is not AssessmentRunStatus.COMPLETED:
         return {
             "answer": answer, "performed": True, "status": diagnostic.status.value,
             "claim_count": len(claims), "truncated_claim_count": truncated_claim_count,
             "supported_claim_count": 0, "partial_claim_count": 0, "removed_claim_count": 0,
             "supported_chunk_ids": [], "error_code": diagnostic.error_code,
+            **assessment_diagnostics,
         }
 
     by_id = {item.aspect_id: item for item in result.assessments}
@@ -372,4 +418,5 @@ def verify_answer_claims(
         "supported_chunk_ids": chunk_ids,
         "claim_evidence": claim_evidence,
         "error_code": None,
+        **assessment_diagnostics,
     }
