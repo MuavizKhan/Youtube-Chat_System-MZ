@@ -182,6 +182,11 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
         if target_count >= len(selected):
             target_count = len(selected) - 1
         selected = even_sample(valid, target_count)
+        while (
+            len(selected) > 1
+            and sum(len(item.page_content) for item in selected) > MAX_SOURCE_CHARS
+        ):
+            selected = even_sample(valid, len(selected) - 1)
         section_limit_sampling = True
         sections, lookup = pack_sections(selected)
 
