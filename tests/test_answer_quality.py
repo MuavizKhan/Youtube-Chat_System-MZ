@@ -578,6 +578,55 @@ def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
     assert captured["model"] == chain.GROQ_MODEL_ID
 
 
+def test_generate_with_groq_keeps_prose_sanitization_without_response_format(monkeypatch):
+    captured = {}
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="A normal prose answer."),
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+        ),
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return response
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    prompt_value = SimpleNamespace(
+        messages=[
+            SimpleNamespace(type="system", content="Answer normally."),
+            SimpleNamespace(type="human", content="What happened?"),
+        ]
+    )
+    sanitizer_calls = []
+
+    def fake_sanitizer(value):
+        sanitizer_calls.append(value)
+        return "sanitized prose"
+
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+    monkeypatch.setattr(chain, "sanitize_generated_answer", fake_sanitizer)
+
+    answer = chain.generate_with_groq(
+        client=client,
+        prompt_value=prompt_value,
+    )
+
+    assert answer == "sanitized prose"
+    assert sanitizer_calls == ["A normal prose answer."]
+    assert "response_format" not in captured
+
+
 def test_generate_with_llm_forwards_response_format_to_groq(monkeypatch):
     captured = {}
     response_format = overview_prompts.overview_response_format_for_model(
