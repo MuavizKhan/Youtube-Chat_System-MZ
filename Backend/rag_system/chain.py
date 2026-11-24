@@ -8763,6 +8763,13 @@ def generate_with_groq(
         answer = extract_chat_completion_answer(response)
 
         if answer:
+            # Structured responses are machine-readable payloads, not prose.
+            # The natural-language sanitizer trims JSON delimiters as edge
+            # punctuation, corrupting valid objects before schema validation.
+            # Preserve JSON here; overview parsing and transcript-evidence
+            # validation remain mandatory downstream.
+            if response_format is not None:
+                return answer.strip()
             return sanitize_generated_answer(answer)
 
         diagnostics = get_chat_response_diagnostics(response)
