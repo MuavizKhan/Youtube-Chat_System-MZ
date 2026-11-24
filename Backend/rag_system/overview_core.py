@@ -142,21 +142,54 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
             return f"{hours:02d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
         return f"{fmt(start)}–{fmt(end)}"
 
-    sections, current, size, lookup = [], [], 0, {}
-    for index, document in enumerate(selected, start=1):
-        passage_id = f"P{index:05d}"
-        chunk_id = metadata(document)["chunk_id"]
-        line = f"[{passage_id}] [{timestamp(document)}] (chunk {chunk_id}) {document.page_content[:MAX_SECTION_CHARS]}"
-        if current and size + len(line) > MAX_SECTION_CHARS:
+    def pack_sections(items: Sequence[Any]) -> tuple[list[list[dict]], dict]:
+        sections: list[list[dict]] = []
+        current: list[dict] = []
+        size = 0
+        lookup: dict[str, Any] = {}
+        for index, document in enumerate(items, start=1):
+            passage_id = f"P{index:05d}"
+            chunk_id = metadata(document)["chunk_id"]
+            prefix = f"[{passage_id}] [{timestamp(document)}] (chunk {chunk_id}) "
+            if len(prefix) > MAX_SECTION_CHARS:
+                raise OverviewError("Transcript chunk metadata exceeds the section limit.")
+            # The complete rendered row, including its timestamp and evidence
+            # identifier, must fit the section budget. Previously the text slice
+            # alone used MAX_SECTION_CHARS, allowing a single row to exceed it.
+            content_limit = MAX_SECTION_CHARS - len(prefix)
+            line = prefix + document.page_content[:content_limit]
+            if current and size + len(line) > MAX_SECTION_CHARS:
+                sections.append(current)
+                current, size = [], 0
+            current.append({"id": passage_id, "document": document, "line": line})
+            lookup[passage_id] = document
+            size += len(line)
+        if current:
             sections.append(current)
-            current, size = [], 0
-        current.append({"id": passage_id, "document": document, "line": line})
-        lookup[passage_id] = document
-        size += len(line)
-    if current:
-        sections.append(current)
+        return sections, lookup
+
+    sections, lookup = pack_sections(selected)
+    section_limit_sampling = False
+    # Header overhead and uneven chunk lengths can create more sections than
+    # the nominal 48,000-character source budget suggests. Keep the map/reduce
+    # call count bounded by sampling fewer documents evenly across the entire
+    # timeline until the selected transcript fits the fixed section budget.
+    while len(sections) > MAX_SECTIONS and len(selected) > 1:
+        target_count = max(
+            1,
+            math.floor(len(selected) * MAX_SECTIONS / len(sections)),
+        )
+        if target_count >= len(selected):
+            target_count = len(selected) - 1
+        selected = even_sample(valid, target_count)
+        section_limit_sampling = True
+        sections, lookup = pack_sections(selected)
+
     if len(sections) > MAX_SECTIONS:
         raise OverviewError("Transcript exceeds the bounded overview section limit.")
+    if section_limit_sampling:
+        mode = "timeline_stratified"
+
     stats = {
         "coverage_mode": mode,
         "indexed_document_count": len(valid),
@@ -165,5 +198,6 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
         "selected_source_chars": sum(len(item.page_content) for item in selected),
         "selected_fraction": round(len(selected) / len(valid), 4),
         "section_count": len(sections),
+        "section_limit_sampling": section_limit_sampling,
     }
     return sections, lookup, stats
