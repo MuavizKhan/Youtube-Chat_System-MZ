@@ -653,3 +653,89 @@ def test_generate_with_llm_forwards_response_format_to_groq(monkeypatch):
     assert captured["prompt_value"] == "test-prompt"
     assert captured["response_format"] == response_format
 
+
+
+
+def test_claim_verification_compacts_visible_excerpts_to_fit_assessment_budget(monkeypatch):
+    first = make_doc(
+        1,
+        0,
+        "The speaker discusses cobalt extraction from the northern mine. "
+        + ("Cobalt mining and extraction details. " * 30),
+    )
+    second = make_doc(
+        2,
+        120,
+        "The speaker reports lithium prices increased in the coastal market. "
+        + ("Lithium market and price details. " * 30),
+    )
+    visible_context = first.page_content + "\n" + second.page_content
+    answer = (
+        "1. The speaker discusses cobalt extraction from the northern mine.\n"
+        "2. The speaker reports lithium prices increased in the coastal market."
+    )
+    attempted_passage_lengths = []
+
+    def fake_assessment(analysis, passages, client, **kwargs):
+        lengths = [len(passage.text) for passage in passages]
+        attempted_passage_lengths.append(lengths)
+        assert all(passage.text in visible_context for passage in passages)
+
+        if max(lengths) > 320:
+            diagnostics = SimpleNamespace(
+                status=AssessmentRunStatus.BUDGET_EXCEEDED,
+                error_code="assessment_input_character_budget_exceeded",
+                input_chars=9_000,
+                input_limit_chars=8_000,
+                passage_count=len(passages),
+                aspect_count=len(analysis.aspects),
+                request_count=0,
+            )
+            return SimpleNamespace(diagnostics=diagnostics, assessments=[])
+
+        diagnostics = SimpleNamespace(
+            status=AssessmentRunStatus.COMPLETED,
+            error_code=None,
+            input_chars=7_900,
+            input_limit_chars=8_000,
+            passage_count=len(passages),
+            aspect_count=len(analysis.aspects),
+            request_count=1,
+        )
+        assessments = [
+            SimpleNamespace(
+                aspect_id=aspect.aspect_id,
+                status=EvidenceSupportStatus.SUPPORTED,
+                supporting_evidence=(passages[index].references[0],),
+            )
+            for index, aspect in enumerate(analysis.aspects)
+        ]
+        return SimpleNamespace(diagnostics=diagnostics, assessments=assessments)
+
+    monkeypatch.setattr(
+        claim_verification,
+        "assess_evidence_support",
+        fake_assessment,
+    )
+
+    result = claim_verification.verify_answer_claims(
+        answer=answer,
+        question="Summarize the key facts.",
+        video_id="video-1",
+        retrieved_results=[(first, 0.1), (second, 0.2)],
+        included_chunk_ids=["1", "2"],
+        prompt_visible_context=visible_context,
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+    )
+
+    assert [max(lengths) for lengths in attempted_passage_lengths] == [480, 400, 320]
+    assert result["status"] == "completed"
+    assert result["claim_count"] == 2
+    assert result["supported_claim_count"] == 2
+    assert result["assessment_compaction_attempts"] == 3
+    assert result["assessment_passage_excerpt_limit"] == 320
+    assert result["assessment_input_chars"] == 7_900
+    assert result["assessment_input_limit_chars"] == 8_000
+    assert set(result["supported_chunk_ids"]) == {"1", "2"}
+\n
