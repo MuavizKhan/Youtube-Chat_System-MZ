@@ -63,3 +63,56 @@ Section findings:
 {notes}
 Return JSON."""),
 ])
+
+# Groq's constrained decoder can enforce this schema for supported models.
+# The application still validates evidence IDs and transcript support after
+# generation; structured output guarantees shape, not factual correctness.
+OVERVIEW_STRICT_JSON_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "video_overview_points",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "evidence_ids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["text", "evidence_ids"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["points"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT = {"type": "json_object"}
+
+# Groq currently offers strict constrained decoding for these model IDs.
+# Other Groq models use JSON Object Mode; local parsing and evidence checks
+# remain mandatory for every provider/model.
+OVERVIEW_STRICT_JSON_MODELS = frozenset({
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "meta-models/muse-spark-open",
+})
+
+
+def overview_response_format_for_model(model_id: str) -> dict:
+    normalized_model_id = str(model_id or "").strip().casefold()
+    if normalized_model_id in OVERVIEW_STRICT_JSON_MODELS:
+        return OVERVIEW_STRICT_JSON_RESPONSE_FORMAT
+    return OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT
+
