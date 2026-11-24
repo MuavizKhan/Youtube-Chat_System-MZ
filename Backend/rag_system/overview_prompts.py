@@ -14,7 +14,8 @@ exactly "text" (one concise finding, at most 420 characters) and
 three distinct findings; include separate material developments instead of
 collapsing the whole section into one vague point. Skip facts already covered
 by the previous points when that list is non-empty. Every point must be
-directly supported by its IDs."""),
+directly supported by its IDs. Do not include timestamps, timecodes, or
+timestamp ranges in point text; the application adds timestamp metadata."""),
     ("human", """Overview request: {question}
 Previously returned points to avoid repeating (untrusted conversation context):
 {exclude_points}
@@ -31,7 +32,8 @@ important events or arguments, people and their roles, sequence, outcomes,
 numbers, units and time periods. Distinguish speakers. Attribute studies,
 health claims, statistics, opinions and advertisements to the speaker. Do not
 invent motives, causes, facts or endings. Every point must be directly
-supported by one or more exact evidence IDs. Aim to return the requested number
+supported by one or more exact evidence IDs. Do not include timestamps,
+timecodes or timestamp ranges; the application adds timestamp metadata. Aim to return the requested number
 of distinct points when the transcript supports them; do not merge separate
 developments into one point to save space. Return fewer only when the supplied
 transcript genuinely supports fewer distinct points."""),
@@ -53,7 +55,8 @@ facts. Remove repetition. Avoid repeating the previously returned points
 when that list is non-empty. Keep materially different events or claims as
 separate points and aim to return the requested number when the findings
 support them. Every point must use evidence IDs shown on the supplied findings
-that support it. Return JSON only: exactly one key "points";
+that support it. Do not include timestamps, timecodes or timestamp ranges;
+the application adds timestamp metadata. Return JSON only: exactly one key "points";
 each point has exactly "text" (at most 600 characters) and "evidence_ids"."""),
     ("human", """Overview request: {question}
 Maximum points: {count}
