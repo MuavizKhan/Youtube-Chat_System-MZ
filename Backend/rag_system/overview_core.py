@@ -81,7 +81,7 @@ def parse_points(
     # below. Multiple matching objects remain ambiguous and fail closed.
     decoder = json.JSONDecoder()
     payload_candidates = []
-    for match in re.finditer(r"\\{", content):
+    for match in re.finditer(r"\{", content):
         try:
             candidate, _end = decoder.raw_decode(content, match.start())
         except json.JSONDecodeError:
