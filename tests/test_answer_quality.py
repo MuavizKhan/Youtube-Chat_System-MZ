@@ -132,6 +132,47 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     assert "samples sections across the full timeline" in result["answer"]
 
 
+def test_parse_points_accepts_one_valid_json_payload_with_model_wrapping_text():
+    payload = {
+        "points": [{
+            "text": "The speaker introduces the topic.",
+            "evidence_ids": ["P00001"],
+        }]
+    }
+    raw = (
+        "Here is the requested response:\\n"
+        "```json\\n"
+        + json.dumps(payload)
+        + "\\n```\\n"
+        "The response is complete."
+    )
+
+    result = overview_core.parse_points(
+        raw,
+        allowed_ids={"P00001"},
+        limit=3,
+    )
+
+    assert result == payload["points"]
+
+
+def test_parse_points_rejects_multiple_ambiguous_json_payloads():
+    payload = {
+        "points": [{
+            "text": "The speaker introduces the topic.",
+            "evidence_ids": ["P00001"],
+        }]
+    }
+    raw = json.dumps(payload) + "\\n" + json.dumps(payload)
+
+    with pytest.raises(overview_core.OverviewError, match="multiple ambiguous"):
+        overview_core.parse_points(
+            raw,
+            allowed_ids={"P00001"},
+            limit=3,
+        )
+
+
 def test_overview_rejects_model_invented_evidence_ids():
     with pytest.raises(overview_summarization.OverviewError):
         overview_summarization.summarize_video_overview(
