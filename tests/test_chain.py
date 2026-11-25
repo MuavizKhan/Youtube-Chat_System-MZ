@@ -13120,3 +13120,108 @@ def test_q02_context_truncation_uses_existing_relevance_scorer_when_claim_rows_d
     assert len(truncated) <= max_chars
     assert any(line in scored_lines for line in rows[:3])
     assert "Force India team claim" in truncated
+
+@pytest.mark.regression
+def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeypatch):
+    reducer_document = doc(1, 0, 15, "The reducer's selected source.")
+    map_document_one = reducer_document
+    map_document_two = doc(2, 300, 315, "A map-cited source for a later claim.")
+    map_document_three = doc(3, 600, 615, "Another map-cited source.")
+    overview_result = {
+        "answer": "1. A claim about a later event.",
+        "retrieved_results": [(reducer_document, 0.0)],
+        "verification_results": [
+            (map_document_one, 0.0),
+            (map_document_two, 0.0),
+            (map_document_three, 0.0),
+        ],
+        "prompt_visible_context": (
+            reducer_document.page_content + "\\n"
+            + map_document_two.page_content + "\\n"
+            + map_document_three.page_content
+        ),
+        "source_groups": chain.merge_overlapping_results([(reducer_document, 0.0)]),
+        "retrieval_trace": {
+            "route": "video_wide_overview",
+            "final_stage": "video_wide_map_reduce",
+            "final_chunk_ids": ["1"],
+            "citation_chunk_ids": ["1"],
+        },
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+            "context_budget": {
+                "included_chunk_ids": ["1"],
+                "verification_chunk_ids": ["1", "2", "3"],
+            },
+        },
+    }
+    observed = {}
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "huggingface")
+    monkeypatch.setattr(chain, "EMBEDDING_MODEL", "test-embedding-model")
+    monkeypatch.setattr(chain, "RAG_INDEX_NAMESPACE", "test-namespace")
+    monkeypatch.setattr(chain, "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", False)
+    monkeypatch.setattr(chain, "_build_overview_continuation_plan", lambda *_args: None)
+    monkeypatch.setattr(chain, "_build_answer_revision_plan", lambda *_args: None)
+    monkeypatch.setattr(
+        chain,
+        "resolve_conversational_query_plan",
+        lambda *, question, **_kwargs: (question, []),
+    )
+    monkeypatch.setattr(chain, "_is_explicit_overview_request", lambda _question: True)
+    monkeypatch.setattr(chain, "is_overview_question", lambda _question: True)
+    monkeypatch.setattr(chain, "get_all_documents", lambda _vector_store: [])
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: SimpleNamespace(invoke=lambda _inputs: pytest.fail(
+            "The explicit overview route should not invoke standard RAG."
+        )),
+    )
+    monkeypatch.setattr(
+        chain,
+        "summarize_video_overview",
+        lambda **_kwargs: overview_result,
+    )
+
+    def fake_verification(**kwargs):
+        observed["chunk_ids"] = [
+            str(pair[0].metadata["chunk_id"])
+            for pair in kwargs["retrieved_results"]
+        ]
+        observed["included_chunk_ids"] = list(kwargs["included_chunk_ids"])
+        return {
+            "answer": "1. A claim about a later event.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": 1,
+            "truncated_claim_count": 0,
+            "supported_claim_count": 1,
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": ["2"],
+            "claim_evidence": [{
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["2"],
+            }],
+            "error_code": None,
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+
+    result = chain.answer_question(
+        video_reference="Gfr50f6ZBvo",
+        question="Summarize this entire video chronologically.",
+    )
+
+    assert observed["chunk_ids"] == ["1", "2", "3"]
+    assert observed["included_chunk_ids"] == ["1", "2", "3"]
+    assert result["observability"]["retrieval"]["final_chunk_ids"] == ["2"]
+    assert [source["chunk_ids"] for source in result["sources"]] == [[2]]
+    assert "verification_results" not in result
+    assert "verification_chunk_ids" not in result["observability"]["generation"]["context_budget"]
