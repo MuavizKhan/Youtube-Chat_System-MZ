@@ -8988,13 +8988,13 @@ def _is_explicit_overview_request(question: str) -> bool:
         is_overview_question(question)
         and bool(
             re.search(
-                r"\\b(?:summari[sz](?:e|ing|ed)|recap\\w*|overview|summary)\\b",
+                r"\b(?:summari[sz](?:e|ing|ed)|recap\w*|overview|summary)\b",
                 normalized,
             )
         )
         and bool(
             re.search(
-                r"\\b(?:entire|whole|full|complete)\\s+(?:video|story)\\b",
+                r"\b(?:entire|whole|full|complete)\s+(?:video|story)\b",
                 normalized,
             )
         )
