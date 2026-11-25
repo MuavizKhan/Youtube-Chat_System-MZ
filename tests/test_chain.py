@@ -13136,7 +13136,7 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
             (map_document_three, 0.0),
         ],
         "prompt_visible_context": (
-            reducer_document.page_content + "\\n"
+            reducer_document.page_content + "\n"
             + map_document_two.page_content + "\\n"
             + map_document_three.page_content
         ),
