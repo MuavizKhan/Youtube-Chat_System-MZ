@@ -13137,7 +13137,7 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
         ],
         "prompt_visible_context": (
             reducer_document.page_content + "\n"
-            + map_document_two.page_content + "\\n"
+            + map_document_two.page_content + "\n"
             + map_document_three.page_content
         ),
         "source_groups": chain.merge_overlapping_results([(reducer_document, 0.0)]),
