@@ -291,7 +291,7 @@ def verify_answer_claims(
     )
 
     # The assessor budget includes its fixed system instructions, the entire
-    # claim list, passage metadata and transcript excerpts. A set of eight
+    # claim list, passage metadata and transcript excerpts. A set of twelve
     # otherwise valid passages can therefore exceed the hard 8,000-character
     # limit. Repack only the already prompt-visible excerpts into progressively
     # smaller exact windows; do not drop claims, admit hidden transcript text,
