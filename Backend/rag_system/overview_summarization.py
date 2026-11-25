@@ -164,6 +164,23 @@ def summarize_video_overview(
     chunk_ids = list(dict.fromkeys(
         str(document.metadata["chunk_id"]) for document in used_documents
     ))
+    # The reducer receives every map finding, not only the evidence IDs it
+    # chooses to attach to its final points. Retain all map-cited documents in
+    # a separate internal pool so the claim auditor can check every summary
+    # point against evidence that was visible during the map/reduce process.
+    verification_ids = list(dict.fromkeys(
+        evidence_id
+        for finding in map_findings
+        for evidence_id in finding["evidence_ids"]
+    )) or used_ids
+    verification_documents = [
+        lookup[value] for value in verification_ids if value in lookup
+    ]
+    verification_documents.sort(key=sort_key)
+    verification_chunk_ids = list(dict.fromkeys(
+        str(document.metadata["chunk_id"])
+        for document in verification_documents
+    ))
     stats.update({
         "map_calls": map_calls,
         "final_synthesis_calls": 1,
@@ -172,11 +189,15 @@ def summarize_video_overview(
         "reducer_returned_point_count": reducer_point_count,
         "map_fallback_points_added": map_fallback_points_added,
         "point_count_satisfied": len(points) >= requested,
+        "verification_document_count": len(verification_documents),
     })
     return {
         "answer": answer,
         "prompt_visible_context": "\n\n".join(prompt_context_parts),
         "retrieved_results": [(document, 0.0) for document in used_documents],
+        "verification_results": [
+            (document, 0.0) for document in verification_documents
+        ],
         "retrieval_trace": {
             "route": "video_wide_overview",
             "final_stage": "video_wide_map_reduce",
@@ -196,6 +217,7 @@ def summarize_video_overview(
                 "groups_available": stats["indexed_document_count"],
                 "groups_included": len(used_documents),
                 "included_chunk_ids": chunk_ids,
+                "verification_chunk_ids": verification_chunk_ids,
                 "reduced": stats["coverage_mode"] == "timeline_stratified",
             },
         },
