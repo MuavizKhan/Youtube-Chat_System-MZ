@@ -434,7 +434,7 @@ def test_sampling_disclosure_is_not_a_transcript_claim_and_survives_verification
     )
     result = claim_verification.verify_answer_claims(
         answer=answer,
-        question="Summarize the entire video.",
+        question="What does the speaker say about the source?",
         video_id="video-1",
         retrieved_results=[(document, 0.0)],
         included_chunk_ids=["7"],
