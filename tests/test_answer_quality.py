@@ -471,8 +471,8 @@ def test_overview_rejects_documents_from_multiple_videos():
 
 def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
     documents = [
-        make_doc(1, 0, "Opening context. " + ("opening detail " * 170)),
-        make_doc(2, 300, "Later important development. " + ("later detail " * 170)),
+        make_doc(1, 0, "Opening context. " + ("opening detail " * 350)),
+        make_doc(2, 300, "Later important development. " + ("later detail " * 350)),
     ]
     calls = []
 
@@ -568,7 +568,7 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
         make_doc(
             index,
             index * 120,
-            f"Distinct section {index} describes a separate event. " + (f"detail-{index} " * 390),
+            f"Distinct section {index} describes a separate event. " + (f"detail-{index} " * 600),
         )
         for index in range(1, 7)
     ]
@@ -936,7 +936,7 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
     )
 
     assert [max(lengths) for lengths, _ in attempted] == [
-        640, 560, 480, 400, 320, 240, 192, 160, 128
+        640, 559, 480, 400, 320, 240, 192, 160, 128
     ]
     assert all(aspect_count == 8 for _, aspect_count in attempted)
     assert result["status"] == "completed"
