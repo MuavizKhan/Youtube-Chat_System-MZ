@@ -19,6 +19,12 @@ from .overview_prompts import (
 )
 
 
+OVERVIEW_SAMPLING_DISCLOSURE = (
+    "The transcript is long, so this overview samples sections across "
+    "the full timeline; some fine details may be omitted."
+)
+
+
 def _normalized_point_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
 
@@ -157,10 +163,7 @@ def summarize_video_overview(
         for index, point in enumerate(points, start=start_index)
     )
     if stats["coverage_mode"] == "timeline_stratified":
-        answer = (
-            "The transcript is long, so this overview samples sections across "
-            "the full timeline; some fine details may be omitted.\n\n" + answer
-        )
+        answer = OVERVIEW_SAMPLING_DISCLOSURE + "\n\n" + answer
     chunk_ids = list(dict.fromkeys(
         str(document.metadata["chunk_id"]) for document in used_documents
     ))

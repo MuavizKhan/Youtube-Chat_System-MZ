@@ -8,10 +8,11 @@ from typing import Any, Sequence
 
 from .evidence_assessment import AssessmentRunStatus, EvidencePassage, assess_evidence_support
 from .evidence_contracts import EvidenceAspect, EvidenceReference, QuestionAnalysis, QuestionIntent
+from .overview_summarization import OVERVIEW_SAMPLING_DISCLOSURE
 
 MAX_CLAIMS = 8
-MAX_PASSAGES = 8
-MAX_PASSAGE_CHARS = 480
+MAX_PASSAGES = 12
+MAX_PASSAGE_CHARS = 640
 MAX_INPUT_CHARS = 8_000
 logger = logging.getLogger(__name__)
 _STOP = set(
@@ -35,6 +36,32 @@ def _terms(text: str) -> set[str]:
     }
 
 
+def _answer_disclosures(answer: str) -> list[str]:
+    """Return system-generated notices that must not be judged as transcript claims."""
+    if not isinstance(answer, str):
+        return []
+    expected = OVERVIEW_SAMPLING_DISCLOSURE.casefold()
+    return list(dict.fromkeys(
+        " ".join(line.split())
+        for line in answer.splitlines()
+        if " ".join(line.split()).casefold() == expected
+    ))
+
+
+def _without_answer_disclosures(answer: str) -> str:
+    expected = OVERVIEW_SAMPLING_DISCLOSURE.casefold()
+    return "\n".join(
+        line for line in answer.splitlines()
+        if " ".join(line.split()).casefold() != expected
+    ).strip()
+
+
+def _append_answer_disclosures(answer: str, disclosures: Sequence[str]) -> str:
+    if not disclosures:
+        return answer
+    return answer.rstrip() + "\n\n" + "\n".join(disclosures)
+
+
 def split_answer_claims(
     answer: str,
     *,
@@ -43,7 +70,8 @@ def split_answer_claims(
     """Split paragraph and bullet answers into a bounded sequence of claims."""
     if not isinstance(answer, str) or not answer.strip():
         return []
-    text = re.sub(r"(?im)^\s*Relevant timestamps?\s*:.*$", "", answer).strip()
+    text = _without_answer_disclosures(answer)
+    text = re.sub(r"(?im)^\s*Relevant timestamps?\s*:.*$", "", text).strip()
     claims = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -210,6 +238,7 @@ def verify_answer_claims(
     Provider/schema failures are reported as unavailable and do not masquerade
     as successful verification. A completed check removes unsupported claims.
     """
+    disclosures = _answer_disclosures(answer)
     all_claims = split_answer_claims(answer, max_claims=None)
     claims = all_claims[:MAX_CLAIMS]
     truncated_claim_count = max(0, len(all_claims) - len(claims))
@@ -236,7 +265,7 @@ def verify_answer_claims(
     )
     if not claims or not documents:
         return {
-            "answer": fallback_answer, "performed": True,
+            "answer": _append_answer_disclosures(fallback_answer, disclosures), "performed": True,
             "status": "no_prompt_visible_evidence", "claim_count": len(claims), "truncated_claim_count": truncated_claim_count,
             "supported_claim_count": 0, "partial_claim_count": 0,
             "removed_claim_count": len(claims), "supported_chunk_ids": [],
@@ -269,10 +298,12 @@ def verify_answer_claims(
     # or raise the assessor's hard budget.
     excerpt_limits = tuple(dict.fromkeys((
         MAX_PASSAGE_CHARS,
+        560,
+        480,
         400,
         320,
         240,
-        200,
+        192,
         160,
         128,
         96,
@@ -313,6 +344,7 @@ def verify_answer_claims(
                 max_input_chars=MAX_INPUT_CHARS,
                 max_passages=MAX_PASSAGES,
                 max_aspects=MAX_CLAIMS,
+                compact_prompt=True,
             )
         except Exception:
             logger.exception("Unexpected answer claim assessment failure.")
@@ -412,6 +444,7 @@ def verify_answer_claims(
             "\n\nAdditional details were omitted because the answer exceeded "
             f"the {MAX_CLAIMS}-claim verification limit."
         )
+    verified = _append_answer_disclosures(verified, disclosures)
 
     return {
         "answer": verified, "performed": True, "status": "completed",

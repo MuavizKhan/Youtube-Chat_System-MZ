@@ -58,7 +58,7 @@ def test_overview_single_section_returns_only_valid_source_linked_points():
 def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling():
     documents = [
         make_doc(index, index * 15, f"Transcript segment {index}. " + ("detail " * 110))
-        for index in range(1, 62)
+        for index in range(1, 102)
     ]
     calls = []
 
@@ -95,6 +95,49 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
     ) == stats["section_count"]
 
 
+@pytest.mark.regression
+def test_77_chunk_video_of_about_60k_characters_keeps_full_chronological_coverage():
+    documents = [
+        make_doc(
+            index,
+            (index - 1) * 45,
+            f"Transcript segment {index}. " + ("context " * 95),
+        )
+        for index in range(1, 78)
+    ]
+    calls = []
+
+    def generate(prompt):
+        calls.append(prompt)
+        prompt_text = "\n".join(
+            message.content for message in prompt.to_messages()
+        )
+        ids = re.findall(r"\bP\d{5}\b", prompt_text)
+        assert ids
+        return json.dumps({
+            "points": [{
+                "text": "A chronological development in this part of the video.",
+                "evidence_ids": [ids[0]],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize this entire video chronologically.",
+        generate_text=generate,
+    )
+
+    stats = result["retrieval_trace"]["overview"]
+    assert stats["coverage_mode"] == "full_transcript"
+    assert stats["indexed_document_count"] == 77
+    assert stats["selected_document_count"] == 77
+    assert stats["selected_fraction"] == 1.0
+    assert stats["section_count"] <= overview_core.MAX_SECTIONS
+    assert stats["map_calls"] == stats["section_count"]
+    assert len(calls) == stats["map_calls"] + 1
+    assert stats["selected_source_chars"] == stats["indexed_source_chars"]
+
+
 def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     # The full transcript is exactly at the 48,000-character source budget,
     # but its uneven chunk sizes require 15 chronological sections at the
@@ -106,9 +149,9 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
             index,
             index * 15,
             (
-                "Opening development " + ("x" * (3000 - len("Opening development")))
+                "Opening development " + ("x" * (7000 - len("Opening development")))
                 if index <= 12
-                else "Later development " + ("y" * (1000 - len("Later development")))
+                else "Later development " + ("y" * (3000 - len("Later development")))
             ),
         )
         for index in range(1, 25)
@@ -355,6 +398,54 @@ def test_claim_audit_uses_only_exact_text_visible_in_prompt(monkeypatch):
     assert "1997" not in " ".join(observed["texts"])
     assert result["removed_claim_count"] == 1
     assert result["supported_chunk_ids"] == []
+
+
+def test_sampling_disclosure_is_not_a_transcript_claim_and_survives_verification(monkeypatch):
+    document = make_doc(7, 60, "The speaker introduces the community project.")
+    observed = {}
+
+    def fake_assessment(analysis, passages, client, **kwargs):
+        observed["claims"] = [aspect.description for aspect in analysis.aspects]
+        assert len(passages) == 1
+        return SimpleNamespace(
+            diagnostics=SimpleNamespace(
+                status=AssessmentRunStatus.COMPLETED,
+                error_code=None,
+            ),
+            assessments=[
+                SimpleNamespace(
+                    aspect_id="claim_01",
+                    status=EvidenceSupportStatus.SUPPORTED,
+                    supporting_evidence=(
+                        EvidenceReference("video-1", "7", 60, 75),
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        claim_verification,
+        "assess_evidence_support",
+        fake_assessment,
+    )
+    answer = (
+        overview_summarization.OVERVIEW_SAMPLING_DISCLOSURE
+        + "\n\n1. The speaker introduces the community project."
+    )
+    result = claim_verification.verify_answer_claims(
+        answer=answer,
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[(document, 0.0)],
+        included_chunk_ids=["7"],
+        prompt_visible_context=document.page_content,
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+    )
+
+    assert observed["claims"] == ["The speaker introduces the community project."]
+    assert result["supported_claim_count"] == 1
+    assert overview_summarization.OVERVIEW_SAMPLING_DISCLOSURE in result["answer"]
 
 
 def test_overview_rejects_documents_from_multiple_videos():
@@ -741,7 +832,9 @@ def test_claim_verification_compacts_visible_excerpts_to_fit_assessment_budget(m
         fallback_answer="I couldn't find enough information about that in the video.",
     )
 
-    assert [max(lengths) for lengths in attempted_passage_lengths] == [480, 400, 320]
+    assert [max(lengths) for lengths in attempted_passage_lengths] == [
+        640, 560, 480, 400, 320
+    ]
     assert result["status"] == "completed"
     assert result["claim_count"] == 2
     assert result["supported_claim_count"] == 2
@@ -843,7 +936,7 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
     )
 
     assert [max(lengths) for lengths, _ in attempted] == [
-        480, 400, 320, 240, 200, 160, 128
+        640, 560, 480, 400, 320, 240, 192, 160, 128
     ]
     assert all(aspect_count == 8 for _, aspect_count in attempted)
     assert result["status"] == "completed"
@@ -854,6 +947,6 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
     assert result["removed_claim_count"] == 0
     assert result["assessment_input_chars"] == 7_875
     assert result["assessment_input_limit_chars"] == 8_000
-    assert result["assessment_compaction_attempts"] == 7
+    assert result["assessment_compaction_attempts"] == 9
     assert result["assessment_passage_excerpt_limit"] == 128
     assert len(result["supported_chunk_ids"]) == 8

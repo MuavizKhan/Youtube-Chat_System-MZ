@@ -122,6 +122,51 @@ def force_huggingface_provider(monkeypatch):
 
 
 @pytest.mark.unit
+def test_compact_prompt_reduces_assessment_payload_without_losing_provenance():
+    parsed = make_analysis(
+        EvidenceAspect("financial_crisis", "The speaker attributes the funding stoppage to the global financial crisis.")
+    )
+    source = make_passage(
+        "p1",
+        "The speaker says the global financial crisis caused money to stop flowing.",
+        "chunk-41",
+        start=120.0,
+        end=137.0,
+    )
+    content = output(output_item(
+        "financial_crisis",
+        "supported",
+        0.93,
+        support=("p1",),
+    ))
+
+    verbose_client, verbose_calls = fake_client(content)
+    compact_client, compact_calls = fake_client(content)
+    verbose = assess_evidence_support(parsed, (source,), verbose_client)
+    compact = assess_evidence_support(
+        parsed,
+        (source,),
+        compact_client,
+        compact_prompt=True,
+    )
+
+    assert compact.diagnostics.status is AssessmentRunStatus.COMPLETED
+    assert compact.assessments[0].supporting_evidence == source.references
+    assert compact.diagnostics.input_chars < verbose.diagnostics.input_chars
+    assert len(compact_calls.calls[0]["messages"][0]["content"]) < len(
+        verbose_calls.calls[0]["messages"][0]["content"]
+    )
+
+    compact_payload = json.loads(
+        compact_calls.calls[0]["messages"][1]["content"].split("\n", 1)[1]
+    )
+    assert compact_payload["video_id"] == "video-A"
+    assert compact_payload["passages"][0][0] == "p1"
+    assert compact_payload["passages"][0][2][0][0] == "chunk-41"
+    assert compact_payload["passages"][0][3] == source.text
+
+
+@pytest.mark.unit
 def test_supported_aspect_maps_model_passage_id_to_exact_source_reference():
     parsed = make_analysis(EvidenceAspect("financial_crisis", "The speaker attributes the funding stoppage to the global financial crisis."))
     source = make_passage(

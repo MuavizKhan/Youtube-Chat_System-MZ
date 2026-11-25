@@ -5,10 +5,11 @@ import math
 import re
 from typing import Any, Sequence
 
-MAX_SOURCE_CHARS = 48_000
-MAX_DOCUMENTS = 60
-MAX_SECTION_CHARS = 4_500
-MAX_SECTIONS = 12
+# Keep ordinary long videos fully represented while retaining hard upper bounds.
+MAX_SOURCE_CHARS = 80_000
+MAX_DOCUMENTS = 100
+MAX_SECTION_CHARS = 9_000
+MAX_SECTIONS = 10
 
 
 class OverviewError(RuntimeError):
