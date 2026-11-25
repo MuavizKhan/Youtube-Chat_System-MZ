@@ -46,6 +46,13 @@ def test_overview_single_section_returns_only_valid_source_linked_points():
     assert result["retrieval_trace"]["overview"]["coverage_mode"] == "full_transcript"
     assert "introduces and explains" in result["answer"]
     assert [item[0].metadata["chunk_id"] for item in result["retrieved_results"]] == [1, 2]
+    assert [
+        item[0].metadata["chunk_id"]
+        for item in result["verification_results"]
+    ] == [1, 2]
+    assert result["generation_trace"]["context_budget"]["verification_chunk_ids"] == [
+        "1", "2"
+    ]
 
 
 def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling():
@@ -81,6 +88,11 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
     assert len(calls) == stats["map_calls"] + 1
     assert "samples sections across the full timeline" in result["answer"]
     assert len(result["retrieved_results"]) <= stats["selected_document_count"]
+    assert len(result["verification_results"]) == stats["section_count"]
+    assert len(result["verification_results"]) > len(result["retrieved_results"])
+    assert len(
+        result["generation_trace"]["context_budget"]["verification_chunk_ids"]
+    ) == stats["section_count"]
 
 
 def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
