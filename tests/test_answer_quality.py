@@ -139,11 +139,11 @@ def test_77_chunk_video_of_about_60k_characters_keeps_full_chronological_coverag
 
 
 def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
-    # The full transcript is exactly at the 48,000-character source budget,
-    # but its uneven chunk sizes require 15 chronological sections at the
-    # 4,500-character per-section limit (12 large chunks + 3 small-chunk
-    # sections). The overview must sample more coarsely instead of falling
-    # back to sparse similarity retrieval.
+    # This transcript exceeds the 80,000-character source budget and contains
+    # uneven chunks. Even after the initial timeline sample, header overhead
+    # would exceed the 10-section cap at 9,000 characters per section. The
+    # overview must sample more coarsely instead of falling back to sparse
+    # similarity retrieval.
     documents = [
         make_doc(
             index,
@@ -838,7 +838,7 @@ def test_claim_verification_compacts_visible_excerpts_to_fit_assessment_budget(m
     assert result["status"] == "completed"
     assert result["claim_count"] == 2
     assert result["supported_claim_count"] == 2
-    assert result["assessment_compaction_attempts"] == 3
+    assert result["assessment_compaction_attempts"] == 5
     assert result["assessment_passage_excerpt_limit"] == 320
     assert result["assessment_input_chars"] == 7_900
     assert result["assessment_input_limit_chars"] == 8_000

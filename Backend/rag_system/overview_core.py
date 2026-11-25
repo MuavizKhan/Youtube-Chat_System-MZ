@@ -191,7 +191,7 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
     sections, lookup = pack_sections(selected)
     section_limit_sampling = False
     # Header overhead and uneven chunk lengths can create more sections than
-    # the nominal 48,000-character source budget suggests. Keep the map/reduce
+    # the source-character and document-count bounds imply. Keep the map/reduce
     # call count bounded by sampling fewer documents evenly across the entire
     # timeline until the selected transcript fits the fixed section budget.
     while len(sections) > MAX_SECTIONS and len(selected) > 1:
