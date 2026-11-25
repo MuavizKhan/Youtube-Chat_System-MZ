@@ -8978,6 +8978,30 @@ def _is_explicit_overview_request(question: str) -> bool:
         r"development\w*|historical|cause\w*|effect\w*|impact\w*)\b",
         normalized,
     )
+    # A request that explicitly asks for a summary/recap of the entire video
+    # is a video-wide task even when its instructions enumerate several content
+    # facets (arguments, explanations, events, conclusions, timestamps, etc.).
+    # Those facets describe the desired coverage of the summary; they do not
+    # turn it into a targeted evidence-dense question. Keep this override
+    # deliberately narrow: it requires both summary intent and whole-video scope.
+    explicit_full_video_summary = (
+        is_overview_question(question)
+        and bool(
+            re.search(
+                r"\\b(?:summari[sz](?:e|ing|ed)|recap\\w*|overview|summary)\\b",
+                normalized,
+            )
+        )
+        and bool(
+            re.search(
+                r"\\b(?:entire|whole|full|complete)\\s+(?:video|story)\\b",
+                normalized,
+            )
+        )
+    )
+    if explicit_full_video_summary:
+        return True
+
     if is_evidence_dense_question(question) or (
         analytical_request
         and (multi_facet_request or consequence_or_history_request)
