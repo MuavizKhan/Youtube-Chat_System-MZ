@@ -12218,12 +12218,19 @@ def answer_question(
         context_budget = {}
         generation_trace["context_budget"] = context_budget
 
+    verification_results = result.get("verification_results")
+    if not isinstance(verification_results, (list, tuple)) or not verification_results:
+        verification_results = result.get("retrieved_results", [])
+    verification_chunk_ids = context_budget.get("verification_chunk_ids")
+    if not isinstance(verification_chunk_ids, (list, tuple, set)):
+        verification_chunk_ids = context_budget.get("included_chunk_ids")
+
     verification = verify_answer_claims(
         answer=result.get("answer", ""),
         question=question,
         video_id=video_id,
-        retrieved_results=result.get("retrieved_results", []),
-        included_chunk_ids=context_budget.get("included_chunk_ids"),
+        retrieved_results=verification_results,
+        included_chunk_ids=verification_chunk_ids,
         prompt_visible_context=result.get("prompt_visible_context"),
         client=generation_client,
         fallback_answer=FALLBACK_ANSWER,
@@ -12241,7 +12248,7 @@ def answer_question(
             }
             filtered_results = [
                 pair
-                for pair in result.get("retrieved_results", [])
+                for pair in verification_results
                 if isinstance(pair, (tuple, list))
                 and pair
                 and str(getattr(pair[0], "metadata", {}).get("chunk_id")) in supported_chunk_ids
@@ -12264,6 +12271,8 @@ def answer_question(
     # This value is internal-only and is deliberately not included in the API
     # response or observability payload.
     result.pop("prompt_visible_context", None)
+    result.pop("verification_results", None)
+    context_budget.pop("verification_chunk_ids", None)
     retrieved_results = result.get("retrieved_results", [])
     source_groups = result.get(
         "source_groups",
