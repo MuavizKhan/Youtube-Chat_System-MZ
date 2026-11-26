@@ -49,6 +49,224 @@ def _duplicate_point(candidate: str, existing: Sequence[dict]) -> bool:
     return False
 
 
+
+def _timeline_bucket_index(
+    seconds: float,
+    timeline_start: float,
+    timeline_end: float,
+    bucket_count: int,
+) -> int:
+    duration = timeline_end - timeline_start
+    if duration <= 0 or bucket_count < 1:
+        return 0
+    position = (seconds - timeline_start) / duration
+    return min(bucket_count - 1, max(0, int(position * bucket_count)))
+
+
+def _point_timeline_buckets(
+    point: dict,
+    lookup: dict,
+    timeline_start: float,
+    timeline_end: float,
+    bucket_count: int,
+) -> tuple[set[int], list[float]]:
+    """Return the timeline buckets and source midpoints cited by one point."""
+    duration = timeline_end - timeline_start
+    if duration <= 0 or bucket_count < 1:
+        return set(), []
+
+    buckets = set()
+    midpoints = []
+    for evidence_id in point.get("evidence_ids", []):
+        document = lookup.get(str(evidence_id))
+        if document is None:
+            continue
+        start, end, _ = sort_key(document)
+        midpoint = (start + end) / 2.0
+        buckets.add(_timeline_bucket_index(
+            midpoint,
+            timeline_start,
+            timeline_end,
+            bucket_count,
+        ))
+        midpoints.append(midpoint)
+    return buckets, midpoints
+
+
+def _balance_points_over_timeline(
+    reducer_points: Sequence[dict],
+    map_findings: Sequence[dict],
+    lookup: dict,
+    previous_points: Sequence[dict],
+    requested: int,
+) -> tuple[list[dict], dict]:
+    """Select source-grounded points across the complete available timeline.
+
+    Reducer wording is preferred within a time bucket. When the reducer
+    clusters points in a few sections, validated map findings from uncovered
+    sections fill the missing intervals. No transcript claim or evidence ID
+    is created by this selection step.
+    """
+    if requested < 2 or previous_points or not map_findings or not lookup:
+        return list(reducer_points), {
+            "balancing_applied": False,
+            "map_points_selected": 0,
+        }
+
+    documents = list(lookup.values())
+    timeline_start = min(sort_key(document)[0] for document in documents)
+    timeline_end = max(sort_key(document)[1] for document in documents)
+    if timeline_end <= timeline_start:
+        return list(reducer_points), {
+            "balancing_applied": False,
+            "map_points_selected": 0,
+        }
+
+    candidates = []
+    duplicate_guard = list(previous_points)
+    for origin, items in (
+        ("reducer", reducer_points),
+        ("map", map_findings),
+    ):
+        for order, point in enumerate(items):
+            text = str(point.get("text", "")).strip()
+            if not text or _duplicate_point(text, duplicate_guard):
+                continue
+            buckets, midpoints = _point_timeline_buckets(
+                point,
+                lookup,
+                timeline_start,
+                timeline_end,
+                requested,
+            )
+            if not buckets or not midpoints:
+                continue
+            duplicate_guard.append(point)
+            candidates.append({
+                "point": point,
+                "origin": origin,
+                "order": order,
+                "buckets": buckets,
+                "midpoints": midpoints,
+            })
+
+    if not candidates:
+        return list(reducer_points), {
+            "balancing_applied": False,
+            "map_points_selected": 0,
+        }
+
+    selected = []
+    selected_indexes = set()
+    covered_buckets = set()
+    duration = timeline_end - timeline_start
+
+    for bucket in range(requested):
+        if bucket in covered_buckets:
+            continue
+        bucket_center = timeline_start + (
+            duration * (bucket + 0.5) / requested
+        )
+        options = [
+            (index, candidate)
+            for index, candidate in enumerate(candidates)
+            if index not in selected_indexes
+            and bucket in candidate["buckets"]
+        ]
+        if not options:
+            continue
+
+        index, candidate = min(
+            options,
+            key=lambda pair: (
+                pair[1]["origin"] != "reducer",
+                min(
+                    abs(midpoint - bucket_center)
+                    for midpoint in pair[1]["midpoints"]
+                    if _timeline_bucket_index(
+                        midpoint,
+                        timeline_start,
+                        timeline_end,
+                        requested,
+                    ) == bucket
+                ),
+                pair[1]["order"],
+            ),
+        )
+        selected.append(candidate)
+        selected_indexes.add(index)
+        covered_buckets.update(candidate["buckets"])
+
+    # If a section has no distinct finding for one or more time buckets, keep
+    # filling from the remaining grounded reducer/map findings. The coverage
+    # diagnostic below makes any unrepresented intervals explicit.
+    for index, candidate in enumerate(candidates):
+        if len(selected) >= requested:
+            break
+        if index in selected_indexes:
+            continue
+        selected.append(candidate)
+        selected_indexes.add(index)
+
+    selected.sort(
+        key=lambda candidate: (
+            min(candidate["midpoints"]),
+            candidate["origin"] != "reducer",
+            candidate["order"],
+        )
+    )
+    selected_points = [candidate["point"] for candidate in selected[:requested]]
+    return selected_points, {
+        "balancing_applied": (
+            [point.get("text") for point in selected_points]
+            != [point.get("text") for point in reducer_points]
+        ),
+        "map_points_selected": sum(
+            candidate["origin"] == "map"
+            for candidate in selected[:requested]
+        ),
+    }
+
+
+def _timeline_coverage_stats(
+    points: Sequence[dict],
+    lookup: dict,
+    bucket_count: int,
+) -> dict:
+    """Report which equal-duration timeline intervals have selected evidence."""
+    if bucket_count < 1 or not lookup:
+        return {}
+
+    documents = list(lookup.values())
+    timeline_start = min(sort_key(document)[0] for document in documents)
+    timeline_end = max(sort_key(document)[1] for document in documents)
+    if timeline_end <= timeline_start:
+        return {}
+
+    covered = set()
+    for point in points:
+        buckets, _midpoints = _point_timeline_buckets(
+            point,
+            lookup,
+            timeline_start,
+            timeline_end,
+            bucket_count,
+        )
+        covered.update(buckets)
+
+    return {
+        "bucket_count": bucket_count,
+        "covered_buckets": [value + 1 for value in sorted(covered)],
+        "missing_buckets": [
+            value + 1
+            for value in range(bucket_count)
+            if value not in covered
+        ],
+        "coverage_fraction": round(len(covered) / bucket_count, 4),
+        "start_seconds": round(timeline_start, 2),
+        "end_seconds": round(timeline_end, 2),
+    }
+
 def _numbered_previous_points(value: str) -> list[dict]:
     points = []
     for line in str(value or "").splitlines():
@@ -138,6 +356,13 @@ def summarize_video_overview(
         )
 
     reducer_point_count = len(points)
+    points, timeline_balance = _balance_points_over_timeline(
+        reducer_points=points,
+        map_findings=map_findings,
+        lookup=lookup,
+        previous_points=previous_points,
+        requested=requested,
+    )
     map_fallback_points_added = 0
     if len(points) < requested and map_findings:
         duplicate_guard = [*previous_points, *points]
@@ -193,6 +418,13 @@ def summarize_video_overview(
         "map_fallback_points_added": map_fallback_points_added,
         "point_count_satisfied": len(points) >= requested,
         "verification_document_count": len(verification_documents),
+        "timeline_balancing_applied": timeline_balance["balancing_applied"],
+        "timeline_map_points_selected": timeline_balance["map_points_selected"],
+        "timeline_coverage": _timeline_coverage_stats(
+            points,
+            lookup,
+            requested,
+        ),
     })
     return {
         "answer": answer,

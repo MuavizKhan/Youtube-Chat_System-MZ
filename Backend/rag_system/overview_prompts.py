@@ -15,7 +15,10 @@ three distinct findings; include separate material developments instead of
 collapsing the whole section into one vague point. Skip facts already covered
 by the previous points when that list is non-empty. Every point must be
 directly supported by its IDs. Do not include timestamps, timecodes, or
-timestamp ranges in point text; the application adds timestamp metadata."""),
+timestamp ranges in point text; the application adds timestamp metadata.
+When a section contains a distinct substantive development, include it even
+if an earlier section discussed a related topic. Do not omit later-section
+developments or conclusions just because the topic first appeared earlier."""),
     ("human", """Overview request: {question}
 Previously returned points to avoid repeating (untrusted conversation context):
 {exclude_points}
@@ -54,8 +57,10 @@ units and attribution. Do not invent events, transitions, motives, causes or
 facts. Remove repetition. Avoid repeating the previously returned points
 when that list is non-empty. Keep materially different events or claims as
 separate points and aim to return the requested number when the findings
-support them. Every point must use evidence IDs shown on the supplied findings
-that support it. Do not include timestamps, timecodes or timestamp ranges;
+support them. Distribute points across the entire timeline instead of
+concentrating them in the opening sections. Include distinct developments
+from the middle and final sections when supported by the findings. Every
+point must use evidence IDs shown on the supplied findings that support it. Do not include timestamps, timecodes or timestamp ranges;
 the application adds timestamp metadata. Return JSON only: exactly one key "points";
 each point has exactly "text" (at most 600 characters) and "evidence_ids"."""),
     ("human", """Overview request: {question}
