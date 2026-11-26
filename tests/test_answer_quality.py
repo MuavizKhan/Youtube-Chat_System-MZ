@@ -454,7 +454,7 @@ def test_overview_claim_audit_prioritizes_final_point_evidence_within_passage_bu
     monkeypatch.setattr(claim_verification, "assess_evidence_support", fake_assessment)
     result = claim_verification.verify_answer_claims(
         answer=(
-            "1. The final act describes a blue lantern carried across the stage.\\n"
+            "1. The final act describes a blue lantern carried across the stage.\n"
             "2. The closing interview discusses a quiet garden beside the old station."
         ),
         question="Summarize the final part of this video.",
