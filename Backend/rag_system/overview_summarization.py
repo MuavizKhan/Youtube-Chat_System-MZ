@@ -70,27 +70,31 @@ def _point_timeline_buckets(
     timeline_end: float,
     bucket_count: int,
 ) -> tuple[set[int], list[float]]:
-    """Return the timeline buckets and source midpoints cited by one point."""
+    """Assign each point to one bucket using its median cited source time."""
     duration = timeline_end - timeline_start
     if duration <= 0 or bucket_count < 1:
         return set(), []
 
-    buckets = set()
     midpoints = []
     for evidence_id in point.get("evidence_ids", []):
         document = lookup.get(str(evidence_id))
         if document is None:
             continue
         start, end, _ = sort_key(document)
-        midpoint = (start + end) / 2.0
-        buckets.add(_timeline_bucket_index(
-            midpoint,
+        midpoints.append((start + end) / 2.0)
+
+    if not midpoints:
+        return set(), []
+    midpoints.sort()
+    anchor_time = midpoints[len(midpoints) // 2]
+    return {
+        _timeline_bucket_index(
+            anchor_time,
             timeline_start,
             timeline_end,
             bucket_count,
-        ))
-        midpoints.append(midpoint)
-    return buckets, midpoints
+        )
+    }, midpoints
 
 
 def _balance_points_over_timeline(
