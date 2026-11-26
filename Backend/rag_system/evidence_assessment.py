@@ -138,6 +138,9 @@ class EvidenceAssessmentDiagnostics:
     error_code: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    finish_reason: str | None = None
+    output_chars: int | None = None
+    validation_error_code: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, AssessmentRunStatus):
@@ -158,12 +161,19 @@ class EvidenceAssessmentDiagnostics:
                 raise ValueError(f"{name} must be a non-negative integer.")
         if not math.isfinite(float(self.elapsed_ms)) or self.elapsed_ms < 0:
             raise ValueError("elapsed_ms must be finite and non-negative.")
-        for name in ("input_tokens", "output_tokens"):
+        for name in ("input_tokens", "output_tokens", "output_chars"):
             value = getattr(self, name)
             if value is not None and (
                 isinstance(value, bool) or not isinstance(value, int) or value < 0
             ):
                 raise ValueError(f"{name} must be a non-negative integer or None.")
+        for name in ("finish_reason", "validation_error_code"):
+            value = getattr(self, name)
+            if value is not None and (
+                not isinstance(value, str)
+                or not re.fullmatch(r"[a-z0-9_-]{1,64}", value)
+            ):
+                raise ValueError(f"{name} must be a normalized label or None.")
         if self.error_code is not None:
             object.__setattr__(self, "error_code", _clean_text(self.error_code, "error_code"))
 
@@ -392,6 +402,56 @@ def _response_text(response: Any) -> str:
     if not isinstance(content, str) or not content.strip():
         raise EvidenceAssessmentOutputError("Provider response content is empty or not text.")
     return content.strip()
+
+
+def _response_finish_reason(response: Any) -> str | None:
+    """Return a provider finish label without exposing response content."""
+    try:
+        choice = response.choices[0]
+        reason = getattr(choice, "finish_reason", None)
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if not isinstance(reason, str):
+        return None
+    normalized = reason.strip().casefold()
+    return normalized if re.fullmatch(r"[a-z0-9_-]{1,32}", normalized) else None
+
+
+def _assessment_output_error_code(error: Exception) -> str:
+    """Map strict-output failures to stable, non-sensitive diagnostic labels."""
+    message = str(error).casefold()
+    mappings = (
+        ("provider response has no message content", "missing_message_content"),
+        ("provider response content is empty or not text", "empty_or_nontext_content"),
+        ("incomplete json code fence", "incomplete_code_fence"),
+        ("response is not valid json", "invalid_json"),
+        ("unexpected top-level output fields", "unexpected_top_level_fields"),
+        ("assessments must be an array", "assessments_not_array"),
+        ("every assessment must be an object", "assessment_not_object"),
+        ("assessment has missing or unexpected fields", "assessment_field_mismatch"),
+        ("unknown aspect id", "unknown_aspect_id"),
+        ("duplicate aspect id", "duplicate_aspect_id"),
+        ("unsupported status", "unsupported_status"),
+        ("must be a number", "invalid_score_type"),
+        ("must be between 0 and 1", "invalid_score_range"),
+        ("must be an array of strings", "invalid_passage_id_array"),
+        ("cannot contain empty strings", "empty_passage_id"),
+        ("cannot contain duplicates", "duplicate_passage_id"),
+        ("summary must be a non-empty string", "empty_summary"),
+        ("summary exceeds", "summary_too_long"),
+        ("passage id not in the request", "unknown_passage_id"),
+        ("support status is inconsistent", "inconsistent_supported_status"),
+        ("partial status is inconsistent", "inconsistent_partial_status"),
+        ("missing status must have no ids", "inconsistent_missing_status"),
+        ("contradicted status is inconsistent", "inconsistent_contradicted_status"),
+        ("conflicted status requires both", "inconsistent_conflicted_status"),
+        ("unknown status must have no ids", "inconsistent_unknown_status"),
+        ("omitted one or more requested aspects", "missing_aspect_assessments"),
+    )
+    for fragment, code in mappings:
+        if fragment in message:
+            return code
+    return "response_validation_error"
 
 
 def _token_usage(response: Any) -> tuple[int | None, int | None]:
@@ -967,6 +1027,8 @@ def assess_evidence_support(
             )
 
     input_tokens, output_tokens = _token_usage(response)
+    finish_reason = _response_finish_reason(response)
+    response_content = ""
     try:
         response_content = _response_text(response)
         raw = _duplicate_safe_json_loads(response_content)
@@ -976,7 +1038,7 @@ def assess_evidence_support(
             passage_values,
             minimum_support_score=minimum_support_score,
         )
-    except (EvidenceAssessmentOutputError, TypeError, ValueError, OverflowError):
+    except (EvidenceAssessmentOutputError, TypeError, ValueError, OverflowError) as error:
         diagnostics = EvidenceAssessmentDiagnostics(
             status=AssessmentRunStatus.INVALID_RESPONSE,
             provider=provider_name,
@@ -991,6 +1053,9 @@ def assess_evidence_support(
             error_code="invalid_assessment_response",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            finish_reason=finish_reason,
+            output_chars=len(response_content),
+            validation_error_code=_assessment_output_error_code(error),
         )
         assessments, notes = _unknown_assessments(
             analysis,
@@ -1013,6 +1078,8 @@ def assess_evidence_support(
         aspect_count=len(analysis.aspects),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        finish_reason=finish_reason,
+        output_chars=len(response_content),
     )
     return _make_result(
         analysis, assessments, notes, diagnostics, minimum_support_score

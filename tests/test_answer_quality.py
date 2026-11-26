@@ -525,6 +525,48 @@ def test_claim_audit_fails_open_with_explicit_diagnostic_on_provider_error(monke
     assert result["removed_claim_count"] == 0
 
 
+def test_claim_audit_exposes_sanitized_assessment_response_diagnostics(monkeypatch):
+    document = make_doc(6, 90, "The speaker describes an event with several details.")
+    diagnostics = SimpleNamespace(
+        status=claim_verification.AssessmentRunStatus.INVALID_RESPONSE,
+        error_code="invalid_assessment_response",
+        input_chars=7902,
+        input_limit_chars=8000,
+        passage_count=12,
+        aspect_count=7,
+        request_count=3,
+        elapsed_ms=18432.5,
+        input_tokens=5200,
+        output_tokens=900,
+        finish_reason="length",
+        output_chars=3600,
+        validation_error_code="invalid_json",
+    )
+
+    def fake_assessment(*args, **kwargs):
+        return SimpleNamespace(diagnostics=diagnostics)
+
+    monkeypatch.setattr(claim_verification, "assess_evidence_support", fake_assessment)
+    result = claim_verification.verify_answer_claims(
+        answer="The speaker describes an event. The event had three stages.",
+        question="Summarize what happened.",
+        video_id="video-1",
+        retrieved_results=[(document, 0.1)],
+        included_chunk_ids=["6"],
+        prompt_visible_context=document.page_content,
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+    )
+
+    assert result["status"] == "invalid_response"
+    assert result["assessment_validation_error_code"] == "invalid_json"
+    assert result["assessment_finish_reason"] == "length"
+    assert result["assessment_output_chars"] == 3600
+    assert result["assessment_output_tokens"] == 900
+    assert result["assessment_elapsed_ms"] == 18432.5
+    assert result["answer"] == "The speaker describes an event. The event had three stages."
+
+
 def test_claim_audit_does_not_silently_merge_unchecked_overflow_claims(monkeypatch):
     document = make_doc(5, 60, "The speaker provides a long series of independent facts. " * 20)
     seen = {}

@@ -24,10 +24,11 @@ from Backend.rag_system.evidence_contracts import (
 
 
 class FakeCompletions:
-    def __init__(self, content=None, error=None, usage=None):
+    def __init__(self, content=None, error=None, usage=None, finish_reason="stop"):
         self.content = content
         self.error = error
         self.usage = usage
+        self.finish_reason = finish_reason
         self.calls = []
 
     def create(self, **kwargs):
@@ -35,15 +36,20 @@ class FakeCompletions:
         if self.error is not None:
             raise self.error
         message = SimpleNamespace(content=self.content)
-        choice = SimpleNamespace(message=message)
+        choice = SimpleNamespace(message=message, finish_reason=self.finish_reason)
         return SimpleNamespace(
             choices=[choice],
             usage=self.usage,
         )
 
 
-def fake_client(content=None, error=None, usage=None):
-    completions = FakeCompletions(content=content, error=error, usage=usage)
+def fake_client(content=None, error=None, usage=None, finish_reason="stop"):
+    completions = FakeCompletions(
+        content=content,
+        error=error,
+        usage=usage,
+        finish_reason=finish_reason,
+    )
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=completions)
     )
@@ -391,6 +397,30 @@ def test_invalid_json_response_fails_closed(bad_content):
 
 
 @pytest.mark.unit
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("finish_reason", "expected_error_code"),
+    [("stop", "invalid_json"), ("length", "invalid_json")],
+)
+def test_invalid_assessment_output_exposes_sanitized_response_diagnostics(
+    finish_reason,
+    expected_error_code,
+):
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    invalid_content = "{not valid json"
+    client, _ = fake_client(invalid_content, finish_reason=finish_reason)
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.INVALID_RESPONSE
+    assert result.diagnostics.error_code == "invalid_assessment_response"
+    assert result.diagnostics.validation_error_code == expected_error_code
+    assert result.diagnostics.finish_reason == finish_reason
+    assert result.diagnostics.output_chars == len(invalid_content)
+    assert result.diagnostics.output_tokens is None
+
+
 @pytest.mark.parametrize(
     "items",
     [

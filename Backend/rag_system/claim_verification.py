@@ -376,6 +376,12 @@ def verify_answer_claims(
         "assessment_passage_count": getattr(diagnostic, "passage_count", len(documents)),
         "assessment_aspect_count": getattr(diagnostic, "aspect_count", len(claims)),
         "assessment_request_count": getattr(diagnostic, "request_count", None),
+        "assessment_elapsed_ms": getattr(diagnostic, "elapsed_ms", None),
+        "assessment_input_tokens": getattr(diagnostic, "input_tokens", None),
+        "assessment_output_tokens": getattr(diagnostic, "output_tokens", None),
+        "assessment_finish_reason": getattr(diagnostic, "finish_reason", None),
+        "assessment_output_chars": getattr(diagnostic, "output_chars", None),
+        "assessment_validation_error_code": getattr(diagnostic, "validation_error_code", None),
         "assessment_compaction_attempts": assessment_compaction_attempts,
         "assessment_passage_excerpt_limit": selected_excerpt_limit,
     }
