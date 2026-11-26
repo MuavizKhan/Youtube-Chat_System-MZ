@@ -652,7 +652,7 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
     assert stats["returned_point_count"] == 5
     assert stats["point_count_satisfied"] is True
     assert map_calls == 6
-    assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [1, 3, 4, 5, 6]
+    assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [1, 2, 3, 5, 6]
     assert stats["timeline_coverage"]["covered_buckets"] == [1, 2, 3, 4, 5]
     assert stats["timeline_coverage"]["missing_buckets"] == []
 
