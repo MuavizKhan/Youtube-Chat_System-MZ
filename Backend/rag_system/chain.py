@@ -123,7 +123,11 @@ from .retrieval import (
 
 from .overview_core import requested_count
 from .overview_prompts import overview_response_format_for_model
-from .overview_summarization import OverviewError, summarize_video_overview
+from .overview_summarization import (
+    OverviewError,
+    summarize_video_overview,
+    timeline_coverage_from_documents,
+)
 from .claim_verification import verify_answer_claims
 
 from .index_service import load_ready_index
@@ -12258,6 +12262,7 @@ def answer_question(
         prompt_visible_context=result.get("prompt_visible_context"),
         client=generation_client,
         fallback_answer=FALLBACK_ANSWER,
+        preferred_chunk_ids=result.get("preferred_verification_chunk_ids"),
     )
     if verification.get("performed"):
         generation_trace["answer_evidence_verification"] = {
@@ -12278,6 +12283,28 @@ def answer_question(
                 and str(getattr(pair[0], "metadata", {}).get("chunk_id")) in supported_chunk_ids
             ]
             result["retrieved_results"] = filtered_results
+            overview_stats = result.get("retrieval_trace", {}).get("overview")
+            if not isinstance(overview_stats, dict):
+                overview_stats = generation_trace.get("overview_summary")
+            if isinstance(overview_stats, dict):
+                overview_stats["verified_point_count"] = len(
+                    re.findall(r"(?m)^\s*\d{1,2}[.)]\s+", verification.get("answer", ""))
+                )
+                before_coverage = overview_stats.get("timeline_coverage", {})
+                if (
+                    isinstance(before_coverage, dict)
+                    and before_coverage.get("start_seconds") is not None
+                    and before_coverage.get("end_seconds") is not None
+                    and before_coverage.get("bucket_count") is not None
+                ):
+                    overview_stats["verified_timeline_coverage"] = (
+                        timeline_coverage_from_documents(
+                            [pair[0] for pair in filtered_results],
+                            timeline_start=before_coverage["start_seconds"],
+                            timeline_end=before_coverage["end_seconds"],
+                            bucket_count=before_coverage["bucket_count"],
+                        )
+                    )
             context_budget["included_chunk_ids"] = sorted(supported_chunk_ids)
             verification_trace = result.get("retrieval_trace", {})
             if not isinstance(verification_trace, dict):
@@ -12296,6 +12323,7 @@ def answer_question(
     # response or observability payload.
     result.pop("prompt_visible_context", None)
     result.pop("verification_results", None)
+    result.pop("preferred_verification_chunk_ids", None)
     context_budget.pop("verification_chunk_ids", None)
     retrieved_results = result.get("retrieved_results", [])
     source_groups = result.get(

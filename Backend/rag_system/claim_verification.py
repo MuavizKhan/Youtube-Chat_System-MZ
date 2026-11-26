@@ -163,6 +163,7 @@ def _select_documents(
     included_ids: Sequence[Any] | None,
     claims: Sequence[str],
     prompt_visible_context: str | None,
+    preferred_chunk_ids: Sequence[Any] | None = None,
 ) -> list[tuple[Any, str]]:
     if not isinstance(included_ids, (list, tuple, set)):
         return []
@@ -201,13 +202,51 @@ def _select_documents(
         return [(item["document"], item["visible_text"]) for item in candidates]
 
     selected, selected_ids = [], set()
+    candidate_by_id = {
+        str(_meta(item["document"]).get("chunk_id")): item
+        for item in candidates
+    }
+    if isinstance(preferred_chunk_ids, (list, tuple)):
+        for raw_chunk_id in preferred_chunk_ids:
+            if raw_chunk_id is None:
+                continue
+            chunk_id = str(raw_chunk_id)
+            preferred = candidate_by_id.get(chunk_id)
+            if preferred is None or chunk_id in selected_ids:
+                continue
+            selected.append((preferred["document"], preferred["visible_text"]))
+            selected_ids.add(chunk_id)
+            if len(selected) == MAX_PASSAGES:
+                return selected
+
     for claim_index in range(len(claims)):
-        best = max(
+        # A point's preferred source may already be selected for an earlier
+        # claim. In that case it remains available to assess this claim too.
+        if any(
+            str(_meta(item["document"]).get("chunk_id")) in selected_ids
+            and item["scores"][claim_index] > 0
+            for item in candidates
+        ):
+            continue
+        ranked = sorted(
             candidates,
-            key=lambda item: (item["scores"][claim_index], item["score"], -item["rank"]),
+            key=lambda item: (
+                item["scores"][claim_index],
+                item["score"],
+                -item["rank"],
+            ),
+            reverse=True,
         )
-        chunk_id = str(_meta(best["document"]).get("chunk_id"))
-        if best["scores"][claim_index] and chunk_id not in selected_ids:
+        best = next(
+            (
+                item for item in ranked
+                if item["scores"][claim_index] > 0
+                and str(_meta(item["document"]).get("chunk_id")) not in selected_ids
+            ),
+            None,
+        )
+        if best is not None:
+            chunk_id = str(_meta(best["document"]).get("chunk_id"))
             selected.append((best["document"], best["visible_text"]))
             selected_ids.add(chunk_id)
             if len(selected) == MAX_PASSAGES:
@@ -232,6 +271,7 @@ def verify_answer_claims(
     prompt_visible_context: str | None,
     client: Any,
     fallback_answer: str,
+    preferred_chunk_ids: Sequence[Any] | None = None,
 ) -> dict:
     """Check claims only against passages that were visible to answer generation.
 
@@ -262,6 +302,7 @@ def verify_answer_claims(
         included_chunk_ids,
         claims,
         prompt_visible_context,
+        preferred_chunk_ids=preferred_chunk_ids,
     )
     if not claims or not documents:
         return {
@@ -269,6 +310,7 @@ def verify_answer_claims(
             "status": "no_prompt_visible_evidence", "claim_count": len(claims), "truncated_claim_count": truncated_claim_count,
             "supported_claim_count": 0, "partial_claim_count": 0,
             "removed_claim_count": len(claims), "supported_chunk_ids": [],
+            "assessment_selected_chunk_ids": [],
             "error_code": "no_prompt_visible_evidence",
         }
 
@@ -384,6 +426,10 @@ def verify_answer_claims(
         "assessment_validation_error_code": getattr(diagnostic, "validation_error_code", None),
         "assessment_compaction_attempts": assessment_compaction_attempts,
         "assessment_passage_excerpt_limit": selected_excerpt_limit,
+        "assessment_selected_chunk_ids": [
+            str(_meta(document).get("chunk_id"))
+            for document, _visible_text in documents
+        ],
     }
     if diagnostic.status is not AssessmentRunStatus.COMPLETED:
         return {

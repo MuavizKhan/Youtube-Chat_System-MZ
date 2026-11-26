@@ -271,6 +271,53 @@ def _timeline_coverage_stats(
         "end_seconds": round(timeline_end, 2),
     }
 
+
+def timeline_coverage_from_documents(
+    documents: Sequence[Any],
+    *,
+    timeline_start: float,
+    timeline_end: float,
+    bucket_count: int,
+) -> dict:
+    """Measure time buckets represented by evidence surviving claim verification."""
+    if (
+        isinstance(bucket_count, bool)
+        or not isinstance(bucket_count, int)
+        or bucket_count < 1
+        or not math.isfinite(float(timeline_start))
+        or not math.isfinite(float(timeline_end))
+        or timeline_end <= timeline_start
+    ):
+        return {}
+
+    covered = set()
+    seen = set()
+    for document in documents:
+        start, end, chunk_id = sort_key(document)
+        identity = str(chunk_id)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        midpoint = (start + end) / 2.0
+        covered.add(_timeline_bucket_index(
+            midpoint,
+            timeline_start,
+            timeline_end,
+            bucket_count,
+        ))
+
+    return {
+        "bucket_count": bucket_count,
+        "covered_buckets": [value + 1 for value in sorted(covered)],
+        "missing_buckets": [
+            value + 1 for value in range(bucket_count) if value not in covered
+        ],
+        "coverage_fraction": round(len(covered) / bucket_count, 4),
+        "start_seconds": round(float(timeline_start), 2),
+        "end_seconds": round(float(timeline_end), 2),
+        "evidence_document_count": len(seen),
+    }
+
 def _numbered_previous_points(value: str) -> list[dict]:
     points = []
     for line in str(value or "").splitlines():
@@ -439,6 +486,7 @@ def summarize_video_overview(
         "verification_results": [
             (document, 0.0) for document in verification_documents
         ],
+        "preferred_verification_chunk_ids": chunk_ids,
         "retrieval_trace": {
             "route": "video_wide_overview",
             "final_stage": "video_wide_map_reduce",

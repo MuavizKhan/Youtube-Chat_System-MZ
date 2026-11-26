@@ -400,6 +400,78 @@ def test_claim_audit_uses_only_exact_text_visible_in_prompt(monkeypatch):
     assert result["supported_chunk_ids"] == []
 
 
+
+def test_overview_claim_audit_prioritizes_final_point_evidence_within_passage_budget(monkeypatch):
+    documents = [
+        make_doc(index, index * 60, f"General transcript context {index}.")
+        for index in range(1, 15)
+    ]
+    documents[12].page_content = (
+        "The final act describes a distinct blue lantern carried across the stage."
+    )
+    documents[13].page_content = (
+        "The closing interview discusses a quiet garden beside the old station."
+    )
+    visible_context = "\n".join(document.page_content for document in documents)
+    observed = {}
+
+    def fake_assessment(analysis, passages, client, **kwargs):
+        observed["chunk_ids"] = [
+            reference.chunk_id
+            for passage in passages
+            for reference in passage.references
+        ]
+        return SimpleNamespace(
+            diagnostics=SimpleNamespace(
+                status=AssessmentRunStatus.COMPLETED,
+                error_code=None,
+                input_chars=1000,
+                input_limit_chars=8000,
+                passage_count=len(passages),
+                aspect_count=len(analysis.aspects),
+                request_count=1,
+                elapsed_ms=10.0,
+                input_tokens=100,
+                output_tokens=100,
+                finish_reason="stop",
+                output_chars=100,
+                validation_error_code=None,
+            ),
+            assessments=[
+                SimpleNamespace(
+                    aspect_id="claim_01",
+                    status=EvidenceSupportStatus.SUPPORTED,
+                    supporting_evidence=(EvidenceReference("video-1", "13", 780, 795),),
+                ),
+                SimpleNamespace(
+                    aspect_id="claim_02",
+                    status=EvidenceSupportStatus.SUPPORTED,
+                    supporting_evidence=(EvidenceReference("video-1", "14", 840, 855),),
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(claim_verification, "assess_evidence_support", fake_assessment)
+    result = claim_verification.verify_answer_claims(
+        answer=(
+            "1. The final act describes a blue lantern carried across the stage.\\n"
+            "2. The closing interview discusses a quiet garden beside the old station."
+        ),
+        question="Summarize the final part of this video.",
+        video_id="video-1",
+        retrieved_results=[(document, float(index)) for index, document in enumerate(documents)],
+        included_chunk_ids=[str(index) for index in range(1, 15)],
+        prompt_visible_context=visible_context,
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+        preferred_chunk_ids=["13", "14"],
+    )
+
+    assert observed["chunk_ids"][:2] == ["13", "14"]
+    assert result["status"] == "completed"
+    assert result["supported_claim_count"] == 2
+    assert result["assessment_selected_chunk_ids"][:2] == ["13", "14"]
+
 def test_sampling_disclosure_is_not_a_transcript_claim_and_survives_verification(monkeypatch):
     document = make_doc(7, 60, "The speaker introduces the community project.")
     observed = {}

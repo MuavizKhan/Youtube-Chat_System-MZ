@@ -13141,15 +13141,38 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
             + map_document_three.page_content
         ),
         "source_groups": chain.merge_overlapping_results([(reducer_document, 0.0)]),
+        "preferred_verification_chunk_ids": ["1"],
         "retrieval_trace": {
             "route": "video_wide_overview",
             "final_stage": "video_wide_map_reduce",
             "final_chunk_ids": ["1"],
             "citation_chunk_ids": ["1"],
+            "overview": {
+                "requested_point_count": 3,
+                "timeline_coverage": {
+                    "bucket_count": 3,
+                    "start_seconds": 0.0,
+                    "end_seconds": 615.0,
+                    "covered_buckets": [1],
+                    "missing_buckets": [2, 3],
+                    "coverage_fraction": 1 / 3,
+                },
+            },
         },
         "generation_trace": {
             "generated": True,
             "fallback_used": False,
+            "overview_summary": {
+                "requested_point_count": 3,
+                "timeline_coverage": {
+                    "bucket_count": 3,
+                    "start_seconds": 0.0,
+                    "end_seconds": 615.0,
+                    "covered_buckets": [1],
+                    "missing_buckets": [2, 3],
+                    "coverage_fraction": 1 / 3,
+                },
+            },
             "context_budget": {
                 "included_chunk_ids": ["1"],
                 "verification_chunk_ids": ["1", "2", "3"],
@@ -13194,6 +13217,7 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
             for pair in kwargs["retrieved_results"]
         ]
         observed["included_chunk_ids"] = list(kwargs["included_chunk_ids"])
+        observed["preferred_chunk_ids"] = list(kwargs["preferred_chunk_ids"])
         return {
             "answer": "1. A claim about a later event.",
             "performed": True,
@@ -13221,6 +13245,10 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
 
     assert observed["chunk_ids"] == ["1", "2", "3"]
     assert observed["included_chunk_ids"] == ["1", "2", "3"]
+    assert observed["preferred_chunk_ids"] == ["1"]
+    assert result["observability"]["retrieval"]["overview"]["verified_point_count"] == 1
+    assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["covered_buckets"] == [2]
+    assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["missing_buckets"] == [1, 3]
     assert result["observability"]["retrieval"]["final_chunk_ids"] == ["2"]
     assert [source["chunk_ids"] for source in result["sources"]] == [[2]]
     assert "verification_results" not in result
