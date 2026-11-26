@@ -397,7 +397,6 @@ def test_invalid_json_response_fails_closed(bad_content):
 
 
 @pytest.mark.unit
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("finish_reason", "expected_error_code"),
     [("stop", "invalid_json"), ("length", "invalid_json")],
