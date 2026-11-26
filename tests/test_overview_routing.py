@@ -65,4 +65,3 @@ def test_targeted_multi_facet_analysis_remains_outside_overview_route():
 
     assert not chain._is_explicit_overview_request(question)
     assert not chain._should_use_overview_route(question, "overview")
-
