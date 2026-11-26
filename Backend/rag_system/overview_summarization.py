@@ -367,7 +367,9 @@ def summarize_video_overview(
         previous_points=previous_points,
         requested=requested,
     )
-    map_fallback_points_added = 0
+    # Count map findings selected for timeline balancing as additions too;
+    # preserve the existing diagnostic's meaning across both selection paths.
+    map_fallback_points_added = timeline_balance["map_points_selected"]
     if len(points) < requested and map_findings:
         duplicate_guard = [*previous_points, *points]
         for finding in map_findings:
