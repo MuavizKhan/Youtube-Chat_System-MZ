@@ -31,7 +31,7 @@ from .evidence_contracts import (
 DEFAULT_MAX_ASSESSMENT_INPUT_CHARS = 8_000
 DEFAULT_MAX_ASSESSMENT_PASSAGES = 12
 DEFAULT_MAX_ASSESSMENT_ASPECTS = 8
-DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS = 900
+DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS = 1_800
 DEFAULT_MINIMUM_SUPPORT_SCORE = 0.75
 MAX_ASSESSMENT_SUMMARY_CHARS = 320
 MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 30.0
@@ -883,7 +883,7 @@ def assess_evidence_support(
     provider_name = provider or config.LLM_PROVIDER
     if provider_name == "groq":
         model_name = model or config.GROQ_MODEL_ID
-        configured_max_tokens = config.GROQ_MAX_TOKENS
+        configured_max_tokens = config.GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS
     elif provider_name == "huggingface":
         model_name = model or config.HF_MODEL_ID
         configured_max_tokens = config.HF_MAX_TOKENS

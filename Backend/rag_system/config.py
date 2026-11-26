@@ -554,6 +554,14 @@ GROQ_MAX_TOKENS = _get_int(
     800,
 )
 
+# Evidence assessment is a separate structured task. GPT-OSS reasoning tokens
+# count toward max_completion_tokens, so it needs a larger bounded allowance
+# than normal user-facing generation to finish all requested claim assessments.
+GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS = _get_int(
+    "GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS",
+    1800,
+)
+
 GROQ_TEMPERATURE = _get_float(
     "GROQ_TEMPERATURE",
     0.1,
@@ -601,6 +609,12 @@ if GROQ_MAX_TOKENS <= 0:
 
     raise RuntimeError(
         "GROQ_MAX_TOKENS must be greater than 0."
+    )
+
+if GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS <= 0:
+
+    raise RuntimeError(
+        "GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS must be greater than 0."
     )
 
 if not 0.0 <= GROQ_TEMPERATURE <= 2.0:

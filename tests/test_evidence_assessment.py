@@ -613,7 +613,7 @@ def test_assessment_limits_cannot_be_increased_above_hard_maxima():
     with pytest.raises(ValueError, match="hard maximum"):
         assess_evidence_support(
             parsed, (source,), client,
-            max_output_tokens=901,
+            max_output_tokens=1801,
         )
 
 
@@ -646,6 +646,8 @@ def test_evidence_passage_requires_references_and_single_video():
 @pytest.mark.unit
 def test_groq_provider_request_is_single_call_json_mode_and_temperature_zero(monkeypatch):
     monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS", 1800)
     parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
     source = make_passage("p1", "Transcript text.", "c1")
     client, completions = fake_client(output(output_item(
@@ -657,7 +659,7 @@ def test_groq_provider_request_is_single_call_json_mode_and_temperature_zero(mon
     kwargs = completions.calls[0]
     assert result.diagnostics.provider == "groq"
     assert result.diagnostics.model == "openai/gpt-oss-20b"
-    assert kwargs["max_completion_tokens"] == 900
+    assert kwargs["max_completion_tokens"] == 1800
     assert kwargs["temperature"] == 0.0
     assert kwargs["reasoning_effort"] == "low"
     assert kwargs["include_reasoning"] is False
@@ -678,7 +680,7 @@ def test_huggingface_provider_request_is_single_call_and_deterministic():
     kwargs = completions.calls[0]
     assert result.diagnostics.provider == "huggingface"
     assert kwargs["model"] == "test/hf-assessor"
-    assert kwargs["max_tokens"] == 900
+    assert kwargs["max_tokens"] == 1800
     assert kwargs["temperature"] == 0.0
     assert kwargs["extra_body"]["reasoning_effort"] == "low"
     assert "response_format" not in kwargs
