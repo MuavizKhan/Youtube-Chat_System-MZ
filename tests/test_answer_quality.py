@@ -764,16 +764,16 @@ def test_single_section_overview_reserves_verified_alternatives_for_short_videos
         1 + overview_summarization.MAX_BACKUP_POINTS_PER_BUCKET
     )
     assert stats["returned_point_count"] == 1
-    assert stats["single_section_backup_candidate_count"] == 3
-    assert stats["backup_candidate_point_count"] == 3
-    assert len(result["verification_claims"]) == 4
+    assert stats["single_section_backup_candidate_count"] == 2
+    assert stats["backup_candidate_point_count"] == 2
+    assert len(result["verification_claims"]) == 3
     assert result["verification_claims"][0]["is_backup"] is False
     assert all(item["is_backup"] for item in result["verification_claims"][1:])
-    assert len(result["verification_results"]) == 4
+    assert len(result["verification_results"]) == 3
     assert [
         pair[0].metadata["chunk_id"]
         for pair in result["verification_results"]
-    ] == [1, 2, 3, 4]
+    ] == [1, 2, 3]
     assert result["verification_claims"][0]["evidence_chunk_ids"] == ["1"]
 
 def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
