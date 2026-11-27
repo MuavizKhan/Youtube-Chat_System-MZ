@@ -52,12 +52,16 @@ Processing is bounded:
   the vocabulary of the claims that cite them. Mapped alternatives are
   reserved across the timeline before primary points are audited. The reserve
   uses the remaining claim-audit budget, so primary points plus alternatives
-  never exceed fourteen candidates. This lets fully supported alternatives
+  never exceed twenty-one candidates, with up to two distinct reserve candidates per requested timeline bucket. This lets fully supported alternatives
   replace partial or unsupported primary points even when the primary list
   already fills the requested count.
 - The map candidate coverage, selected-point coverage, and final verified
   answer coverage are reported separately. Final coverage is calculated only
-  from evidence IDs attached to claims that survive verification.
+  from evidence IDs attached to claims that survive verification. Same-source
+  paraphrases are deduplicated before point counting; the final selector chooses
+  at most one verified development per represented timeline bucket. Diagnostics
+  distinguish raw supported candidate claims from distinct selected verified
+  points and report any remaining point shortfall.
 - Every accepted summary point must cite evidence IDs from supplied passages.
   Reducer output cannot invent a new reference or cite a passage that did not
   support a section finding.
@@ -75,9 +79,9 @@ selected fraction are kept in diagnostics so coverage limitations are visible.
 Compound and fact-sensitive answers are audited after generation using the
 existing evidence-assessment contracts. Each assessment request is bounded to
 eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
-answers support up to ten requested points plus as many source-linked reserve
-candidates as fit within the fourteen-candidate verification ceiling, through
-bounded assessment batches. Trivial
+answers support up to ten requested points plus up to two source-linked reserve
+candidates per requested timeline bucket, within a twenty-one-candidate verification
+ceiling and three bounded assessment batches. Trivial
 short non-overview answers avoid an additional model call.
 
 The audit is restricted to:
@@ -89,9 +93,11 @@ The audit is restricted to:
 Overview points provide their own evidence chunk IDs. Those sources are
 prioritized under the passage ceiling, and each excerpt is selected against
 the claims that cite it. Other answer types retain bounded claim-aware source
-selection. Up to fourteen overview candidates can be audited in two requests,
-with at most eight aspects per request; up to three source-linked reserve
-candidates may also be verified to replace unsupported primary points. No requested point is silently dropped
+selection. Up to twenty-one overview candidates can be audited in three bounded
+assessment batches, with at most eight aspects per provider request. Reserve
+selection aims to retain two independent alternatives per requested timeline
+bucket, so one unsupported reserve does not exhaust that interval's fallback
+capacity. No requested point is silently dropped
 merely because it exceeds one request's aspect limit.
 
 A chunk selected for indexing but omitted from the relevant model prompt cannot
