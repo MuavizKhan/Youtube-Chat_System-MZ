@@ -131,6 +131,7 @@ from .overview_summarization import (
     OverviewError,
     select_verified_overview_points,
     summarize_video_overview,
+    terminal_tail_coverage_from_claim_evidence,
     timeline_coverage_from_claim_evidence,
 )
 from .claim_verification import verify_answer_claims
@@ -12508,6 +12509,22 @@ def answer_question(
                     ] = len(selected_overview_points)
                     verification["verified_timeline_coverage"] = (
                         overview_stats["verified_timeline_coverage"]
+                    )
+                    terminal_tail_coverage = (
+                        terminal_tail_coverage_from_claim_evidence(
+                            verification.get("claim_evidence", []),
+                            [
+                                pair[0]
+                                for pair in verification_results
+                                if isinstance(pair, (tuple, list)) and pair
+                            ],
+                        )
+                    )
+                    overview_stats["verified_terminal_tail_coverage"] = (
+                        terminal_tail_coverage
+                    )
+                    verification["verified_terminal_tail_coverage"] = (
+                        terminal_tail_coverage
                     )
                     verification["verified_timeline_coverage_fraction"] = (
                         overview_stats["verified_timeline_coverage"].get(
