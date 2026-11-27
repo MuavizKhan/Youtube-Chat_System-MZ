@@ -123,3 +123,31 @@ def test_build_sections_uses_one_section_when_transcript_is_sparser_than_request
     assert len(sections) == 1
     assert len(lookup) == 2
     assert stats["sectioning_strategy"] == "character_packed"
+
+
+def test_build_sections_always_preserves_latest_transcript_chunks_when_sampling():
+    documents = [
+        _doc(index, index * 60)
+        for index in range(1, 151)
+    ]
+
+    sections, lookup, stats = build_sections(
+        documents,
+        preferred_sections=7,
+    )
+
+    selected_chunk_ids = {
+        str(document.metadata["chunk_id"])
+        for document in lookup.values()
+    }
+    assert stats["coverage_mode"] == "timeline_stratified"
+    assert stats["selected_document_count"] == 100
+    assert {str(index) for index in range(145, 151)}.issubset(
+        selected_chunk_ids
+    )
+    assert min(
+        float(item["document"].metadata["start"])
+        for section in sections
+        for item in section
+    ) == 60.0
+
