@@ -27,6 +27,14 @@ Each section represents a separate interval in the video's timeline. For a
 non-empty section containing substantive speech, normally return at least one
 finding from that interval. Return no findings only when the section contains
 no distinct substantive information (for example, silence or repeated filler).
+Inspect the final one or two transcript passages in every section separately
+from its opening. If those latest passages contain a new substantive
+development, answer, emotional reflection, decision, resolution, or
+conclusion, include at least one distinct finding anchored to those latest
+passage IDs. Do not let findings from the opening or middle of a section stand
+in for its ending. This is especially important for the final section of the
+video: represent the actual closing developments, not merely an earlier topic
+that happens to fall in the same broad timeline interval.
 Do not let a topic's appearance in an earlier interval cause you to omit a
 new event, explanation, example, change of position, or conclusion here.
 When a section contains a distinct substantive development, include it even
@@ -78,7 +86,10 @@ when that list is non-empty. Keep materially different events or claims as
 separate points and aim to return the requested number when the findings
 support them. Distribute points across the entire timeline instead of
 concentrating them in the opening sections. Include distinct developments
-from the middle and final sections when supported by the findings. Each point
+from the middle and final sections when supported by the findings. When the
+latest section findings contain a distinct substantive closing development,
+reserve a point for that terminal development; do not use an earlier finding
+from the same final timeline bucket as a substitute. Each point
 must describe exactly one independently verifiable development in one
 sentence. Never merge separate section findings, people, events, arguments,
 or conclusions into one point just to meet the requested count. When one
