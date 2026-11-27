@@ -88,7 +88,9 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
     assert len(calls) == stats["map_calls"] + 2
     assert "samples sections across the full timeline" in result["answer"]
     assert len(result["retrieved_results"]) <= stats["selected_document_count"]
-    assert len(result["verification_results"]) == stats["section_count"]
+    assert stats["section_count"] <= len(result["verification_results"]) <= (
+        stats["section_count"] + overview_summarization.MAX_TERMINAL_TAIL_FINDINGS
+    )
     assert len(result["verification_results"]) > len(result["retrieved_results"])
     assert len(
         result["generation_trace"]["context_budget"]["verification_chunk_ids"]
