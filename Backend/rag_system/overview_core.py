@@ -184,6 +184,14 @@ def build_sections(
         raise OverviewError("Overview documents must belong to exactly one video.")
 
     total_chars = sum(len(item.page_content) for item in valid)
+    timeline_start = min(sort_key(item)[0] for item in valid)
+    timeline_end = max(sort_key(item)[1] for item in valid)
+    time_binning_applied = (
+        isinstance(preferred_sections, int)
+        and not isinstance(preferred_sections, bool)
+        and 2 <= preferred_sections <= MAX_SECTIONS
+        and timeline_end > timeline_start
+    )
     selected, mode = valid, "full_transcript"
     if len(valid) > MAX_DOCUMENTS or total_chars > MAX_SOURCE_CHARS:
         mode = "timeline_stratified"
@@ -208,16 +216,7 @@ def build_sections(
         sections: list[list[dict]] = []
         lookup: dict[str, Any] = {}
         indexed_items = list(items)
-        time_binned = (
-            isinstance(preferred_sections, int)
-            and not isinstance(preferred_sections, bool)
-            and 2 <= preferred_sections <= MAX_SECTIONS
-        )
-
-        if time_binned:
-            timeline_start = min(sort_key(item)[0] for item in indexed_items)
-            timeline_end = max(sort_key(item)[1] for item in indexed_items)
-            time_binned = timeline_end > timeline_start
+        time_binned = time_binning_applied
 
         if time_binned:
             timeline_duration = timeline_end - timeline_start
@@ -312,11 +311,7 @@ def build_sections(
         "section_count": len(sections),
         "section_limit_sampling": section_limit_sampling,
         "sectioning_strategy": (
-            "timeline_binned"
-            if isinstance(preferred_sections, int)
-            and not isinstance(preferred_sections, bool)
-            and 2 <= preferred_sections <= MAX_SECTIONS
-            else "character_packed"
+            "timeline_binned" if time_binning_applied else "character_packed"
         ),
         "preferred_timeline_sections": (
             preferred_sections

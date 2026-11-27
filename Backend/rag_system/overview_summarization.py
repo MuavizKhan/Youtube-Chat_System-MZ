@@ -725,7 +725,7 @@ def summarize_video_overview(
             requested,
         ),
     })
-    maximum_backup_points = min(3, max(0, 10 - requested))
+    maximum_backup_points = 3
     backup_points = _select_backup_points(
         primary_points=points,
         map_findings=map_findings,

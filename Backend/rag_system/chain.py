@@ -12307,6 +12307,16 @@ def answer_question(
                         item["claim_index"] for item in selected_overview_points
                     }
                     all_claim_evidence = verification.get("claim_evidence", [])
+                    verification["candidate_claim_evidence"] = all_claim_evidence
+                    verification["candidate_removed_claim_count"] = (
+                        verification.get("removed_claim_count", 0)
+                    )
+                    verification["candidate_unsupported_claim_indices"] = [
+                        item.get("claim_index")
+                        for item in all_claim_evidence
+                        if isinstance(item, dict)
+                        and item.get("status") not in {"supported", "partial"}
+                    ]
                     selected_claim_evidence = [
                         item for item in all_claim_evidence
                         if isinstance(item, dict)
@@ -12362,10 +12372,13 @@ def answer_question(
                         item["status"] == "partial"
                         for item in selected_overview_points
                     )
-                    verification["removed_claim_count"] = max(
+                    verification["final_point_shortfall"] = max(
                         0,
                         overview_stats.get("requested_point_count", 7)
                         - len(selected_overview_points),
+                    )
+                    verification["removed_claim_count"] = (
+                        verification["candidate_removed_claim_count"]
                     )
             supported_chunk_ids = {
                 str(value) for value in verification.get("supported_chunk_ids", [])

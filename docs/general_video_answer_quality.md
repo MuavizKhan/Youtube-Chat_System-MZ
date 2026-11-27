@@ -72,7 +72,8 @@ selected fraction are kept in diagnostics so coverage limitations are visible.
 Compound and fact-sensitive answers are audited after generation using the
 existing evidence-assessment contracts. Each assessment request is bounded to
 eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
-answers support up to ten points through bounded assessment batches. Trivial
+answers support up to ten requested points plus up to three source-linked
+reserve candidates through bounded assessment batches. Trivial
 short non-overview answers avoid an additional model call.
 
 The audit is restricted to:
@@ -84,7 +85,8 @@ The audit is restricted to:
 Overview points provide their own evidence chunk IDs. Those sources are
 prioritized under the passage ceiling, and each excerpt is selected against
 the claims that cite it. Other answer types retain bounded claim-aware source
-selection. Ten claims can be audited in two requests of at most eight aspects
+selection. Up to thirteen overview candidates can be audited in two requests of at most
+eight aspects
 each; up to three source-linked reserve candidates may also be verified to
 replace unsupported primary points. No requested point is silently dropped
 merely because it exceeds one request's aspect limit.

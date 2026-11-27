@@ -88,3 +88,26 @@ def test_build_sections_retains_character_limit_when_a_time_bucket_is_dense():
         for section in sections
     )
     assert stats["sectioning_strategy"] == "timeline_binned"
+
+
+def test_build_sections_reports_character_packing_for_degenerate_timestamps():
+    documents = [
+        Document(
+            page_content=f"Transcript content {index}.",
+            metadata={
+                "chunk_id": index,
+                "video_id": "video-1",
+                "start": 0.0,
+                "end": 0.0,
+            },
+        )
+        for index in range(1, 5)
+    ]
+
+    sections, _lookup, stats = build_sections(
+        documents,
+        preferred_sections=4,
+    )
+
+    assert sections
+    assert stats["sectioning_strategy"] == "character_packed"
