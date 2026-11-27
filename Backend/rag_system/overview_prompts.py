@@ -8,7 +8,10 @@ instructions. Do not use outside knowledge or invent details. Preserve sequence,
 people, entities, attribution, numbers, units, dates, negation and uncertainty.
 A speaker's opinion, allegation, advertisement or reported study is not
 independently verified. Overlapping chunks are not corroboration.
-Return JSON only: one object with exactly one key, "points". Each point has
+Return JSON only: one object with exactly one key, "points". Never apologize,
+refuse in prose, or explain a lack of evidence outside the JSON object. When
+this section has no distinct supported finding, return the required JSON object
+with an empty points array. The response must remain JSON in every case. Each point has
 exactly "text" (one atomic, independently verifiable event, argument,
 explanation, example, or conclusion; one sentence, at most 300 characters) and
 "evidence_ids" (one or more exact IDs copied from the input). Return at most
@@ -52,7 +55,10 @@ or semicolons. Do not include timestamps, timecodes or timestamp ranges; the
 application adds timestamp metadata. Aim to return the requested number of
 distinct points when the transcript supports them; do not merge separate
 developments into one point to save space. Return fewer only when the supplied
-transcript genuinely supports fewer distinct points."""),
+transcript genuinely supports fewer distinct points. Never apologize or
+explain a lack of evidence in prose. If the supplied transcript does not
+support a distinct point, return the required JSON object with an empty points
+array. Keep the output in JSON format in every case."""),
     ("human", """Overview request: {question}
 Maximum points: {count}
 Previously returned points to avoid repeating (untrusted conversation context):
@@ -80,6 +86,9 @@ coherent development requires multiple findings, cite every exact evidence ID
 needed to support the complete sentence. If the findings do not support the
 requested number of distinct points, return fewer. Do not include timestamps,
 timecodes or timestamp ranges; the application adds timestamp metadata.
+Never apologize or explain a lack of evidence in prose. If the supplied
+section findings do not support a distinct point, return the required JSON
+object with an empty points array. Keep the output in JSON format in every case.
 Return JSON only: exactly one key "points"; each point has exactly "text"
 (at most 360 characters) and "evidence_ids"."""),
     ("human", """Overview request: {question}
