@@ -143,9 +143,9 @@ def test_verified_timeline_coverage_uses_only_supported_claim_sources():
         bucket_count=4,
     )
 
-    assert result["verified_point_count"] == 2
-    assert result["covered_buckets"] == [1, 4]
-    assert result["missing_buckets"] == [2, 3]
+    assert result["verified_point_count"] == 1
+    assert result["covered_buckets"] == [1]
+    assert result["missing_buckets"] == [2, 3, 4]
 
 
 def test_verified_overview_point_selector_replaces_missing_primary_from_timeline_backup():
@@ -184,6 +184,96 @@ def test_verified_overview_point_selector_replaces_missing_primary_from_timeline
         "Supported closing point.",
     }
     assert sum(item["is_backup"] for item in selected) == 1
+
+
+def test_verified_overview_selector_replaces_partial_primary_points_with_supported_backups():
+    documents = [
+        _document_for_minute(index, (index - 1) * 10)
+        for index in range(1, 8)
+    ]
+    verification_claims = [
+        {
+            "text": f"Primary point {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": False,
+        }
+        for index in range(1, 8)
+    ] + [
+        {
+            "text": f"Fully supported map alternative {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": True,
+        }
+        for index in range(2, 8)
+    ]
+    claim_evidence = [
+        {
+            "claim_index": 1,
+            "status": "supported",
+            "supporting_chunk_ids": ["1"],
+        }
+    ] + [
+        {
+            "claim_index": index,
+            "status": "partial",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(2, 8)
+    ] + [
+        {
+            "claim_index": index + 7,
+            "status": "supported",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(2, 8)
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        verification_claims,
+        claim_evidence,
+        documents,
+        requested_count=7,
+        timeline_start=0.0,
+        timeline_end=3645.0,
+        bucket_count=7,
+    )
+
+    assert len(selected) == 7
+    assert all(item["status"] == "supported" for item in selected)
+    assert sum(item["is_backup"] for item in selected) == 6
+    assert [item["text"] for item in selected] == [
+        "Primary point 1.",
+        "Fully supported map alternative 2.",
+        "Fully supported map alternative 3.",
+        "Fully supported map alternative 4.",
+        "Fully supported map alternative 5.",
+        "Fully supported map alternative 6.",
+        "Fully supported map alternative 7.",
+    ]
+
+
+def test_verified_overview_selector_omits_partial_points_without_supported_replacements():
+    documents = [_document_for_minute(1, 0)]
+    selected = overview_summarization.select_verified_overview_points(
+        [
+            {
+                "text": "Partially supported compound point.",
+                "evidence_chunk_ids": ["1"],
+                "is_backup": False,
+            }
+        ],
+        [
+            {
+                "claim_index": 1,
+                "status": "partial",
+                "supporting_chunk_ids": ["1"],
+            }
+        ],
+        documents,
+        requested_count=1,
+    )
+
+    assert selected == []
 
 
 def test_verified_overview_selector_caps_output_when_timestamps_are_degenerate():
@@ -248,3 +338,44 @@ def test_overview_backup_candidates_remain_available_without_usable_timestamps()
         "Alternative 3.",
         "Alternative 4.",
     ]
+
+
+def test_overview_backup_reserve_spans_timeline_buckets_even_when_primary_points_cover_them():
+    minutes = [0, 10, 20, 30, 40, 50, 60]
+    documents = [
+        _document_for_minute(index, minute)
+        for index, minute in enumerate(minutes, start=1)
+    ]
+    lookup = {
+        f"P{index:05d}": document
+        for index, document in enumerate(documents, start=1)
+    }
+    primary_points = [
+        _point(f"Primary point {index}.", f"P{index:05d}")
+        for index in range(1, 8)
+    ]
+    map_findings = [
+        _point(f"Distinct alternative development {index}.", f"P{index:05d}")
+        for index in range(1, 8)
+    ]
+
+    selected = overview_summarization._select_backup_points(
+        primary_points=primary_points,
+        map_findings=map_findings,
+        lookup=lookup,
+        requested=7,
+        maximum_backups=6,
+    )
+
+    assert len(selected) == 6
+    selected_buckets = [
+        overview_summarization._point_timeline_buckets(
+            point,
+            lookup,
+            0.0,
+            3645.0,
+            7,
+        )[0].pop()
+        for point in selected
+    ]
+    assert selected_buckets == [0, 1, 2, 4, 5, 6]
