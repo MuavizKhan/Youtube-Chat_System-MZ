@@ -83,7 +83,7 @@ def _timeline_sample_preserving_tail(
     items: Sequence[Any],
     count: int,
     *,
-    terminal_reserve: int = 6,
+    terminal_reserve: int = 20,
 ) -> list[Any]:
     """Sample the whole timeline while always retaining the latest transcript chunks."""
     ordered = sorted(items, key=sort_key)
