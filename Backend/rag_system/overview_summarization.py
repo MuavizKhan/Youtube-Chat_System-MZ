@@ -1102,9 +1102,107 @@ def summarize_video_overview(
         for item in findings:
             note_evidence_ids.update(item["evidence_ids"])
         map_calls += 1
-    else:
+    # The actual ending is audited independently from the broad timeline
+    # buckets. This prevents an earlier passage in the final bucket from
+    # standing in for substantive developments in the transcript's closing
+    # minutes. The scan reuses the existing overview verification budget.
+    selected_documents = list(lookup.values())
+    timeline_start = min(sort_key(document)[0] for document in selected_documents)
+    timeline_end = max(sort_key(document)[1] for document in selected_documents)
+    terminal_tail_start = _terminal_tail_start(timeline_start, timeline_end)
+    terminal_tail_scan = {
+        "status": "not_applicable",
+        "finding_count": 0,
+        "start_seconds": None,
+        "end_seconds": round(timeline_end, 2),
+        "passage_ids": [],
+    }
+    if terminal_tail_start is not None:
+        terminal_items = [
+            item
+            for section in sections
+            for item in section
+            if _terminal_overlap_center(
+                item["document"],
+                terminal_tail_start,
+                timeline_end,
+            ) is not None
+        ]
+        terminal_items.sort(
+            key=lambda item: sort_key(item["document"])
+        )
+        # Keep the most recent passages under a fixed prompt budget. The
+        # ending itself is never removed to make room for older context.
+        bounded_terminal_items = []
+        terminal_chars = 0
+        for item in reversed(terminal_items):
+            line_length = len(item["line"])
+            if (
+                bounded_terminal_items
+                and terminal_chars + line_length > MAX_TERMINAL_TAIL_CONTEXT_CHARS
+            ):
+                break
+            if not bounded_terminal_items and line_length > MAX_TERMINAL_TAIL_CONTEXT_CHARS:
+                item = {
+                    **item,
+                    "line": item["line"][-MAX_TERMINAL_TAIL_CONTEXT_CHARS:],
+                }
+                line_length = len(item["line"])
+            bounded_terminal_items.append(item)
+            terminal_chars += line_length
+        bounded_terminal_items.reverse()
+        if bounded_terminal_items:
+            terminal_context = "\n".join(
+                item["line"] for item in bounded_terminal_items
+            )
+            terminal_allowed_ids = {
+                item["id"] for item in bounded_terminal_items
+            }
+            terminal_points = parse_points(
+                generate_text(OVERVIEW_TERMINAL_PROMPT.invoke({
+                    "question": question,
+                    "exclude_points": (
+                        exclude_points + "\n" + "\n".join(notes)
+                    )[-4_000:],
+                    "context": terminal_context,
+                })),
+                terminal_allowed_ids,
+                MAX_TERMINAL_TAIL_FINDINGS,
+                allow_empty=True,
+            )
+            map_findings.extend(terminal_points)
+            for item in terminal_points:
+                note_evidence_ids.update(item["evidence_ids"])
+                notes.append(
+                    f"Terminal closing development: {item['text']} "
+                    f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
+                )
+            terminal_tail_scan = {
+                "status": "completed",
+                "finding_count": len(terminal_points),
+                "start_seconds": round(terminal_tail_start, 2),
+                "end_seconds": round(timeline_end, 2),
+                "passage_ids": [
+                    item["id"] for item in bounded_terminal_items
+                ],
+                "source_chunk_ids": list(dict.fromkeys(
+                    str(item["document"].metadata.get("chunk_id"))
+                    for item in bounded_terminal_items
+                )),
+                "context_chars": terminal_chars,
+            }
+        else:
+            terminal_tail_scan = {
+                "status": "no_terminal_passages_selected",
+                "finding_count": 0,
+                "start_seconds": round(terminal_tail_start, 2),
+                "end_seconds": round(timeline_end, 2),
+                "passage_ids": [],
+            }
+
+    if len(sections) > 1:
         if not notes:
-            raise OverviewError("No section findings were generated.")
+            raise OverviewError("No section or terminal findings were generated.")
         points = parse_points(
             generate_text(OVERVIEW_REDUCE_PROMPT.invoke({
                 "question": question,
@@ -1179,6 +1277,7 @@ def summarize_video_overview(
     stats.update({
         "map_calls": map_calls,
         "map_finding_count": len(map_findings),
+        "terminal_tail_scan": terminal_tail_scan,
         "map_section_point_counts": map_section_point_counts,
         "map_finding_timeline_coverage": _timeline_coverage_stats(
             map_findings,
