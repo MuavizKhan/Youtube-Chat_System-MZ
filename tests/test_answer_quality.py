@@ -542,7 +542,7 @@ def test_unstructured_answer_claims_keep_the_existing_fourteen_claim_ceiling(mon
         fake_assessment,
     )
     result = claim_verification.verify_answer_claims(
-        answer="\\n".join(
+        answer="\n".join(
             f"{index}. The speaker describes independent event number {index}."
             for index in range(1, 16)
         ),
@@ -553,7 +553,7 @@ def test_unstructured_answer_claims_keep_the_existing_fourteen_claim_ceiling(mon
             for index, document in enumerate(documents)
         ],
         included_chunk_ids=[str(index) for index in range(1, 16)],
-        prompt_visible_context="\\n".join(
+        prompt_visible_context="\n".join(
             document.page_content for document in documents
         ),
         client=object(),
