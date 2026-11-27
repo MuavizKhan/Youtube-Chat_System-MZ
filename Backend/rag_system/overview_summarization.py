@@ -1027,6 +1027,7 @@ def summarize_video_overview(
     prompt_context_parts = []
     map_calls = 0
     map_section_point_counts = []
+    terminal_points = []
 
     for number, section in enumerate(sections, start=1):
         context = "\n".join(item["line"] for item in section)
@@ -1249,11 +1250,16 @@ def summarize_video_overview(
     ))
     stats.update({
         "map_calls": map_calls,
-        "map_finding_count": len(map_findings),
+        "map_finding_count": len(map_findings) - len(terminal_points),
         "terminal_tail_scan": terminal_tail_scan,
+        "terminal_tail_finding_timeline_coverage": _timeline_coverage_stats(
+            terminal_points,
+            lookup,
+            requested,
+        ),
         "map_section_point_counts": map_section_point_counts,
         "map_finding_timeline_coverage": _timeline_coverage_stats(
-            map_findings,
+            map_findings[:-len(terminal_points)] if terminal_points else map_findings,
             lookup,
             requested,
         ),
