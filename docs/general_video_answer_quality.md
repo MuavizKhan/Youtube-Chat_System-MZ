@@ -48,8 +48,8 @@ Processing is bounded:
   interval, including late conclusions and new examples of earlier themes.
   It separately inspects the final one or two passages in each section so an
   opening passage cannot stand in for the section's ending.
-  A separate terminal-tail scan examines up to the final five percent of the
-  transcript (bounded to 60–300 seconds) in a dedicated, source-ID-constrained
+  A separate terminal-tail scan examines the final seven percent of the
+  transcript (bounded to 60–360 seconds) in a dedicated, source-ID-constrained
   model call. It can produce up to three additional findings, which enter the
   existing twenty-one-claim audit budget rather than expanding that budget.
   When long transcripts must be sampled, the latest twenty chunks are reserved
@@ -64,11 +64,14 @@ Processing is bounded:
   terminal window are preferred over earlier points in that same bucket;
   when multiple verified closing findings compete, the latest supported
   development is selected so the final answer reaches the actual ending.
-  Chunk intervals that materially overlap the terminal window count even when
-  their midpoint lies just before the window boundary. Diagnostics report
-  terminal-tail coverage separately from broad bucket
+  A cited chunk counts as terminal evidence only when its full timestamp
+  interval lies inside the terminal window; a chunk straddling the start
+  boundary cannot prove that its claim came from the closing portion.
+  Diagnostics report terminal-tail coverage separately from broad bucket
   coverage. The terminal window is anchored to the full indexed transcript
-  duration, never the latest selected evidence timestamp.
+  duration, never the latest selected evidence timestamp. If the supplementary
+  scan is rate-limited or malformed, the main verified overview is preserved
+  and the response discloses that the ending may need a focused follow-up.
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
