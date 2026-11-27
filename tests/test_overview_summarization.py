@@ -1059,7 +1059,7 @@ def test_terminal_end_cap_coverage_is_stricter_than_terminal_tail_coverage():
         documents,
         timeline_start=4.0,
         timeline_end=5287.0,
-        end_cap_start=5174.0,
+        end_cap_chunk_ids=["75", "76"],
     )
     assert early["covered"] is True
     assert early["end_cap_eligible"] is True

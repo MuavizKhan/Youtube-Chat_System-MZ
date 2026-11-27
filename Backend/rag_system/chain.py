@@ -12516,10 +12516,10 @@ def answer_question(
                         if isinstance(terminal_scan, dict)
                         else {}
                     )
-                    end_cap_start = (
-                        end_cap_scan.get("start_seconds")
+                    end_cap_chunk_ids = (
+                        end_cap_scan.get("source_chunk_ids", [])
                         if isinstance(end_cap_scan, dict)
-                        else None
+                        else []
                     )
                     terminal_tail_coverage = (
                         terminal_tail_coverage_from_claim_evidence(
@@ -12531,7 +12531,7 @@ def answer_question(
                             ],
                             timeline_start=before_coverage["start_seconds"],
                             timeline_end=before_coverage["end_seconds"],
-                            end_cap_start=end_cap_start,
+                            end_cap_chunk_ids=end_cap_chunk_ids,
                         )
                     )
                     overview_stats["verified_terminal_tail_coverage"] = (

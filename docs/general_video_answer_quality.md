@@ -76,8 +76,9 @@ Processing is bounded:
   boundary cannot prove that its claim came from the closing portion.
   Diagnostics report terminal-tail coverage separately from broad bucket
   coverage and report whether a substantive end-cap finding was selected and
-  verified. The end-cap boundary is derived from the final two eligible
-  transcript passages. The terminal window is anchored to the full indexed
+  verified. End-cap verification is tied to the exact chunk IDs of the final
+  two eligible transcript passages, not a timestamp interval that could count
+  an unrelated overlapping chunk. The terminal window is anchored to the full indexed
   transcript duration, never the latest selected evidence timestamp. If the supplementary
   scan is rate-limited or malformed, the main verified overview is preserved
   and the response discloses that the ending may need a focused follow-up.

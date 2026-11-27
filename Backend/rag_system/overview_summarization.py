@@ -946,9 +946,9 @@ def terminal_tail_coverage_from_claim_evidence(
     *,
     timeline_start: float | None = None,
     timeline_end: float | None = None,
-    end_cap_start: float | None = None,
+    end_cap_chunk_ids: Sequence[str] | None = None,
 ) -> dict:
-    """Measure verified evidence in both the closing window and its final passages."""
+    """Measure verified evidence in the closing window and exact final passages."""
     document_values = [
         document for document in documents
         if isinstance(getattr(document, "metadata", None), dict)
@@ -979,19 +979,20 @@ def terminal_tail_coverage_from_claim_evidence(
         for document in document_values
         if getattr(document, "metadata", {}).get("chunk_id") is not None
     }
-    try:
-        end_cap_start_value = (
-            float(end_cap_start) if end_cap_start is not None else None
-        )
-    except (TypeError, ValueError, OverflowError):
-        end_cap_start_value = None
-    end_cap_eligible = (
-        end_cap_start_value is not None
-        and math.isfinite(end_cap_start_value)
-        and tail_start <= end_cap_start_value < timeline_end
-    )
-    if not end_cap_eligible:
-        end_cap_start_value = None
+    requested_end_cap_ids = {
+        str(value)
+        for value in (end_cap_chunk_ids or ())
+        if value is not None
+    }
+    eligible_end_cap_ids = {
+        chunk_id
+        for chunk_id in requested_end_cap_ids
+        if chunk_id in by_chunk_id
+        and _terminal_overlap_center(
+            by_chunk_id[chunk_id], tail_start, timeline_end
+        ) is not None
+    }
+    end_cap_eligible = bool(eligible_end_cap_ids)
     supporting_chunk_ids = []
     end_cap_supporting_chunk_ids = []
     latest_supported_midpoint = None
@@ -1017,10 +1018,8 @@ def terminal_tail_coverage_from_claim_evidence(
                     else max(latest_supported_midpoint, overlap_center)
                 )
             end_cap_center = (
-                _terminal_overlap_center(
-                    document, end_cap_start_value, timeline_end
-                )
-                if end_cap_eligible
+                overlap_center
+                if chunk_id in eligible_end_cap_ids
                 else None
             )
             if end_cap_center is not None:
@@ -1054,11 +1053,7 @@ def terminal_tail_coverage_from_claim_evidence(
         "end_cap_covered": (
             bool(unique_end_cap_chunk_ids) if end_cap_eligible else None
         ),
-        "end_cap_start_seconds": (
-            round(end_cap_start_value, 2)
-            if end_cap_start_value is not None
-            else None
-        ),
+        "end_cap_chunk_ids": sorted(eligible_end_cap_ids),
         "end_cap_supporting_chunk_ids": unique_end_cap_chunk_ids,
         "latest_end_cap_supported_midpoint_seconds": (
             round(latest_end_cap_supported_midpoint, 2)
