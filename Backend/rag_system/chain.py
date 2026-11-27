@@ -12331,10 +12331,13 @@ def answer_question(
                         "\nThe available transcript material did not yield enough "
                         "verifiable distinct developments for the requested count."
                     )
-                elif verification.get("removed_claim_count", 0):
+                elif (
+                    verification.get("removed_claim_count", 0)
+                    or verification.get("partial_claim_count", 0)
+                ):
                     answer_lines.append(
-                        "\nSome candidate details were omitted because the available "
-                        "transcript did not clearly support them."
+                        "\nSome candidate details were omitted because the transcript "
+                        "did not fully support them."
                     )
                 if any(
                     item.get("status") in {"conflicted", "contradicted"}
@@ -12348,8 +12351,19 @@ def answer_question(
                 result["answer"] = "\n".join(answer_lines)
                 verification["candidate_supported_claim_count"] = (
                     verification.get("supported_claim_count", 0)
-                    + verification.get("partial_claim_count", 0)
                 )
+                verification["candidate_partial_claim_count"] = (
+                    verification.get("partial_claim_count", 0)
+                )
+                verification["candidate_accepted_or_partial_claim_count"] = (
+                    verification["candidate_supported_claim_count"]
+                    + verification["candidate_partial_claim_count"]
+                )
+                verification["candidate_partial_claim_indices"] = [
+                    item.get("claim_index")
+                    for item in all_claim_evidence
+                    if isinstance(item, dict) and item.get("status") == "partial"
+                ]
                 verification["final_selected_claim_indices"] = sorted(selected_indices)
                 verification["final_backup_points_used"] = sum(
                     item["is_backup"] for item in selected_overview_points
@@ -12429,7 +12443,6 @@ def answer_question(
             verification_trace["citation_chunk_ids"] = filtered_ids
             verification_trace["verified_claim_count"] = (
                 verification.get("supported_claim_count", 0)
-                + verification.get("partial_claim_count", 0)
             )
             result["retrieval_trace"] = verification_trace
             result["source_groups"] = merge_overlapping_results(filtered_results)
