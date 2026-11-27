@@ -221,7 +221,7 @@ def test_verified_overview_selector_replaces_partial_primary_points_with_support
         for index in range(2, 8)
     ] + [
         {
-            "claim_index": index + 7,
+            "claim_index": index + 6,
             "status": "supported",
             "supporting_chunk_ids": [str(index)],
         }
