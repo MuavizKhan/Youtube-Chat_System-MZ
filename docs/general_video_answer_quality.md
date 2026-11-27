@@ -33,14 +33,26 @@ order rather than relying on the targeted-question top-k result set.
 
 Processing is bounded:
 
-- Up to 60 transcript chunks and 48,000 source characters are passed through
-  the full-transcript route.
-- Larger transcripts are sampled evenly over the complete indexed timeline;
-  the response and diagnostics disclose when this happens.
-- Selected source passages are grouped into chronological sections, with a
-  maximum of 4,500 characters per section and 12 sections.
-- Multi-section videos use map/reduce: each section produces a small set of
-  source-ID-linked findings, followed by a chronological synthesis.
+- When the indexed transcript contains at most 100 chunks and 80,000 source
+  characters, every valid chunk is processed by the overview map stage.
+- Larger transcripts are sampled near evenly spaced timestamps over the
+  complete indexed timeline; the response and diagnostics disclose this.
+  Sampling is time-based rather than based only on chunk order.
+- Selected source passages are grouped into chronological, equal-duration
+  timeline sections (normally matching the requested point count), while each
+  section stays within the 9,000-character input bound. At most 10 map sections
+  are processed.
+- Multi-section videos use map/reduce: each non-empty timeline section produces
+  up to three source-ID-linked findings, followed by chronological synthesis.
+  The map stage is prompted to retain distinct developments within each
+  interval, including late conclusions and new examples of earlier themes.
+- Every accepted summary point retains its own exact transcript chunk IDs.
+  The verifier receives this point-to-source mapping rather than an
+  unassociated global pool of candidate passages. Excerpts are selected using
+  the vocabulary of the claims that cite them.
+- The map candidate coverage, selected-point coverage, and final verified
+  answer coverage are reported separately. Final coverage is calculated only
+  from evidence IDs attached to claims that survive verification.
 - Every accepted summary point must cite evidence IDs from supplied passages.
   Reducer output cannot invent a new reference or cite a passage that did not
   support a section finding.
@@ -56,18 +68,26 @@ selected fraction are kept in diagnostics so coverage limitations are visible.
 ## 3. Claim-level answer verification
 
 Compound and fact-sensitive answers are audited after generation using the
-existing evidence-assessment contracts. The audit is bounded to at most eight
-claims, eight evidence passages, and 8,000 input characters. Trivial short
-answers avoid an additional model call.
+existing evidence-assessment contracts. Each assessment request is bounded to
+eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
+answers support up to ten points through bounded assessment batches. Trivial
+short non-overview answers avoid an additional model call.
 
 The audit is restricted to:
 
-1. chunk IDs recorded as included in the generation context; and
+1. chunk IDs recorded as included in the generation or overview map context; and
 2. exact normalized text excerpts that can be found inside the prompt-visible
    transcript context.
 
-A chunk selected by retrieval but omitted from the prompt cannot verify an
-answer. Text outside a truncated prompt excerpt cannot verify a claim either.
+Overview points provide their own evidence chunk IDs. Those sources are
+prioritized under the passage ceiling, and each excerpt is selected against
+the claims that cite it. Other answer types retain bounded claim-aware source
+selection. Ten claims can be audited in two requests of at most eight aspects
+each; no requested point is silently dropped merely because it exceeds one
+request's aspect limit.
+
+A chunk selected for indexing but omitted from the relevant model prompt cannot
+verify an answer. Text outside a prompt-visible excerpt cannot verify a claim.
 Each passage retains its video ID, chunk ID, and timestamp interval.
 
 Completed assessments keep supported claims, qualify partially supported
