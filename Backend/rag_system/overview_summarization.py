@@ -20,9 +20,12 @@ from .overview_prompts import (
 )
 
 
-# Keep all overview candidates within the claim verifier's bounded audit ceiling.
-MAX_OVERVIEW_VERIFICATION_CLAIMS = 14
+# Audit two alternative developments per requested timeline bucket. The verifier
+# processes at most eight aspects per provider request, so 21 candidates are
+# handled as three bounded requests for a seven-point overview.
+MAX_OVERVIEW_VERIFICATION_CLAIMS = 21
 MAX_BACKUP_POINTS = MAX_OVERVIEW_VERIFICATION_CLAIMS - 1
+MAX_BACKUP_POINTS_PER_BUCKET = 2
 
 
 OVERVIEW_SAMPLING_DISCLOSURE = (
@@ -35,22 +38,79 @@ def _normalized_point_text(value: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
 
 
-def _duplicate_point(candidate: str, existing: Sequence[dict]) -> bool:
-    normalized = _normalized_point_text(candidate)
+def _point_evidence_ids(point: dict) -> set[str]:
+    values = []
+    for key in ("evidence_ids", "evidence_chunk_ids", "supporting_chunk_ids"):
+        raw = point.get(key, [])
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(raw)
+    return {str(value) for value in values if value is not None}
+
+
+def _point_terms(value: str) -> set[str]:
+    stop_words = {
+        "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+        "for", "from", "had", "has", "have", "he", "her", "his", "how",
+        "in", "into", "is", "it", "its", "of", "on", "or", "she", "so",
+        "that", "the", "their", "them", "then", "there", "they", "this",
+        "to", "was", "we", "were", "which", "while", "who", "with",
+    }
+    return {
+        token.casefold()
+        for token in re.findall(r"[^\\W_]+", value, flags=re.UNICODE)
+        if len(token) > 2 and token.casefold() not in stop_words
+    }
+
+
+def _duplicate_point(candidate: str | dict, existing: Sequence[dict]) -> bool:
+    candidate_item = candidate if isinstance(candidate, dict) else {}
+    candidate_text = (
+        str(candidate_item.get("text", ""))
+        if candidate_item
+        else str(candidate)
+    )
+    normalized = _normalized_point_text(candidate_text)
     if not normalized:
         return True
-    candidate_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", normalized)
+    candidate_numbers = re.findall(r"\\b\\d+(?:[.,]\\d+)*\\b", normalized)
+    candidate_terms = _point_terms(normalized)
+    candidate_sources = _point_evidence_ids(candidate_item)
+
     for item in existing:
         current = _normalized_point_text(str(item.get("text", "")))
         if not current:
             continue
-        current_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", current)
+        current_numbers = re.findall(r"\\b\\d+(?:[.,]\\d+)*\\b", current)
         # Different numeric claims are materially distinct evidence, even when
-        # the surrounding wording is almost identical. Preserve them for the
-        # transcript claim verifier rather than fuzzy-collapsing their values.
+        # the surrounding wording is almost identical. Preserve their values.
         if candidate_numbers != current_numbers:
             continue
         if normalized == current or SequenceMatcher(None, normalized, current).ratio() >= 0.88:
+            return True
+
+        current_sources = _point_evidence_ids(item)
+        shared_sources = candidate_sources.intersection(current_sources)
+        if not shared_sources:
+            continue
+        current_terms = _point_terms(current)
+        shared_terms = candidate_terms.intersection(current_terms)
+        if not candidate_terms or not current_terms:
+            continue
+        overlap_coefficient = len(shared_terms) / min(
+            len(candidate_terms),
+            len(current_terms),
+        )
+        jaccard_similarity = len(shared_terms) / len(
+            candidate_terms.union(current_terms)
+        )
+        # When two paraphrases rely on the same transcript chunk, use both
+        # lexical overlap measures to catch redundant restatements without
+        # collapsing merely related events that share a broader topic.
+        if (
+            len(shared_terms) >= 4
+            and overlap_coefficient >= 0.70
+            and jaccard_similarity >= 0.50
+        ):
             return True
     return False
 
@@ -140,7 +200,7 @@ def _balance_points_over_timeline(
     ):
         for order, point in enumerate(items):
             text = str(point.get("text", "")).strip()
-            if not text or _duplicate_point(text, duplicate_guard):
+            if not text or _duplicate_point(point, duplicate_guard):
                 continue
             buckets, midpoints = _point_timeline_buckets(
                 point,
@@ -258,7 +318,7 @@ def _select_backup_points(
     candidates = []
     for order, finding in enumerate(map_findings):
         text = str(finding.get("text", "")).strip()
-        if not text or _duplicate_point(text, duplicate_guard):
+        if not text or _duplicate_point(finding, duplicate_guard):
             continue
         if timeline_valid:
             buckets, midpoints = _point_timeline_buckets(
@@ -308,39 +368,46 @@ def _select_backup_points(
             for index in range(maximum_backups)
         })
 
-    for bucket in target_buckets:
+    reserve_rounds = max(
+        1,
+        math.ceil(maximum_backups / max(1, len(target_buckets))),
+    )
+    for _round in range(reserve_rounds):
+        for bucket in target_buckets:
+            if len(selected) >= maximum_backups:
+                break
+            bucket_center = (
+                timeline_start + duration * (bucket + 0.5) / bucket_count
+                if timeline_valid
+                else timeline_start
+            )
+            options = [
+                (index, candidate)
+                for index, candidate in enumerate(candidates)
+                if index not in selected_indexes and bucket in candidate["buckets"]
+            ]
+            if not options:
+                continue
+            index, candidate = min(
+                options,
+                key=lambda pair: (
+                    min(
+                        abs(midpoint - bucket_center)
+                        for midpoint in pair[1]["midpoints"]
+                        if _timeline_bucket_index(
+                            midpoint,
+                            timeline_start,
+                            timeline_end,
+                            bucket_count,
+                        ) == bucket
+                    ),
+                    pair[1]["order"],
+                ),
+            )
+            selected.append(candidate)
+            selected_indexes.add(index)
         if len(selected) >= maximum_backups:
             break
-        bucket_center = (
-            timeline_start + duration * (bucket + 0.5) / bucket_count
-            if timeline_valid
-            else timeline_start
-        )
-        options = [
-            (index, candidate)
-            for index, candidate in enumerate(candidates)
-            if index not in selected_indexes and bucket in candidate["buckets"]
-        ]
-        if not options:
-            continue
-        index, candidate = min(
-            options,
-            key=lambda pair: (
-                min(
-                    abs(midpoint - bucket_center)
-                    for midpoint in pair[1]["midpoints"]
-                    if _timeline_bucket_index(
-                        midpoint,
-                        timeline_start,
-                        timeline_end,
-                        bucket_count,
-                    ) == bucket
-                ),
-                pair[1]["order"],
-            ),
-        )
-        selected.append(candidate)
-        selected_indexes.add(index)
 
     # Sparse timelines may not have a candidate in every target bucket. Fill
     # the remaining reserve from distinct, source-linked map findings.
@@ -411,11 +478,12 @@ def select_verified_overview_points(
     timeline_end: float | None = None,
     bucket_count: int | None = None,
 ) -> list[dict]:
-    """Keep verified primary points and fill gaps with verified map alternatives.
+    """Select distinct, fully supported points across the available timeline.
 
-    Timeline bucket balancing is used when trustworthy timestamp bounds exist.
-    When timestamps are missing or degenerate, the selector still enforces the
-    requested output cap and uses stable chronological/source order.
+    Primary and reserve claims compete for the same timeline buckets. The
+    selector never pads a covered bucket with a duplicate or a second point
+    while another usable interval is available. If an interval has no distinct
+    fully supported candidate, the caller reports the resulting shortfall.
     """
     if (
         isinstance(requested_count, bool)
@@ -467,13 +535,12 @@ def select_verified_overview_points(
         for item in claim_evidence
         if isinstance(item, dict)
     }
-    primary, backups = [], []
+    candidates = []
     for claim_index, claim in enumerate(verification_claims, start=1):
         if not isinstance(claim, dict):
             continue
         evidence = evidence_by_index.get(claim_index, {})
-        status = evidence.get("status")
-        if status != "supported":
+        if evidence.get("status") != "supported":
             continue
         chunk_ids = list(dict.fromkeys(
             str(value)
@@ -488,68 +555,114 @@ def select_verified_overview_points(
             continue
         source_times.sort()
         anchor_time = source_times[len(source_times) // 2]
-        bucket = (
-            _timeline_bucket_index(
-                anchor_time,
-                start_value,
-                end_value,
-                bucket_count,
-            )
-            if valid_buckets
-            else None
-        )
-        candidate = {
+        candidates.append({
             "claim_index": claim_index,
-            "text": claim.get("text", ""),
-            "status": status,
+            "text": str(claim.get("text", "")).strip(),
+            "status": "supported",
             "supporting_chunk_ids": chunk_ids,
             "anchor_seconds": anchor_time,
-            "bucket": bucket,
+            "bucket": (
+                _timeline_bucket_index(
+                    anchor_time,
+                    start_value,
+                    end_value,
+                    bucket_count,
+                )
+                if valid_buckets
+                else None
+            ),
             "is_backup": bool(claim.get("is_backup")),
-        }
-        (backups if candidate["is_backup"] else primary).append(candidate)
+        })
 
-    selected = sorted(
-        primary,
-        key=lambda item: (item["anchor_seconds"], item["claim_index"]),
-    )[:requested_count]
-    backup_pool = sorted(
-        backups,
-        key=lambda item: (item["anchor_seconds"], item["claim_index"]),
-    )
+    # Keep primary wording in preference to reserve wording when two claims
+    # repeat the same development. A same-source paraphrase is considered a
+    # duplicate only when its informative terms substantially overlap.
+    distinct_candidates = []
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (
+            item["is_backup"],
+            item["anchor_seconds"],
+            item["claim_index"],
+        ),
+    ):
+        if not candidate["text"] or _duplicate_point(candidate, distinct_candidates):
+            continue
+        distinct_candidates.append(candidate)
 
-    if valid_buckets:
-        covered = {item["bucket"] for item in selected}
-        duration = end_value - start_value
-        for bucket in range(bucket_count):
-            if len(selected) >= requested_count:
-                break
-            if bucket in covered:
-                continue
-            options = [
-                item for item in backup_pool
-                if item["bucket"] == bucket
-            ]
-            if not options:
-                continue
-            bucket_center = (
-                start_value + duration * (bucket + 0.5) / bucket_count
-            )
-            chosen = min(
-                options,
-                key=lambda item: (
-                    abs(item["anchor_seconds"] - bucket_center),
-                    item["claim_index"],
-                ),
-            )
-            selected.append(chosen)
-            backup_pool.remove(chosen)
-            covered.add(bucket)
+    if not valid_buckets:
+        return sorted(
+            distinct_candidates,
+            key=lambda item: (item["anchor_seconds"], item["claim_index"]),
+        )[:requested_count]
 
-    for candidate in backup_pool:
+    if requested_count >= bucket_count:
+        target_buckets = list(range(bucket_count))
+    elif requested_count == 1:
+        target_buckets = [bucket_count // 2]
+    else:
+        target_buckets = sorted({
+            round(index * (bucket_count - 1) / (requested_count - 1))
+            for index in range(requested_count)
+        })
+
+    selected = []
+    selected_indexes = set()
+    duration = end_value - start_value
+    for bucket in target_buckets:
         if len(selected) >= requested_count:
             break
-        selected.append(candidate)
+        options = [
+            item for item in distinct_candidates
+            if item["bucket"] == bucket
+            and item["claim_index"] not in selected_indexes
+        ]
+        if not options:
+            continue
+        bucket_center = start_value + (
+            duration * (bucket + 0.5) / bucket_count
+        )
+        chosen = min(
+            options,
+            key=lambda item: (
+                item["is_backup"],
+                abs(item["anchor_seconds"] - bucket_center),
+                item["claim_index"],
+            ),
+        )
+        selected.append(chosen)
+        selected_indexes.add(chosen["claim_index"])
+
+    # If one of the evenly spaced target buckets has no verified finding,
+    # use another unrepresented bucket before returning a shortfall. Never
+    # take a second point from a bucket already represented.
+    remaining_buckets = [
+        bucket for bucket in range(bucket_count)
+        if bucket not in target_buckets
+    ]
+    for bucket in remaining_buckets:
+        if len(selected) >= requested_count:
+            break
+        options = [
+            item for item in distinct_candidates
+            if item["bucket"] == bucket
+            and item["claim_index"] not in selected_indexes
+        ]
+        if not options:
+            continue
+        bucket_center = start_value + (
+            duration * (bucket + 0.5) / bucket_count
+        )
+        chosen = min(
+            options,
+            key=lambda item: (
+                item["is_backup"],
+                abs(item["anchor_seconds"] - bucket_center),
+                item["claim_index"],
+            ),
+        )
+        selected.append(chosen)
+        selected_indexes.add(chosen["claim_index"])
 
     return sorted(
         selected,
@@ -666,12 +779,18 @@ def summarize_video_overview(
             single_section_candidates = parse_points(
                 generate_text(OVERVIEW_FINAL_PROMPT.invoke({
                     "question": question,
-                    "count": requested + MAX_BACKUP_POINTS,
+                    "count": requested + min(
+                        MAX_BACKUP_POINTS_PER_BUCKET * requested,
+                        MAX_OVERVIEW_VERIFICATION_CLAIMS - requested,
+                    ),
                     "exclude_points": exclude_points,
                     "context": context,
                 })),
                 allowed,
-                requested + MAX_BACKUP_POINTS,
+                requested + min(
+                    MAX_BACKUP_POINTS_PER_BUCKET * requested,
+                    MAX_OVERVIEW_VERIFICATION_CLAIMS - requested,
+                ),
             )
             points = single_section_candidates[:requested]
             backup_findings.extend(single_section_candidates[requested:])
@@ -727,7 +846,7 @@ def summarize_video_overview(
     if len(points) < requested and map_findings:
         duplicate_guard = [*previous_points, *points]
         for finding in map_findings:
-            if _duplicate_point(finding["text"], duplicate_guard):
+            if _duplicate_point(finding, duplicate_guard):
                 continue
             points.append(finding)
             duplicate_guard.append(finding)
@@ -810,6 +929,7 @@ def summarize_video_overview(
     })
     maximum_backup_points = min(
         MAX_BACKUP_POINTS,
+        MAX_BACKUP_POINTS_PER_BUCKET * requested,
         max(0, MAX_OVERVIEW_VERIFICATION_CLAIMS - len(points)),
     )
     backup_points = _select_backup_points(
