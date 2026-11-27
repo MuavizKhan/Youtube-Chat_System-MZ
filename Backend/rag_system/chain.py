@@ -12380,6 +12380,9 @@ def answer_question(
                     verification["final_omitted_claim_indices"]
                 )
                 verification["final_selected_claim_indices"] = sorted(selected_indices)
+                verification["distinct_verified_point_count"] = len(
+                    selected_overview_points
+                )
                 verification["final_backup_points_used"] = sum(
                     item["is_backup"] for item in selected_overview_points
                 )
@@ -12440,9 +12443,21 @@ def answer_question(
                             bucket_count=before_coverage["bucket_count"],
                         )
                     )
-                    overview_stats["verified_point_count"] = (
+                    overview_stats["distinct_verified_point_count"] = len(
+                        selected_overview_points
+                    )
+                    overview_stats["verified_point_count"] = len(
+                        selected_overview_points
+                    )
+                    overview_stats["verified_timeline_coverage"][
+                        "distinct_verified_point_count"
+                    ] = len(selected_overview_points)
+                    verification["verified_timeline_coverage"] = (
+                        overview_stats["verified_timeline_coverage"]
+                    )
+                    verification["verified_timeline_coverage_fraction"] = (
                         overview_stats["verified_timeline_coverage"].get(
-                            "verified_point_count", 0
+                            "coverage_fraction", 0.0
                         )
                     )
                 else:
