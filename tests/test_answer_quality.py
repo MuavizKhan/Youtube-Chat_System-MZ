@@ -463,7 +463,7 @@ def test_claim_audit_verifies_twenty_one_overview_candidates_in_three_bounded_ba
         fake_assessment,
     )
     result = claim_verification.verify_answer_claims(
-        answer="\\n".join(
+        answer="\n".join(
             f"{index}. The speaker describes independent event number {index}."
             for index in range(1, 11)
         ),
@@ -474,7 +474,7 @@ def test_claim_audit_verifies_twenty_one_overview_candidates_in_three_bounded_ba
             for index, document in enumerate(documents)
         ],
         included_chunk_ids=[str(index) for index in range(1, 22)],
-        prompt_visible_context="\\n".join(
+        prompt_visible_context="\n".join(
             document.page_content for document in documents
         ),
         client=object(),
