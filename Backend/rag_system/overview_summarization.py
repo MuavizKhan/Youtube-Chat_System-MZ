@@ -1178,8 +1178,8 @@ def summarize_video_overview(
                         "question": question,
                         "exclude_points": (
                             exclude_points
-                            + "\\n"
-                            + "\\n".join(item["text"] for item in map_findings)
+                            + "\n"
+                            + "\n".join(item["text"] for item in map_findings)
                         )[-4_000:],
                         "context": terminal_context,
                     })
