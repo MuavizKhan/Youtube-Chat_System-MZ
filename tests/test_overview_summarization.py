@@ -1076,3 +1076,28 @@ def test_terminal_end_cap_coverage_is_stricter_than_terminal_tail_coverage():
     assert actual_ending["covered"] is True
     assert actual_ending["end_cap_covered"] is True
     assert actual_ending["end_cap_supporting_chunk_ids"] == ["76"]
+
+def test_terminal_end_cap_eligibility_survives_when_final_docs_are_not_in_audit_pool():
+    earlier_tail_document = Document(
+        page_content="Earlier terminal-window evidence.",
+        metadata={
+            "chunk_id": "74",
+            "video_id": "generic-video-end-cap",
+            "start": 5089.0,
+            "end": 5182.0,
+        },
+    )
+    coverage = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [],
+        [earlier_tail_document],
+        timeline_start=4.0,
+        timeline_end=5287.0,
+        end_cap_chunk_ids=["75", "76"],
+    )
+
+    assert coverage["eligible"] is True
+    assert coverage["covered"] is False
+    assert coverage["end_cap_eligible"] is True
+    assert coverage["end_cap_covered"] is False
+    assert coverage["end_cap_chunk_ids"] == ["75", "76"]
+    assert coverage["end_cap_supporting_chunk_ids"] == []

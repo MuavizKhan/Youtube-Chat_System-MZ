@@ -984,14 +984,11 @@ def terminal_tail_coverage_from_claim_evidence(
         for value in (end_cap_chunk_ids or ())
         if value is not None
     }
-    eligible_end_cap_ids = {
-        chunk_id
-        for chunk_id in requested_end_cap_ids
-        if chunk_id in by_chunk_id
-        and _terminal_overlap_center(
-            by_chunk_id[chunk_id], tail_start, timeline_end
-        ) is not None
-    }
+    # The end-cap IDs come from the full transcript passages already checked
+    # for terminal-window containment during overview construction. Keep
+    # eligibility independent from the verifier's narrower evidence pool:
+    # those exact documents may be absent when no claim cites them.
+    eligible_end_cap_ids = requested_end_cap_ids
     end_cap_eligible = bool(eligible_end_cap_ids)
     supporting_chunk_ids = []
     end_cap_supporting_chunk_ids = []
