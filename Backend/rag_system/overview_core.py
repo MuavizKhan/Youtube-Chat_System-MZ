@@ -43,6 +43,42 @@ def even_sample(items: Sequence[Any], count: int) -> list[Any]:
     return [items[index] for index in indexes]
 
 
+def timeline_sample(items: Sequence[Any], count: int) -> list[Any]:
+    """Sample transcript documents near evenly spaced timestamps, not list indices."""
+    ordered = sorted(items, key=sort_key)
+    if len(ordered) <= count:
+        return ordered
+    if count <= 1:
+        return [ordered[len(ordered) // 2]]
+
+    first_time = sort_key(ordered[0])[0]
+    last_time = sort_key(ordered[-1])[1]
+    if last_time <= first_time:
+        return even_sample(ordered, count)
+
+    midpoints = [
+        (sort_key(document)[0] + sort_key(document)[1]) / 2.0
+        for document in ordered
+    ]
+    targets = [
+        first_time + index * (last_time - first_time) / (count - 1)
+        for index in range(count)
+    ]
+    selected_indexes = set()
+    for target in targets:
+        choices = sorted(
+            range(len(ordered)),
+            key=lambda index: (abs(midpoints[index] - target), index),
+        )
+        selected_index = next(
+            (index for index in choices if index not in selected_indexes),
+            None,
+        )
+        if selected_index is not None:
+            selected_indexes.add(selected_index)
+    return [ordered[index] for index in sorted(selected_indexes)]
+
+
 def requested_count(question: str) -> int:
     match = re.search(
         r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
@@ -120,7 +156,11 @@ def parse_points(
     return result
 
 
-def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, dict]:
+def build_sections(
+    documents: Sequence[Any],
+    *,
+    preferred_sections: int | None = None,
+) -> tuple[list[list[dict]], dict, dict]:
     valid, seen = [], set()
     for document in documents:
         text = getattr(document, "page_content", None)
@@ -149,9 +189,9 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
         mode = "timeline_stratified"
         average = max(1, math.ceil(total_chars / len(valid)))
         count = min(MAX_DOCUMENTS, max(1, MAX_SOURCE_CHARS // average))
-        selected = even_sample(valid, count)
+        selected = timeline_sample(valid, count)
         while len(selected) > 1 and sum(len(item.page_content) for item in selected) > MAX_SOURCE_CHARS:
-            selected = even_sample(selected, len(selected) - 1)
+            selected = timeline_sample(valid, len(selected) - 1)
 
     def timestamp(document: Any) -> str:
         start, end, _ = sort_key(document)
@@ -162,30 +202,77 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
             return f"{hours:02d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
         return f"{fmt(start)}–{fmt(end)}"
 
-    def pack_sections(items: Sequence[Any]) -> tuple[list[list[dict]], dict]:
+    def pack_sections(
+        items: Sequence[Any],
+    ) -> tuple[list[list[dict]], dict]:
         sections: list[list[dict]] = []
-        current: list[dict] = []
-        size = 0
         lookup: dict[str, Any] = {}
-        for index, document in enumerate(items, start=1):
-            passage_id = f"P{index:05d}"
-            chunk_id = metadata(document)["chunk_id"]
-            prefix = f"[{passage_id}] [{timestamp(document)}] (chunk {chunk_id}) "
-            if len(prefix) > MAX_SECTION_CHARS:
-                raise OverviewError("Transcript chunk metadata exceeds the section limit.")
-            # The complete rendered row, including its timestamp and evidence
-            # identifier, must fit the section budget. Previously the text slice
-            # alone used MAX_SECTION_CHARS, allowing a single row to exceed it.
-            content_limit = MAX_SECTION_CHARS - len(prefix)
-            line = prefix + document.page_content[:content_limit]
-            if current and size + len(line) > MAX_SECTION_CHARS:
+        indexed_items = list(items)
+        time_binned = (
+            isinstance(preferred_sections, int)
+            and not isinstance(preferred_sections, bool)
+            and 2 <= preferred_sections <= MAX_SECTIONS
+        )
+
+        if time_binned:
+            timeline_start = min(sort_key(item)[0] for item in indexed_items)
+            timeline_end = max(sort_key(item)[1] for item in indexed_items)
+            time_binned = timeline_end > timeline_start
+
+        if time_binned:
+            timeline_duration = timeline_end - timeline_start
+            bins: list[list[Any]] = [
+                [] for _ in range(preferred_sections)
+            ]
+            for document in indexed_items:
+                start, end, _ = sort_key(document)
+                midpoint = (start + end) / 2.0
+                bucket = min(
+                    preferred_sections - 1,
+                    max(
+                        0,
+                        int(
+                            (midpoint - timeline_start)
+                            / timeline_duration
+                            * preferred_sections
+                        ),
+                    ),
+                )
+                bins[bucket].append(document)
+            ordered_groups = [group for group in bins if group]
+        else:
+            ordered_groups = [indexed_items]
+
+        passage_index = 0
+        for group in ordered_groups:
+            current: list[dict] = []
+            size = 0
+            for document in group:
+                passage_index += 1
+                passage_id = f"P{passage_index:05d}"
+                chunk_id = metadata(document)["chunk_id"]
+                prefix = (
+                    f"[{passage_id}] [{timestamp(document)}] "
+                    f"(chunk {chunk_id}) "
+                )
+                if len(prefix) > MAX_SECTION_CHARS:
+                    raise OverviewError(
+                        "Transcript chunk metadata exceeds the section limit."
+                    )
+                content_limit = MAX_SECTION_CHARS - len(prefix)
+                line = prefix + document.page_content[:content_limit]
+                if current and size + len(line) > MAX_SECTION_CHARS:
+                    sections.append(current)
+                    current, size = [], 0
+                current.append({
+                    "id": passage_id,
+                    "document": document,
+                    "line": line,
+                })
+                lookup[passage_id] = document
+                size += len(line)
+            if current:
                 sections.append(current)
-                current, size = [], 0
-            current.append({"id": passage_id, "document": document, "line": line})
-            lookup[passage_id] = document
-            size += len(line)
-        if current:
-            sections.append(current)
         return sections, lookup
 
     sections, lookup = pack_sections(selected)
@@ -201,12 +288,12 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
         )
         if target_count >= len(selected):
             target_count = len(selected) - 1
-        selected = even_sample(valid, target_count)
+        selected = timeline_sample(valid, target_count)
         while (
             len(selected) > 1
             and sum(len(item.page_content) for item in selected) > MAX_SOURCE_CHARS
         ):
-            selected = even_sample(valid, len(selected) - 1)
+            selected = timeline_sample(valid, len(selected) - 1)
         section_limit_sampling = True
         sections, lookup = pack_sections(selected)
 
@@ -224,5 +311,18 @@ def build_sections(documents: Sequence[Any]) -> tuple[list[list[dict]], dict, di
         "selected_fraction": round(len(selected) / len(valid), 4),
         "section_count": len(sections),
         "section_limit_sampling": section_limit_sampling,
+        "sectioning_strategy": (
+            "timeline_binned"
+            if isinstance(preferred_sections, int)
+            and not isinstance(preferred_sections, bool)
+            and 2 <= preferred_sections <= MAX_SECTIONS
+            else "character_packed"
+        ),
+        "preferred_timeline_sections": (
+            preferred_sections
+            if isinstance(preferred_sections, int)
+            and not isinstance(preferred_sections, bool)
+            else None
+        ),
     }
     return sections, lookup, stats

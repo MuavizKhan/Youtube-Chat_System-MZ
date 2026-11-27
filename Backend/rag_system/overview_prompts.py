@@ -16,6 +16,12 @@ collapsing the whole section into one vague point. Skip facts already covered
 by the previous points when that list is non-empty. Every point must be
 directly supported by its IDs. Do not include timestamps, timecodes, or
 timestamp ranges in point text; the application adds timestamp metadata.
+Each section represents a separate interval in the video's timeline. For a
+non-empty section containing substantive speech, normally return at least one
+finding from that interval. Return no findings only when the section contains
+no distinct substantive information (for example, silence or repeated filler).
+Do not let a topic's appearance in an earlier interval cause you to omit a
+new event, explanation, example, change of position, or conclusion here.
 When a section contains a distinct substantive development, include it even
 if an earlier section discussed a related topic. Do not omit later-section
 developments or conclusions just because the topic first appeared earlier."""),

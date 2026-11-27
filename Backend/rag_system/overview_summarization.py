@@ -353,13 +353,16 @@ def summarize_video_overview(
     start_index: int = 1,
 ) -> dict:
     """Summarize the full indexed timeline, or sample it evenly under a hard budget."""
-    sections, lookup, stats = build_sections(documents)
     if requested_points is None:
         requested = requested_count(question)
     elif isinstance(requested_points, bool) or not isinstance(requested_points, int) or requested_points < 1:
         raise ValueError("requested_points must be a positive integer or None.")
     else:
         requested = min(requested_points, 10)
+    sections, lookup, stats = build_sections(
+        documents,
+        preferred_sections=requested,
+    )
     if isinstance(start_index, bool) or not isinstance(start_index, int) or start_index < 1:
         raise ValueError("start_index must be a positive integer.")
     exclude_points = str(exclude_points or "")[:4_000]
