@@ -49,9 +49,12 @@ Processing is bounded:
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
-  the vocabulary of the claims that cite them. Up to three additional mapped
-  alternatives are reserved so a failed point can be replaced by another
-  independently verified development, preferring uncovered timeline intervals.
+  the vocabulary of the claims that cite them. Mapped alternatives are
+  reserved across the timeline before primary points are audited. The reserve
+  uses the remaining claim-audit budget, so primary points plus alternatives
+  never exceed thirteen candidates. This lets fully supported alternatives
+  replace partial or unsupported primary points even when the primary list
+  already fills the requested count.
 - The map candidate coverage, selected-point coverage, and final verified
   answer coverage are reported separately. Final coverage is calculated only
   from evidence IDs attached to claims that survive verification.
@@ -72,8 +75,9 @@ selected fraction are kept in diagnostics so coverage limitations are visible.
 Compound and fact-sensitive answers are audited after generation using the
 existing evidence-assessment contracts. Each assessment request is bounded to
 eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
-answers support up to ten requested points plus up to three source-linked
-reserve candidates through bounded assessment batches. Trivial
+answers support up to ten requested points plus as many source-linked reserve
+candidates as fit within the thirteen-candidate verification ceiling, through
+bounded assessment batches. Trivial
 short non-overview answers avoid an additional model call.
 
 The audit is restricted to:
@@ -94,9 +98,14 @@ A chunk selected for indexing but omitted from the relevant model prompt cannot
 verify an answer. Text outside a prompt-visible excerpt cannot verify a claim.
 Each passage retains its video ID, chunk ID, and timestamp interval.
 
-Completed assessments keep supported claims, qualify partially supported
-claims, and remove claims assessed as missing, contradicted, or conflicting.
-If all claims are rejected, the existing video-evidence abstention is returned.
+For ordinary targeted answers, completed assessments keep supported
+claims, qualify partially supported claims, and remove claims assessed as
+missing, contradicted, or conflicting. For video-wide overviews, only fully
+supported points are retained; partial or unsupported points are omitted and
+replaced by fully supported reserved findings when available. The response
+discloses when fewer than the requested number of fully supported points can
+be produced. If all claims are rejected, the existing video-evidence abstention
+is returned.
 Supported chunk IDs determine which source links and timestamps are returned.
 Claim-to-chunk support is retained in diagnostics.
 
