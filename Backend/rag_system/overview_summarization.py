@@ -189,14 +189,22 @@ def _balance_points_over_timeline(
             key=lambda pair: (
                 pair[1]["origin"] != "reducer",
                 min(
-                    abs(midpoint - bucket_center)
+                    (
+                        abs(midpoint - bucket_center)
+                        if timeline_valid
+                        else 0.0
+                    )
                     for midpoint in pair[1]["midpoints"]
-                    if _timeline_bucket_index(
-                        midpoint,
-                        timeline_start,
-                        timeline_end,
-                        requested,
-                    ) == bucket
+                    if (
+                        _timeline_bucket_index(
+                            midpoint,
+                            timeline_start,
+                            timeline_end,
+                            requested,
+                        ) == bucket
+                        if timeline_valid
+                        else bucket == 0
+                    )
                 ),
                 pair[1]["order"],
             ),
@@ -250,8 +258,7 @@ def _select_backup_points(
     documents = list(lookup.values())
     timeline_start = min(sort_key(document)[0] for document in documents)
     timeline_end = max(sort_key(document)[1] for document in documents)
-    if timeline_end <= timeline_start:
-        return []
+    timeline_valid = timeline_end > timeline_start
 
     duplicate_guard = list(primary_points)
     candidates = []
@@ -259,13 +266,23 @@ def _select_backup_points(
         text = str(finding.get("text", "")).strip()
         if not text or _duplicate_point(text, duplicate_guard):
             continue
-        buckets, midpoints = _point_timeline_buckets(
-            finding,
-            lookup,
-            timeline_start,
-            timeline_end,
-            requested,
-        )
+        if timeline_valid:
+            buckets, midpoints = _point_timeline_buckets(
+                finding,
+                lookup,
+                timeline_start,
+                timeline_end,
+                requested,
+            )
+        else:
+            midpoints = []
+            for evidence_id in finding.get("evidence_ids", []):
+                document = lookup.get(str(evidence_id))
+                if document is None:
+                    continue
+                start, end, _ = sort_key(document)
+                midpoints.append((start + end) / 2.0)
+            buckets = {0} if midpoints else set()
         if not buckets or not midpoints:
             continue
         duplicate_guard.append(finding)
@@ -281,22 +298,33 @@ def _select_backup_points(
 
     covered_buckets = set()
     for point in primary_points:
-        buckets, _midpoints = _point_timeline_buckets(
-            point,
-            lookup,
-            timeline_start,
-            timeline_end,
-            requested,
-        )
+        if timeline_valid:
+            buckets, _midpoints = _point_timeline_buckets(
+                point,
+                lookup,
+                timeline_start,
+                timeline_end,
+                requested,
+            )
+        else:
+            has_source = any(
+                str(evidence_id) in lookup
+                for evidence_id in point.get("evidence_ids", [])
+            )
+            buckets = {0} if has_source else set()
         covered_buckets.update(buckets)
 
     selected = []
     selected_indexes = set()
     duration = timeline_end - timeline_start
-    for bucket in range(requested):
+    for bucket in range(requested if timeline_valid else 1):
         if bucket in covered_buckets or len(selected) >= maximum_backups:
             continue
-        bucket_center = timeline_start + duration * (bucket + 0.5) / requested
+        bucket_center = (
+            timeline_start + duration * (bucket + 0.5) / requested
+            if timeline_valid
+            else timeline_start
+        )
         options = [
             (index, candidate)
             for index, candidate in enumerate(candidates)

@@ -218,3 +218,33 @@ def test_verified_overview_selector_caps_output_when_timestamps_are_degenerate()
         "Primary opening.",
         "Verified reserve middle.",
     }
+
+
+def test_overview_backup_candidates_remain_available_without_usable_timestamps():
+    lookup = {
+        f"P{index:05d}": _document_for_minute(index, 0)
+        for index in range(1, 5)
+    }
+    for document in lookup.values():
+        document.metadata["start"] = 0.0
+        document.metadata["end"] = 0.0
+    primary = [_point("Primary point.", "P00001")]
+    alternatives = [
+        _point(f"Alternative {index}.", f"P{index:05d}")
+        for index in range(2, 5)
+    ]
+
+    selected = overview_summarization._select_backup_points(
+        primary_points=primary,
+        map_findings=alternatives,
+        lookup=lookup,
+        requested=1,
+        maximum_backups=3,
+    )
+
+    assert len(selected) == 3
+    assert [item["text"] for item in selected] == [
+        "Alternative 2.",
+        "Alternative 3.",
+        "Alternative 4.",
+    ]
