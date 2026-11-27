@@ -46,6 +46,18 @@ Processing is bounded:
   up to three source-ID-linked findings, followed by chronological synthesis.
   The map stage is prompted to retain distinct developments within each
   interval, including late conclusions and new examples of earlier themes.
+  It separately inspects the final one or two passages in each section so an
+  opening passage cannot stand in for the section's ending.
+- Broad equal-duration bucket coverage is not treated as proof that the actual
+  video ending was represented. An independent terminal-tail window is
+  measured as the final five percent of the transcript, bounded to 60–300
+  seconds and disabled when it would cover at least half of a short video.
+  For the final broad timeline bucket, map/reducer candidates, reserve
+  candidates, and fully verified claims that cite evidence inside this
+  terminal window are preferred over earlier points in that same bucket.
+  Diagnostics report terminal-tail coverage separately from broad bucket
+  coverage. The terminal window is anchored to the full indexed transcript
+  duration, never the latest selected evidence timestamp.
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
