@@ -1172,7 +1172,9 @@ def summarize_video_overview(
                 OVERVIEW_TERMINAL_PROMPT.invoke({
                     "question": question,
                     "exclude_points": (
-                        exclude_points + "\n" + "\n".join(notes)
+                        exclude_points
+                        + "\n"
+                        + "\n".join(item["text"] for item in map_findings)
                     )[-4_000:],
                     "context": terminal_context,
                 })
