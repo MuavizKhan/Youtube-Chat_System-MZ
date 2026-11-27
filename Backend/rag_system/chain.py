@@ -12528,6 +12528,21 @@ def answer_question(
                     verification["verified_terminal_tail_coverage"] = (
                         terminal_tail_coverage
                     )
+                    terminal_scan = overview_stats.get("terminal_tail_scan", {})
+                    if (
+                        isinstance(terminal_scan, dict)
+                        and terminal_scan.get("status") == "completed"
+                        and terminal_scan.get("finding_count", 0) > 0
+                        and terminal_tail_coverage.get("eligible") is True
+                        and terminal_tail_coverage.get("covered") is not True
+                    ):
+                        result["answer"] = (
+                            result.get("answer", "")
+                            + "\n\nThe final transcript window contained additional "
+                            "candidate material, but it could not be fully verified "
+                            "as a distinct summary point. Ask a focused question "
+                            "about the ending for more detail."
+                        )
                     verification["verified_timeline_coverage_fraction"] = (
                         overview_stats["verified_timeline_coverage"].get(
                             "coverage_fraction", 0.0
