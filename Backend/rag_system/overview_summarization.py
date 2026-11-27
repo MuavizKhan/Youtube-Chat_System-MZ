@@ -757,11 +757,14 @@ def summarize_video_overview(
     # a separate internal pool so the claim auditor can check every summary
     # point against evidence that was visible during the map/reduce process.
     verification_findings = [*map_findings, *backup_findings]
-    verification_ids = list(dict.fromkeys(
-        evidence_id
-        for finding in verification_findings
-        for evidence_id in finding["evidence_ids"]
-    )) or used_ids
+    verification_ids = list(dict.fromkeys([
+        *used_ids,
+        *(
+            evidence_id
+            for finding in verification_findings
+            for evidence_id in finding["evidence_ids"]
+        ),
+    ]))
     verification_documents = [
         lookup[value] for value in verification_ids if value in lookup
     ]

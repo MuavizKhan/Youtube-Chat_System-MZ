@@ -696,6 +696,11 @@ def test_single_section_overview_reserves_verified_alternatives_for_short_videos
     assert result["verification_claims"][0]["is_backup"] is False
     assert all(item["is_backup"] for item in result["verification_claims"][1:])
     assert len(result["verification_results"]) == 4
+    assert [
+        pair[0].metadata["chunk_id"]
+        for pair in result["verification_results"]
+    ] == [1, 2, 3, 4]
+    assert result["verification_claims"][0]["evidence_chunk_ids"] == ["1"]
 
 def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
     documents = [
