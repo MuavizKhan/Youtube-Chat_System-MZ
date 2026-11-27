@@ -67,8 +67,17 @@ Processing is bounded:
   support a section finding.
 
 If a section contains no useful information, it may return no findings.
-Invalid output or a summary without source-linked points is rejected and the
-existing evidence-gated RAG path remains the fallback.
+Structured overview generation prefers Groq strict JSON-schema output. If Groq
+returns the explicit `json_validate_failed` response for that structured
+completion, the same prompt is retried once in JSON Object Mode. The application
+still parses and validates the exact point schema, evidence IDs, and transcript
+support locally; JSON Object Mode does not relax those checks.
+
+If overview generation still fails, the request fails closed with an upstream
+generation error. A whole-video summary is never silently replaced by the
+standard targeted top-k RAG path, because that path cannot guarantee
+chronological coverage of the complete transcript. Targeted questions continue
+to use the established evidence-gated RAG route.
 
 This is a bounded transcript-wide summary, not a promise that every detail of
 an arbitrarily long transcript can fit into one model call. Sampling status and
