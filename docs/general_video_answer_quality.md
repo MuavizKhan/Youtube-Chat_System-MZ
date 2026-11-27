@@ -81,8 +81,9 @@ existing evidence-assessment contracts. Each assessment request is bounded to
 eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
 answers support up to ten requested points plus up to two source-linked reserve
 candidates per requested timeline bucket, within a twenty-one-candidate verification
-ceiling and three bounded assessment batches. Trivial
-short non-overview answers avoid an additional model call.
+ceiling and three bounded assessment batches. Ordinary unstructured answers
+retain the existing fourteen-claim verification ceiling. Trivial short
+non-overview answers avoid an additional model call.
 
 The audit is restricted to:
 
