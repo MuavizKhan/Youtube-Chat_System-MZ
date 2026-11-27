@@ -85,7 +85,7 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
     assert stats["selected_fraction"] < 1
     assert stats["section_count"] > 1
     assert stats["map_calls"] == stats["section_count"]
-    assert len(calls) == stats["map_calls"] + 1
+    assert len(calls) == stats["map_calls"] + 2
     assert "samples sections across the full timeline" in result["answer"]
     assert len(result["retrieved_results"]) <= stats["selected_document_count"]
     assert len(result["verification_results"]) == stats["section_count"]
@@ -134,7 +134,7 @@ def test_77_chunk_video_of_about_60k_characters_keeps_full_chronological_coverag
     assert stats["selected_fraction"] == 1.0
     assert stats["section_count"] <= overview_core.MAX_SECTIONS
     assert stats["map_calls"] == stats["section_count"]
-    assert len(calls) == stats["map_calls"] + 1
+    assert len(calls) == stats["map_calls"] + 2
     assert stats["selected_source_chars"] == stats["indexed_source_chars"]
 
 
@@ -183,7 +183,7 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     assert stats["selected_fraction"] < 1
     assert 1 <= stats["section_count"] <= overview_core.MAX_SECTIONS
     assert stats["map_calls"] == stats["section_count"]
-    assert len(calls) == stats["map_calls"] + 1
+    assert len(calls) == stats["map_calls"] + 2
     assert "samples sections across the full timeline" in result["answer"]
 
 
@@ -802,7 +802,7 @@ def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
         generate_text=generate,
     )
 
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert "later section" in result["answer"]
     assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [2]
 
@@ -943,6 +943,16 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
     def generate(prompt):
         nonlocal map_calls
         prompt_text = "\n".join(message.content for message in prompt.to_messages())
+        if "Inspect only the closing portion" in prompt_text:
+            evidence_ids = re.findall(r"\bP\d{5}\b", prompt_text)
+            assert evidence_ids
+            return json.dumps({
+                "points": [{
+                    "text": "Distinct section 6 describes a separate event.",
+                    "evidence_ids": [evidence_ids[-1]],
+                }]
+            })
+
         if "Section findings:" in prompt_text:
             return json.dumps({
                 "points": [{
