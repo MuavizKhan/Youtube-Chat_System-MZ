@@ -573,3 +573,159 @@ def test_overview_backup_reserve_spans_timeline_buckets_even_when_primary_points
         for point in selected
     ]
     assert selected_buckets == list(range(7))
+
+
+def test_verified_overview_selector_prefers_terminal_tail_point_in_final_bucket():
+    minutes = [1, 11, 21, 31, 41, 51, 61, 66]
+    documents = [
+        _document_for_minute(index, minute)
+        for index, minute in enumerate(minutes, start=1)
+    ]
+    claims = [
+        {
+            "text": f"Distinct development in timeline interval {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": False,
+        }
+        for index in range(1, 7)
+    ]
+    claims.extend([
+        {
+            "text": "Earlier point from the broad final interval.",
+            "evidence_chunk_ids": ["7"],
+            "is_backup": False,
+        },
+        {
+            "text": "A distinct substantive conclusion from the actual video ending.",
+            "evidence_chunk_ids": ["8"],
+            "is_backup": True,
+        },
+    ])
+    evidence = [
+        {
+            "claim_index": index,
+            "status": "supported",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(1, 9)
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        claims,
+        evidence,
+        documents,
+        requested_count=7,
+        timeline_start=60.0,
+        timeline_end=66 * 60.0 + 45.0,
+        bucket_count=7,
+    )
+
+    assert len(selected) == 7
+    assert selected[-1]["text"] == (
+        "A distinct substantive conclusion from the actual video ending."
+    )
+    assert selected[-1]["supporting_chunk_ids"] == ["8"]
+    assert selected[-1]["is_backup"] is True
+
+
+def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
+    early_final_bucket = Document(
+        page_content="A development from the earlier part of the final broad bucket.",
+        metadata={
+            "chunk_id": "70",
+            "video_id": "VKrtiTgBeng",
+            "start": 4841.0,
+            "end": 4930.0,
+        },
+    )
+    actual_tail = Document(
+        page_content="A substantive conclusion from the final minutes.",
+        metadata={
+            "chunk_id": "75",
+            "video_id": "VKrtiTgBeng",
+            "start": 5174.0,
+            "end": 5260.0,
+        },
+    )
+    documents = [early_final_bucket, actual_tail]
+
+    # The old evidence belongs to broad bucket seven, but it is outside the
+    # separate five-percent terminal window of this 88-minute transcript.
+    broad_bucket = overview_summarization._timeline_bucket_index(
+        (4841.0 + 4930.0) / 2.0,
+        4.0,
+        5287.0,
+        7,
+    )
+    assert broad_bucket == 6
+
+    early_coverage = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [
+            {
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["70"],
+            }
+        ],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+    )
+    assert early_coverage["eligible"] is True
+    assert early_coverage["covered"] is False
+    assert early_coverage["supporting_chunk_ids"] == []
+
+    tail_coverage = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [
+            {
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["75"],
+            }
+        ],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+    )
+    assert tail_coverage["eligible"] is True
+    assert tail_coverage["covered"] is True
+    assert tail_coverage["supporting_chunk_ids"] == ["75"]
+
+
+def test_backup_reserve_prioritizes_terminal_tail_alternative_in_final_bucket():
+    minutes = [1, 11, 21, 31, 41, 51, 61, 66]
+    documents = [
+        _document_for_minute(index, minute)
+        for index, minute in enumerate(minutes, start=1)
+    ]
+    lookup = {
+        f"P{index:05d}": document
+        for index, document in enumerate(documents, start=1)
+    }
+    findings = [
+        _point(f"Distinct reserve event {index}.", f"P{index:05d}")
+        for index in range(1, 9)
+    ]
+
+    selected = overview_summarization._select_backup_points(
+        primary_points=[],
+        map_findings=findings,
+        lookup=lookup,
+        requested=7,
+        maximum_backups=7,
+    )
+
+    selected_last_bucket = [
+        point
+        for point in selected
+        if overview_summarization._point_timeline_buckets(
+            point,
+            lookup,
+            60.0,
+            66 * 60.0 + 45.0,
+            7,
+        )[0] == {6}
+    ]
+    assert len(selected_last_bucket) == 1
+    assert selected_last_bucket[0]["evidence_ids"] == ["P00008"]
+
