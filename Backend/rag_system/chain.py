@@ -12328,8 +12328,8 @@ def answer_question(
                     answer_lines.append(f"{index}. {text}")
                 if len(selected_overview_points) < overview_stats.get("requested_point_count", 7):
                     answer_lines.append(
-                        "\nThe transcript did not provide enough verifiable distinct "
-                        "developments to support all requested points."
+                        "\nThe available transcript material did not yield enough "
+                        "verifiable distinct developments for the requested count."
                     )
                 elif verification.get("removed_claim_count", 0):
                     answer_lines.append(

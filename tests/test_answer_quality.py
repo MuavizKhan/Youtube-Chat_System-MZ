@@ -401,6 +401,101 @@ def test_claim_audit_uses_only_exact_text_visible_in_prompt(monkeypatch):
 
 
 
+
+
+def test_claim_audit_verifies_thirteen_overview_candidates_in_bounded_batches(monkeypatch):
+    documents = [
+        make_doc(
+            index,
+            index * 60,
+            f"The transcript directly describes independent event number {index}.",
+        )
+        for index in range(1, 14)
+    ]
+    claims = [
+        {
+            "text": f"The speaker describes independent event number {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": index > 10,
+        }
+        for index in range(1, 14)
+    ]
+    observed_batches = []
+
+    def fake_assessment(analysis, passages, client, **kwargs):
+        chunk_ids = [
+            passage.references[0].chunk_id
+            for passage in passages
+        ]
+        observed_batches.append({
+            "aspect_count": len(analysis.aspects),
+            "chunk_ids": chunk_ids,
+        })
+        return SimpleNamespace(
+            diagnostics=SimpleNamespace(
+                status=AssessmentRunStatus.COMPLETED,
+                error_code=None,
+                input_chars=1000,
+                input_limit_chars=8000,
+                passage_count=len(passages),
+                aspect_count=len(analysis.aspects),
+                request_count=1,
+                elapsed_ms=10.0,
+                input_tokens=100,
+                output_tokens=100,
+                finish_reason="stop",
+                output_chars=100,
+                validation_error_code=None,
+            ),
+            assessments=[
+                SimpleNamespace(
+                    aspect_id=aspect.aspect_id,
+                    status=EvidenceSupportStatus.SUPPORTED,
+                    supporting_evidence=(passages[index].references[0],),
+                )
+                for index, aspect in enumerate(analysis.aspects)
+            ],
+        )
+
+    monkeypatch.setattr(
+        claim_verification,
+        "assess_evidence_support",
+        fake_assessment,
+    )
+    result = claim_verification.verify_answer_claims(
+        answer="\n".join(
+            f"{index}. The speaker describes independent event number {index}."
+            for index in range(1, 11)
+        ),
+        question="Summarize the full video.",
+        video_id="video-1",
+        retrieved_results=[
+            (document, float(index))
+            for index, document in enumerate(documents)
+        ],
+        included_chunk_ids=[str(index) for index in range(1, 14)],
+        prompt_visible_context="\n".join(
+            document.page_content for document in documents
+        ),
+        client=object(),
+        fallback_answer="I couldn't find enough information about that in the video.",
+        structured_claims=claims,
+    )
+
+    assert [item["aspect_count"] for item in observed_batches] == [8, 5]
+    assert [item["chunk_ids"] for item in observed_batches] == [
+        [str(index) for index in range(1, 9)],
+        [str(index) for index in range(9, 14)],
+    ]
+    assert result["status"] == "completed"
+    assert result["claim_count"] == 13
+    assert result["truncated_claim_count"] == 0
+    assert result["assessment_batch_count"] == 2
+    assert result["supported_claim_count"] == 13
+    assert set(result["supported_chunk_ids"]) == {
+        str(index) for index in range(1, 14)
+    }
+
 def test_overview_claim_audit_keeps_each_point_bound_to_its_own_visible_evidence(monkeypatch):
     documents = [
         make_doc(index, index * 60, f"General transcript context {index}.")
