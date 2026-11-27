@@ -12364,6 +12364,21 @@ def answer_question(
                     for item in all_claim_evidence
                     if isinstance(item, dict) and item.get("status") == "partial"
                 ]
+                verification["final_omitted_partial_claim_indices"] = [
+                    claim_index
+                    for claim_index in verification["candidate_partial_claim_indices"]
+                    if claim_index not in selected_indices
+                ]
+                verification["final_omitted_partial_claim_count"] = len(
+                    verification["final_omitted_partial_claim_indices"]
+                )
+                verification["final_omitted_claim_indices"] = sorted({
+                    *verification["candidate_unsupported_claim_indices"],
+                    *verification["final_omitted_partial_claim_indices"],
+                })
+                verification["final_omitted_claim_count"] = len(
+                    verification["final_omitted_claim_indices"]
+                )
                 verification["final_selected_claim_indices"] = sorted(selected_indices)
                 verification["final_backup_points_used"] = sum(
                     item["is_backup"] for item in selected_overview_points
@@ -12388,7 +12403,7 @@ def answer_question(
                     - len(selected_overview_points),
                 )
                 verification["removed_claim_count"] = (
-                    verification["candidate_removed_claim_count"]
+                    verification["final_omitted_claim_count"]
                 )
             supported_chunk_ids = {
                 str(value) for value in verification.get("supported_chunk_ids", [])
