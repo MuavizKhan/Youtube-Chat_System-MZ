@@ -61,8 +61,12 @@ Processing is bounded:
   seconds and disabled when it would cover at least half of a short video.
   For the final broad timeline bucket, map/reducer candidates, reserve
   candidates, and fully verified claims that cite evidence inside this
-  terminal window are preferred over earlier points in that same bucket.
-  Diagnostics report terminal-tail coverage separately from broad bucket
+  terminal window are preferred over earlier points in that same bucket;
+  when multiple verified closing findings compete, the latest supported
+  development is selected so the final answer reaches the actual ending.
+  Chunk intervals that materially overlap the terminal window count even when
+  their midpoint lies just before the window boundary. Diagnostics report
+  terminal-tail coverage separately from broad bucket
   coverage. The terminal window is anchored to the full indexed transcript
   duration, never the latest selected evidence timestamp.
 - Every accepted summary point retains its own exact transcript chunk IDs.
