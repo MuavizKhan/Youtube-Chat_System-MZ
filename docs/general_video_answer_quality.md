@@ -57,7 +57,7 @@ Processing is bounded:
   depend on a single endpoint chunk.
 - Broad equal-duration bucket coverage is not treated as proof that the actual
   video ending was represented. An independent terminal-tail window is
-  measured as the final five percent of the transcript, bounded to 60–300
+  measured as the final seven percent of the transcript, bounded to 60–360
   seconds and disabled when it would cover at least half of a short video.
   For the final broad timeline bucket, map/reducer candidates, reserve
   candidates, and fully verified claims that cite evidence inside this
