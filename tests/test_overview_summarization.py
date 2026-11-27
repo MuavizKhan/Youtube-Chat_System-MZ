@@ -656,8 +656,8 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
             "end": 5260.0,
         },
     )
-    boundary_overlap = Document(
-        page_content="A meaningful exchange overlaps the closing-window boundary.",
+    actual_closing_exchange = Document(
+        page_content="A meaningful exchange from the closing-window.",
         metadata={
             "chunk_id": "72",
             "video_id": "VKrtiTgBeng",
@@ -665,10 +665,24 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
             "end": 5080.0,
         },
     )
-    documents = [early_final_bucket, boundary_overlap, actual_tail]
+    partial_boundary_chunk = Document(
+        page_content="A chunk that crosses into the terminal window.",
+        metadata={
+            "chunk_id": "71",
+            "video_id": "VKrtiTgBeng",
+            "start": 4910.0,
+            "end": 5050.0,
+        },
+    )
+    documents = [
+        early_final_bucket,
+        partial_boundary_chunk,
+        actual_closing_exchange,
+        actual_tail,
+    ]
 
     # The old evidence belongs to broad bucket seven, but it is outside the
-    # separate five-percent terminal window of this 88-minute transcript.
+    # separate seven-percent terminal window of this 88-minute transcript.
     broad_bucket = overview_summarization._timeline_bucket_index(
         (4841.0 + 4930.0) / 2.0,
         4.0,
@@ -725,6 +739,23 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
     )
     assert boundary_coverage["covered"] is True
     assert boundary_coverage["supporting_chunk_ids"] == ["72"]
+
+    # A passage that merely straddles the beginning of the tail cannot be
+    # treated as terminal evidence: its claim could come from pre-tail text.
+    partial_boundary_coverage = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [
+            {
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["71"],
+            }
+        ],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+    )
+    assert partial_boundary_coverage["covered"] is False
+    assert partial_boundary_coverage["supporting_chunk_ids"] == []
 
 
 def test_backup_reserve_prioritizes_terminal_tail_alternative_in_final_bucket():
