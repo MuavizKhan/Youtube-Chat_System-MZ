@@ -360,7 +360,7 @@ def verify_answer_claims(
     """Verify claims against exact prompt-visible sources.
 
     Overview points can carry their own source chunk IDs. Other answers use
-    bounded lexical source selection. Up to fourteen claims are assessed in batches
+    bounded lexical source selection. Up to twenty-one claims are assessed in batches
     of at most eight aspects per provider request.
     """
     disclosures = _answer_disclosures(answer)
