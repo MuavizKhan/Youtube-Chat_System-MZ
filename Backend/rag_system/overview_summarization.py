@@ -57,7 +57,7 @@ def _point_terms(value: str) -> set[str]:
     }
     return {
         token.casefold()
-        for token in re.findall(r"[^\\W_]+", value, flags=re.UNICODE)
+        for token in re.findall(r"[^\W_]+", value, flags=re.UNICODE)
         if len(token) > 2 and token.casefold() not in stop_words
     }
 
@@ -72,7 +72,7 @@ def _duplicate_point(candidate: str | dict, existing: Sequence[dict]) -> bool:
     normalized = _normalized_point_text(candidate_text)
     if not normalized:
         return True
-    candidate_numbers = re.findall(r"\\b\\d+(?:[.,]\\d+)*\\b", normalized)
+    candidate_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", normalized)
     candidate_terms = _point_terms(normalized)
     candidate_sources = _point_evidence_ids(candidate_item)
 
@@ -80,7 +80,7 @@ def _duplicate_point(candidate: str | dict, existing: Sequence[dict]) -> bool:
         current = _normalized_point_text(str(item.get("text", "")))
         if not current:
             continue
-        current_numbers = re.findall(r"\\b\\d+(?:[.,]\\d+)*\\b", current)
+        current_numbers = re.findall(r"\b\d+(?:[.,]\d+)*\b", current)
         # Different numeric claims are materially distinct evidence, even when
         # the surrounding wording is almost identical. Preserve their values.
         if candidate_numbers != current_numbers:
