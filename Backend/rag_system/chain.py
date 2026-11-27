@@ -12529,19 +12529,26 @@ def answer_question(
                         terminal_tail_coverage
                     )
                     terminal_scan = overview_stats.get("terminal_tail_scan", {})
-                    if (
+                    terminal_scan_incomplete = (
+                        isinstance(terminal_scan, dict)
+                        and terminal_scan.get("status") not in {
+                            "completed",
+                            "not_applicable",
+                        }
+                    )
+                    terminal_findings_unverified = (
                         isinstance(terminal_scan, dict)
                         and terminal_scan.get("status") == "completed"
                         and terminal_scan.get("finding_count", 0) > 0
                         and terminal_tail_coverage.get("eligible") is True
                         and terminal_tail_coverage.get("covered") is not True
-                    ):
+                    )
+                    if terminal_scan_incomplete or terminal_findings_unverified:
                         result["answer"] = (
                             result.get("answer", "")
-                            + "\n\nThe final transcript window contained additional "
-                            "candidate material, but it could not be fully verified "
-                            "as a distinct summary point. Ask a focused question "
-                            "about the ending for more detail."
+                            + "\n\nThe final transcript window could not be fully "
+                            "represented by a verified summary point. Ask a focused "
+                            "question about the ending for more detail."
                         )
                     verification["verified_timeline_coverage_fraction"] = (
                         overview_stats["verified_timeline_coverage"].get(
