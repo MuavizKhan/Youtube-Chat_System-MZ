@@ -190,6 +190,7 @@ def build_sections(
         isinstance(preferred_sections, int)
         and not isinstance(preferred_sections, bool)
         and 2 <= preferred_sections <= MAX_SECTIONS
+        and len(valid) >= preferred_sections
         and timeline_end > timeline_start
     )
     selected, mode = valid, "full_transcript"

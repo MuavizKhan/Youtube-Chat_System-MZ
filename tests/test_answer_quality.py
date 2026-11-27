@@ -660,8 +660,22 @@ def test_single_section_overview_reserves_verified_alternatives_for_short_videos
         ).group(1)
         return json.dumps({
             "points": [
-                {"text": f"Distinct transcript development {index}.", "evidence_ids": [f"P{index:05d}"]}
-                for index in range(1, 5)
+                {
+                    "text": "The host introduces an urban gardening project.",
+                    "evidence_ids": ["P00001"],
+                },
+                {
+                    "text": "A guest compares hydroponics with soil growing.",
+                    "evidence_ids": ["P00002"],
+                },
+                {
+                    "text": "A storm damages the greenhouse roof.",
+                    "evidence_ids": ["P00003"],
+                },
+                {
+                    "text": "The discussion ends with a plan to rebuild the greenhouse.",
+                    "evidence_ids": ["P00004"],
+                },
             ]
         })
 

@@ -233,13 +233,49 @@ def _select_documents(
             "scores": scores,
         })
 
-    if len(candidates) <= MAX_PASSAGES:
-        return [(item["document"], item["visible_text"]) for item in candidates]
-
     candidate_by_id = {
         str(_meta(item["document"]).get("chunk_id")): item
         for item in candidates
     }
+
+    if claim_evidence_ids is not None and claim_ids:
+        direct_matches = [
+            [
+                chunk_id
+                for chunk_id in chunk_ids
+                if chunk_id in candidate_by_id
+            ]
+            for chunk_ids in claim_ids
+        ]
+        if all(direct_matches):
+            selected, selected_ids = [], set()
+
+            def add_direct_candidate(chunk_id: str) -> None:
+                if chunk_id in selected_ids:
+                    return
+                candidate = candidate_by_id[chunk_id]
+                selected.append((candidate["document"], candidate["visible_text"]))
+                selected_ids.add(chunk_id)
+
+            # Preserve at least one exact passage per point. Extra citations are
+            # included round-robin within the fixed passage ceiling.
+            for matches in direct_matches:
+                add_direct_candidate(matches[0])
+                if len(selected) >= MAX_PASSAGES:
+                    return selected
+
+            max_direct_ids = max((len(values) for values in direct_matches), default=0)
+            for source_offset in range(1, max_direct_ids):
+                for matches in direct_matches:
+                    if source_offset < len(matches):
+                        add_direct_candidate(matches[source_offset])
+                        if len(selected) >= MAX_PASSAGES:
+                            return selected
+            return selected
+
+    if len(candidates) <= MAX_PASSAGES:
+        return [(item["document"], item["visible_text"]) for item in candidates]
+
     selected, selected_ids = [], set()
 
     def add_candidate(chunk_id: str) -> bool:
@@ -281,7 +317,7 @@ def _select_documents(
             candidates,
             key=lambda item: (
                 item["scores"][claim_index],
-                item["score"] if "score" in item else max(item["scores"], default=0),
+                max(item["scores"], default=0),
                 -item["rank"],
             ),
             reverse=True,
@@ -537,7 +573,50 @@ def verify_answer_claims(
                 "supported_chunk_ids": [],
                 "error_code": diagnostic.error_code,
                 "assessment_batch_count": len(batch_diagnostics) + 1,
-                "assessment_compaction_attempts": compaction_attempts,
+                "assessment_request_count": (
+                    sum(item["request_count"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "request_count", 0) or 0)
+                ),
+                "assessment_elapsed_ms": (
+                    sum(item["elapsed_ms"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "elapsed_ms", 0.0) or 0.0)
+                ),
+                "assessment_input_chars": getattr(diagnostic, "input_chars", 0),
+                "assessment_input_chars_total": (
+                    sum(item["input_chars"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "input_chars", 0) or 0)
+                ),
+                "assessment_input_limit_chars": getattr(
+                    diagnostic,
+                    "input_limit_chars",
+                    MAX_INPUT_CHARS,
+                ),
+                "assessment_passage_count": getattr(
+                    diagnostic,
+                    "passage_count",
+                    len(documents),
+                ),
+                "assessment_aspect_count": getattr(
+                    diagnostic,
+                    "aspect_count",
+                    len(batch_claims),
+                ),
+                "assessment_input_tokens": (
+                    sum(item["input_tokens"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "input_tokens", 0) or 0)
+                ),
+                "assessment_output_tokens": (
+                    sum(item["output_tokens"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "output_tokens", 0) or 0)
+                ),
+                "assessment_output_chars": (
+                    sum(item["output_chars"] for item in batch_diagnostics)
+                    + (getattr(diagnostic, "output_chars", 0) or 0)
+                ),
+                "assessment_compaction_attempts": (
+                    sum(item["compaction_attempts"] for item in batch_diagnostics)
+                    + compaction_attempts
+                ),
                 "assessment_passage_excerpt_limit": selected_excerpt_limit,
                 "assessment_finish_reason": getattr(diagnostic, "finish_reason", None),
                 "assessment_validation_error_code": getattr(
@@ -545,6 +624,17 @@ def verify_answer_claims(
                     "validation_error_code",
                     None,
                 ),
+                "assessment_selected_chunk_ids": list(dict.fromkeys(
+                    [
+                        chunk_id
+                        for item in batch_diagnostics
+                        for chunk_id in item["selected_chunk_ids"]
+                    ]
+                    + [
+                        str(_meta(document).get("chunk_id"))
+                        for document, _visible_text in documents
+                    ]
+                )),
             }
 
         batch_diagnostics.append({

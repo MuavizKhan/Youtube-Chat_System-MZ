@@ -189,22 +189,14 @@ def _balance_points_over_timeline(
             key=lambda pair: (
                 pair[1]["origin"] != "reducer",
                 min(
-                    (
-                        abs(midpoint - bucket_center)
-                        if timeline_valid
-                        else 0.0
-                    )
+                    abs(midpoint - bucket_center)
                     for midpoint in pair[1]["midpoints"]
-                    if (
-                        _timeline_bucket_index(
-                            midpoint,
-                            timeline_start,
-                            timeline_end,
-                            requested,
-                        ) == bucket
-                        if timeline_valid
-                        else bucket == 0
-                    )
+                    if _timeline_bucket_index(
+                        midpoint,
+                        timeline_start,
+                        timeline_end,
+                        requested,
+                    ) == bucket
                 ),
                 pair[1]["order"],
             ),

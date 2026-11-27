@@ -111,3 +111,15 @@ def test_build_sections_reports_character_packing_for_degenerate_timestamps():
 
     assert sections
     assert stats["sectioning_strategy"] == "character_packed"
+
+
+def test_build_sections_uses_one_section_when_transcript_is_sparser_than_requested_buckets():
+    documents = [
+        _doc(1, 0),
+        _doc(2, 20),
+    ]
+    sections, lookup, stats = build_sections(documents, preferred_sections=7)
+
+    assert len(sections) == 1
+    assert len(lookup) == 2
+    assert stats["sectioning_strategy"] == "character_packed"
