@@ -1056,6 +1056,124 @@ def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
     assert captured["model"] == chain.GROQ_MODEL_ID
 
 
+def test_generate_with_groq_downgrades_once_after_json_schema_validation_error(monkeypatch):
+    expected_answer = json.dumps({
+        "points": [{
+            "text": "The speaker introduces the central topic.",
+            "evidence_ids": ["P00001"],
+        }]
+    })
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=expected_answer),
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=12,
+            total_tokens=22,
+        ),
+    )
+    captured_formats = []
+
+    class JsonValidationError(Exception):
+        status_code = 400
+        body = {"error": {"code": "json_validate_failed"}}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured_formats.append(kwargs.get("response_format"))
+            if len(captured_formats) == 1:
+                raise JsonValidationError("Groq rejected strict JSON generation.")
+            return response
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+    prompt_value = SimpleNamespace(
+        messages=[
+            SimpleNamespace(type="system", content="Return JSON only."),
+            SimpleNamespace(type="human", content="Summarize this section."),
+        ]
+    )
+    strict_format = overview_prompts.overview_response_format_for_model(
+        "openai/gpt-oss-20b"
+    )
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 0)
+
+    answer = chain.generate_with_groq(
+        client=client,
+        prompt_value=prompt_value,
+        response_format=strict_format,
+    )
+
+    assert answer == expected_answer
+    assert captured_formats == [
+        strict_format,
+        overview_prompts.OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT,
+    ]
+
+
+def test_explicit_overview_failure_does_not_fall_back_to_top_k_rag(monkeypatch):
+    class ForbiddenRagFallback:
+        def invoke(self, payload):
+            pytest.fail(
+                "A failed whole-video overview must not invoke targeted top-k RAG."
+            )
+
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(chain, "extract_video_id", lambda _value: "video-1")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "create_groq_client", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: ForbiddenRagFallback(),
+    )
+    monkeypatch.setattr(
+        chain,
+        "_build_overview_continuation_plan",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "_build_answer_revision_plan",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        chain,
+        "resolve_conversational_query_plan",
+        lambda **kwargs: (kwargs["question"], []),
+    )
+    monkeypatch.setattr(chain, "_is_explicit_overview_request", lambda _q: True)
+    monkeypatch.setattr(chain, "is_overview_question", lambda _q: True)
+    monkeypatch.setattr(
+        chain,
+        "get_all_documents",
+        lambda _store: [make_doc(1, 0, "A transcript section.")],
+    )
+
+    def fail_overview(**_kwargs):
+        raise overview_summarization.OverviewError(
+            "Overview model returned invalid JSON."
+        )
+
+    monkeypatch.setattr(chain, "summarize_video_overview", fail_overview)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Whole-video overview generation failed",
+    ):
+        chain.answer_question(
+            video_reference="video-1",
+            question="Summarize this entire video chronologically in 7 points.",
+            conversation_history=[],
+        )
+
+
 def test_generate_with_groq_keeps_prose_sanitization_without_response_format(monkeypatch):
     captured = {}
     response = SimpleNamespace(
