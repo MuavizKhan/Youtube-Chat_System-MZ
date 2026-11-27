@@ -13251,6 +13251,7 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
         {"text": "A claim about a later event.", "evidence_chunk_ids": ["1"]}
     ]
     assert result["observability"]["retrieval"]["overview"]["verified_point_count"] == 1
+    assert result["observability"]["generation"]["answer_evidence_verification"]["supported_claim_count"] == 1
     assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["covered_buckets"] == [2]
     assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["missing_buckets"] == [1, 3]
     assert result["observability"]["retrieval"]["final_chunk_ids"] == ["2"]

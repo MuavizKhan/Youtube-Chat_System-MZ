@@ -12299,83 +12299,83 @@ def answer_question(
                     timeline_end=before_coverage.get("end_seconds"),
                     bucket_count=before_coverage.get("bucket_count"),
                 )
-                    selected_indices = {
-                        item["claim_index"] for item in selected_overview_points
-                    }
-                    all_claim_evidence = verification.get("claim_evidence", [])
-                    verification["candidate_claim_evidence"] = all_claim_evidence
-                    verification["candidate_removed_claim_count"] = (
-                        verification.get("removed_claim_count", 0)
+                selected_indices = {
+                    item["claim_index"] for item in selected_overview_points
+                }
+                all_claim_evidence = verification.get("claim_evidence", [])
+                verification["candidate_claim_evidence"] = all_claim_evidence
+                verification["candidate_removed_claim_count"] = (
+                    verification.get("removed_claim_count", 0)
+                )
+                verification["candidate_unsupported_claim_indices"] = [
+                    item.get("claim_index")
+                    for item in all_claim_evidence
+                    if isinstance(item, dict)
+                    and item.get("status") not in {"supported", "partial"}
+                ]
+                selected_claim_evidence = [
+                    item for item in all_claim_evidence
+                    if isinstance(item, dict)
+                    and item.get("claim_index") in selected_indices
+                ]
+                answer_lines = []
+                if OVERVIEW_SAMPLING_DISCLOSURE in result.get("answer", ""):
+                    answer_lines.append(OVERVIEW_SAMPLING_DISCLOSURE)
+                for index, item in enumerate(selected_overview_points, start=1):
+                    text = item["text"]
+                    if item["status"] == "partial":
+                        text = "The transcript only partially supports this detail: " + text
+                    answer_lines.append(f"{index}. {text}")
+                if len(selected_overview_points) < overview_stats.get("requested_point_count", 7):
+                    answer_lines.append(
+                        "\nThe transcript did not provide enough verifiable distinct "
+                        "developments to support all requested points."
                     )
-                    verification["candidate_unsupported_claim_indices"] = [
-                        item.get("claim_index")
-                        for item in all_claim_evidence
-                        if isinstance(item, dict)
-                        and item.get("status") not in {"supported", "partial"}
-                    ]
-                    selected_claim_evidence = [
-                        item for item in all_claim_evidence
-                        if isinstance(item, dict)
-                        and item.get("claim_index") in selected_indices
-                    ]
-                    answer_lines = []
-                    if OVERVIEW_SAMPLING_DISCLOSURE in result.get("answer", ""):
-                        answer_lines.append(OVERVIEW_SAMPLING_DISCLOSURE)
-                    for index, item in enumerate(selected_overview_points, start=1):
-                        text = item["text"]
-                        if item["status"] == "partial":
-                            text = "The transcript only partially supports this detail: " + text
-                        answer_lines.append(f"{index}. {text}")
-                    if len(selected_overview_points) < overview_stats.get("requested_point_count", 7):
-                        answer_lines.append(
-                            "\nThe transcript did not provide enough verifiable distinct "
-                            "developments to support all requested points."
-                        )
-                    elif verification.get("removed_claim_count", 0):
-                        answer_lines.append(
-                            "\nSome candidate details were omitted because the available "
-                            "transcript did not clearly support them."
-                        )
-                    if any(
-                        item.get("status") in {"conflicted", "contradicted"}
-                        for item in all_claim_evidence
-                        if isinstance(item, dict)
-                    ):
-                        answer_lines.append(
-                            "The transcript contains conflicting information about at "
-                            "least one omitted point."
-                        )
-                    result["answer"] = "\n".join(answer_lines)
-                    verification["candidate_supported_claim_count"] = (
-                        verification.get("supported_claim_count", 0)
-                        + verification.get("partial_claim_count", 0)
+                elif verification.get("removed_claim_count", 0):
+                    answer_lines.append(
+                        "\nSome candidate details were omitted because the available "
+                        "transcript did not clearly support them."
                     )
-                    verification["final_selected_claim_indices"] = sorted(selected_indices)
-                    verification["final_backup_points_used"] = sum(
-                        item["is_backup"] for item in selected_overview_points
+                if any(
+                    item.get("status") in {"conflicted", "contradicted"}
+                    for item in all_claim_evidence
+                    if isinstance(item, dict)
+                ):
+                    answer_lines.append(
+                        "The transcript contains conflicting information about at "
+                        "least one omitted point."
                     )
-                    verification["claim_evidence"] = selected_claim_evidence
-                    verification["supported_chunk_ids"] = list(dict.fromkeys(
-                        chunk_id
-                        for item in selected_overview_points
-                        for chunk_id in item["supporting_chunk_ids"]
-                    ))
-                    verification["supported_claim_count"] = sum(
-                        item["status"] == "supported"
-                        for item in selected_overview_points
-                    )
-                    verification["partial_claim_count"] = sum(
-                        item["status"] == "partial"
-                        for item in selected_overview_points
-                    )
-                    verification["final_point_shortfall"] = max(
-                        0,
-                        overview_stats.get("requested_point_count", 7)
-                        - len(selected_overview_points),
-                    )
-                    verification["removed_claim_count"] = (
-                        verification["candidate_removed_claim_count"]
-                    )
+                result["answer"] = "\n".join(answer_lines)
+                verification["candidate_supported_claim_count"] = (
+                    verification.get("supported_claim_count", 0)
+                    + verification.get("partial_claim_count", 0)
+                )
+                verification["final_selected_claim_indices"] = sorted(selected_indices)
+                verification["final_backup_points_used"] = sum(
+                    item["is_backup"] for item in selected_overview_points
+                )
+                verification["claim_evidence"] = selected_claim_evidence
+                verification["supported_chunk_ids"] = list(dict.fromkeys(
+                    chunk_id
+                    for item in selected_overview_points
+                    for chunk_id in item["supporting_chunk_ids"]
+                ))
+                verification["supported_claim_count"] = sum(
+                    item["status"] == "supported"
+                    for item in selected_overview_points
+                )
+                verification["partial_claim_count"] = sum(
+                    item["status"] == "partial"
+                    for item in selected_overview_points
+                )
+                verification["final_point_shortfall"] = max(
+                    0,
+                    overview_stats.get("requested_point_count", 7)
+                    - len(selected_overview_points),
+                )
+                verification["removed_claim_count"] = (
+                    verification["candidate_removed_claim_count"]
+                )
             supported_chunk_ids = {
                 str(value) for value in verification.get("supported_chunk_ids", [])
             }
@@ -12433,6 +12433,13 @@ def answer_question(
             )
             result["retrieval_trace"] = verification_trace
             result["source_groups"] = merge_overlapping_results(filtered_results)
+
+    if verification.get("performed"):
+        generation_trace["answer_evidence_verification"] = {
+            key: value
+            for key, value in verification.items()
+            if key not in {"answer", "supported_chunk_ids"}
+        }
 
     # This value is internal-only and is deliberately not included in the API
     # response or observability payload.
