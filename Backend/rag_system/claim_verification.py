@@ -14,7 +14,8 @@ from .overview_summarization import (
 )
 
 MAX_CLAIMS = 8
-MAX_TOTAL_CLAIMS = MAX_OVERVIEW_VERIFICATION_CLAIMS
+MAX_TOTAL_CLAIMS = 14
+MAX_STRUCTURED_OVERVIEW_CLAIMS = MAX_OVERVIEW_VERIFICATION_CLAIMS
 MAX_PASSAGES = 12
 MAX_PASSAGE_CHARS = 640
 MAX_INPUT_CHARS = 8_000
@@ -359,9 +360,10 @@ def verify_answer_claims(
 ) -> dict:
     """Verify claims against exact prompt-visible sources.
 
-    Overview points can carry their own source chunk IDs. Other answers use
-    bounded lexical source selection. Up to twenty-one claims are assessed in batches
-    of at most eight aspects per provider request.
+    Overview points can carry their own source chunk IDs. Structured overview
+    audits support up to twenty-one claims; ordinary answers retain the existing
+    fourteen-claim ceiling. Assessments are processed in batches of at most eight
+    aspects per provider request.
     """
     disclosures = _answer_disclosures(answer)
     claim_evidence_ids: list[list[str]] | None = None
@@ -389,9 +391,14 @@ def verify_answer_claims(
         all_claims = split_answer_claims(answer, max_claims=None)
         structured_mode = False
 
-    claims = all_claims[:MAX_TOTAL_CLAIMS]
+    claim_limit = (
+        MAX_STRUCTURED_OVERVIEW_CLAIMS
+        if structured_mode
+        else MAX_TOTAL_CLAIMS
+    )
+    claims = all_claims[:claim_limit]
     if claim_evidence_ids is not None:
-        claim_evidence_ids = claim_evidence_ids[:MAX_TOTAL_CLAIMS]
+        claim_evidence_ids = claim_evidence_ids[:claim_limit]
     truncated_claim_count = max(0, len(all_claims) - len(claims))
 
     if (
@@ -730,7 +737,7 @@ def verify_answer_claims(
     if truncated_claim_count:
         verified += (
             "\n\nAdditional details were omitted because the answer exceeded "
-            f"the {MAX_TOTAL_CLAIMS}-claim verification limit."
+            f"the {claim_limit}-claim verification limit."
         )
     verified = _append_answer_disclosures(verified, disclosures)
 
