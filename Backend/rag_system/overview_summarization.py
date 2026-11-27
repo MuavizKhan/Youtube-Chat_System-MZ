@@ -259,11 +259,6 @@ def _balance_points_over_timeline(
         }
 
     terminal_tail_start = _terminal_tail_start(timeline_start, timeline_end)
-    terminal_tail_center = (
-        (terminal_tail_start + timeline_end) / 2.0
-        if terminal_tail_start is not None
-        else None
-    )
     candidates = []
     duplicate_guard = list(previous_points)
     for origin, items in (
@@ -330,12 +325,9 @@ def _balance_points_over_timeline(
                 bucket == requested - 1
                 and bool(candidate["terminal_tail_times"])
             )
-            if bucket == requested - 1 and terminal_tail_center is not None:
-                anchor_distance = (
-                    min(
-                        abs(value - terminal_tail_center)
-                        for value in candidate["terminal_tail_times"]
-                    )
+            if bucket == requested - 1 and terminal_tail_start is not None:
+                distance_to_video_end = (
+                    timeline_end - max(candidate["terminal_tail_times"])
                     if in_terminal_tail
                     else min(
                         abs(midpoint - bucket_center)
@@ -350,8 +342,8 @@ def _balance_points_over_timeline(
                 )
                 return (
                     not in_terminal_tail,
+                    distance_to_video_end,
                     candidate["origin"] != "reducer",
-                    anchor_distance,
                     candidate["order"],
                 )
             return (
@@ -423,11 +415,6 @@ def _select_backup_points(
     terminal_tail_start = (
         _terminal_tail_start(timeline_start, timeline_end)
         if timeline_valid
-        else None
-    )
-    terminal_tail_center = (
-        (terminal_tail_start + timeline_end) / 2.0
-        if terminal_tail_start is not None
         else None
     )
 
@@ -517,12 +504,9 @@ def _select_backup_points(
                     bucket == bucket_count - 1
                     and bool(candidate["terminal_tail_times"])
                 )
-                if bucket == bucket_count - 1 and terminal_tail_center is not None:
-                    anchor_distance = (
-                        min(
-                            abs(value - terminal_tail_center)
-                            for value in candidate["terminal_tail_times"]
-                        )
+                if bucket == bucket_count - 1 and terminal_tail_start is not None:
+                    distance_to_video_end = (
+                        timeline_end - max(candidate["terminal_tail_times"])
                         if in_terminal_tail
                         else min(
                             abs(midpoint - bucket_center)
@@ -537,7 +521,7 @@ def _select_backup_points(
                     )
                     return (
                         not in_terminal_tail,
-                        anchor_distance,
+                        distance_to_video_end,
                         candidate["order"],
                     )
                 return (
@@ -686,11 +670,6 @@ def select_verified_overview_points(
         if valid_buckets
         else None
     )
-    terminal_tail_center = (
-        (terminal_tail_start + end_value) / 2.0
-        if terminal_tail_start is not None
-        else None
-    )
     evidence_by_index = {
         item.get("claim_index"): item
         for item in claim_evidence
@@ -795,19 +774,16 @@ def select_verified_overview_points(
             duration * (bucket + 0.5) / bucket_count
         )
         def verified_candidate_rank(item):
-            if bucket == bucket_count - 1 and terminal_tail_center is not None:
+            if bucket == bucket_count - 1 and terminal_tail_start is not None:
                 in_terminal_tail = bool(item["terminal_tail_times"])
                 return (
                     not in_terminal_tail,
-                    item["is_backup"],
                     (
-                        min(
-                            abs(value - terminal_tail_center)
-                            for value in item["terminal_tail_times"]
-                        )
+                        end_value - max(item["terminal_tail_times"])
                         if in_terminal_tail
                         else abs(item["anchor_seconds"] - bucket_center)
                     ),
+                    item["is_backup"],
                     item["claim_index"],
                 )
             return (
@@ -841,19 +817,16 @@ def select_verified_overview_points(
             duration * (bucket + 0.5) / bucket_count
         )
         def verified_candidate_rank(item):
-            if bucket == bucket_count - 1 and terminal_tail_center is not None:
+            if bucket == bucket_count - 1 and terminal_tail_start is not None:
                 in_terminal_tail = bool(item["terminal_tail_times"])
                 return (
                     not in_terminal_tail,
-                    item["is_backup"],
                     (
-                        min(
-                            abs(value - terminal_tail_center)
-                            for value in item["terminal_tail_times"]
-                        )
+                        end_value - max(item["terminal_tail_times"])
                         if in_terminal_tail
                         else abs(item["anchor_seconds"] - bucket_center)
                     ),
+                    item["is_backup"],
                     item["claim_index"],
                 )
             return (
