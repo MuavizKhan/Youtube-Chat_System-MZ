@@ -21,7 +21,7 @@ from .overview_prompts import (
 
 
 # Keep all overview candidates within the claim verifier's bounded audit ceiling.
-MAX_OVERVIEW_VERIFICATION_CLAIMS = 13
+MAX_OVERVIEW_VERIFICATION_CLAIMS = 14
 MAX_BACKUP_POINTS = MAX_OVERVIEW_VERIFICATION_CLAIMS - 1
 
 
