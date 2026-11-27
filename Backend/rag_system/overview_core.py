@@ -79,6 +79,52 @@ def timeline_sample(items: Sequence[Any], count: int) -> list[Any]:
     return [ordered[index] for index in sorted(selected_indexes)]
 
 
+def _timeline_sample_preserving_tail(
+    items: Sequence[Any],
+    count: int,
+    *,
+    terminal_reserve: int = 6,
+) -> list[Any]:
+    """Sample the whole timeline while always retaining the latest transcript chunks."""
+    ordered = sorted(items, key=sort_key)
+    if count >= len(ordered):
+        return ordered
+    if count <= 0:
+        return []
+    reserve_count = min(count, terminal_reserve, len(ordered))
+    terminal_items = ordered[-reserve_count:]
+    earlier_items = ordered[:-reserve_count]
+    earlier_count = count - reserve_count
+    sampled_earlier = (
+        timeline_sample(earlier_items, earlier_count)
+        if earlier_count and earlier_items
+        else []
+    )
+    selected_keys = {
+        (
+            str(metadata(document).get("video_id", "")),
+            str(metadata(document).get("chunk_id", "")),
+        )
+        for document in terminal_items
+    }
+    for document in sampled_earlier:
+        selected_keys.add((
+            str(metadata(document).get("video_id", "")),
+            str(metadata(document).get("chunk_id", "")),
+        ))
+    by_key = {
+        (
+            str(metadata(document).get("video_id", "")),
+            str(metadata(document).get("chunk_id", "")),
+        ): document
+        for document in ordered
+    }
+    return sorted(
+        (by_key[key] for key in selected_keys if key in by_key),
+        key=sort_key,
+    )
+
+
 def requested_count(question: str) -> int:
     match = re.search(
         r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
@@ -198,9 +244,9 @@ def build_sections(
         mode = "timeline_stratified"
         average = max(1, math.ceil(total_chars / len(valid)))
         count = min(MAX_DOCUMENTS, max(1, MAX_SOURCE_CHARS // average))
-        selected = timeline_sample(valid, count)
+        selected = _timeline_sample_preserving_tail(valid, count)
         while len(selected) > 1 and sum(len(item.page_content) for item in selected) > MAX_SOURCE_CHARS:
-            selected = timeline_sample(valid, len(selected) - 1)
+            selected = _timeline_sample_preserving_tail(valid, len(selected) - 1)
 
     def timestamp(document: Any) -> str:
         start, end, _ = sort_key(document)
@@ -288,12 +334,12 @@ def build_sections(
         )
         if target_count >= len(selected):
             target_count = len(selected) - 1
-        selected = timeline_sample(valid, target_count)
+        selected = _timeline_sample_preserving_tail(valid, target_count)
         while (
             len(selected) > 1
             and sum(len(item.page_content) for item in selected) > MAX_SOURCE_CHARS
         ):
-            selected = timeline_sample(valid, len(selected) - 1)
+            selected = _timeline_sample_preserving_tail(valid, len(selected) - 1)
         section_limit_sampling = True
         sections, lookup = pack_sections(selected)
 
