@@ -903,8 +903,11 @@ def timeline_coverage_from_claim_evidence(
 def terminal_tail_coverage_from_claim_evidence(
     claim_evidence: Sequence[dict],
     documents: Sequence[Any],
+    *,
+    timeline_start: float | None = None,
+    timeline_end: float | None = None,
 ) -> dict:
-    """Measure whether selected supported evidence actually reaches the transcript tail."""
+    """Measure selected supported evidence against the full transcript's terminal window."""
     document_values = [
         document for document in documents
         if isinstance(getattr(document, "metadata", None), dict)
@@ -912,8 +915,14 @@ def terminal_tail_coverage_from_claim_evidence(
     if not document_values:
         return {}
 
-    timeline_start = min(sort_key(document)[0] for document in document_values)
-    timeline_end = max(sort_key(document)[1] for document in document_values)
+    evidence_start = min(sort_key(document)[0] for document in document_values)
+    evidence_end = max(sort_key(document)[1] for document in document_values)
+    timeline_start = (
+        evidence_start if timeline_start is None else float(timeline_start)
+    )
+    timeline_end = (
+        evidence_end if timeline_end is None else float(timeline_end)
+    )
     tail_start = _terminal_tail_start(timeline_start, timeline_end)
     if tail_start is None:
         return {
