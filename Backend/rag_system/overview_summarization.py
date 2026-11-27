@@ -17,6 +17,7 @@ from .overview_prompts import (
     OVERVIEW_FINAL_PROMPT,
     OVERVIEW_MAP_PROMPT,
     OVERVIEW_REDUCE_PROMPT,
+    OVERVIEW_TERMINAL_PROMPT,
 )
 
 
@@ -26,6 +27,8 @@ from .overview_prompts import (
 MAX_OVERVIEW_VERIFICATION_CLAIMS = 21
 MAX_BACKUP_POINTS = MAX_OVERVIEW_VERIFICATION_CLAIMS - 1
 MAX_BACKUP_POINTS_PER_BUCKET = 2
+MAX_TERMINAL_TAIL_CONTEXT_CHARS = 9_000
+MAX_TERMINAL_TAIL_FINDINGS = 3
 
 
 OVERVIEW_SAMPLING_DISCLOSURE = (
@@ -152,10 +155,28 @@ def _terminal_tail_start(
     return float(timeline_end) - window_seconds
 
 
+def _terminal_overlap_center(
+    document: Any,
+    tail_start: float | None,
+    timeline_end: float,
+) -> float | None:
+    """Return an overlap-center only when a chunk materially intersects the tail."""
+    if tail_start is None:
+        return None
+    start, end, _ = sort_key(document)
+    duration = max(0.0, end - start)
+    overlap = max(0.0, min(end, timeline_end) - max(start, tail_start))
+    required_overlap = min(15.0, duration * 0.25)
+    if overlap <= 0 or overlap < required_overlap:
+        return None
+    return (max(start, tail_start) + min(end, timeline_end)) / 2.0
+
+
 def _point_terminal_tail_times(
     point: dict,
     lookup: dict,
     tail_start: float | None,
+    timeline_end: float,
 ) -> list[float]:
     if tail_start is None:
         return []
@@ -164,10 +185,13 @@ def _point_terminal_tail_times(
         document = lookup.get(str(evidence_id))
         if document is None:
             continue
-        start, end, _ = sort_key(document)
-        midpoint = (start + end) / 2.0
-        if midpoint >= tail_start:
-            times.append(midpoint)
+        overlap_center = _terminal_overlap_center(
+            document,
+            tail_start,
+            timeline_end,
+        )
+        if overlap_center is not None:
+            times.append(overlap_center)
     return sorted(times)
 
 
@@ -270,6 +294,7 @@ def _balance_points_over_timeline(
                     point,
                     lookup,
                     terminal_tail_start,
+                    timeline_end,
                 ),
             })
 
@@ -441,6 +466,7 @@ def _select_backup_points(
                 finding,
                 lookup,
                 terminal_tail_start,
+                timeline_end,
             ),
         })
 
@@ -697,9 +723,15 @@ def select_verified_overview_points(
             "supporting_chunk_ids": chunk_ids,
             "anchor_seconds": anchor_time,
             "terminal_tail_times": [
-                midpoint for midpoint in source_times
-                if terminal_tail_start is not None
-                and midpoint >= terminal_tail_start
+                overlap_center
+                for chunk_id in chunk_ids
+                if (
+                    overlap_center := _terminal_overlap_center(
+                        by_chunk_id[chunk_id],
+                        terminal_tail_start,
+                        end_value,
+                    )
+                ) is not None
             ],
             "bucket": (
                 _timeline_bucket_index(
@@ -948,14 +980,17 @@ def terminal_tail_coverage_from_claim_evidence(
             document = by_chunk_id.get(chunk_id)
             if document is None:
                 continue
-            start, end, _ = sort_key(document)
-            midpoint = (start + end) / 2.0
-            if midpoint >= tail_start:
+            overlap_center = _terminal_overlap_center(
+                document,
+                tail_start,
+                timeline_end,
+            )
+            if overlap_center is not None:
                 supporting_chunk_ids.append(chunk_id)
                 latest_supported_midpoint = (
-                    midpoint
+                    overlap_center
                     if latest_supported_midpoint is None
-                    else max(latest_supported_midpoint, midpoint)
+                    else max(latest_supported_midpoint, overlap_center)
                 )
 
     unique_chunk_ids = list(dict.fromkeys(supporting_chunk_ids))
