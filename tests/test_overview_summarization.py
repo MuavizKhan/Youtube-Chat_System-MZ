@@ -578,8 +578,8 @@ def test_overview_backup_reserve_spans_timeline_buckets_even_when_primary_points
     assert selected_buckets == list(range(7))
 
 
-def test_verified_overview_selector_prefers_terminal_tail_point_in_final_bucket():
-    minutes = [1, 11, 21, 31, 41, 51, 61, 66]
+def test_verified_overview_selector_prefers_latest_terminal_tail_point_in_final_bucket():
+    minutes = [1, 11, 21, 31, 41, 51, 61, 65, 66]
     documents = [
         _document_for_minute(index, minute)
         for index, minute in enumerate(minutes, start=1)
@@ -599,8 +599,13 @@ def test_verified_overview_selector_prefers_terminal_tail_point_in_final_bucket(
             "is_backup": False,
         },
         {
-            "text": "A distinct substantive conclusion from the actual video ending.",
+            "text": "A closing reflection from the earlier part of the terminal window.",
             "evidence_chunk_ids": ["8"],
+            "is_backup": False,
+        },
+        {
+            "text": "The final exchange explains how the host keeps interviews spontaneous.",
+            "evidence_chunk_ids": ["9"],
             "is_backup": True,
         },
     ])
@@ -610,7 +615,7 @@ def test_verified_overview_selector_prefers_terminal_tail_point_in_final_bucket(
             "status": "supported",
             "supporting_chunk_ids": [str(index)],
         }
-        for index in range(1, 9)
+        for index in range(1, 10)
     ]
 
     selected = overview_summarization.select_verified_overview_points(
@@ -625,11 +630,12 @@ def test_verified_overview_selector_prefers_terminal_tail_point_in_final_bucket(
 
     assert len(selected) == 7
     assert selected[-1]["text"] == (
-        "A distinct substantive conclusion from the actual video ending."
+        "The final exchange explains how the host keeps interviews spontaneous."
     )
-    assert selected[-1]["supporting_chunk_ids"] == ["8"]
+    assert selected[-1]["supporting_chunk_ids"] == ["9"]
+    # A later supported terminal finding outranks an earlier primary point
+    # from the same broad final bucket.
     assert selected[-1]["is_backup"] is True
-
 
 def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
     early_final_bucket = Document(
