@@ -1256,7 +1256,7 @@ def summarize_video_overview(
                 }
 
             # A single broad-tail prompt can prefer the first part of its
-            # closing window. If neither it nor the section maps cites either
+            # closing window. If neither it nor the section maps cites the
             # of the final two eligible passages, inspect those exact passages
             # separately and pass any distinct finding through normal audit.
             end_cap_items = bounded_terminal_items[-2:]
@@ -1266,6 +1266,12 @@ def summarize_video_overview(
                 str(item["document"].metadata.get("chunk_id"))
                 for item in end_cap_items
             ))
+            latest_end_cap_passage_id = (
+                end_cap_items[-1]["id"] if end_cap_items else None
+            )
+            latest_end_cap_source_chunk_id = (
+                end_cap_source_ids[-1] if end_cap_source_ids else None
+            )
             end_cap_start_seconds = (
                 round(sort_key(end_cap_items[0]["document"])[0], 2)
                 if end_cap_items
@@ -1278,13 +1284,18 @@ def summarize_video_overview(
                 "end_seconds": round(timeline_end, 2),
                 "passage_ids": end_cap_passage_ids,
                 "source_chunk_ids": end_cap_source_ids,
+                "latest_passage_id": latest_end_cap_passage_id,
+                "latest_source_chunk_id": latest_end_cap_source_chunk_id,
                 "source": "none",
             }
             if end_cap_items:
                 end_cap_candidates_already_found = [
                     point
                     for point in [*map_findings, *terminal_points]
-                    if _point_evidence_ids(point).intersection(end_cap_allowed_ids)
+                    if (
+                        latest_end_cap_passage_id
+                        in _point_evidence_ids(point)
+                    )
                 ]
                 if end_cap_candidates_already_found:
                     end_cap_scan.update({

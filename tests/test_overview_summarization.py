@@ -1003,10 +1003,18 @@ def test_terminal_end_cap_scan_recovers_final_passages_when_broad_scan_stops_ear
                 ]
             })
 
+        section_match = re.search(
+            r"Chronological section (\d+) of (\d+)", prompt_text
+        )
+        selected_map_id = (
+            passage_ids[-2]
+            if section_match and int(section_match.group(1)) == 3
+            else passage_ids[0]
+        )
         return json.dumps({
             "points": [{
                 "text": "A distinct development in this section is discussed.",
-                "evidence_ids": [passage_ids[0]],
+                "evidence_ids": [selected_map_id],
             }]
         })
 

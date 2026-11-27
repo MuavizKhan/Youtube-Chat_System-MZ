@@ -52,8 +52,8 @@ Processing is bounded:
   transcript (bounded to 60–420 seconds) in a dedicated, source-ID-constrained
   model call. It can produce up to three additional findings, which enter the
   existing twenty-one-claim audit budget rather than expanding that budget.
-  If neither this scan nor the section findings cites either of the final two
-  eligible closing passages, a focused end-cap scan inspects those exact
+  If neither this scan nor the section findings cites the latest of the final
+  two eligible closing passages, a focused end-cap scan inspects both exact
   passages and can add one further candidate within the same twenty-one-claim
   budget. Its candidate is not trusted until claim-level transcript verification
   succeeds. Diagnostics distinguish broad tail coverage from verified evidence
