@@ -1257,8 +1257,8 @@ def summarize_video_overview(
 
             # A single broad-tail prompt can prefer the first part of its
             # closing window. If neither it nor the section maps cites the
-            # of the final two eligible passages, inspect those exact passages
-            # separately and pass any distinct finding through normal audit.
+            # latest of the final two eligible passages, inspect both exact
+            # passages separately and pass any distinct finding through audit.
             end_cap_items = bounded_terminal_items[-2:]
             end_cap_passage_ids = [item["id"] for item in end_cap_items]
             end_cap_allowed_ids = set(end_cap_passage_ids)
