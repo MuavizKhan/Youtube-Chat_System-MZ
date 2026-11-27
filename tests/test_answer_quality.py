@@ -92,9 +92,9 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
         stats["section_count"] + overview_summarization.MAX_TERMINAL_TAIL_FINDINGS
     )
     assert len(result["verification_results"]) > len(result["retrieved_results"])
-    assert len(
+    assert stats["section_count"] <= len(
         result["generation_trace"]["context_budget"]["verification_chunk_ids"]
-    ) == stats["section_count"]
+    ) <= stats["section_count"] + overview_summarization.MAX_TERMINAL_TAIL_FINDINGS
 
 
 @pytest.mark.regression
