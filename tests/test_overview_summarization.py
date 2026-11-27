@@ -1,3 +1,6 @@
+import json
+import re
+
 from langchain_core.documents import Document
 
 from Backend.rag_system import overview_summarization
@@ -728,4 +731,101 @@ def test_backup_reserve_prioritizes_terminal_tail_alternative_in_final_bucket():
     ]
     assert len(selected_last_bucket) == 1
     assert selected_last_bucket[0]["evidence_ids"] == ["P00008"]
+
+
+def test_overview_runs_dedicated_terminal_scan_and_adds_tail_findings_to_audit():
+    starts = [
+        0, 600, 1200, 1800, 2400, 3000,
+        3600, 4200, 4800, 5100, 5160, 5220,
+    ]
+    documents = [
+        Document(
+            page_content=f"Transcript development for segment {index}.",
+            metadata={
+                "chunk_id": str(index),
+                "video_id": "generic-video",
+                "start": float(start),
+                "end": float(start + 45),
+            },
+        )
+        for index, start in enumerate(starts, start=1)
+    ]
+    terminal_ids = []
+    calls = {"map": 0, "terminal": 0, "reduce": 0}
+
+    def generate(prompt):
+        prompt_text = "\n".join(
+            message.content for message in prompt.to_messages()
+        )
+        passage_ids = re.findall(r"\[(P\d{5})\]", prompt_text)
+
+        if "Inspect only the closing portion" in prompt_text:
+            calls["terminal"] += 1
+            terminal_ids.extend(passage_ids)
+            return json.dumps({
+                "points": [{
+                    "text": (
+                        "The closing exchange introduces a distinct final "
+                        "reflection from the guest."
+                    ),
+                    "evidence_ids": [passage_ids[-1]],
+                }]
+            })
+
+        if "Synthesize the chronological section findings" in prompt_text:
+            calls["reduce"] += 1
+            note_ids = re.findall(
+                r"\[evidence_ids: (P\d{5})\]",
+                prompt_text,
+            )
+            assert len(note_ids) >= 3
+            return json.dumps({
+                "points": [
+                    {
+                        "text": "An opening development is discussed.",
+                        "evidence_ids": [note_ids[0]],
+                    },
+                    {
+                        "text": "A middle development is explained.",
+                        "evidence_ids": [note_ids[len(note_ids) // 2]],
+                    },
+                    {
+                        "text": (
+                            "The closing exchange introduces a distinct final "
+                            "reflection from the guest."
+                        ),
+                        "evidence_ids": [note_ids[-1]],
+                    },
+                ]
+            })
+
+        calls["map"] += 1
+        assert passage_ids
+        return json.dumps({
+            "points": [{
+                "text": f"Distinct development in map section {calls['map']}.",
+                "evidence_ids": [passage_ids[0]],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize the entire video chronologically in 3 points.",
+        requested_points=3,
+        generate_text=generate,
+    )
+
+    scan = result["retrieval_trace"]["overview"]["terminal_tail_scan"]
+    assert calls["terminal"] == 1
+    assert calls["reduce"] == 1
+    assert scan["status"] == "completed"
+    assert scan["finding_count"] == 1
+    assert scan["source_chunk_ids"][-3:] == ["10", "11", "12"]
+    assert set(scan["passage_ids"]).issubset(set(terminal_ids))
+    assert any(
+        "The closing exchange introduces a distinct final reflection"
+        in claim["text"]
+        and "12" in claim["evidence_chunk_ids"]
+        for claim in result["verification_claims"]
+    )
 
