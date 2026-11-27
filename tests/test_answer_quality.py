@@ -688,7 +688,9 @@ def test_single_section_overview_reserves_verified_alternatives_for_short_videos
 
     stats = result["retrieval_trace"]["overview"]
     assert stats["section_count"] == 1
-    assert observed["maximum_points"] == str(1 + overview_summarization.MAX_BACKUP_POINTS)
+    assert observed["maximum_points"] == str(
+        1 + overview_summarization.MAX_BACKUP_POINTS_PER_BUCKET
+    )
     assert stats["returned_point_count"] == 1
     assert stats["single_section_backup_candidate_count"] == 3
     assert stats["backup_candidate_point_count"] == 3
