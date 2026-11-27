@@ -1165,41 +1165,45 @@ def summarize_video_overview(
             terminal_allowed_ids = {
                 item["id"] for item in bounded_terminal_items
             }
-            terminal_response = generate_text(
-                OVERVIEW_TERMINAL_PROMPT.invoke({
-                    "question": question,
-                    "exclude_points": (
-                        exclude_points
-                        + "\n"
-                        + "\n".join(item["text"] for item in map_findings)
-                    )[-4_000:],
-                    "context": terminal_context,
-                })
-            )
+            terminal_passage_ids = [
+                item["id"] for item in bounded_terminal_items
+            ]
+            terminal_source_ids = list(dict.fromkeys(
+                str(item["document"].metadata.get("chunk_id"))
+                for item in bounded_terminal_items
+            ))
             try:
+                terminal_response = generate_text(
+                    OVERVIEW_TERMINAL_PROMPT.invoke({
+                        "question": question,
+                        "exclude_points": (
+                            exclude_points
+                            + "\\n"
+                            + "\\n".join(item["text"] for item in map_findings)
+                        )[-4_000:],
+                        "context": terminal_context,
+                    })
+                )
                 terminal_points = parse_points(
                     terminal_response,
                     terminal_allowed_ids,
                     MAX_TERMINAL_TAIL_FINDINGS,
                     allow_empty=True,
                 )
-            except OverviewError:
-                # A malformed dedicated tail response must not destroy a
-                # otherwise valid overview. The response is explicitly marked
-                # incomplete so callers can request a focused ending follow-up.
+            except Exception as error:
+                # The dedicated closing scan is supplementary. A provider
+                # throttle or malformed response must not discard an otherwise
+                # complete, evidence-verified overview. Surface the limitation
+                # so the user can ask a focused question about the ending.
                 terminal_points = []
                 terminal_tail_scan = {
-                    "status": "invalid_structured_output",
+                    "status": "unavailable",
+                    "failure_type": type(error).__name__,
                     "finding_count": 0,
                     "start_seconds": round(terminal_tail_start, 2),
                     "end_seconds": round(timeline_end, 2),
-                    "passage_ids": [
-                        item["id"] for item in bounded_terminal_items
-                    ],
-                    "source_chunk_ids": list(dict.fromkeys(
-                        str(item["document"].metadata.get("chunk_id"))
-                        for item in bounded_terminal_items
-                    )),
+                    "passage_ids": terminal_passage_ids,
+                    "source_chunk_ids": terminal_source_ids,
                     "context_chars": terminal_chars,
                 }
             else:
@@ -1215,13 +1219,8 @@ def summarize_video_overview(
                     "finding_count": len(terminal_points),
                     "start_seconds": round(terminal_tail_start, 2),
                     "end_seconds": round(timeline_end, 2),
-                    "passage_ids": [
-                        item["id"] for item in bounded_terminal_items
-                    ],
-                    "source_chunk_ids": list(dict.fromkeys(
-                        str(item["document"].metadata.get("chunk_id"))
-                        for item in bounded_terminal_items
-                    )),
+                    "passage_ids": terminal_passage_ids,
+                    "source_chunk_ids": terminal_source_ids,
                     "context_chars": terminal_chars,
                 }
         else:
