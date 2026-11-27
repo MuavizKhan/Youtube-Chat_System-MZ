@@ -650,7 +650,16 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
             "end": 5260.0,
         },
     )
-    documents = [early_final_bucket, actual_tail]
+    boundary_overlap = Document(
+        page_content="A meaningful exchange overlaps the closing-window boundary.",
+        metadata={
+            "chunk_id": "72",
+            "video_id": "VKrtiTgBeng",
+            "start": 4965.0,
+            "end": 5080.0,
+        },
+    )
+    documents = [early_final_bucket, boundary_overlap, actual_tail]
 
     # The old evidence belongs to broad bucket seven, but it is outside the
     # separate five-percent terminal window of this 88-minute transcript.
@@ -693,6 +702,23 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
     assert tail_coverage["eligible"] is True
     assert tail_coverage["covered"] is True
     assert tail_coverage["supporting_chunk_ids"] == ["75"]
+
+    # Chunk 72 starts just before the five-percent tail boundary but overlaps
+    # it for more than a minute. Midpoint-only checks would incorrectly drop it.
+    boundary_coverage = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [
+            {
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["72"],
+            }
+        ],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+    )
+    assert boundary_coverage["covered"] is True
+    assert boundary_coverage["supporting_chunk_ids"] == ["72"]
 
 
 def test_backup_reserve_prioritizes_terminal_tail_alternative_in_final_bucket():
