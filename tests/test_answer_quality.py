@@ -403,22 +403,22 @@ def test_claim_audit_uses_only_exact_text_visible_in_prompt(monkeypatch):
 
 
 
-def test_claim_audit_verifies_fourteen_overview_candidates_in_bounded_batches(monkeypatch):
+def test_claim_audit_verifies_twenty_one_overview_candidates_in_three_bounded_batches(monkeypatch):
     documents = [
         make_doc(
             index,
             index * 60,
             f"The transcript directly describes independent event number {index}.",
         )
-        for index in range(1, 15)
+        for index in range(1, 22)
     ]
     claims = [
         {
             "text": f"The speaker describes independent event number {index}.",
             "evidence_chunk_ids": [str(index)],
-            "is_backup": index > 10,
+            "is_backup": index > 7,
         }
-        for index in range(1, 15)
+        for index in range(1, 22)
     ]
     observed_batches = []
 
@@ -463,7 +463,7 @@ def test_claim_audit_verifies_fourteen_overview_candidates_in_bounded_batches(mo
         fake_assessment,
     )
     result = claim_verification.verify_answer_claims(
-        answer="\n".join(
+        answer="\\n".join(
             f"{index}. The speaker describes independent event number {index}."
             for index in range(1, 11)
         ),
@@ -473,8 +473,8 @@ def test_claim_audit_verifies_fourteen_overview_candidates_in_bounded_batches(mo
             (document, float(index))
             for index, document in enumerate(documents)
         ],
-        included_chunk_ids=[str(index) for index in range(1, 15)],
-        prompt_visible_context="\n".join(
+        included_chunk_ids=[str(index) for index in range(1, 22)],
+        prompt_visible_context="\\n".join(
             document.page_content for document in documents
         ),
         client=object(),
@@ -482,18 +482,19 @@ def test_claim_audit_verifies_fourteen_overview_candidates_in_bounded_batches(mo
         structured_claims=claims,
     )
 
-    assert [item["aspect_count"] for item in observed_batches] == [8, 6]
+    assert [item["aspect_count"] for item in observed_batches] == [8, 8, 5]
     assert [item["chunk_ids"] for item in observed_batches] == [
         [str(index) for index in range(1, 9)],
-        [str(index) for index in range(9, 15)],
+        [str(index) for index in range(9, 17)],
+        [str(index) for index in range(17, 22)],
     ]
     assert result["status"] == "completed"
-    assert result["claim_count"] == 14
+    assert result["claim_count"] == 21
     assert result["truncated_claim_count"] == 0
-    assert result["assessment_batch_count"] == 2
-    assert result["supported_claim_count"] == 14
+    assert result["assessment_batch_count"] == 3
+    assert result["supported_claim_count"] == 21
     assert set(result["supported_chunk_ids"]) == {
-        str(index) for index in range(1, 15)
+        str(index) for index in range(1, 22)
     }
 
 def test_overview_claim_audit_keeps_each_point_bound_to_its_own_visible_evidence(monkeypatch):
