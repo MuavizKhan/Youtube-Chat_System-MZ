@@ -1132,39 +1132,63 @@ def summarize_video_overview(
             terminal_allowed_ids = {
                 item["id"] for item in bounded_terminal_items
             }
-            terminal_points = parse_points(
-                generate_text(OVERVIEW_TERMINAL_PROMPT.invoke({
+            terminal_response = generate_text(
+                OVERVIEW_TERMINAL_PROMPT.invoke({
                     "question": question,
                     "exclude_points": (
                         exclude_points + "\n" + "\n".join(notes)
                     )[-4_000:],
                     "context": terminal_context,
-                })),
-                terminal_allowed_ids,
-                MAX_TERMINAL_TAIL_FINDINGS,
-                allow_empty=True,
+                })
             )
-            map_findings.extend(terminal_points)
-            for item in terminal_points:
-                note_evidence_ids.update(item["evidence_ids"])
-                notes.append(
-                    f"Terminal closing development: {item['text']} "
-                    f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
+            try:
+                terminal_points = parse_points(
+                    terminal_response,
+                    terminal_allowed_ids,
+                    MAX_TERMINAL_TAIL_FINDINGS,
+                    allow_empty=True,
                 )
-            terminal_tail_scan = {
-                "status": "completed",
-                "finding_count": len(terminal_points),
-                "start_seconds": round(terminal_tail_start, 2),
-                "end_seconds": round(timeline_end, 2),
-                "passage_ids": [
-                    item["id"] for item in bounded_terminal_items
-                ],
-                "source_chunk_ids": list(dict.fromkeys(
-                    str(item["document"].metadata.get("chunk_id"))
-                    for item in bounded_terminal_items
-                )),
-                "context_chars": terminal_chars,
-            }
+            except OverviewError:
+                # A malformed dedicated tail response must not destroy a
+                # otherwise valid overview. The response is explicitly marked
+                # incomplete so callers can request a focused ending follow-up.
+                terminal_points = []
+                terminal_tail_scan = {
+                    "status": "invalid_structured_output",
+                    "finding_count": 0,
+                    "start_seconds": round(terminal_tail_start, 2),
+                    "end_seconds": round(timeline_end, 2),
+                    "passage_ids": [
+                        item["id"] for item in bounded_terminal_items
+                    ],
+                    "source_chunk_ids": list(dict.fromkeys(
+                        str(item["document"].metadata.get("chunk_id"))
+                        for item in bounded_terminal_items
+                    )),
+                    "context_chars": terminal_chars,
+                }
+            else:
+                map_findings.extend(terminal_points)
+                for item in terminal_points:
+                    note_evidence_ids.update(item["evidence_ids"])
+                    notes.append(
+                        f"Terminal closing development: {item['text']} "
+                        f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
+                    )
+                terminal_tail_scan = {
+                    "status": "completed",
+                    "finding_count": len(terminal_points),
+                    "start_seconds": round(terminal_tail_start, 2),
+                    "end_seconds": round(timeline_end, 2),
+                    "passage_ids": [
+                        item["id"] for item in bounded_terminal_items
+                    ],
+                    "source_chunk_ids": list(dict.fromkeys(
+                        str(item["document"].metadata.get("chunk_id"))
+                        for item in bounded_terminal_items
+                    )),
+                    "context_chars": terminal_chars,
+                }
         else:
             terminal_tail_scan = {
                 "status": "no_terminal_passages_selected",
