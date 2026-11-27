@@ -12518,6 +12518,8 @@ def answer_question(
                                 for pair in verification_results
                                 if isinstance(pair, (tuple, list)) and pair
                             ],
+                            timeline_start=before_coverage["start_seconds"],
+                            timeline_end=before_coverage["end_seconds"],
                         )
                     )
                     overview_stats["verified_terminal_tail_coverage"] = (
