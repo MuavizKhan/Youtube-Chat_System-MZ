@@ -752,7 +752,9 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
     assert stats["map_finding_count"] == 6
     assert stats["map_section_point_counts"] == [1, 1, 1, 1, 1, 1]
     assert stats["map_finding_timeline_coverage"]["missing_buckets"] == []
-    assert len(result["verification_claims"]) == 5
+    assert len(result["verification_claims"]) == 6
+    assert result["verification_claims"][-1]["is_backup"] is True
+    assert stats["backup_candidate_point_count"] == 1
     assert result["verification_claims"][0]["evidence_chunk_ids"] == ["1"]
 
 

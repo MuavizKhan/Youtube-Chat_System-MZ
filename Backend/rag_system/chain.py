@@ -124,7 +124,9 @@ from .retrieval import (
 from .overview_core import requested_count
 from .overview_prompts import overview_response_format_for_model
 from .overview_summarization import (
+    OVERVIEW_SAMPLING_DISCLOSURE,
     OverviewError,
+    select_verified_overview_points,
     summarize_video_overview,
     timeline_coverage_from_claim_evidence,
 )
@@ -12272,6 +12274,99 @@ def answer_question(
         }
         if verification.get("status") in {"completed", "no_prompt_visible_evidence"}:
             result["answer"] = verification["answer"]
+            structured_overview_claims = result.get("verification_claims")
+            overview_stats = result.get("retrieval_trace", {}).get("overview")
+            if not isinstance(overview_stats, dict):
+                overview_stats = generation_trace.get("overview_summary")
+            if (
+                verification.get("status") == "completed"
+                and isinstance(structured_overview_claims, (list, tuple))
+                and isinstance(overview_stats, dict)
+            ):
+                before_coverage = overview_stats.get("timeline_coverage", {})
+                if (
+                    isinstance(before_coverage, dict)
+                    and before_coverage.get("start_seconds") is not None
+                    and before_coverage.get("end_seconds") is not None
+                    and before_coverage.get("bucket_count") is not None
+                ):
+                    selected_overview_points = select_verified_overview_points(
+                        structured_overview_claims,
+                        verification.get("claim_evidence", []),
+                        [
+                            pair[0]
+                            for pair in verification_results
+                            if isinstance(pair, (tuple, list)) and pair
+                        ],
+                        requested_count=overview_stats.get("requested_point_count", 7),
+                        timeline_start=before_coverage["start_seconds"],
+                        timeline_end=before_coverage["end_seconds"],
+                        bucket_count=before_coverage["bucket_count"],
+                    )
+                    selected_indices = {
+                        item["claim_index"] for item in selected_overview_points
+                    }
+                    all_claim_evidence = verification.get("claim_evidence", [])
+                    selected_claim_evidence = [
+                        item for item in all_claim_evidence
+                        if isinstance(item, dict)
+                        and item.get("claim_index") in selected_indices
+                    ]
+                    answer_lines = []
+                    if OVERVIEW_SAMPLING_DISCLOSURE in result.get("answer", ""):
+                        answer_lines.append(OVERVIEW_SAMPLING_DISCLOSURE)
+                    for index, item in enumerate(selected_overview_points, start=1):
+                        text = item["text"]
+                        if item["status"] == "partial":
+                            text = "The transcript only partially supports this detail: " + text
+                        answer_lines.append(f"{index}. {text}")
+                    if len(selected_overview_points) < overview_stats.get("requested_point_count", 7):
+                        answer_lines.append(
+                            "\nThe transcript did not provide enough verifiable distinct "
+                            "developments to support all requested points."
+                        )
+                    elif verification.get("removed_claim_count", 0):
+                        answer_lines.append(
+                            "\nSome candidate details were omitted because the available "
+                            "transcript did not clearly support them."
+                        )
+                    if any(
+                        item.get("status") in {"conflicted", "contradicted"}
+                        for item in all_claim_evidence
+                        if isinstance(item, dict)
+                    ):
+                        answer_lines.append(
+                            "The transcript contains conflicting information about at "
+                            "least one omitted point."
+                        )
+                    result["answer"] = "\n".join(answer_lines)
+                    verification["candidate_supported_claim_count"] = (
+                        verification.get("supported_claim_count", 0)
+                        + verification.get("partial_claim_count", 0)
+                    )
+                    verification["final_selected_claim_indices"] = sorted(selected_indices)
+                    verification["final_backup_points_used"] = sum(
+                        item["is_backup"] for item in selected_overview_points
+                    )
+                    verification["claim_evidence"] = selected_claim_evidence
+                    verification["supported_chunk_ids"] = list(dict.fromkeys(
+                        chunk_id
+                        for item in selected_overview_points
+                        for chunk_id in item["supporting_chunk_ids"]
+                    ))
+                    verification["supported_claim_count"] = sum(
+                        item["status"] == "supported"
+                        for item in selected_overview_points
+                    )
+                    verification["partial_claim_count"] = sum(
+                        item["status"] == "partial"
+                        for item in selected_overview_points
+                    )
+                    verification["removed_claim_count"] = max(
+                        0,
+                        overview_stats.get("requested_point_count", 7)
+                        - len(selected_overview_points),
+                    )
             supported_chunk_ids = {
                 str(value) for value in verification.get("supported_chunk_ids", [])
             }

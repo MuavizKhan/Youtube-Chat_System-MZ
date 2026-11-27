@@ -233,6 +233,111 @@ def _balance_points_over_timeline(
     }
 
 
+def _select_backup_points(
+    primary_points: Sequence[dict],
+    map_findings: Sequence[dict],
+    lookup: dict,
+    requested: int,
+    maximum_backups: int,
+) -> list[dict]:
+    """Reserve verified map alternatives to replace unsupported primary points."""
+    if maximum_backups < 1 or not map_findings or not lookup:
+        return []
+
+    documents = list(lookup.values())
+    timeline_start = min(sort_key(document)[0] for document in documents)
+    timeline_end = max(sort_key(document)[1] for document in documents)
+    if timeline_end <= timeline_start:
+        return []
+
+    duplicate_guard = list(primary_points)
+    candidates = []
+    for order, finding in enumerate(map_findings):
+        text = str(finding.get("text", "")).strip()
+        if not text or _duplicate_point(text, duplicate_guard):
+            continue
+        buckets, midpoints = _point_timeline_buckets(
+            finding,
+            lookup,
+            timeline_start,
+            timeline_end,
+            requested,
+        )
+        if not buckets or not midpoints:
+            continue
+        duplicate_guard.append(finding)
+        candidates.append({
+            "point": finding,
+            "order": order,
+            "buckets": buckets,
+            "midpoints": midpoints,
+        })
+
+    if not candidates:
+        return []
+
+    covered_buckets = set()
+    for point in primary_points:
+        buckets, _midpoints = _point_timeline_buckets(
+            point,
+            lookup,
+            timeline_start,
+            timeline_end,
+            requested,
+        )
+        covered_buckets.update(buckets)
+
+    selected = []
+    selected_indexes = set()
+    duration = timeline_end - timeline_start
+    for bucket in range(requested):
+        if bucket in covered_buckets or len(selected) >= maximum_backups:
+            continue
+        bucket_center = timeline_start + duration * (bucket + 0.5) / requested
+        options = [
+            (index, candidate)
+            for index, candidate in enumerate(candidates)
+            if index not in selected_indexes and bucket in candidate["buckets"]
+        ]
+        if not options:
+            continue
+        index, candidate = min(
+            options,
+            key=lambda pair: (
+                min(
+                    abs(midpoint - bucket_center)
+                    for midpoint in pair[1]["midpoints"]
+                    if _timeline_bucket_index(
+                        midpoint,
+                        timeline_start,
+                        timeline_end,
+                        requested,
+                    ) == bucket
+                ),
+                pair[1]["order"],
+            ),
+        )
+        selected.append(candidate)
+        selected_indexes.add(index)
+        covered_buckets.update(candidate["buckets"])
+
+    for index, candidate in enumerate(candidates):
+        if len(selected) >= maximum_backups:
+            break
+        if index in selected_indexes:
+            continue
+        selected.append(candidate)
+        selected_indexes.add(index)
+
+    selected.sort(
+        key=lambda candidate: (
+            min(candidate["midpoints"]),
+            candidate["order"],
+        )
+    )
+    return [candidate["point"] for candidate in selected[:maximum_backups]]
+
+
 def _timeline_coverage_stats(
     points: Sequence[dict],
     lookup: dict,
@@ -271,6 +376,114 @@ def _timeline_coverage_stats(
         "start_seconds": round(timeline_start, 2),
         "end_seconds": round(timeline_end, 2),
     }
+
+
+def select_verified_overview_points(
+    verification_claims: Sequence[dict],
+    claim_evidence: Sequence[dict],
+    documents: Sequence[Any],
+    *,
+    requested_count: int,
+    timeline_start: float,
+    timeline_end: float,
+    bucket_count: int,
+) -> list[dict]:
+    """Keep verified primary points and use verified backups to fill missing slots."""
+    if (
+        isinstance(requested_count, bool)
+        or not isinstance(requested_count, int)
+        or requested_count < 1
+        or not math.isfinite(float(timeline_start))
+        or not math.isfinite(float(timeline_end))
+        or timeline_end <= timeline_start
+        or bucket_count < 1
+    ):
+        return []
+
+    by_chunk_id = {
+        str(getattr(document, "metadata", {}).get("chunk_id")): document
+        for document in documents
+        if isinstance(getattr(document, "metadata", None), dict)
+        and getattr(document, "metadata", {}).get("chunk_id") is not None
+    }
+    evidence_by_index = {
+        item.get("claim_index"): item
+        for item in claim_evidence
+        if isinstance(item, dict)
+    }
+    primary, backups = [], []
+    for claim_index, claim in enumerate(verification_claims, start=1):
+        if not isinstance(claim, dict):
+            continue
+        evidence = evidence_by_index.get(claim_index, {})
+        status = evidence.get("status")
+        if status not in {"supported", "partial"}:
+            continue
+        chunk_ids = list(dict.fromkeys(
+            str(value)
+            for value in evidence.get("supporting_chunk_ids", [])
+            if str(value) in by_chunk_id
+        ))
+        source_times = []
+        for chunk_id in chunk_ids:
+            start, end, _ = sort_key(by_chunk_id[chunk_id])
+            source_times.append((start + end) / 2.0)
+        if not source_times:
+            continue
+        source_times.sort()
+        anchor_time = source_times[len(source_times) // 2]
+        bucket = _timeline_bucket_index(
+            anchor_time,
+            timeline_start,
+            timeline_end,
+            bucket_count,
+        )
+        candidate = {
+            "claim_index": claim_index,
+            "text": claim.get("text", ""),
+            "status": status,
+            "supporting_chunk_ids": chunk_ids,
+            "anchor_seconds": anchor_time,
+            "bucket": bucket,
+            "is_backup": bool(claim.get("is_backup")),
+        }
+        (backups if candidate["is_backup"] else primary).append(candidate)
+
+    selected = sorted(primary, key=lambda item: item["anchor_seconds"])
+    selected = selected[:requested_count]
+    covered = {item["bucket"] for item in selected}
+    backup_pool = list(backups)
+    duration = timeline_end - timeline_start
+
+    for bucket in range(bucket_count):
+        if len(selected) >= requested_count:
+            break
+        if bucket in covered:
+            continue
+        options = [
+            item for item in backup_pool
+            if item["bucket"] == bucket
+        ]
+        if not options:
+            continue
+        bucket_center = timeline_start + duration * (bucket + 0.5) / bucket_count
+        chosen = min(
+            options,
+            key=lambda item: abs(item["anchor_seconds"] - bucket_center),
+        )
+        selected.append(chosen)
+        backup_pool.remove(chosen)
+        covered.add(bucket)
+
+    for candidate in sorted(
+        backup_pool,
+        key=lambda item: item["anchor_seconds"],
+    ):
+        if len(selected) >= requested_count:
+            break
+        selected.append(candidate)
+
+    return sorted(selected, key=lambda item: item["anchor_seconds"])[:requested_count]
 
 
 def timeline_coverage_from_claim_evidence(
@@ -512,8 +725,19 @@ def summarize_video_overview(
             requested,
         ),
     })
+    maximum_backup_points = min(3, max(0, 10 - requested))
+    backup_points = _select_backup_points(
+        primary_points=points,
+        map_findings=map_findings,
+        lookup=lookup,
+        requested=requested,
+        maximum_backups=maximum_backup_points,
+    )
     verification_claims = []
-    for point in points:
+    for point, is_backup in (
+        *((point, False) for point in points),
+        *((point, True) for point in backup_points),
+    ):
         evidence_chunk_ids = []
         for evidence_id in point.get("evidence_ids", []):
             document = lookup.get(str(evidence_id))
@@ -525,7 +749,9 @@ def summarize_video_overview(
         verification_claims.append({
             "text": point["text"],
             "evidence_chunk_ids": list(dict.fromkeys(evidence_chunk_ids)),
+            "is_backup": is_backup,
         })
+    stats["backup_candidate_point_count"] = len(backup_points)
 
     return {
         "answer": answer,

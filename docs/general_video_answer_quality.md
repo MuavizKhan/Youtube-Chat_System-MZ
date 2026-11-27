@@ -49,7 +49,9 @@ Processing is bounded:
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
-  the vocabulary of the claims that cite them.
+  the vocabulary of the claims that cite them. Up to three additional mapped
+  alternatives are reserved so a failed point can be replaced by another
+  independently verified development, preferring uncovered timeline intervals.
 - The map candidate coverage, selected-point coverage, and final verified
   answer coverage are reported separately. Final coverage is calculated only
   from evidence IDs attached to claims that survive verification.
@@ -83,8 +85,9 @@ Overview points provide their own evidence chunk IDs. Those sources are
 prioritized under the passage ceiling, and each excerpt is selected against
 the claims that cite it. Other answer types retain bounded claim-aware source
 selection. Ten claims can be audited in two requests of at most eight aspects
-each; no requested point is silently dropped merely because it exceeds one
-request's aspect limit.
+each; up to three source-linked reserve candidates may also be verified to
+replace unsupported primary points. No requested point is silently dropped
+merely because it exceeds one request's aspect limit.
 
 A chunk selected for indexing but omitted from the relevant model prompt cannot
 verify an answer. Text outside a prompt-visible excerpt cannot verify a claim.

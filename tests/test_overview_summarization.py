@@ -146,3 +146,41 @@ def test_verified_timeline_coverage_uses_only_supported_claim_sources():
     assert result["verified_point_count"] == 2
     assert result["covered_buckets"] == [1, 4]
     assert result["missing_buckets"] == [2, 3]
+
+
+def test_verified_overview_point_selector_replaces_missing_primary_from_timeline_backup():
+    documents = [
+        _document_for_minute(1, 0),
+        _document_for_minute(2, 10),
+        _document_for_minute(3, 20),
+        _document_for_minute(4, 30),
+    ]
+    verification_claims = [
+        {"text": "Unsupported opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Supported closing point.", "evidence_chunk_ids": ["4"], "is_backup": False},
+        {"text": "Verified opening alternative.", "evidence_chunk_ids": ["1"], "is_backup": True},
+        {"text": "Verified middle alternative.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+    claim_evidence = [
+        {"claim_index": 1, "status": "missing", "supporting_chunk_ids": []},
+        {"claim_index": 2, "status": "supported", "supporting_chunk_ids": ["4"]},
+        {"claim_index": 3, "status": "supported", "supporting_chunk_ids": ["1"]},
+        {"claim_index": 4, "status": "supported", "supporting_chunk_ids": ["3"]},
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        verification_claims,
+        claim_evidence,
+        documents,
+        requested_count=2,
+        timeline_start=0.0,
+        timeline_end=2075.0,
+        bucket_count=4,
+    )
+
+    assert len(selected) == 2
+    assert {item["text"] for item in selected} == {
+        "Verified opening alternative.",
+        "Supported closing point.",
+    }
+    assert sum(item["is_backup"] for item in selected) == 1

@@ -11,7 +11,7 @@ from .evidence_contracts import EvidenceAspect, EvidenceReference, QuestionAnaly
 from .overview_summarization import OVERVIEW_SAMPLING_DISCLOSURE
 
 MAX_CLAIMS = 8
-MAX_TOTAL_CLAIMS = 10
+MAX_TOTAL_CLAIMS = 13
 MAX_PASSAGES = 12
 MAX_PASSAGE_CHARS = 640
 MAX_INPUT_CHARS = 8_000
@@ -656,12 +656,14 @@ def verify_answer_claims(
         "assessment_batch_count": len(batch_diagnostics),
         "assessment_request_count": sum(item["request_count"] for item in batch_diagnostics),
         "assessment_elapsed_ms": sum(item["elapsed_ms"] for item in batch_diagnostics),
-        "assessment_input_chars": sum(item["input_chars"] for item in batch_diagnostics),
-        "assessment_input_limit_chars": MAX_INPUT_CHARS,
-        "assessment_max_input_chars": max(
+        "assessment_input_chars": max(
             (item["input_chars"] for item in batch_diagnostics),
             default=0,
         ),
+        "assessment_input_chars_total": sum(
+            item["input_chars"] for item in batch_diagnostics
+        ),
+        "assessment_input_limit_chars": MAX_INPUT_CHARS,
         "assessment_passage_count": max(
             (item["passage_count"] for item in batch_diagnostics),
             default=0,
@@ -669,7 +671,11 @@ def verify_answer_claims(
         "assessment_passage_total_count": sum(
             item["passage_count"] for item in batch_diagnostics
         ),
-        "assessment_aspect_count": len(claims),
+        "assessment_aspect_count": max(
+            (item["aspect_count"] for item in batch_diagnostics),
+            default=0,
+        ),
+        "assessment_assessed_claim_count": len(claims),
         "assessment_max_aspects_per_request": max(
             (item["aspect_count"] for item in batch_diagnostics),
             default=0,
