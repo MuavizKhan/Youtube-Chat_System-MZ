@@ -12510,6 +12510,17 @@ def answer_question(
                     verification["verified_timeline_coverage"] = (
                         overview_stats["verified_timeline_coverage"]
                     )
+                    terminal_scan = overview_stats.get("terminal_tail_scan", {})
+                    end_cap_scan = (
+                        terminal_scan.get("end_cap_scan", {})
+                        if isinstance(terminal_scan, dict)
+                        else {}
+                    )
+                    end_cap_start = (
+                        end_cap_scan.get("start_seconds")
+                        if isinstance(end_cap_scan, dict)
+                        else None
+                    )
                     terminal_tail_coverage = (
                         terminal_tail_coverage_from_claim_evidence(
                             verification.get("claim_evidence", []),
@@ -12520,6 +12531,7 @@ def answer_question(
                             ],
                             timeline_start=before_coverage["start_seconds"],
                             timeline_end=before_coverage["end_seconds"],
+                            end_cap_start=end_cap_start,
                         )
                     )
                     overview_stats["verified_terminal_tail_coverage"] = (
@@ -12528,7 +12540,6 @@ def answer_question(
                     verification["verified_terminal_tail_coverage"] = (
                         terminal_tail_coverage
                     )
-                    terminal_scan = overview_stats.get("terminal_tail_scan", {})
                     terminal_scan_incomplete = (
                         isinstance(terminal_scan, dict)
                         and terminal_scan.get("status") not in {
@@ -12544,10 +12555,30 @@ def answer_question(
                         and terminal_tail_coverage.get("eligible") is True
                         and terminal_tail_coverage.get("covered") is not True
                     )
-                    if terminal_scan_incomplete or terminal_findings_unverified:
+                    end_cap_scan_unavailable = (
+                        isinstance(end_cap_scan, dict)
+                        and end_cap_scan.get("status") in {
+                            "unavailable",
+                            "skipped_terminal_scan_unavailable",
+                        }
+                        and terminal_tail_coverage.get("end_cap_covered") is not True
+                    )
+                    end_cap_findings_unverified = (
+                        isinstance(end_cap_scan, dict)
+                        and end_cap_scan.get("status") == "completed"
+                        and end_cap_scan.get("finding_count", 0) > 0
+                        and terminal_tail_coverage.get("end_cap_eligible") is True
+                        and terminal_tail_coverage.get("end_cap_covered") is not True
+                    )
+                    if (
+                        terminal_scan_incomplete
+                        or terminal_findings_unverified
+                        or end_cap_scan_unavailable
+                        or end_cap_findings_unverified
+                    ):
                         result["answer"] = (
                             result.get("answer", "")
-                            + "\n\nThe final transcript window could not be fully "
+                            + "\n\nThe final transcript passages could not be fully "
                             "represented by a verified summary point. Ask a focused "
                             "question about the ending for more detail."
                         )

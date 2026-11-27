@@ -945,3 +945,134 @@ def test_overview_survives_unavailable_supplementary_terminal_scan():
     assert result["retrieval_trace"]["route"] == "video_wide_overview"
     assert result["answer"]
 
+
+
+def test_terminal_end_cap_scan_recovers_final_passages_when_broad_scan_stops_early():
+    starts = [
+        0, 600, 1200, 1800, 2400, 3000,
+        3600, 4200, 4800, 5100, 5160, 5220,
+    ]
+    documents = [
+        Document(
+            page_content=f"Transcript development for segment {index}.",
+            metadata={
+                "chunk_id": str(index),
+                "video_id": "generic-video-end-cap",
+                "start": float(start),
+                "end": float(start + 45),
+            },
+        )
+        for index, start in enumerate(starts, start=1)
+    ]
+    calls = {"broad_tail": 0, "end_cap": 0, "reduce": 0}
+
+    def generate(prompt):
+        prompt_text = "\n".join(
+            message.content for message in prompt.to_messages()
+        )
+        passage_ids = re.findall(r"\[(P\d{5})\]", prompt_text)
+
+        if "Inspect only the closing portion" in prompt_text:
+            calls["broad_tail"] += 1
+            # Reproduce the production miss: the wide scan returns an early
+            # terminal finding despite later substantive passages.
+            return json.dumps({
+                "points": [{
+                    "text": "An earlier closing reflection is discussed.",
+                    "evidence_ids": [passage_ids[0]],
+                }]
+            })
+
+        if "Inspect only the final two transcript passages" in prompt_text:
+            calls["end_cap"] += 1
+            return json.dumps({
+                "points": [{
+                    "text": "The host explains that he avoids researching guests deeply so the interview remains fresh and spontaneous.",
+                    "evidence_ids": [passage_ids[-1]],
+                }]
+            })
+
+        if "Synthesize the chronological section findings" in prompt_text:
+            calls["reduce"] += 1
+            note_ids = re.findall(r"\[evidence_ids: (P\d{5})\]", prompt_text)
+            return json.dumps({
+                "points": [
+                    {"text": "An opening development is discussed.", "evidence_ids": [note_ids[0]]},
+                    {"text": "A middle development is explained.", "evidence_ids": [note_ids[len(note_ids) // 2]]},
+                    {"text": "A later development is discussed.", "evidence_ids": [note_ids[-1]]},
+                ]
+            })
+
+        return json.dumps({
+            "points": [{
+                "text": "A distinct development in this section is discussed.",
+                "evidence_ids": [passage_ids[0]],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize the entire video chronologically in 3 points.",
+        requested_points=3,
+        generate_text=generate,
+    )
+
+    scan = result["retrieval_trace"]["overview"]["terminal_tail_scan"]
+    assert calls["broad_tail"] == 1
+    assert calls["end_cap"] == 1
+    assert calls["reduce"] == 1
+    assert scan["status"] == "completed"
+    assert scan["end_cap_scan"]["status"] == "completed"
+    assert scan["end_cap_scan"]["source"] == "dedicated_end_cap_scan"
+    assert scan["end_cap_scan"]["finding_count"] == 1
+    assert scan["end_cap_scan"]["source_chunk_ids"] == ["11", "12"]
+    assert any(
+        claim["text"].startswith("The host explains that he avoids researching guests")
+        and "12" in claim["evidence_chunk_ids"]
+        for claim in result["verification_claims"]
+    )
+
+
+def test_terminal_end_cap_coverage_is_stricter_than_terminal_tail_coverage():
+    documents = [
+        Document(
+            page_content="Earlier tail passage.",
+            metadata={
+                "chunk_id": "74",
+                "video_id": "generic-video-end-cap",
+                "start": 5089.0,
+                "end": 5182.0,
+            },
+        ),
+        Document(
+            page_content="Final substantive passage.",
+            metadata={
+                "chunk_id": "76",
+                "video_id": "generic-video-end-cap",
+                "start": 5238.0,
+                "end": 5287.0,
+            },
+        ),
+    ]
+    early = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [{"claim_index": 1, "status": "supported", "supporting_chunk_ids": ["74"]}],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+        end_cap_start=5174.0,
+    )
+    assert early["covered"] is True
+    assert early["end_cap_eligible"] is True
+    assert early["end_cap_covered"] is False
+    assert early["end_cap_supporting_chunk_ids"] == []
+
+    actual_ending = overview_summarization.terminal_tail_coverage_from_claim_evidence(
+        [{"claim_index": 1, "status": "supported", "supporting_chunk_ids": ["76"]}],
+        documents,
+        timeline_start=4.0,
+        timeline_end=5287.0,
+        end_cap_start=5174.0,
+    )
+    assert actual_ending["covered"] is True
+    assert actual_ending["end_cap_covered"] is True
+    assert actual_ending["end_cap_supporting_chunk_ids"] == ["76"]

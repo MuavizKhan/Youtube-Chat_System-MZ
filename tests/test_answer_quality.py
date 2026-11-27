@@ -67,10 +67,16 @@ def test_overview_long_video_uses_chronological_map_reduce_and_reports_sampling(
         prompt_text = "\n".join(message.content for message in prompt.to_messages())
         ids = re.findall(r"\bP\d{5}\b", prompt_text)
         assert ids
+        selected_id = (
+            ids[-1]
+            if "Inspect only the closing portion" in prompt_text
+            or "Inspect only the final two transcript passages" in prompt_text
+            else ids[0]
+        )
         return json.dumps({
             "points": [{
                 "text": "A supported development in this section.",
-                "evidence_ids": [ids[0]],
+                "evidence_ids": [selected_id],
             }]
         })
 
@@ -116,10 +122,16 @@ def test_77_chunk_video_of_about_60k_characters_keeps_full_chronological_coverag
         )
         ids = re.findall(r"\bP\d{5}\b", prompt_text)
         assert ids
+        selected_id = (
+            ids[-1]
+            if "Inspect only the closing portion" in prompt_text
+            or "Inspect only the final two transcript passages" in prompt_text
+            else ids[0]
+        )
         return json.dumps({
             "points": [{
                 "text": "A chronological development in this part of the video.",
-                "evidence_ids": [ids[0]],
+                "evidence_ids": [selected_id],
             }]
         })
 

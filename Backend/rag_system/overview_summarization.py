@@ -17,6 +17,7 @@ from .overview_prompts import (
     OVERVIEW_FINAL_PROMPT,
     OVERVIEW_MAP_PROMPT,
     OVERVIEW_REDUCE_PROMPT,
+    OVERVIEW_TERMINAL_END_CAP_PROMPT,
     OVERVIEW_TERMINAL_PROMPT,
 )
 
@@ -29,6 +30,7 @@ MAX_BACKUP_POINTS = MAX_OVERVIEW_VERIFICATION_CLAIMS - 1
 MAX_BACKUP_POINTS_PER_BUCKET = 2
 MAX_TERMINAL_TAIL_CONTEXT_CHARS = 9_000
 MAX_TERMINAL_TAIL_FINDINGS = 3
+MAX_TERMINAL_END_CAP_FINDINGS = 1
 
 
 OVERVIEW_SAMPLING_DISCLOSURE = (
@@ -944,8 +946,9 @@ def terminal_tail_coverage_from_claim_evidence(
     *,
     timeline_start: float | None = None,
     timeline_end: float | None = None,
+    end_cap_start: float | None = None,
 ) -> dict:
-    """Measure selected supported evidence against the full transcript's terminal window."""
+    """Measure verified evidence in both the closing window and its final passages."""
     document_values = [
         document for document in documents
         if isinstance(getattr(document, "metadata", None), dict)
@@ -976,8 +979,23 @@ def terminal_tail_coverage_from_claim_evidence(
         for document in document_values
         if getattr(document, "metadata", {}).get("chunk_id") is not None
     }
+    try:
+        end_cap_start_value = (
+            float(end_cap_start) if end_cap_start is not None else None
+        )
+    except (TypeError, ValueError, OverflowError):
+        end_cap_start_value = None
+    end_cap_eligible = (
+        end_cap_start_value is not None
+        and math.isfinite(end_cap_start_value)
+        and tail_start <= end_cap_start_value < timeline_end
+    )
+    if not end_cap_eligible:
+        end_cap_start_value = None
     supporting_chunk_ids = []
+    end_cap_supporting_chunk_ids = []
     latest_supported_midpoint = None
+    latest_end_cap_supported_midpoint = None
     for item in claim_evidence:
         if not isinstance(item, dict) or item.get("status") != "supported":
             continue
@@ -998,8 +1016,23 @@ def terminal_tail_coverage_from_claim_evidence(
                     if latest_supported_midpoint is None
                     else max(latest_supported_midpoint, overlap_center)
                 )
+            end_cap_center = (
+                _terminal_overlap_center(
+                    document, end_cap_start_value, timeline_end
+                )
+                if end_cap_eligible
+                else None
+            )
+            if end_cap_center is not None:
+                end_cap_supporting_chunk_ids.append(chunk_id)
+                latest_end_cap_supported_midpoint = (
+                    end_cap_center
+                    if latest_end_cap_supported_midpoint is None
+                    else max(latest_end_cap_supported_midpoint, end_cap_center)
+                )
 
     unique_chunk_ids = list(dict.fromkeys(supporting_chunk_ids))
+    unique_end_cap_chunk_ids = list(dict.fromkeys(end_cap_supporting_chunk_ids))
     return {
         "eligible": True,
         "covered": bool(unique_chunk_ids),
@@ -1015,6 +1048,21 @@ def terminal_tail_coverage_from_claim_evidence(
         "latest_supported_midpoint_seconds": (
             round(latest_supported_midpoint, 2)
             if latest_supported_midpoint is not None
+            else None
+        ),
+        "end_cap_eligible": end_cap_eligible,
+        "end_cap_covered": (
+            bool(unique_end_cap_chunk_ids) if end_cap_eligible else None
+        ),
+        "end_cap_start_seconds": (
+            round(end_cap_start_value, 2)
+            if end_cap_start_value is not None
+            else None
+        ),
+        "end_cap_supporting_chunk_ids": unique_end_cap_chunk_ids,
+        "latest_end_cap_supported_midpoint_seconds": (
+            round(latest_end_cap_supported_midpoint, 2)
+            if latest_end_cap_supported_midpoint is not None
             else None
         ),
     }
@@ -1191,10 +1239,8 @@ def summarize_video_overview(
                     allow_empty=True,
                 )
             except Exception as error:
-                # The dedicated closing scan is supplementary. A provider
-                # throttle or malformed response must not discard an otherwise
-                # complete, evidence-verified overview. Surface the limitation
-                # so the user can ask a focused question about the ending.
+                # A provider throttle or malformed response must not discard
+                # an otherwise complete, evidence-verified overview.
                 terminal_points = []
                 terminal_tail_scan = {
                     "status": "unavailable",
@@ -1207,13 +1253,6 @@ def summarize_video_overview(
                     "context_chars": terminal_chars,
                 }
             else:
-                map_findings.extend(terminal_points)
-                for item in terminal_points:
-                    note_evidence_ids.update(item["evidence_ids"])
-                    notes.append(
-                        f"Terminal closing development: {item['text']} "
-                        f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
-                    )
                 terminal_tail_scan = {
                     "status": "completed",
                     "finding_count": len(terminal_points),
@@ -1223,6 +1262,114 @@ def summarize_video_overview(
                     "source_chunk_ids": terminal_source_ids,
                     "context_chars": terminal_chars,
                 }
+
+            # A single broad-tail prompt can prefer the first part of its
+            # closing window. If neither it nor the section maps cites either
+            # of the final two eligible passages, inspect those exact passages
+            # separately and pass any distinct finding through normal audit.
+            end_cap_items = bounded_terminal_items[-2:]
+            end_cap_passage_ids = [item["id"] for item in end_cap_items]
+            end_cap_allowed_ids = set(end_cap_passage_ids)
+            end_cap_source_ids = list(dict.fromkeys(
+                str(item["document"].metadata.get("chunk_id"))
+                for item in end_cap_items
+            ))
+            end_cap_start_seconds = (
+                round(sort_key(end_cap_items[0]["document"])[0], 2)
+                if end_cap_items
+                else None
+            )
+            end_cap_scan = {
+                "status": "not_applicable",
+                "finding_count": 0,
+                "start_seconds": end_cap_start_seconds,
+                "end_seconds": round(timeline_end, 2),
+                "passage_ids": end_cap_passage_ids,
+                "source_chunk_ids": end_cap_source_ids,
+                "source": "none",
+            }
+            if end_cap_items:
+                end_cap_candidates_already_found = [
+                    point
+                    for point in [*map_findings, *terminal_points]
+                    if _point_evidence_ids(point).intersection(end_cap_allowed_ids)
+                ]
+                if end_cap_candidates_already_found:
+                    end_cap_scan.update({
+                        "status": "completed",
+                        "finding_count": len(end_cap_candidates_already_found),
+                        "source": (
+                            "terminal_tail_scan"
+                            if any(
+                                point in terminal_points
+                                for point in end_cap_candidates_already_found
+                            )
+                            else "section_map"
+                        ),
+                    })
+                elif terminal_tail_scan.get("status") == "completed":
+                    end_cap_context = "\n".join(
+                        item["line"] for item in end_cap_items
+                    )
+                    try:
+                        end_cap_response = generate_text(
+                            OVERVIEW_TERMINAL_END_CAP_PROMPT.invoke({
+                                "question": question,
+                                "exclude_points": (
+                                    exclude_points
+                                    + "\n"
+                                    + "\n".join(
+                                        item["text"]
+                                        for item in [*map_findings, *terminal_points]
+                                    )
+                                )[-4_000:],
+                                "context": end_cap_context,
+                            })
+                        )
+                        end_cap_candidates = parse_points(
+                            end_cap_response,
+                            end_cap_allowed_ids,
+                            MAX_TERMINAL_END_CAP_FINDINGS,
+                            allow_empty=True,
+                        )
+                    except Exception as error:
+                        end_cap_scan.update({
+                            "status": "unavailable",
+                            "failure_type": type(error).__name__,
+                        })
+                    else:
+                        appended_end_cap_count = 0
+                        for candidate in end_cap_candidates:
+                            if _duplicate_point(
+                                candidate, [*map_findings, *terminal_points]
+                            ):
+                                continue
+                            terminal_points.append(candidate)
+                            appended_end_cap_count += 1
+                        end_cap_scan.update({
+                            "status": "completed",
+                            "finding_count": appended_end_cap_count,
+                            "source": "dedicated_end_cap_scan",
+                        })
+                else:
+                    end_cap_scan.update({
+                        "status": "skipped_terminal_scan_unavailable",
+                        "failure_type": terminal_tail_scan.get("failure_type"),
+                    })
+
+            terminal_tail_scan["base_finding_count"] = (
+                terminal_tail_scan.get("finding_count", 0)
+            )
+            terminal_tail_scan["finding_count"] = len(terminal_points)
+            terminal_tail_scan["end_cap_scan"] = end_cap_scan
+            if terminal_tail_scan.get("status") == "completed":
+                map_findings.extend(terminal_points)
+                for item in terminal_points:
+                    note_evidence_ids.update(item["evidence_ids"])
+                    notes.append(
+                        f"Terminal closing development: {item['text']} "
+                        f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
+                    )
         else:
             terminal_tail_scan = {
                 "status": "no_terminal_passages_selected",
@@ -1230,6 +1377,15 @@ def summarize_video_overview(
                 "start_seconds": round(terminal_tail_start, 2),
                 "end_seconds": round(timeline_end, 2),
                 "passage_ids": [],
+                "end_cap_scan": {
+                    "status": "not_applicable",
+                    "finding_count": 0,
+                    "start_seconds": None,
+                    "end_seconds": round(timeline_end, 2),
+                    "passage_ids": [],
+                    "source_chunk_ids": [],
+                    "source": "none",
+                },
             }
 
     if len(sections) > 1:

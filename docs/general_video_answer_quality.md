@@ -52,6 +52,13 @@ Processing is bounded:
   transcript (bounded to 60–420 seconds) in a dedicated, source-ID-constrained
   model call. It can produce up to three additional findings, which enter the
   existing twenty-one-claim audit budget rather than expanding that budget.
+  If neither this scan nor the section findings cites either of the final two
+  eligible closing passages, a focused end-cap scan inspects those exact
+  passages and can add one further candidate within the same twenty-one-claim
+  budget. Its candidate is not trusted until claim-level transcript verification
+  succeeds. Diagnostics distinguish broad tail coverage from verified evidence
+  in the final two passages; an earlier point in the closing window alone does
+  not count as actual end-cap representation.
   When long transcripts must be sampled, the latest twenty chunks are reserved
   first (subject to the source-character budget) so the terminal scan does not
   depend on a single endpoint chunk.
@@ -68,8 +75,10 @@ Processing is bounded:
   interval lies inside the terminal window; a chunk straddling the start
   boundary cannot prove that its claim came from the closing portion.
   Diagnostics report terminal-tail coverage separately from broad bucket
-  coverage. The terminal window is anchored to the full indexed transcript
-  duration, never the latest selected evidence timestamp. If the supplementary
+  coverage and report whether a substantive end-cap finding was selected and
+  verified. The end-cap boundary is derived from the final two eligible
+  transcript passages. The terminal window is anchored to the full indexed
+  transcript duration, never the latest selected evidence timestamp. If the supplementary
   scan is rate-limited or malformed, the main verified overview is preserved
   and the response discloses that the ending may need a focused follow-up.
 - Every accepted summary point retains its own exact transcript chunk IDs.
