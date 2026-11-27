@@ -204,7 +204,7 @@ def test_verified_overview_selector_replaces_partial_primary_points_with_support
             "evidence_chunk_ids": [str(index)],
             "is_backup": True,
         }
-        for index in range(2, 8)
+        for index in range(1, 8)
     ]
     claim_evidence = [
         {
@@ -221,11 +221,11 @@ def test_verified_overview_selector_replaces_partial_primary_points_with_support
         for index in range(2, 8)
     ] + [
         {
-            "claim_index": index + 6,
+            "claim_index": index + 7,
             "status": "supported",
             "supporting_chunk_ids": [str(index)],
         }
-        for index in range(2, 8)
+        for index in range(1, 8)
     ]
 
     selected = overview_summarization.select_verified_overview_points(
@@ -249,6 +249,60 @@ def test_verified_overview_selector_replaces_partial_primary_points_with_support
         "Fully supported map alternative 5.",
         "Fully supported map alternative 6.",
         "Fully supported map alternative 7.",
+    ]
+
+
+def test_verified_overview_selector_can_replace_all_seven_partial_primary_points():
+    documents = [
+        _document_for_minute(index, (index - 1) * 10)
+        for index in range(1, 8)
+    ]
+    verification_claims = [
+        {
+            "text": f"Partial primary point {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": False,
+        }
+        for index in range(1, 8)
+    ] + [
+        {
+            "text": f"Verified reserve point {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": True,
+        }
+        for index in range(1, 8)
+    ]
+    claim_evidence = [
+        {
+            "claim_index": index,
+            "status": "partial",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(1, 8)
+    ] + [
+        {
+            "claim_index": index + 7,
+            "status": "supported",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(1, 8)
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        verification_claims,
+        claim_evidence,
+        documents,
+        requested_count=7,
+        timeline_start=0.0,
+        timeline_end=3645.0,
+        bucket_count=7,
+    )
+
+    assert len(selected) == 7
+    assert all(item["status"] == "supported" for item in selected)
+    assert all(item["is_backup"] for item in selected)
+    assert [item["text"] for item in selected] == [
+        f"Verified reserve point {index}." for index in range(1, 8)
     ]
 
 
