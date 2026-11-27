@@ -48,6 +48,13 @@ Processing is bounded:
   interval, including late conclusions and new examples of earlier themes.
   It separately inspects the final one or two passages in each section so an
   opening passage cannot stand in for the section's ending.
+  A separate terminal-tail scan examines up to the final five percent of the
+  transcript (bounded to 60–300 seconds) in a dedicated, source-ID-constrained
+  model call. It can produce up to three additional findings, which enter the
+  existing twenty-one-claim audit budget rather than expanding that budget.
+  When long transcripts must be sampled, the latest twenty chunks are reserved
+  first (subject to the source-character budget) so the terminal scan does not
+  depend on a single endpoint chunk.
 - Broad equal-duration bucket coverage is not treated as proof that the actual
   video ending was represented. An independent terminal-tail window is
   measured as the final five percent of the transcript, bounded to 60–300
