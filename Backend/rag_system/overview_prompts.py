@@ -9,13 +9,17 @@ people, entities, attribution, numbers, units, dates, negation and uncertainty.
 A speaker's opinion, allegation, advertisement or reported study is not
 independently verified. Overlapping chunks are not corroboration.
 Return JSON only: one object with exactly one key, "points". Each point has
-exactly "text" (one concise finding, at most 420 characters) and
+exactly "text" (one atomic, independently verifiable event, argument,
+explanation, example, or conclusion; one sentence, at most 300 characters) and
 "evidence_ids" (one or more exact IDs copied from the input). Return at most
 three distinct findings; include separate material developments instead of
-collapsing the whole section into one vague point. Skip facts already covered
-by the previous points when that list is non-empty. Every point must be
-directly supported by its IDs. Do not include timestamps, timecodes, or
-timestamp ranges in point text; the application adds timestamp metadata.
+collapsing the whole section into one vague point. Never bundle independent
+facts or developments into one point using "and", "while", "also", or
+semicolons. If a section contains multiple distinct developments, return them
+as separate points. Skip facts already covered by the previous points when
+that list is non-empty. Every point must be directly supported by all of its
+cited IDs. Do not include timestamps, timecodes, or timestamp ranges in point
+text; the application adds timestamp metadata.
 Each section represents a separate interval in the video's timeline. For a
 non-empty section containing substantive speech, normally return at least one
 finding from that interval. Return no findings only when the section contains
@@ -65,10 +69,16 @@ when that list is non-empty. Keep materially different events or claims as
 separate points and aim to return the requested number when the findings
 support them. Distribute points across the entire timeline instead of
 concentrating them in the opening sections. Include distinct developments
-from the middle and final sections when supported by the findings. Every
-point must use evidence IDs shown on the supplied findings that support it. Do not include timestamps, timecodes or timestamp ranges;
-the application adds timestamp metadata. Return JSON only: exactly one key "points";
-each point has exactly "text" (at most 600 characters) and "evidence_ids"."""),
+from the middle and final sections when supported by the findings. Each point
+must describe exactly one independently verifiable development in one
+sentence. Never merge separate section findings, people, events, arguments,
+or conclusions into one point just to meet the requested count. When one
+coherent development requires multiple findings, cite every exact evidence ID
+needed to support the complete sentence. If the findings do not support the
+requested number of distinct points, return fewer. Do not include timestamps,
+timecodes or timestamp ranges; the application adds timestamp metadata.
+Return JSON only: exactly one key "points"; each point has exactly "text"
+(at most 360 characters) and "evidence_ids"."""),
     ("human", """Overview request: {question}
 Maximum points: {count}
 Previously returned points to avoid repeating (untrusted conversation context):
