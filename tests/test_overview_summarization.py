@@ -892,3 +892,56 @@ def test_overview_runs_dedicated_terminal_scan_and_adds_tail_findings_to_audit()
         for claim in result["verification_claims"]
     )
 
+def test_overview_survives_unavailable_supplementary_terminal_scan():
+    starts = [0, 600, 1200, 1800, 2400, 3000, 3600, 4200]
+    documents = [
+        Document(
+            page_content=f"Supported transcript section {index}.",
+            metadata={
+                "chunk_id": str(index),
+                "video_id": "video-terminal-fallback",
+                "start": float(start),
+                "end": float(start + 45),
+            },
+        )
+        for index, start in enumerate(starts, start=1)
+    ]
+
+    def generate(prompt):
+        prompt_text = "\n".join(
+            message.content for message in prompt.to_messages()
+        )
+        if "Inspect only the closing portion" in prompt_text:
+            raise RuntimeError("simulated provider throttle")
+        if "Synthesize the chronological section findings" in prompt_text:
+            note_ids = re.findall(
+                r"\[evidence_ids: (P\d{5})\]",
+                prompt_text,
+            )
+            return json.dumps({
+                "points": [{
+                    "text": "The overview retains a supported chronological development.",
+                    "evidence_ids": [note_ids[0]],
+                }]
+            })
+        ids = re.findall(r"\[(P\d{5})\]", prompt_text)
+        return json.dumps({
+            "points": [{
+                "text": "A supported development is discussed in this section.",
+                "evidence_ids": [ids[0]],
+            }]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize the entire video in 3 points.",
+        requested_points=3,
+        generate_text=generate,
+    )
+
+    scan = result["retrieval_trace"]["overview"]["terminal_tail_scan"]
+    assert scan["status"] == "unavailable"
+    assert scan["failure_type"] == "RuntimeError"
+    assert result["retrieval_trace"]["route"] == "video_wide_overview"
+    assert result["answer"]
+
