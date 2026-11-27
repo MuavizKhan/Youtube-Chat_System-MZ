@@ -122,7 +122,10 @@ from .retrieval import (
 )
 
 from .overview_core import requested_count
-from .overview_prompts import overview_response_format_for_model
+from .overview_prompts import (
+    OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT,
+    overview_response_format_for_model,
+)
 from .overview_summarization import (
     OVERVIEW_SAMPLING_DISCLOSURE,
     OverviewError,
@@ -8388,6 +8391,24 @@ def _provider_error_status(error: Exception) -> int | None:
     return None
 
 
+def _is_structured_output_validation_error(error: Exception) -> bool:
+    """Identify Groq's explicit JSON-schema generation/validation rejection."""
+    if _provider_error_status(error) != 400:
+        return False
+
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        provider_error = body.get("error")
+        if (
+            isinstance(provider_error, dict)
+            and str(provider_error.get("code", "")).casefold()
+            == "json_validate_failed"
+        ):
+            return True
+
+    return "json_validate_failed" in str(error).casefold()
+
+
 def _provider_retry_after_seconds(error: Exception) -> float | None:
     """Read a numeric Retry-After header when the provider exposes one."""
     response = getattr(error, "response", None)
@@ -8616,12 +8637,15 @@ def generate_with_groq(
     *,
     response_format: dict[str, Any] | None = None,
 ) -> str:
-    """Send the LangChain prompt to Groq and return the visible answer."""
+    """Send a prompt to Groq, recovering once from strict JSON validation failures."""
 
     messages = prompt_to_messages(prompt_value)
     total_retry_wait_seconds = 0.0
+    attempt = 0
+    max_attempts = GROQ_MAX_RETRIES + 1
+    response_format_fallback_used = False
 
-    for attempt in range(GROQ_MAX_RETRIES + 1):
+    while attempt < max_attempts:
         try:
             completion_options = {
                 "model": GROQ_MODEL_ID,
@@ -8653,6 +8677,28 @@ def generate_with_groq(
                 ) from error
 
             provider_status = _provider_error_status(error)
+
+            # Strict structured output is preferred, but provider-side JSON
+            # validation can still reject an exceptional/refusal completion.
+            # Retry that exact prompt once in JSON Object Mode, then retain all
+            # local schema, evidence-ID, and transcript-support validation.
+            if (
+                response_format is not None
+                and response_format.get("type") == "json_schema"
+                and not response_format_fallback_used
+                and _is_structured_output_validation_error(error)
+            ):
+                response_format = OVERVIEW_JSON_OBJECT_RESPONSE_FORMAT
+                response_format_fallback_used = True
+                max_attempts += 1
+                logger.warning(
+                    "Groq rejected strict structured JSON output; retrying once "
+                    "with JSON Object Mode model=%s status_code=%s",
+                    GROQ_MODEL_ID,
+                    provider_status,
+                )
+                continue
+
             # Inspect the structured HTTP status rather than searching for
             # numeric substrings: a 429 TPM message can contain "Requested
             # 4010 tokens", which must not be mistaken for HTTP 401.
@@ -8670,14 +8716,14 @@ def generate_with_groq(
 
             retry_after = _provider_retry_after_seconds(error)
             is_rate_limit = (
-                _provider_error_status(error) == 429
+                provider_status == 429
                 or "429" in error_text
                 or "rate limit" in error_text
                 or "too many requests" in error_text
             )
 
             if _is_retryable_provider_error(error):
-                if attempt < GROQ_MAX_RETRIES:
+                if attempt < max_attempts - 1:
                     configured_delay = GROQ_RETRY_DELAY_SECONDS * (attempt + 1)
                     retry_delay = max(
                         configured_delay,
@@ -8694,8 +8740,8 @@ def generate_with_groq(
                             "attempt=%s max_attempts=%s status_code=%s "
                             "retry_after_seconds=%s waited_seconds=%.2f",
                             attempt + 1,
-                            GROQ_MAX_RETRIES + 1,
-                            _provider_error_status(error),
+                            max_attempts,
+                            provider_status,
                             retry_after,
                             total_retry_wait_seconds,
                         )
@@ -8712,14 +8758,15 @@ def generate_with_groq(
                         "retry_after_seconds=%s retry_delay_seconds=%.2f "
                         "cumulative_retry_wait_seconds=%.2f",
                         attempt + 1,
-                        GROQ_MAX_RETRIES + 1,
-                        _provider_error_status(error),
+                        max_attempts,
+                        provider_status,
                         type(error).__name__,
                         retry_after,
                         retry_delay,
                         total_retry_wait_seconds,
                     )
                     time.sleep(retry_delay)
+                    attempt += 1
                     continue
 
                 if is_rate_limit:
@@ -8780,16 +8827,18 @@ def generate_with_groq(
 
         diagnostics = get_chat_response_diagnostics(response)
 
-        if attempt < GROQ_MAX_RETRIES:
+        if attempt < max_attempts - 1:
             time.sleep(GROQ_RETRY_DELAY_SECONDS)
+            attempt += 1
             continue
 
         raise RuntimeError(
             "The Groq model returned an empty answer "
-            f"after {GROQ_MAX_RETRIES + 1} attempts. "
+            f"after {max_attempts} attempts. "
             f"Diagnostics: {diagnostics}"
         )
 
+    raise RuntimeError("Groq generation ended without a completion.")
 
 def generate_with_llm(
     client,
@@ -12217,11 +12266,16 @@ def answer_question(
             # API return the provider's Retry-After response instead of starting
             # another generation path that consumes more of the same quota.
             raise
-        except Exception:
+        except Exception as error:
             logger.exception(
-                "Video-wide overview path failed; falling back to the standard "
-                "evidence-gated retrieval chain."
+                "Video-wide overview path failed; refusing to substitute the "
+                "standard top-k retrieval chain for a whole-video summary."
             )
+            raise RuntimeError(
+                "Whole-video overview generation failed before a complete, "
+                "transcript-grounded summary could be produced. Retry the request; "
+                "a targeted retrieval answer was not substituted."
+            ) from error
 
     if result is None:
         result = rag_chain.invoke(
