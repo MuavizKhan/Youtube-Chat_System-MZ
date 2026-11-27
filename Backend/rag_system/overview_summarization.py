@@ -133,8 +133,8 @@ def _timeline_bucket_index(
 
 
 TERMINAL_TAIL_MIN_SECONDS = 60.0
-TERMINAL_TAIL_MAX_SECONDS = 300.0
-TERMINAL_TAIL_FRACTION = 0.05
+TERMINAL_TAIL_MAX_SECONDS = 360.0
+TERMINAL_TAIL_FRACTION = 0.07
 
 
 def _terminal_tail_start(
@@ -160,16 +160,13 @@ def _terminal_overlap_center(
     tail_start: float | None,
     timeline_end: float,
 ) -> float | None:
-    """Return an overlap-center only when a chunk materially intersects the tail."""
+    """Return a timestamp only when the entire cited chunk is inside the tail."""
     if tail_start is None:
         return None
     start, end, _ = sort_key(document)
-    duration = max(0.0, end - start)
-    overlap = max(0.0, min(end, timeline_end) - max(start, tail_start))
-    required_overlap = min(15.0, duration * 0.25)
-    if overlap <= 0 or overlap < required_overlap:
+    if start < tail_start or end > timeline_end or end <= start:
         return None
-    return (max(start, tail_start) + min(end, timeline_end)) / 2.0
+    return (start + end) / 2.0
 
 
 def _point_terminal_tail_times(
