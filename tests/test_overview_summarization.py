@@ -1,5 +1,6 @@
 from langchain_core.documents import Document
 
+from Backend.rag_system import overview_summarization
 from Backend.rag_system.overview_summarization import (
     _balance_points_over_timeline,
     _timeline_coverage_stats,
@@ -121,3 +122,27 @@ def test_overview_continuation_does_not_rebalance_already_returned_points():
     assert selected == reducer_points
     assert balance["balancing_applied"] is False
     assert balance["map_points_selected"] == 0
+
+
+def test_verified_timeline_coverage_uses_only_supported_claim_sources():
+    documents = [
+        _document_for_minute(1, 1),
+        _document_for_minute(2, 15),
+        _document_for_minute(3, 30),
+        _document_for_minute(4, 42),
+    ]
+    result = overview_summarization.timeline_coverage_from_claim_evidence(
+        [
+            {"claim_index": 1, "status": "supported", "supporting_chunk_ids": ["1"]},
+            {"claim_index": 2, "status": "missing", "supporting_chunk_ids": []},
+            {"claim_index": 3, "status": "partial", "supporting_chunk_ids": ["4"]},
+        ],
+        documents,
+        timeline_start=60.0,
+        timeline_end=2565.0,
+        bucket_count=4,
+    )
+
+    assert result["verified_point_count"] == 2
+    assert result["covered_buckets"] == [1, 4]
+    assert result["missing_buckets"] == [2, 3]

@@ -13141,7 +13141,9 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
             + map_document_three.page_content
         ),
         "source_groups": chain.merge_overlapping_results([(reducer_document, 0.0)]),
-        "preferred_verification_chunk_ids": ["1"],
+        "verification_claims": [
+            {"text": "A claim about a later event.", "evidence_chunk_ids": ["1"]},
+        ],
         "retrieval_trace": {
             "route": "video_wide_overview",
             "final_stage": "video_wide_map_reduce",
@@ -13217,7 +13219,7 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
             for pair in kwargs["retrieved_results"]
         ]
         observed["included_chunk_ids"] = list(kwargs["included_chunk_ids"])
-        observed["preferred_chunk_ids"] = list(kwargs["preferred_chunk_ids"])
+        observed["structured_claims"] = list(kwargs["structured_claims"])
         return {
             "answer": "1. A claim about a later event.",
             "performed": True,
@@ -13245,7 +13247,9 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
 
     assert observed["chunk_ids"] == ["1", "2", "3"]
     assert observed["included_chunk_ids"] == ["1", "2", "3"]
-    assert observed["preferred_chunk_ids"] == ["1"]
+    assert observed["structured_claims"] == [
+        {"text": "A claim about a later event.", "evidence_chunk_ids": ["1"]}
+    ]
     assert result["observability"]["retrieval"]["overview"]["verified_point_count"] == 1
     assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["covered_buckets"] == [2]
     assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["missing_buckets"] == [1, 3]

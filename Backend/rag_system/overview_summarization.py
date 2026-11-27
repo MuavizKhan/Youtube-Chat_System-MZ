@@ -1,6 +1,7 @@
 """Video-wide map/reduce summarization with validated transcript references."""
 from __future__ import annotations
 
+import math
 import re
 from difflib import SequenceMatcher
 from typing import Any, Callable, Sequence
@@ -272,14 +273,15 @@ def _timeline_coverage_stats(
     }
 
 
-def timeline_coverage_from_documents(
+def timeline_coverage_from_claim_evidence(
+    claim_evidence: Sequence[dict],
     documents: Sequence[Any],
     *,
     timeline_start: float,
     timeline_end: float,
     bucket_count: int,
 ) -> dict:
-    """Measure time buckets represented by evidence surviving claim verification."""
+    """Measure final-answer coverage from evidence attached to verified claims."""
     if (
         isinstance(bucket_count, bool)
         or not isinstance(bucket_count, int)
@@ -290,21 +292,35 @@ def timeline_coverage_from_documents(
     ):
         return {}
 
+    by_chunk_id = {
+        str(getattr(document, "metadata", {}).get("chunk_id")): document
+        for document in documents
+        if isinstance(getattr(document, "metadata", None), dict)
+        and getattr(document, "metadata", {}).get("chunk_id") is not None
+    }
     covered = set()
-    seen = set()
-    for document in documents:
-        start, end, chunk_id = sort_key(document)
-        identity = str(chunk_id)
-        if identity in seen:
+    verified_point_count = 0
+    for item in claim_evidence:
+        if not isinstance(item, dict) or item.get("status") not in {"supported", "partial"}:
             continue
-        seen.add(identity)
-        midpoint = (start + end) / 2.0
+        source_times = []
+        for raw_chunk_id in item.get("supporting_chunk_ids", []):
+            document = by_chunk_id.get(str(raw_chunk_id))
+            if document is None:
+                continue
+            start, end, _chunk_id = sort_key(document)
+            source_times.append((start + end) / 2.0)
+        if not source_times:
+            continue
+        source_times.sort()
+        anchor_time = source_times[len(source_times) // 2]
         covered.add(_timeline_bucket_index(
-            midpoint,
+            anchor_time,
             timeline_start,
             timeline_end,
             bucket_count,
         ))
+        verified_point_count += 1
 
     return {
         "bucket_count": bucket_count,
@@ -315,7 +331,7 @@ def timeline_coverage_from_documents(
         "coverage_fraction": round(len(covered) / bucket_count, 4),
         "start_seconds": round(float(timeline_start), 2),
         "end_seconds": round(float(timeline_end), 2),
-        "evidence_document_count": len(seen),
+        "verified_point_count": verified_point_count,
     }
 
 def _numbered_previous_points(value: str) -> list[dict]:
@@ -353,6 +369,7 @@ def summarize_video_overview(
     note_evidence_ids = set()
     prompt_context_parts = []
     map_calls = 0
+    map_section_point_counts = []
 
     for number, section in enumerate(sections, start=1):
         context = "\n".join(item["line"] for item in section)
@@ -384,6 +401,7 @@ def summarize_video_overview(
             allow_empty=True,
         )
         map_findings.extend(findings)
+        map_section_point_counts.append(len(findings))
         notes.extend(
             f"Section {number}: {item['text']} "
             f"[evidence_ids: {', '.join(item['evidence_ids'])}]"
@@ -464,6 +482,18 @@ def summarize_video_overview(
     ))
     stats.update({
         "map_calls": map_calls,
+        "map_finding_count": len(map_findings),
+        "map_section_point_counts": map_section_point_counts,
+        "map_finding_timeline_coverage": _timeline_coverage_stats(
+            map_findings,
+            lookup,
+            requested,
+        ),
+        "candidate_point_timeline_coverage": _timeline_coverage_stats(
+            [*map_findings, *points],
+            lookup,
+            requested,
+        ),
         "final_synthesis_calls": 1,
         "requested_point_count": requested,
         "returned_point_count": len(points),
@@ -479,6 +509,21 @@ def summarize_video_overview(
             requested,
         ),
     })
+    verification_claims = []
+    for point in points:
+        evidence_chunk_ids = []
+        for evidence_id in point.get("evidence_ids", []):
+            document = lookup.get(str(evidence_id))
+            if document is None:
+                continue
+            chunk_id = getattr(document, "metadata", {}).get("chunk_id")
+            if chunk_id is not None:
+                evidence_chunk_ids.append(str(chunk_id))
+        verification_claims.append({
+            "text": point["text"],
+            "evidence_chunk_ids": list(dict.fromkeys(evidence_chunk_ids)),
+        })
+
     return {
         "answer": answer,
         "prompt_visible_context": "\n\n".join(prompt_context_parts),
@@ -486,7 +531,7 @@ def summarize_video_overview(
         "verification_results": [
             (document, 0.0) for document in verification_documents
         ],
-        "preferred_verification_chunk_ids": chunk_ids,
+        "verification_claims": verification_claims,
         "retrieval_trace": {
             "route": "video_wide_overview",
             "final_stage": "video_wide_map_reduce",

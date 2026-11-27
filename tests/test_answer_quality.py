@@ -401,26 +401,26 @@ def test_claim_audit_uses_only_exact_text_visible_in_prompt(monkeypatch):
 
 
 
-def test_overview_claim_audit_prioritizes_final_point_evidence_within_passage_budget(monkeypatch):
+def test_overview_claim_audit_keeps_each_point_bound_to_its_own_visible_evidence(monkeypatch):
     documents = [
         make_doc(index, index * 60, f"General transcript context {index}.")
         for index in range(1, 15)
     ]
     documents[12].page_content = (
-        "The final act describes a distinct blue lantern carried across the stage."
+        "During the final act, a blue lantern is carried across the stage."
     )
     documents[13].page_content = (
-        "The closing interview discusses a quiet garden beside the old station."
+        "In the closing interview, the speaker describes a quiet garden next to the old station."
     )
     visible_context = "\n".join(document.page_content for document in documents)
     observed = {}
 
     def fake_assessment(analysis, passages, client, **kwargs):
-        observed["chunk_ids"] = [
-            reference.chunk_id
+        observed["passages"] = {
+            reference.chunk_id: passage.text
             for passage in passages
             for reference in passage.references
-        ]
+        }
         return SimpleNamespace(
             diagnostics=SimpleNamespace(
                 status=AssessmentRunStatus.COMPLETED,
@@ -454,8 +454,8 @@ def test_overview_claim_audit_prioritizes_final_point_evidence_within_passage_bu
     monkeypatch.setattr(claim_verification, "assess_evidence_support", fake_assessment)
     result = claim_verification.verify_answer_claims(
         answer=(
-            "1. The final act describes a blue lantern carried across the stage.\n"
-            "2. The closing interview discusses a quiet garden beside the old station."
+            "1. The presenter mentions a light source being moved through the performance space.\n"
+            "2. The final conversation includes a description of a tranquil outdoor space by a railway building."
         ),
         question="Summarize the final part of this video.",
         video_id="video-1",
@@ -464,10 +464,15 @@ def test_overview_claim_audit_prioritizes_final_point_evidence_within_passage_bu
         prompt_visible_context=visible_context,
         client=object(),
         fallback_answer="I couldn't find enough information about that in the video.",
-        preferred_chunk_ids=["13", "14"],
+        structured_claims=[
+            {"text": "The presenter mentions a light source being moved through the performance space.", "evidence_chunk_ids": ["13"]},
+            {"text": "The final conversation includes a description of a tranquil outdoor space by a railway building.", "evidence_chunk_ids": ["14"]},
+        ],
     )
 
-    assert observed["chunk_ids"][:2] == ["13", "14"]
+    assert list(observed["passages"])[:2] == ["13", "14"]
+    assert "blue lantern" in observed["passages"]["13"].casefold()
+    assert "quiet garden" in observed["passages"]["14"].casefold()
     assert result["status"] == "completed"
     assert result["supported_claim_count"] == 2
     assert result["assessment_selected_chunk_ids"][:2] == ["13", "14"]
@@ -639,14 +644,28 @@ def test_claim_audit_exposes_sanitized_assessment_response_diagnostics(monkeypat
     assert result["answer"] == "The speaker describes an event. The event had three stages."
 
 
-def test_claim_audit_does_not_silently_merge_unchecked_overflow_claims(monkeypatch):
+def test_claim_audit_verifies_ten_claims_in_bounded_batches(monkeypatch):
     document = make_doc(5, 60, "The speaker provides a long series of independent facts. " * 20)
-    seen = {}
+    observed_batches = []
 
     def fake_assessment(analysis, passages, client, **kwargs):
-        seen["aspect_count"] = len(analysis.aspects)
+        observed_batches.append(len(analysis.aspects))
         return SimpleNamespace(
-            diagnostics=SimpleNamespace(status=AssessmentRunStatus.COMPLETED, error_code=None),
+            diagnostics=SimpleNamespace(
+                status=AssessmentRunStatus.COMPLETED,
+                error_code=None,
+                input_chars=1000,
+                input_limit_chars=8000,
+                passage_count=len(passages),
+                aspect_count=len(analysis.aspects),
+                request_count=1,
+                elapsed_ms=10.0,
+                input_tokens=100,
+                output_tokens=100,
+                finish_reason="stop",
+                output_chars=100,
+                validation_error_code=None,
+            ),
             assessments=[
                 SimpleNamespace(
                     aspect_id=f"claim_{index:02d}",
@@ -670,10 +689,13 @@ def test_claim_audit_does_not_silently_merge_unchecked_overflow_claims(monkeypat
         fallback_answer="I couldn't find enough information about that in the video.",
     )
 
-    assert seen["aspect_count"] == 8
-    assert result["truncated_claim_count"] == 2
-    assert "Supported independent statement 9" not in result["answer"]
-    assert "exceeded the 8-claim verification limit" in result["answer"]
+    assert observed_batches == [8, 2]
+    assert result["assessment_batch_count"] == 2
+    assert result["claim_count"] == 10
+    assert result["truncated_claim_count"] == 0
+    assert result["supported_claim_count"] == 10
+    assert "Supported independent statement 10" in result["answer"]
+    assert "verification limit" not in result["answer"]
 
 
 
@@ -727,6 +749,11 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
     assert [pair[0].metadata["chunk_id"] for pair in result["retrieved_results"]] == [1, 2, 3, 5, 6]
     assert stats["timeline_coverage"]["covered_buckets"] == [1, 2, 3, 4, 5]
     assert stats["timeline_coverage"]["missing_buckets"] == []
+    assert stats["map_finding_count"] == 6
+    assert stats["map_section_point_counts"] == [1, 1, 1, 1, 1, 1]
+    assert stats["map_finding_timeline_coverage"]["missing_buckets"] == []
+    assert len(result["verification_claims"]) == 5
+    assert result["verification_claims"][0]["evidence_chunk_ids"] == ["1"]
 
 
 def test_overview_response_format_uses_strict_schema_for_gpt_oss():
