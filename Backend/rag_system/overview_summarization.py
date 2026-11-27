@@ -129,6 +129,48 @@ def _timeline_bucket_index(
     return min(bucket_count - 1, max(0, int(position * bucket_count)))
 
 
+TERMINAL_TAIL_MIN_SECONDS = 60.0
+TERMINAL_TAIL_MAX_SECONDS = 300.0
+TERMINAL_TAIL_FRACTION = 0.05
+
+
+def _terminal_tail_start(
+    timeline_start: float,
+    timeline_end: float,
+) -> float | None:
+    """Return the start of a bounded, independently measured transcript tail."""
+    duration = float(timeline_end) - float(timeline_start)
+    if not math.isfinite(duration) or duration <= 0:
+        return None
+    window_seconds = min(
+        TERMINAL_TAIL_MAX_SECONDS,
+        max(TERMINAL_TAIL_MIN_SECONDS, duration * TERMINAL_TAIL_FRACTION),
+    )
+    # Avoid designating most of a short video as its terminal tail.
+    if window_seconds >= duration * 0.5:
+        return None
+    return float(timeline_end) - window_seconds
+
+
+def _point_terminal_tail_times(
+    point: dict,
+    lookup: dict,
+    tail_start: float | None,
+) -> list[float]:
+    if tail_start is None:
+        return []
+    times = []
+    for evidence_id in point.get("evidence_ids", []):
+        document = lookup.get(str(evidence_id))
+        if document is None:
+            continue
+        start, end, _ = sort_key(document)
+        midpoint = (start + end) / 2.0
+        if midpoint >= tail_start:
+            times.append(midpoint)
+    return sorted(times)
+
+
 def _point_timeline_buckets(
     point: dict,
     lookup: dict,
@@ -192,6 +234,12 @@ def _balance_points_over_timeline(
             "map_points_selected": 0,
         }
 
+    terminal_tail_start = _terminal_tail_start(timeline_start, timeline_end)
+    terminal_tail_center = (
+        (terminal_tail_start + timeline_end) / 2.0
+        if terminal_tail_start is not None
+        else None
+    )
     candidates = []
     duplicate_guard = list(previous_points)
     for origin, items in (
@@ -218,6 +266,11 @@ def _balance_points_over_timeline(
                 "order": order,
                 "buckets": buckets,
                 "midpoints": midpoints,
+                "terminal_tail_times": _point_terminal_tail_times(
+                    point,
+                    lookup,
+                    terminal_tail_start,
+                ),
             })
 
     if not candidates:
@@ -246,13 +299,41 @@ def _balance_points_over_timeline(
         if not options:
             continue
 
-        index, candidate = min(
-            options,
-            key=lambda pair: (
-                pair[1]["origin"] != "reducer",
+        def candidate_rank(pair):
+            candidate = pair[1]
+            in_terminal_tail = (
+                bucket == requested - 1
+                and bool(candidate["terminal_tail_times"])
+            )
+            if bucket == requested - 1 and terminal_tail_center is not None:
+                anchor_distance = (
+                    min(
+                        abs(value - terminal_tail_center)
+                        for value in candidate["terminal_tail_times"]
+                    )
+                    if in_terminal_tail
+                    else min(
+                        abs(midpoint - bucket_center)
+                        for midpoint in candidate["midpoints"]
+                        if _timeline_bucket_index(
+                            midpoint,
+                            timeline_start,
+                            timeline_end,
+                            requested,
+                        ) == bucket
+                    )
+                )
+                return (
+                    not in_terminal_tail,
+                    candidate["origin"] != "reducer",
+                    anchor_distance,
+                    candidate["order"],
+                )
+            return (
+                candidate["origin"] != "reducer",
                 min(
                     abs(midpoint - bucket_center)
-                    for midpoint in pair[1]["midpoints"]
+                    for midpoint in candidate["midpoints"]
                     if _timeline_bucket_index(
                         midpoint,
                         timeline_start,
@@ -260,9 +341,10 @@ def _balance_points_over_timeline(
                         requested,
                     ) == bucket
                 ),
-                pair[1]["order"],
-            ),
-        )
+                candidate["order"],
+            )
+
+        index, candidate = min(options, key=candidate_rank)
         selected.append(candidate)
         selected_indexes.add(index)
         covered_buckets.update(candidate["buckets"])
@@ -313,6 +395,16 @@ def _select_backup_points(
     timeline_start = min(sort_key(document)[0] for document in documents)
     timeline_end = max(sort_key(document)[1] for document in documents)
     timeline_valid = timeline_end > timeline_start
+    terminal_tail_start = (
+        _terminal_tail_start(timeline_start, timeline_end)
+        if timeline_valid
+        else None
+    )
+    terminal_tail_center = (
+        (terminal_tail_start + timeline_end) / 2.0
+        if terminal_tail_start is not None
+        else None
+    )
 
     duplicate_guard = list(primary_points)
     candidates = []
@@ -345,6 +437,11 @@ def _select_backup_points(
             "order": order,
             "buckets": buckets,
             "midpoints": midpoints,
+            "terminal_tail_times": _point_terminal_tail_times(
+                finding,
+                lookup,
+                terminal_tail_start,
+            ),
         })
 
     if not candidates:
@@ -388,12 +485,39 @@ def _select_backup_points(
             ]
             if not options:
                 continue
-            index, candidate = min(
-                options,
-                key=lambda pair: (
+            def candidate_rank(pair):
+                candidate = pair[1]
+                in_terminal_tail = (
+                    bucket == bucket_count - 1
+                    and bool(candidate["terminal_tail_times"])
+                )
+                if bucket == bucket_count - 1 and terminal_tail_center is not None:
+                    anchor_distance = (
+                        min(
+                            abs(value - terminal_tail_center)
+                            for value in candidate["terminal_tail_times"]
+                        )
+                        if in_terminal_tail
+                        else min(
+                            abs(midpoint - bucket_center)
+                            for midpoint in candidate["midpoints"]
+                            if _timeline_bucket_index(
+                                midpoint,
+                                timeline_start,
+                                timeline_end,
+                                bucket_count,
+                            ) == bucket
+                        )
+                    )
+                    return (
+                        not in_terminal_tail,
+                        anchor_distance,
+                        candidate["order"],
+                    )
+                return (
                     min(
                         abs(midpoint - bucket_center)
-                        for midpoint in pair[1]["midpoints"]
+                        for midpoint in candidate["midpoints"]
                         if _timeline_bucket_index(
                             midpoint,
                             timeline_start,
@@ -401,9 +525,10 @@ def _select_backup_points(
                             bucket_count,
                         ) == bucket
                     ),
-                    pair[1]["order"],
-                ),
-            )
+                    candidate["order"],
+                )
+
+            index, candidate = min(options, key=candidate_rank)
             selected.append(candidate)
             selected_indexes.add(index)
         if len(selected) >= maximum_backups:
@@ -530,6 +655,16 @@ def select_verified_overview_points(
         and end_value > start_value
     )
 
+    terminal_tail_start = (
+        _terminal_tail_start(start_value, end_value)
+        if valid_buckets
+        else None
+    )
+    terminal_tail_center = (
+        (terminal_tail_start + end_value) / 2.0
+        if terminal_tail_start is not None
+        else None
+    )
     evidence_by_index = {
         item.get("claim_index"): item
         for item in claim_evidence
@@ -561,6 +696,11 @@ def select_verified_overview_points(
             "status": "supported",
             "supporting_chunk_ids": chunk_ids,
             "anchor_seconds": anchor_time,
+            "terminal_tail_times": [
+                midpoint for midpoint in source_times
+                if terminal_tail_start is not None
+                and midpoint >= terminal_tail_start
+            ],
             "bucket": (
                 _timeline_bucket_index(
                     anchor_time,
@@ -622,14 +762,29 @@ def select_verified_overview_points(
         bucket_center = start_value + (
             duration * (bucket + 0.5) / bucket_count
         )
-        chosen = min(
-            options,
-            key=lambda item: (
+        def verified_candidate_rank(item):
+            if bucket == bucket_count - 1 and terminal_tail_center is not None:
+                in_terminal_tail = bool(item["terminal_tail_times"])
+                return (
+                    not in_terminal_tail,
+                    item["is_backup"],
+                    (
+                        min(
+                            abs(value - terminal_tail_center)
+                            for value in item["terminal_tail_times"]
+                        )
+                        if in_terminal_tail
+                        else abs(item["anchor_seconds"] - bucket_center)
+                    ),
+                    item["claim_index"],
+                )
+            return (
                 item["is_backup"],
                 abs(item["anchor_seconds"] - bucket_center),
                 item["claim_index"],
-            ),
-        )
+            )
+
+        chosen = min(options, key=verified_candidate_rank)
         selected.append(chosen)
         selected_indexes.add(chosen["claim_index"])
 
@@ -653,14 +808,29 @@ def select_verified_overview_points(
         bucket_center = start_value + (
             duration * (bucket + 0.5) / bucket_count
         )
-        chosen = min(
-            options,
-            key=lambda item: (
+        def verified_candidate_rank(item):
+            if bucket == bucket_count - 1 and terminal_tail_center is not None:
+                in_terminal_tail = bool(item["terminal_tail_times"])
+                return (
+                    not in_terminal_tail,
+                    item["is_backup"],
+                    (
+                        min(
+                            abs(value - terminal_tail_center)
+                            for value in item["terminal_tail_times"]
+                        )
+                        if in_terminal_tail
+                        else abs(item["anchor_seconds"] - bucket_center)
+                    ),
+                    item["claim_index"],
+                )
+            return (
                 item["is_backup"],
                 abs(item["anchor_seconds"] - bucket_center),
                 item["claim_index"],
-            ),
-        )
+            )
+
+        chosen = min(options, key=verified_candidate_rank)
         selected.append(chosen)
         selected_indexes.add(chosen["claim_index"])
 
@@ -729,6 +899,76 @@ def timeline_coverage_from_claim_evidence(
         "end_seconds": round(float(timeline_end), 2),
         "verified_point_count": verified_point_count,
     }
+
+def terminal_tail_coverage_from_claim_evidence(
+    claim_evidence: Sequence[dict],
+    documents: Sequence[Any],
+) -> dict:
+    """Measure whether selected supported evidence actually reaches the transcript tail."""
+    document_values = [
+        document for document in documents
+        if isinstance(getattr(document, "metadata", None), dict)
+    ]
+    if not document_values:
+        return {}
+
+    timeline_start = min(sort_key(document)[0] for document in document_values)
+    timeline_end = max(sort_key(document)[1] for document in document_values)
+    tail_start = _terminal_tail_start(timeline_start, timeline_end)
+    if tail_start is None:
+        return {
+            "eligible": False,
+            "covered": None,
+            "reason": "video_too_short_for_a_separate_terminal_window",
+            "start_seconds": round(timeline_start, 2),
+            "end_seconds": round(timeline_end, 2),
+        }
+
+    by_chunk_id = {
+        str(getattr(document, "metadata", {}).get("chunk_id")): document
+        for document in document_values
+        if getattr(document, "metadata", {}).get("chunk_id") is not None
+    }
+    supporting_chunk_ids = []
+    latest_supported_midpoint = None
+    for item in claim_evidence:
+        if not isinstance(item, dict) or item.get("status") != "supported":
+            continue
+        for raw_chunk_id in item.get("supporting_chunk_ids", []):
+            chunk_id = str(raw_chunk_id)
+            document = by_chunk_id.get(chunk_id)
+            if document is None:
+                continue
+            start, end, _ = sort_key(document)
+            midpoint = (start + end) / 2.0
+            if midpoint >= tail_start:
+                supporting_chunk_ids.append(chunk_id)
+                latest_supported_midpoint = (
+                    midpoint
+                    if latest_supported_midpoint is None
+                    else max(latest_supported_midpoint, midpoint)
+                )
+
+    unique_chunk_ids = list(dict.fromkeys(supporting_chunk_ids))
+    return {
+        "eligible": True,
+        "covered": bool(unique_chunk_ids),
+        "reason": (
+            None
+            if unique_chunk_ids
+            else "no_selected_supported_claim_in_terminal_window"
+        ),
+        "window_seconds": round(timeline_end - tail_start, 2),
+        "start_seconds": round(tail_start, 2),
+        "end_seconds": round(timeline_end, 2),
+        "supporting_chunk_ids": unique_chunk_ids,
+        "latest_supported_midpoint_seconds": (
+            round(latest_supported_midpoint, 2)
+            if latest_supported_midpoint is not None
+            else None
+        ),
+    }
+
 
 def _numbered_previous_points(value: str) -> list[dict]:
     points = []
