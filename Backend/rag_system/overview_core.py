@@ -91,7 +91,7 @@ def _timeline_sample_preserving_tail(
         return ordered
     if count <= 0:
         return []
-    reserve_count = min(count, terminal_reserve, len(ordered))
+    reserve_count = min(count, terminal_reserve, max(1, count // 5), len(ordered))
     terminal_items = ordered[-reserve_count:]
     earlier_items = ordered[:-reserve_count]
     earlier_count = count - reserve_count
