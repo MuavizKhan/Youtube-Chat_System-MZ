@@ -340,7 +340,7 @@ def test_verified_overview_selector_deduplicates_same_source_paraphrases_and_cov
         {
             "claim_index": index,
             "status": "supported",
-            "supporting_chunk_ids": ["1"] if index in {1, 2} else [str(index)],
+            "supporting_chunk_ids": ["1"] if index in {1, 2} else [str(index - 1)],
         }
         for index in range(1, 9)
     ]
