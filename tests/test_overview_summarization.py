@@ -670,8 +670,8 @@ def test_verified_terminal_tail_coverage_is_independent_of_broad_last_bucket():
         metadata={
             "chunk_id": "71",
             "video_id": "VKrtiTgBeng",
-            "start": 4910.0,
-            "end": 5050.0,
+            "start": 4850.0,
+            "end": 4950.0,
         },
     )
     documents = [
