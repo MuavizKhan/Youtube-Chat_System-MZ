@@ -48,8 +48,8 @@ Processing is bounded:
   interval, including late conclusions and new examples of earlier themes.
   It separately inspects the final one or two passages in each section so an
   opening passage cannot stand in for the section's ending.
-  A separate terminal-tail scan examines the final seven percent of the
-  transcript (bounded to 60–360 seconds) in a dedicated, source-ID-constrained
+  A separate terminal-tail scan examines the final 7.5 percent of the
+  transcript (bounded to 60–420 seconds) in a dedicated, source-ID-constrained
   model call. It can produce up to three additional findings, which enter the
   existing twenty-one-claim audit budget rather than expanding that budget.
   When long transcripts must be sampled, the latest twenty chunks are reserved
