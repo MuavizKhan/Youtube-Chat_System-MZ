@@ -219,14 +219,27 @@ def _point_timeline_buckets(
         return set(), []
     midpoints.sort()
     anchor_time = midpoints[len(midpoints) // 2]
-    return {
-        _timeline_bucket_index(
+    terminal_tail_start = _terminal_tail_start(
+        timeline_start,
+        timeline_end,
+    )
+    terminal_tail_times = _point_terminal_tail_times(
+        point,
+        lookup,
+        terminal_tail_start,
+        timeline_end,
+    )
+    anchor_bucket = (
+        bucket_count - 1
+        if terminal_tail_times
+        else _timeline_bucket_index(
             anchor_time,
             timeline_start,
             timeline_end,
             bucket_count,
         )
-    }, midpoints
+    )
+    return {anchor_bucket}, midpoints
 
 
 def _balance_points_over_timeline(
@@ -695,32 +708,37 @@ def select_verified_overview_points(
             continue
         source_times.sort()
         anchor_time = source_times[len(source_times) // 2]
+        terminal_tail_times = [
+            overlap_center
+            for chunk_id in chunk_ids
+            if (
+                overlap_center := _terminal_overlap_center(
+                    by_chunk_id[chunk_id],
+                    terminal_tail_start,
+                    end_value,
+                )
+            ) is not None
+        ]
         candidates.append({
             "claim_index": claim_index,
             "text": str(claim.get("text", "")).strip(),
             "status": "supported",
             "supporting_chunk_ids": chunk_ids,
             "anchor_seconds": anchor_time,
-            "terminal_tail_times": [
-                overlap_center
-                for chunk_id in chunk_ids
-                if (
-                    overlap_center := _terminal_overlap_center(
-                        by_chunk_id[chunk_id],
-                        terminal_tail_start,
-                        end_value,
-                    )
-                ) is not None
-            ],
+            "terminal_tail_times": terminal_tail_times,
             "bucket": (
-                _timeline_bucket_index(
-                    anchor_time,
-                    start_value,
-                    end_value,
-                    bucket_count,
+                bucket_count - 1
+                if valid_buckets and terminal_tail_times
+                else (
+                    _timeline_bucket_index(
+                        anchor_time,
+                        start_value,
+                        end_value,
+                        bucket_count,
+                    )
+                    if valid_buckets
+                    else None
                 )
-                if valid_buckets
-                else None
             ),
             "is_backup": bool(claim.get("is_backup")),
         })
@@ -885,12 +903,30 @@ def timeline_coverage_from_claim_evidence(
             continue
         source_times.sort()
         anchor_time = source_times[len(source_times) // 2]
-        covered.add(_timeline_bucket_index(
-            anchor_time,
-            timeline_start,
-            timeline_end,
-            bucket_count,
-        ))
+        terminal_times = [
+            overlap_center
+            for chunk_id in item.get("supporting_chunk_ids", [])
+            if (
+                document := by_chunk_id.get(str(chunk_id))
+            ) is not None
+            and (
+                overlap_center := _terminal_overlap_center(
+                    document,
+                    _terminal_tail_start(timeline_start, timeline_end),
+                    timeline_end,
+                )
+            ) is not None
+        ]
+        covered.add(
+            bucket_count - 1
+            if terminal_times
+            else _timeline_bucket_index(
+                anchor_time,
+                timeline_start,
+                timeline_end,
+                bucket_count,
+            )
+        )
         verified_point_count += 1
 
     return {
