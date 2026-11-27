@@ -418,10 +418,10 @@ def test_overview_backup_reserve_spans_timeline_buckets_even_when_primary_points
         map_findings=map_findings,
         lookup=lookup,
         requested=7,
-        maximum_backups=6,
+        maximum_backups=7,
     )
 
-    assert len(selected) == 6
+    assert len(selected) == 7
     selected_buckets = [
         overview_summarization._point_timeline_buckets(
             point,
@@ -432,4 +432,4 @@ def test_overview_backup_reserve_spans_timeline_buckets_even_when_primary_points
         )[0].pop()
         for point in selected
     ]
-    assert selected_buckets == [0, 1, 2, 4, 5, 6]
+    assert selected_buckets == list(range(7))
