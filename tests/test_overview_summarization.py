@@ -306,6 +306,146 @@ def test_verified_overview_selector_can_replace_all_seven_partial_primary_points
     ]
 
 
+def test_verified_overview_selector_deduplicates_same_source_paraphrases_and_covers_all_buckets():
+    documents = [
+        _document_for_minute(index, 1 + (index - 1) * 10)
+        for index in range(1, 8)
+    ]
+    claims = [
+        {
+            "text": (
+                "She recalls a beautiful childhood that changed abruptly when "
+                "the Gulf War began in 1990, marking a turning point in her life."
+            ),
+            "evidence_chunk_ids": ["1"],
+            "is_backup": False,
+        },
+        {
+            "text": (
+                "She reflects on her childhood, describing it as beautiful and "
+                "happy until the Gulf War in 1990, which abruptly changed her life."
+            ),
+            "evidence_chunk_ids": ["1"],
+            "is_backup": False,
+        },
+    ] + [
+        {
+            "text": f"Distinct development in timeline bucket {index}.",
+            "evidence_chunk_ids": [str(index + 1)],
+            "is_backup": False,
+        }
+        for index in range(1, 7)
+    ]
+    evidence = [
+        {
+            "claim_index": index,
+            "status": "supported",
+            "supporting_chunk_ids": ["1"] if index in {1, 2} else [str(index)],
+        }
+        for index in range(1, 9)
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        claims,
+        evidence,
+        documents,
+        requested_count=7,
+        timeline_start=60.0,
+        timeline_end=3705.0,
+        bucket_count=7,
+    )
+
+    assert len(selected) == 7
+    assert all(item["status"] == "supported" for item in selected)
+    assert [item["claim_index"] for item in selected] == [1, 3, 4, 5, 6, 7, 8]
+    assert len({item["bucket"] for item in selected}) == 7
+
+
+def test_verified_overview_selector_does_not_pad_missing_bucket_with_second_point():
+    documents = [
+        _document_for_minute(index, minute)
+        for index, minute in enumerate([1, 11, 31, 41, 51, 61], start=1)
+    ]
+    claims = [
+        {
+            "text": f"Distinct supported event {index}.",
+            "evidence_chunk_ids": [str(index)],
+            "is_backup": index == 6,
+        }
+        for index in range(1, 7)
+    ]
+    evidence = [
+        {
+            "claim_index": index,
+            "status": "supported",
+            "supporting_chunk_ids": [str(index)],
+        }
+        for index in range(1, 7)
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        claims,
+        evidence,
+        documents,
+        requested_count=7,
+        timeline_start=60.0,
+        timeline_end=3705.0,
+        bucket_count=7,
+    )
+
+    assert len(selected) == 6
+    assert len({item["bucket"] for item in selected}) == 6
+
+
+def test_overview_backup_reserve_selects_two_distinct_candidates_per_timeline_bucket():
+    minutes = [
+        bucket * 10 + offset
+        for bucket in range(7)
+        for offset in (1, 3, 5)
+    ]
+    documents = [
+        _document_for_minute(index, minute)
+        for index, minute in enumerate(minutes, start=1)
+    ]
+    lookup = {
+        f"P{index:05d}": document
+        for index, document in enumerate(documents, start=1)
+    }
+    map_findings = [
+        _point(f"Independent reserve development {index}.", f"P{index:05d}")
+        for index in range(1, len(documents) + 1)
+    ]
+
+    selected = overview_summarization._select_backup_points(
+        primary_points=[],
+        map_findings=map_findings,
+        lookup=lookup,
+        requested=7,
+        maximum_backups=14,
+    )
+
+    selected_buckets = [
+        overview_summarization._point_timeline_buckets(
+            point,
+            lookup,
+            min(
+                overview_summarization.sort_key(document)[0]
+                for document in lookup.values()
+            ),
+            max(
+                overview_summarization.sort_key(document)[1]
+                for document in lookup.values()
+            ),
+            7,
+        )[0].pop()
+        for point in selected
+    ]
+    assert len(selected) == 14
+    assert sorted(selected_buckets) == [
+        bucket for bucket in range(7) for _ in range(2)
+    ]
+
+
 def test_verified_overview_selector_omits_partial_points_without_supported_replacements():
     documents = [_document_for_minute(1, 0)]
     selected = overview_summarization.select_verified_overview_points(
