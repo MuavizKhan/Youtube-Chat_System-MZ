@@ -20,7 +20,9 @@ from .overview_prompts import (
 )
 
 
-MAX_BACKUP_POINTS = 3
+# Keep all overview candidates within the claim verifier's bounded audit ceiling.
+MAX_OVERVIEW_VERIFICATION_CLAIMS = 13
+MAX_BACKUP_POINTS = MAX_OVERVIEW_VERIFICATION_CLAIMS - 1
 
 
 OVERVIEW_SAMPLING_DISCLOSURE = (
@@ -288,32 +290,29 @@ def _select_backup_points(
     if not candidates:
         return []
 
-    covered_buckets = set()
-    for point in primary_points:
-        if timeline_valid:
-            buckets, _midpoints = _point_timeline_buckets(
-                point,
-                lookup,
-                timeline_start,
-                timeline_end,
-                requested,
-            )
-        else:
-            has_source = any(
-                str(evidence_id) in lookup
-                for evidence_id in point.get("evidence_ids", [])
-            )
-            buckets = {0} if has_source else set()
-        covered_buckets.update(buckets)
-
     selected = []
     selected_indexes = set()
     duration = timeline_end - timeline_start
-    for bucket in range(requested if timeline_valid else 1):
-        if bucket in covered_buckets or len(selected) >= maximum_backups:
-            continue
+    bucket_count = requested if timeline_valid else 1
+
+    # Reserve alternatives across the entire timeline, even where a primary
+    # point currently appears to cover a bucket. Primary points are not trusted
+    # until the claim audit completes; any one of them may be partial.
+    if maximum_backups >= bucket_count:
+        target_buckets = list(range(bucket_count))
+    elif maximum_backups == 1:
+        target_buckets = [bucket_count // 2]
+    else:
+        target_buckets = sorted({
+            round(index * (bucket_count - 1) / (maximum_backups - 1))
+            for index in range(maximum_backups)
+        })
+
+    for bucket in target_buckets:
+        if len(selected) >= maximum_backups:
+            break
         bucket_center = (
-            timeline_start + duration * (bucket + 0.5) / requested
+            timeline_start + duration * (bucket + 0.5) / bucket_count
             if timeline_valid
             else timeline_start
         )
@@ -334,7 +333,7 @@ def _select_backup_points(
                         midpoint,
                         timeline_start,
                         timeline_end,
-                        requested,
+                        bucket_count,
                     ) == bucket
                 ),
                 pair[1]["order"],
@@ -342,8 +341,9 @@ def _select_backup_points(
         )
         selected.append(candidate)
         selected_indexes.add(index)
-        covered_buckets.update(candidate["buckets"])
 
+    # Sparse timelines may not have a candidate in every target bucket. Fill
+    # the remaining reserve from distinct, source-linked map findings.
     for index, candidate in enumerate(candidates):
         if len(selected) >= maximum_backups:
             break
@@ -473,7 +473,7 @@ def select_verified_overview_points(
             continue
         evidence = evidence_by_index.get(claim_index, {})
         status = evidence.get("status")
-        if status not in {"supported", "partial"}:
+        if status != "supported":
             continue
         chunk_ids = list(dict.fromkeys(
             str(value)
@@ -584,7 +584,7 @@ def timeline_coverage_from_claim_evidence(
     covered = set()
     verified_point_count = 0
     for item in claim_evidence:
-        if not isinstance(item, dict) or item.get("status") not in {"supported", "partial"}:
+        if not isinstance(item, dict) or item.get("status") != "supported":
             continue
         source_times = []
         for raw_chunk_id in item.get("supporting_chunk_ids", []):
@@ -808,7 +808,10 @@ def summarize_video_overview(
             requested,
         ),
     })
-    maximum_backup_points = MAX_BACKUP_POINTS
+    maximum_backup_points = min(
+        MAX_BACKUP_POINTS,
+        max(0, MAX_OVERVIEW_VERIFICATION_CLAIMS - len(points)),
+    )
     backup_points = _select_backup_points(
         primary_points=points,
         map_findings=[*map_findings, *backup_findings],
