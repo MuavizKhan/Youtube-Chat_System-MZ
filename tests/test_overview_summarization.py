@@ -184,3 +184,37 @@ def test_verified_overview_point_selector_replaces_missing_primary_from_timeline
         "Supported closing point.",
     }
     assert sum(item["is_backup"] for item in selected) == 1
+
+
+def test_verified_overview_selector_caps_output_when_timestamps_are_degenerate():
+    documents = [
+        _document_for_minute(1, 0),
+        _document_for_minute(2, 0),
+        _document_for_minute(3, 0),
+    ]
+    for document in documents:
+        document.metadata["start"] = 0.0
+        document.metadata["end"] = 0.0
+    claims = [
+        {"text": "Primary opening.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Unsupported primary middle.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Verified reserve middle.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+    evidence = [
+        {"claim_index": 1, "status": "supported", "supporting_chunk_ids": ["1"]},
+        {"claim_index": 2, "status": "missing", "supporting_chunk_ids": []},
+        {"claim_index": 3, "status": "supported", "supporting_chunk_ids": ["3"]},
+    ]
+
+    selected = overview_summarization.select_verified_overview_points(
+        claims,
+        evidence,
+        documents,
+        requested_count=2,
+    )
+
+    assert len(selected) == 2
+    assert {item["text"] for item in selected} == {
+        "Primary opening.",
+        "Verified reserve middle.",
+    }

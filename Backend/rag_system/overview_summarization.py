@@ -384,28 +384,61 @@ def select_verified_overview_points(
     documents: Sequence[Any],
     *,
     requested_count: int,
-    timeline_start: float,
-    timeline_end: float,
-    bucket_count: int,
+    timeline_start: float | None = None,
+    timeline_end: float | None = None,
+    bucket_count: int | None = None,
 ) -> list[dict]:
-    """Keep verified primary points and use verified backups to fill missing slots."""
+    """Keep verified primary points and fill gaps with verified map alternatives.
+
+    Timeline bucket balancing is used when trustworthy timestamp bounds exist.
+    When timestamps are missing or degenerate, the selector still enforces the
+    requested output cap and uses stable chronological/source order.
+    """
     if (
         isinstance(requested_count, bool)
         or not isinstance(requested_count, int)
         or requested_count < 1
-        or not math.isfinite(float(timeline_start))
-        or not math.isfinite(float(timeline_end))
-        or timeline_end <= timeline_start
-        or bucket_count < 1
     ):
         return []
 
+    document_values = [
+        document for document in documents
+        if isinstance(getattr(document, "metadata", None), dict)
+    ]
     by_chunk_id = {
         str(getattr(document, "metadata", {}).get("chunk_id")): document
-        for document in documents
-        if isinstance(getattr(document, "metadata", None), dict)
-        and getattr(document, "metadata", {}).get("chunk_id") is not None
+        for document in document_values
+        if getattr(document, "metadata", {}).get("chunk_id") is not None
     }
+    if not by_chunk_id:
+        return []
+
+    try:
+        derived_start = min(sort_key(document)[0] for document in document_values)
+        derived_end = max(sort_key(document)[1] for document in document_values)
+        start_value = (
+            float(timeline_start)
+            if timeline_start is not None
+            else derived_start
+        )
+        end_value = (
+            float(timeline_end)
+            if timeline_end is not None
+            else derived_end
+        )
+    except (TypeError, ValueError, OverflowError):
+        start_value = derived_start
+        end_value = derived_end
+
+    valid_buckets = (
+        isinstance(bucket_count, int)
+        and not isinstance(bucket_count, bool)
+        and bucket_count > 0
+        and math.isfinite(start_value)
+        and math.isfinite(end_value)
+        and end_value > start_value
+    )
+
     evidence_by_index = {
         item.get("claim_index"): item
         for item in claim_evidence
@@ -426,17 +459,21 @@ def select_verified_overview_points(
         ))
         source_times = []
         for chunk_id in chunk_ids:
-            start, end, _ = sort_key(by_chunk_id[chunk_id])
-            source_times.append((start + end) / 2.0)
+            source_start, source_end, _ = sort_key(by_chunk_id[chunk_id])
+            source_times.append((source_start + source_end) / 2.0)
         if not source_times:
             continue
         source_times.sort()
         anchor_time = source_times[len(source_times) // 2]
-        bucket = _timeline_bucket_index(
-            anchor_time,
-            timeline_start,
-            timeline_end,
-            bucket_count,
+        bucket = (
+            _timeline_bucket_index(
+                anchor_time,
+                start_value,
+                end_value,
+                bucket_count,
+            )
+            if valid_buckets
+            else None
         )
         candidate = {
             "claim_index": claim_index,
@@ -449,42 +486,52 @@ def select_verified_overview_points(
         }
         (backups if candidate["is_backup"] else primary).append(candidate)
 
-    selected = sorted(primary, key=lambda item: item["anchor_seconds"])
-    selected = selected[:requested_count]
-    covered = {item["bucket"] for item in selected}
-    backup_pool = list(backups)
-    duration = timeline_end - timeline_start
+    selected = sorted(
+        primary,
+        key=lambda item: (item["anchor_seconds"], item["claim_index"]),
+    )[:requested_count]
+    backup_pool = sorted(
+        backups,
+        key=lambda item: (item["anchor_seconds"], item["claim_index"]),
+    )
 
-    for bucket in range(bucket_count):
-        if len(selected) >= requested_count:
-            break
-        if bucket in covered:
-            continue
-        options = [
-            item for item in backup_pool
-            if item["bucket"] == bucket
-        ]
-        if not options:
-            continue
-        bucket_center = timeline_start + duration * (bucket + 0.5) / bucket_count
-        chosen = min(
-            options,
-            key=lambda item: abs(item["anchor_seconds"] - bucket_center),
-        )
-        selected.append(chosen)
-        backup_pool.remove(chosen)
-        covered.add(bucket)
+    if valid_buckets:
+        covered = {item["bucket"] for item in selected}
+        duration = end_value - start_value
+        for bucket in range(bucket_count):
+            if len(selected) >= requested_count:
+                break
+            if bucket in covered:
+                continue
+            options = [
+                item for item in backup_pool
+                if item["bucket"] == bucket
+            ]
+            if not options:
+                continue
+            bucket_center = (
+                start_value + duration * (bucket + 0.5) / bucket_count
+            )
+            chosen = min(
+                options,
+                key=lambda item: (
+                    abs(item["anchor_seconds"] - bucket_center),
+                    item["claim_index"],
+                ),
+            )
+            selected.append(chosen)
+            backup_pool.remove(chosen)
+            covered.add(bucket)
 
-    for candidate in sorted(
-        backup_pool,
-        key=lambda item: item["anchor_seconds"],
-    ):
+    for candidate in backup_pool:
         if len(selected) >= requested_count:
             break
         selected.append(candidate)
 
-    return sorted(selected, key=lambda item: item["anchor_seconds"])[:requested_count]
-
+    return sorted(
+        selected,
+        key=lambda item: (item["anchor_seconds"], item["claim_index"]),
+    )[:requested_count]
 
 def timeline_coverage_from_claim_evidence(
     claim_evidence: Sequence[dict],

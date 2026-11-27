@@ -12284,25 +12284,21 @@ def answer_question(
                 and isinstance(overview_stats, dict)
             ):
                 before_coverage = overview_stats.get("timeline_coverage", {})
-                if (
-                    isinstance(before_coverage, dict)
-                    and before_coverage.get("start_seconds") is not None
-                    and before_coverage.get("end_seconds") is not None
-                    and before_coverage.get("bucket_count") is not None
-                ):
-                    selected_overview_points = select_verified_overview_points(
-                        structured_overview_claims,
-                        verification.get("claim_evidence", []),
-                        [
-                            pair[0]
-                            for pair in verification_results
-                            if isinstance(pair, (tuple, list)) and pair
-                        ],
-                        requested_count=overview_stats.get("requested_point_count", 7),
-                        timeline_start=before_coverage["start_seconds"],
-                        timeline_end=before_coverage["end_seconds"],
-                        bucket_count=before_coverage["bucket_count"],
-                    )
+                if not isinstance(before_coverage, dict):
+                    before_coverage = {}
+                selected_overview_points = select_verified_overview_points(
+                    structured_overview_claims,
+                    verification.get("claim_evidence", []),
+                    [
+                        pair[0]
+                        for pair in verification_results
+                        if isinstance(pair, (tuple, list)) and pair
+                    ],
+                    requested_count=overview_stats.get("requested_point_count", 7),
+                    timeline_start=before_coverage.get("start_seconds"),
+                    timeline_end=before_coverage.get("end_seconds"),
+                    bucket_count=before_coverage.get("bucket_count"),
+                )
                     selected_indices = {
                         item["claim_index"] for item in selected_overview_points
                     }
@@ -12419,6 +12415,10 @@ def answer_question(
                         overview_stats["verified_timeline_coverage"].get(
                             "verified_point_count", 0
                         )
+                    )
+                else:
+                    overview_stats["verified_point_count"] = len(
+                        selected_overview_points
                     )
             context_budget["included_chunk_ids"] = sorted(supported_chunk_ids)
             verification_trace = result.get("retrieval_trace", {})

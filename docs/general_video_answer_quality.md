@@ -85,10 +85,9 @@ The audit is restricted to:
 Overview points provide their own evidence chunk IDs. Those sources are
 prioritized under the passage ceiling, and each excerpt is selected against
 the claims that cite it. Other answer types retain bounded claim-aware source
-selection. Up to thirteen overview candidates can be audited in two requests of at most
-eight aspects
-each; up to three source-linked reserve candidates may also be verified to
-replace unsupported primary points. No requested point is silently dropped
+selection. Up to thirteen overview candidates can be audited in two requests,
+with at most eight aspects per request; up to three source-linked reserve
+candidates may also be verified to replace unsupported primary points. No requested point is silently dropped
 merely because it exceeds one request's aspect limit.
 
 A chunk selected for indexing but omitted from the relevant model prompt cannot
