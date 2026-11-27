@@ -641,6 +641,48 @@ def test_overview_rejects_documents_from_multiple_videos():
         )
 
 
+
+
+def test_single_section_overview_reserves_verified_alternatives_for_short_videos():
+    documents = [
+        make_doc(1, 0, "The speaker introduces the first subject."),
+        make_doc(2, 15, "The speaker gives a separate middle example."),
+        make_doc(3, 30, "The speaker reaches a distinct conclusion."),
+        make_doc(4, 45, "The speaker adds one final practical detail."),
+    ]
+    observed = {}
+
+    def generate(prompt):
+        prompt_text = "\n".join(message.content for message in prompt.to_messages())
+        observed["maximum_points"] = re.search(
+            r"Maximum points: (\d+)",
+            prompt_text,
+        ).group(1)
+        return json.dumps({
+            "points": [
+                {"text": f"Distinct transcript development {index}.", "evidence_ids": [f"P{index:05d}"]}
+                for index in range(1, 5)
+            ]
+        })
+
+    result = overview_summarization.summarize_video_overview(
+        documents=documents,
+        question="Summarize this video in one point.",
+        generate_text=generate,
+        requested_points=1,
+    )
+
+    stats = result["retrieval_trace"]["overview"]
+    assert stats["section_count"] == 1
+    assert observed["maximum_points"] == "4"
+    assert stats["returned_point_count"] == 1
+    assert stats["single_section_backup_candidate_count"] == 3
+    assert stats["backup_candidate_point_count"] == 3
+    assert len(result["verification_claims"]) == 4
+    assert result["verification_claims"][0]["is_backup"] is False
+    assert all(item["is_backup"] for item in result["verification_claims"][1:])
+    assert len(result["verification_results"]) == 4
+
 def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
     documents = [
         make_doc(1, 0, "Opening context. " + ("opening detail " * 350)),

@@ -20,6 +20,9 @@ from .overview_prompts import (
 )
 
 
+MAX_BACKUP_POINTS = 3
+
+
 OVERVIEW_SAMPLING_DISCLOSURE = (
     "The transcript is long, so this overview samples sections across "
     "the full timeline; some fine details may be omitted."
@@ -629,6 +632,7 @@ def summarize_video_overview(
     previous_points = _numbered_previous_points(exclude_points)
     notes = []
     map_findings = []
+    backup_findings = []
     note_evidence_ids = set()
     prompt_context_parts = []
     map_calls = 0
@@ -639,16 +643,18 @@ def summarize_video_overview(
         prompt_context_parts.append(context)
         allowed = {item["id"] for item in section}
         if len(sections) == 1:
-            points = parse_points(
+            single_section_candidates = parse_points(
                 generate_text(OVERVIEW_FINAL_PROMPT.invoke({
                     "question": question,
-                    "count": requested,
+                    "count": requested + MAX_BACKUP_POINTS,
                     "exclude_points": exclude_points,
                     "context": context,
                 })),
                 allowed,
-                requested,
+                requested + MAX_BACKUP_POINTS,
             )
+            points = single_section_candidates[:requested]
+            backup_findings.extend(single_section_candidates[requested:])
             break
 
         findings = parse_points(
@@ -730,9 +736,10 @@ def summarize_video_overview(
     # chooses to attach to its final points. Retain all map-cited documents in
     # a separate internal pool so the claim auditor can check every summary
     # point against evidence that was visible during the map/reduce process.
+    verification_findings = [*map_findings, *backup_findings]
     verification_ids = list(dict.fromkeys(
         evidence_id
-        for finding in map_findings
+        for finding in verification_findings
         for evidence_id in finding["evidence_ids"]
     )) or used_ids
     verification_documents = [
@@ -752,8 +759,14 @@ def summarize_video_overview(
             lookup,
             requested,
         ),
+        "single_section_backup_candidate_count": len(backup_findings),
+        "backup_finding_timeline_coverage": _timeline_coverage_stats(
+            backup_findings,
+            lookup,
+            requested,
+        ),
         "candidate_point_timeline_coverage": _timeline_coverage_stats(
-            [*map_findings, *points],
+            [*map_findings, *backup_findings, *points],
             lookup,
             requested,
         ),
@@ -772,10 +785,10 @@ def summarize_video_overview(
             requested,
         ),
     })
-    maximum_backup_points = 3
+    maximum_backup_points = MAX_BACKUP_POINTS
     backup_points = _select_backup_points(
         primary_points=points,
-        map_findings=map_findings,
+        map_findings=[*map_findings, *backup_findings],
         lookup=lookup,
         requested=requested,
         maximum_backups=maximum_backup_points,
