@@ -53,7 +53,7 @@ def _point_terms(value: str) -> set[str]:
         "for", "from", "had", "has", "have", "he", "her", "his", "how",
         "in", "into", "is", "it", "its", "of", "on", "or", "she", "so",
         "that", "the", "their", "them", "then", "there", "they", "this",
-        "to", "was", "we", "were", "which", "while", "who", "with",
+        "to", "until", "was", "we", "were", "when", "which", "while", "who", "with",
     }
     return {
         token.casefold()
