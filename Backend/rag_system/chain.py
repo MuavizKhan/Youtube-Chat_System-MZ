@@ -12535,6 +12535,7 @@ def answer_question(
                             "completed",
                             "not_applicable",
                         }
+                        and terminal_tail_coverage.get("covered") is not True
                     )
                     terminal_findings_unverified = (
                         isinstance(terminal_scan, dict)
