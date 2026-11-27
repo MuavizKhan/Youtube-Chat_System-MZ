@@ -8,10 +8,13 @@ from typing import Any, Sequence
 
 from .evidence_assessment import AssessmentRunStatus, EvidencePassage, assess_evidence_support
 from .evidence_contracts import EvidenceAspect, EvidenceReference, QuestionAnalysis, QuestionIntent
-from .overview_summarization import OVERVIEW_SAMPLING_DISCLOSURE
+from .overview_summarization import (
+    MAX_OVERVIEW_VERIFICATION_CLAIMS,
+    OVERVIEW_SAMPLING_DISCLOSURE,
+)
 
 MAX_CLAIMS = 8
-MAX_TOTAL_CLAIMS = 13
+MAX_TOTAL_CLAIMS = MAX_OVERVIEW_VERIFICATION_CLAIMS
 MAX_PASSAGES = 12
 MAX_PASSAGE_CHARS = 640
 MAX_INPUT_CHARS = 8_000
