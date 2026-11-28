@@ -110,3 +110,31 @@ def test_chat_job_rejects_short_lease_duration(tmp_path):
 
     with pytest.raises(ValueError):
         ChatJobStore(tmp_path / "chat.sqlite3", lease_seconds=59)
+
+
+
+def test_background_worker_reports_daily_provider_quota_exhaustion(
+    tmp_path,
+    monkeypatch,
+):
+    import Backend.app as app_module
+
+    store = ChatJobStore(tmp_path / "worker.sqlite3", lease_seconds=60)
+    job = store.enqueue("VKrtiTgBeng", "Summarize the entire video.", [])
+
+    def exhausted_provider(**_kwargs):
+        raise RuntimeError(
+            "Groq daily token quota is exhausted for the configured model."
+        )
+
+    monkeypatch.setattr(app_module, "_CHAT_JOB_STORE", store)
+    monkeypatch.setattr(app_module, "answer_question", exhausted_provider)
+    monkeypatch.setattr(app_module, "_on_chat_job_finished", lambda _job_id: None)
+
+    app_module._run_chat_job(job.job_id)
+
+    failed = store.get(job.job_id)
+    assert failed is not None
+    assert failed.status == FAILED
+    assert failed.error_code == "ai_provider_daily_quota_exhausted"
+    assert "daily token quota" in failed.error_message.lower()
