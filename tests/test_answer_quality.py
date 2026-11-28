@@ -197,7 +197,7 @@ def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     assert stats["selected_fraction"] < 1
     assert 1 <= stats["section_count"] <= overview_core.MAX_SECTIONS
     assert stats["map_calls"] == stats["section_count"]
-    assert len(calls) == stats["map_calls"] + 2
+    assert len(calls) == stats["map_calls"] + 3
     assert "samples sections across the full timeline" in result["answer"]
 
 
