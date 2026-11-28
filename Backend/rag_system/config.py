@@ -180,6 +180,23 @@ else:
 if not INDEX_JOB_DB_PATH.is_absolute():
     INDEX_JOB_DB_PATH = PROJECT_ROOT / INDEX_JOB_DB_PATH
 
+# Shared SQLite state for provider organization-level token pacing.
+# Deliberately independent of RAG_INDEX_NAMESPACE so separate index experiments
+# cannot each assume a fresh copy of the same Groq organization quota.
+PROVIDER_QUOTA_DB_PATH = Path(
+    os.getenv(
+        "GROQ_QUOTA_DB_PATH",
+        str(PROJECT_ROOT / "data" / "groq_token_quota.sqlite3"),
+    )
+).expanduser()
+if not PROVIDER_QUOTA_DB_PATH.is_absolute():
+    PROVIDER_QUOTA_DB_PATH = PROJECT_ROOT / PROVIDER_QUOTA_DB_PATH
+
+CHAT_JOB_LEASE_SECONDS = _get_int(
+    "CHAT_JOB_LEASE_SECONDS",
+    7200,
+)
+
 INDEX_JOB_WORKERS = _get_int(
     "INDEX_JOB_WORKERS",
     2,
@@ -559,7 +576,27 @@ GROQ_MAX_TOKENS = _get_int(
 # than normal user-facing generation to finish all requested claim assessments.
 GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS = _get_int(
     "GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS",
-    1800,
+    900,
+)
+
+# Overview prompts and assessment payloads have separate, bounded output budgets.
+# Keeping reserved output small matters on Groq Free because completion ceilings
+# contribute to the per-minute token allowance.
+GROQ_OVERVIEW_MAX_COMPLETION_TOKENS = _get_int(
+    "GROQ_OVERVIEW_MAX_COMPLETION_TOKENS",
+    500,
+)
+
+# Groq Free currently publishes 8K TPM for GPT-OSS 20B. Response headers
+# override this default at runtime; the environment value supports other
+# models or organization-specific limits.
+GROQ_TPM_LIMIT = _get_int(
+    "GROQ_TPM_LIMIT",
+    8000,
+)
+GROQ_TPM_SAFETY_FACTOR = _get_float(
+    "GROQ_TPM_SAFETY_FACTOR",
+    0.90,
 )
 
 GROQ_TEMPERATURE = _get_float(
@@ -604,6 +641,18 @@ if GROQ_RETRY_DELAY_SECONDS < 0:
     raise RuntimeError(
         "GROQ_RETRY_DELAY_SECONDS cannot be negative."
     )
+
+if GROQ_TPM_LIMIT <= 0:
+    raise RuntimeError("GROQ_TPM_LIMIT must be greater than 0.")
+
+if not 0.1 <= GROQ_TPM_SAFETY_FACTOR <= 1.0:
+    raise RuntimeError("GROQ_TPM_SAFETY_FACTOR must be between 0.1 and 1.0.")
+
+if GROQ_OVERVIEW_MAX_COMPLETION_TOKENS <= 0:
+    raise RuntimeError("GROQ_OVERVIEW_MAX_COMPLETION_TOKENS must be greater than 0.")
+
+if CHAT_JOB_LEASE_SECONDS < 60:
+    raise RuntimeError("CHAT_JOB_LEASE_SECONDS must be at least 60.")
 
 if GROQ_MAX_TOKENS <= 0:
 
