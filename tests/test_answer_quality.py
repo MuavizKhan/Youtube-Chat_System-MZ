@@ -1079,6 +1079,7 @@ def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
 
     assert answer == expected_answer
     assert captured["response_format"] == response_format
+    assert captured["max_completion_tokens"] is None
     assert captured["model"] == chain.GROQ_MODEL_ID
 
 
@@ -1255,10 +1256,17 @@ def test_generate_with_llm_forwards_response_format_to_groq(monkeypatch):
         "openai/gpt-oss-20b"
     )
 
-    def fake_generate_with_groq(*, client, prompt_value, response_format=None):
+    def fake_generate_with_groq(
+        *,
+        client,
+        prompt_value,
+        response_format=None,
+        max_completion_tokens=None,
+    ):
         captured["client"] = client
         captured["prompt_value"] = prompt_value
         captured["response_format"] = response_format
+        captured["max_completion_tokens"] = max_completion_tokens
         return "generated"
 
     monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
