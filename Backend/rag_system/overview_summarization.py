@@ -1237,6 +1237,7 @@ def summarize_video_overview(
                 terminal_tail_scan = {
                     "status": "unavailable",
                     "failure_type": type(error).__name__,
+                    "retry_after_seconds": getattr(error, "retry_after_seconds", None),
                     "finding_count": 0,
                     "start_seconds": round(terminal_tail_start, 2),
                     "end_seconds": round(timeline_end, 2),
@@ -1289,6 +1290,7 @@ def summarize_video_overview(
                 "finding_evidence_ids": [],
                 "finding_source_chunk_ids": [],
                 "latest_passage_cited": False,
+                "retry_after_seconds": None,
                 "source": "none",
             }
             if end_cap_items:
@@ -1359,6 +1361,7 @@ def summarize_video_overview(
                         end_cap_scan.update({
                             "status": "unavailable",
                             "failure_type": type(error).__name__,
+                            "retry_after_seconds": getattr(error, "retry_after_seconds", None),
                         })
                     else:
                         accepted_end_cap_candidates = []
@@ -1395,6 +1398,7 @@ def summarize_video_overview(
                     end_cap_scan.update({
                         "status": "skipped_terminal_scan_unavailable",
                         "failure_type": terminal_tail_scan.get("failure_type"),
+                        "retry_after_seconds": terminal_tail_scan.get("retry_after_seconds"),
                     })
 
             terminal_tail_scan["base_finding_count"] = (
@@ -1429,6 +1433,7 @@ def summarize_video_overview(
                     "finding_evidence_ids": [],
                     "finding_source_chunk_ids": [],
                     "latest_passage_cited": False,
+                    "retry_after_seconds": None,
                     "source": "none",
                 },
             }
