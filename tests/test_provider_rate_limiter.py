@@ -296,3 +296,30 @@ def test_existing_in_flight_rows_receive_a_lease_during_schema_migration(tmp_pat
 
     assert row[0] is None
     assert row[1] == pytest.approx(now + 300.0)
+
+
+
+def test_retry_after_only_response_headers_still_block_groq_requests(tmp_path):
+    now = [6000.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    pacer = GroqTokenPacer(
+        tmp_path / "quota.sqlite3",
+        default_tpm=100,
+        safety_factor=1.0,
+        clock=lambda: now[0],
+        sleeper=sleep,
+    )
+    pacer.record_headers(
+        "test-model",
+        {"retry-after": "8s"},
+    )
+
+    pacer.acquire("test-model", 20)
+
+    assert now[0] >= 6008.0
+    state = pacer.snapshot("test-model")["provider_state"]
+    assert state["limit_tokens"] == 100
+    assert state["remaining_tokens"] == 0
