@@ -149,3 +149,31 @@ def test_pacer_rejects_a_request_larger_than_the_safe_model_window(tmp_path):
 
     with pytest.raises(ProviderQuotaWaitError):
         pacer.acquire("test-model", 91)
+
+
+
+def test_pacer_uses_rolling_sixty_second_fallback_without_reset_headers(tmp_path):
+    now = [2000.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    pacer = GroqTokenPacer(
+        tmp_path / "quota.sqlite3",
+        default_tpm=100,
+        safety_factor=1.0,
+        clock=lambda: now[0],
+        sleeper=sleep,
+    )
+    pacer.record_headers(
+        "test-model",
+        {
+            "x-ratelimit-limit-tokens": "100",
+            "x-ratelimit-remaining-tokens": "0",
+        },
+    )
+
+    pacer.acquire("test-model", 20)
+
+    assert now[0] >= 2060.0
+    assert pacer.snapshot("test-model")["local_window_reserved_tokens"] == 20
