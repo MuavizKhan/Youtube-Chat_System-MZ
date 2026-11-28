@@ -1186,7 +1186,7 @@ def chat(
             },
         ) from error
 
-    if requires_async_chat_job(question):
+    if requires_async_chat_job(question, conversation_history):
         job = _CHAT_JOB_STORE.enqueue(
             video_id=canonical_video_id,
             question=question,
