@@ -1034,6 +1034,9 @@ def test_terminal_end_cap_scan_recovers_final_passages_when_broad_scan_stops_ear
     assert scan["end_cap_scan"]["source"] == "dedicated_end_cap_scan"
     assert scan["end_cap_scan"]["finding_count"] == 1
     assert scan["end_cap_scan"]["source_chunk_ids"] == ["11", "12"]
+    assert scan["end_cap_scan"]["finding_evidence_ids"] == [["P00012"]]
+    assert scan["end_cap_scan"]["finding_source_chunk_ids"] == [["12"]]
+    assert scan["end_cap_scan"]["latest_passage_cited"] is True
     assert any(
         claim["text"].startswith("The host explains that he avoids researching guests")
         and "12" in claim["evidence_chunk_ids"]
