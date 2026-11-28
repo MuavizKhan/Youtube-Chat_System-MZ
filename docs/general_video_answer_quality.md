@@ -246,7 +246,7 @@ contracts:
 
 - `GROQ_TPM_LIMIT` — conservative fallback token-per-minute limit (default 8000).
 - `GROQ_TPM_SAFETY_FACTOR` — reservation safety margin (default 0.90).
-- `GROQ_OVERVIEW_MAX_COMPLETION_TOKENS` — bounded overview-map/reduce output ceiling (default 500).
+- `GROQ_OVERVIEW_MAX_COMPLETION_TOKENS` — bounded overview-map/reduce output ceiling (default 900).
 - `GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS` — bounded evidence-audit output ceiling (default 900).
 - `GROQ_QUOTA_DB_PATH` — optional shared SQLite ledger path.
 - `CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS` — maximum cumulative provider pacing/retry wait for a whole-video job (default 3600).
