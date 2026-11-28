@@ -13466,3 +13466,91 @@ def test_groq_generation_honors_request_wide_retry_budget(monkeypatch):
         assert sleeps == []
     finally:
         chain.end_groq_retry_budget(token)
+
+
+@pytest.mark.regression
+def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monkeypatch):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        if len(calls) == 1:
+            source_ids = [["1"], ["2"]]
+        else:
+            source_ids = [["76"]]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in source_ids for chunk_id in values
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": values,
+                }
+                for index, values in enumerate(source_ids, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "76"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "Opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Middle point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Final exchange about interview spontaneity.", "evidence_chunk_ids": ["76"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[],
+        included_chunk_ids=["1", "2", "76"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        required_end_cap_chunk_ids=["76"],
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_end_cap_covered"] is False
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["claim_evidence"][-1]["supporting_chunk_ids"] == ["76"]
+
+
+@pytest.mark.regression
+def test_generated_end_cap_finding_is_rejected_without_verified_end_cap_coverage():
+    with pytest.raises(RuntimeError, match="substantive end-cap finding was generated"):
+        chain._require_verified_overview_end_cap(
+            {"status": "completed", "finding_count": 1},
+            {"end_cap_eligible": True, "end_cap_covered": False},
+        )
+
+
+@pytest.mark.regression
+def test_verified_end_cap_finding_passes_acceptance_guard():
+    chain._require_verified_overview_end_cap(
+        {"status": "completed", "finding_count": 1},
+        {"end_cap_eligible": True, "end_cap_covered": True},
+    )
