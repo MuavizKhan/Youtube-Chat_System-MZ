@@ -1079,7 +1079,7 @@ def test_generate_with_groq_forwards_requested_response_format(monkeypatch):
 
     assert answer == expected_answer
     assert captured["response_format"] == response_format
-    assert captured["max_completion_tokens"] is None
+    assert captured["max_completion_tokens"] == chain.GROQ_MAX_TOKENS
     assert captured["model"] == chain.GROQ_MODEL_ID
 
 
