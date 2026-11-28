@@ -112,3 +112,16 @@ def test_index_status_polling_uses_backoff_and_prevents_overlapping_requests():
     assert "indexPollInFlight" in content
     assert "indexPollGeneration" in content
     assert "INDEX_POLL_INTERVAL_MS" not in content
+
+
+
+def test_extension_polls_durable_whole_video_chat_jobs():
+    background = BACKGROUND.read_text(encoding="utf-8")
+    content = (ROOT / "chrome-extension" / "content.js").read_text(encoding="utf-8")
+
+    assert 'message.type === "chat_job_status"' in background
+    assert "handleChatJobStatus(jobId, videoId, sendResponse)" in background
+    assert 'type: "chat_job_status"' in content
+    assert "const pollChatJob = (jobId, delayMs = 5000)" in content
+    assert "statusResponse.pending" in content
+    assert "handleChatResponse(statusResponse, runtimeError)" in content
