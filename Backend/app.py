@@ -318,6 +318,38 @@ def _run_chat_job(job_id: str) -> None:
             job.job_id,
             retry_after,
         )
+    except RuntimeError as error:
+        if "daily token quota" in str(error).casefold():
+            _CHAT_JOB_STORE.fail(
+                job.job_id,
+                worker_id=_CHAT_JOB_WORKER_ID,
+                error_code="ai_provider_daily_quota_exhausted",
+                error_message=(
+                    "The Groq Free-plan daily token quota is exhausted. "
+                    "The summary was not completed; retry after the daily quota resets."
+                ),
+            )
+            logger.warning(
+                "Whole-video chat job stopped by daily provider quota job_id=%s "
+                "video_id=%s",
+                job.job_id,
+                job.video_id,
+            )
+        else:
+            _CHAT_JOB_STORE.fail(
+                job.job_id,
+                worker_id=_CHAT_JOB_WORKER_ID,
+                error_code="chat_job_failed",
+                error_message=(
+                    "The whole-video answer could not be completed. "
+                    "Check that the video index is ready and retry the request."
+                ),
+            )
+            logger.exception(
+                "Whole-video chat job failed job_id=%s video_id=%s",
+                job.job_id,
+                job.video_id,
+            )
     except Exception:
         _CHAT_JOB_STORE.fail(
             job.job_id,
