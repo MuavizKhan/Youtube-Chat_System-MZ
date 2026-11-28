@@ -154,18 +154,18 @@ def test_77_chunk_video_of_about_60k_characters_keeps_full_chronological_coverag
 
 def test_overview_adaptively_samples_when_uneven_chunks_exceed_section_limit():
     # This transcript exceeds the 80,000-character source budget and contains
-    # uneven chunks. Even after the initial timeline sample, header overhead
-    # would exceed the 10-section cap at 9,000 characters per section. The
-    # overview must sample more coarsely instead of falling back to sparse
-    # similarity retrieval.
+    # uneven chunks. Even after the initial timeline sample, four early timeline
+    # bins retain enough large chunks to exceed the 12,000-character section
+    # cap. The overview must sample more coarsely instead of falling back to
+    # sparse similarity retrieval.
     documents = [
         make_doc(
             index,
             index * 15,
             (
-                "Opening development " + ("x" * (7000 - len("Opening development")))
+                "Opening development " + ("x" * (6000 - len("Opening development")))
                 if index <= 12
-                else "Later development " + ("y" * (3000 - len("Later development")))
+                else "Later development " + ("y" * (2000 - len("Later development")))
             ),
         )
         for index in range(1, 25)
@@ -792,8 +792,8 @@ def test_single_section_overview_reserves_verified_alternatives_for_short_videos
 
 def test_overview_can_skip_empty_timeline_section_without_fabricating_points():
     documents = [
-        make_doc(1, 0, "Opening context. " + ("opening detail " * 350)),
-        make_doc(2, 300, "Later important development. " + ("later detail " * 350)),
+        make_doc(1, 0, "Opening context. " + ("opening detail " * 500)),
+        make_doc(2, 300, "Later important development. " + ("later detail " * 500)),
     ]
     calls = []
 
@@ -950,7 +950,7 @@ def test_overview_fills_underproduced_reducer_from_chronological_map_findings():
         make_doc(
             index,
             index * 120,
-            f"Distinct section {index} describes a separate event. " + (f"detail-{index} " * 600),
+            f"Distinct section {index} describes a separate event. " + (f"detail-{index} " * 750),
         )
         for index in range(1, 7)
     ]
