@@ -12103,8 +12103,10 @@ def _verify_video_overview_claims(
     client: Any,
     fallback_answer: str,
     structured_claims: list[dict] | None,
+    requested_point_count: int | None = None,
+    required_end_cap_chunk_ids: list[str] | None = None,
 ) -> dict:
-    """Verify primary overview points first; verify reserves only when needed."""
+    """Verify primary points first; verify reserves if support, count, or ending is incomplete."""
     claims = [
         dict(item)
         for item in (structured_claims or [])
@@ -12148,10 +12150,35 @@ def _verify_video_overview_claims(
         item for item in primary_result.get("claim_evidence", [])
         if isinstance(item, dict)
     ]
+    primary_supported_chunk_ids = {
+        str(chunk_id)
+        for item in primary_evidence
+        for chunk_id in item.get("supporting_chunk_ids", [])
+    }
+    required_end_cap_ids = {
+        str(value)
+        for value in (required_end_cap_chunk_ids or [])
+        if value is not None
+    }
+    primary_end_cap_covered = (
+        not required_end_cap_ids
+        or bool(primary_supported_chunk_ids.intersection(required_end_cap_ids))
+    )
+    primary_point_count_satisfied = (
+        requested_point_count is None
+        or len(primary_claims) >= requested_point_count
+    )
     primary_all_supported = (
         len(primary_evidence) == len(primary_claims)
         and all(item.get("status") == "supported" for item in primary_evidence)
+        and primary_point_count_satisfied
+        and primary_end_cap_covered
     )
+    primary_result["overview_verification"].update({
+        "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_end_cap_covered": primary_end_cap_covered,
+        "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
+    })
     if not reserve_claims or primary_all_supported:
         primary_result["overview_verification"].update({
             "reserve_verification_attempted": False,
@@ -12558,6 +12585,25 @@ def answer_question(
             client=generation_client,
             fallback_answer=FALLBACK_ANSWER,
             structured_claims=result.get("verification_claims"),
+            requested_point_count=(
+                overview_retrieval_trace.get("overview", {}).get("requested_point_count")
+                if isinstance(overview_retrieval_trace.get("overview"), dict)
+                else None
+            ),
+            required_end_cap_chunk_ids=(
+                overview_retrieval_trace.get("overview", {})
+                .get("terminal_tail_scan", {})
+                .get("end_cap_scan", {})
+                .get("source_chunk_ids", [])
+                if (
+                    isinstance(overview_retrieval_trace.get("overview"), dict)
+                    and overview_retrieval_trace["overview"]
+                    .get("terminal_tail_scan", {})
+                    .get("end_cap_scan", {})
+                    .get("finding_count", 0) > 0
+                )
+                else []
+            ),
         )
         _require_completed_overview_audit(
             overview_retrieval_trace,
@@ -12824,11 +12870,16 @@ def answer_question(
                         and terminal_tail_coverage.get("end_cap_eligible") is True
                         and terminal_tail_coverage.get("end_cap_covered") is not True
                     )
+                    if end_cap_findings_unverified:
+                        raise RuntimeError(
+                            "Whole-video overview was withheld because a substantive "
+                            "end-cap finding was generated but no fully verified point "
+                            "retained evidence from the final transcript passages."
+                        )
                     if (
                         terminal_scan_incomplete
                         or terminal_findings_unverified
                         or end_cap_scan_unavailable
-                        or end_cap_findings_unverified
                     ):
                         result["answer"] = (
                             result.get("answer", "")
