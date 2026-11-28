@@ -2390,7 +2390,6 @@ function sendMessage() {
             },
             handleChatJobUnavailable
         );
-        );
     } catch (error) {
         if (requestId === activeRequestId) {
             resetRequestState();
