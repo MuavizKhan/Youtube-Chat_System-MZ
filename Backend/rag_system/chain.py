@@ -184,7 +184,7 @@ class ProviderRateLimitError(RuntimeError):
 # Bound total sleeping on repeated Groq 429 responses for each model call. A
 # single Retry-After interval (including 30 seconds) is honored, but a second
 # long wait is returned to the caller instead of stranding chat for another minute.
-MAX_GROQ_RETRY_WAIT_SECONDS = 300.0
+MAX_GROQ_RETRY_WAIT_SECONDS = 30.0
 MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS = 60.0
 
 
@@ -8452,6 +8452,7 @@ def _is_daily_token_quota_exhausted(error: Exception) -> bool:
     error_text = str(error).casefold()
     quota_marker = (
         "tokens per day" in error_text
+        or "daily token" in error_text
         or re.search(r"\btpd\b", error_text) is not None
     )
     rate_limit_marker = (
