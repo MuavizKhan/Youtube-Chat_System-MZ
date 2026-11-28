@@ -211,9 +211,19 @@ class GroqTokenPacer:
                 (model, (state["observed_at"] if state is not None else now - 60.0)),
             ).fetchall()
 
-            if state is not None and state["reset_at"] is not None and now >= state["reset_at"]:
-                # Groq has told us when its token window resets. Rebase local
-                # reservations on that fresh provider snapshot.
+            provider_reset_at = (
+                float(state["reset_at"])
+                if state is not None and state["reset_at"] is not None
+                else (
+                    float(state["observed_at"]) + 60.0
+                    if state is not None
+                    else None
+                )
+            )
+            if state is not None and provider_reset_at is not None and now >= provider_reset_at:
+                # Prefer Groq's reset timestamp. If the header is absent, the
+                # provider's rolling TPM window still expires 60 seconds after
+                # the last authoritative remaining-token snapshot.
                 connection.execute(
                     """
                     UPDATE groq_token_quota_state
