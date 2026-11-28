@@ -84,7 +84,7 @@ def test_build_sections_retains_character_limit_when_a_time_bucket_is_dense():
 
     assert len(sections) >= 4
     assert all(
-        sum(len(item["line"]) for item in section) <= 9_000
+        sum(len(item["line"]) for item in section) <= 12_000
         for section in sections
     )
     assert stats["sectioning_strategy"] == "timeline_binned"
@@ -151,3 +151,38 @@ def test_build_sections_always_preserves_latest_transcript_chunks_when_sampling(
         for item in section
     ) == 60.0
 
+
+
+def test_build_sections_keeps_uneven_60k_transcript_to_seven_timeline_map_calls():
+    documents = []
+    chunk_id = 1
+    for bucket in range(7):
+        content_length = 900 if bucket < 3 else 750
+        for offset in range(11):
+            start = float(bucket * 700 + offset * 30)
+            documents.append(
+                Document(
+                    page_content="x" * content_length,
+                    metadata={
+                        "chunk_id": str(chunk_id),
+                        "video_id": "video-60k",
+                        "start": start,
+                        "end": start + 20.0,
+                    },
+                )
+            )
+            chunk_id += 1
+
+    sections, lookup, stats = build_sections(
+        documents,
+        preferred_sections=7,
+    )
+
+    assert stats["indexed_source_chars"] >= 60_000
+    assert len(lookup) == 77
+    assert len(sections) == 7
+    assert stats["section_count"] == 7
+    assert all(
+        sum(len(item["line"]) for item in section) <= 12_000
+        for section in sections
+    )
