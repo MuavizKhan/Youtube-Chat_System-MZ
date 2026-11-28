@@ -81,6 +81,7 @@ from .config import (
     GROQ_API_KEY,
     GROQ_MAX_RETRIES,
     GROQ_MAX_TOKENS,
+    GROQ_OVERVIEW_MAX_COMPLETION_TOKENS,
     GROQ_MODEL_ID,
     GROQ_REASONING_EFFORT,
     GROQ_RETRY_DELAY_SECONDS,
@@ -143,6 +144,10 @@ from .provider_retry_budget import (
     end_groq_retry_budget,
     reserve_groq_retry_wait,
 )
+from .provider_rate_limiter import (
+    ProviderQuotaWaitError,
+    groq_completion_create,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -179,7 +184,7 @@ class ProviderRateLimitError(RuntimeError):
 # Bound total sleeping on repeated Groq 429 responses for each model call. A
 # single Retry-After interval (including 30 seconds) is honored, but a second
 # long wait is returned to the caller instead of stranding chat for another minute.
-MAX_GROQ_RETRY_WAIT_SECONDS = 30.0
+MAX_GROQ_RETRY_WAIT_SECONDS = 300.0
 MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS = 60.0
 
 
@@ -8644,6 +8649,7 @@ def generate_with_groq(
     prompt_value,
     *,
     response_format: dict[str, Any] | None = None,
+    max_completion_tokens: int | None = None,
 ) -> str:
     """Send a prompt to Groq, recovering once from strict JSON validation failures."""
 
@@ -8651,6 +8657,13 @@ def generate_with_groq(
     total_retry_wait_seconds = 0.0
     attempt = 0
     max_attempts = GROQ_MAX_RETRIES + 1
+    completion_token_limit = (
+        max_completion_tokens
+        if isinstance(max_completion_tokens, int)
+        and not isinstance(max_completion_tokens, bool)
+        and max_completion_tokens > 0
+        else GROQ_MAX_TOKENS
+    )
     response_format_fallback_used = False
 
     while attempt < max_attempts:
@@ -8658,15 +8671,23 @@ def generate_with_groq(
             completion_options = {
                 "model": GROQ_MODEL_ID,
                 "messages": messages,
-                "max_completion_tokens": GROQ_MAX_TOKENS,
+                "max_completion_tokens": completion_token_limit,
                 "temperature": GROQ_TEMPERATURE,
                 "reasoning_effort": GROQ_REASONING_EFFORT,
                 "include_reasoning": False,
             }
             if response_format is not None:
                 completion_options["response_format"] = response_format
-            response = client.chat.completions.create(**completion_options)
+            response = groq_completion_create(
+                client,
+                completion_options,
+                reserve_wait=reserve_groq_retry_wait,
+            )
 
+        except ProviderQuotaWaitError as error:
+            raise ProviderRateLimitError(
+                retry_after_seconds=error.retry_after_seconds
+            ) from error
         except Exception as error:
             error_text = str(error).lower()
 
@@ -8820,7 +8841,7 @@ def generate_with_groq(
             prompt_tokens,
             completion_tokens,
             total_tokens,
-            GROQ_MAX_TOKENS,
+            completion_token_limit,
         )
         if finish_reason in {"length", "max_tokens"}:
             logger.warning(
@@ -8862,6 +8883,7 @@ def generate_with_llm(
     prompt_value,
     *,
     response_format: dict[str, Any] | None = None,
+    max_completion_tokens: int | None = None,
 ) -> str:
     """Dispatch generation to the configured inference provider."""
 
@@ -8870,6 +8892,7 @@ def generate_with_llm(
             client=client,
             prompt_value=prompt_value,
             response_format=response_format,
+            max_completion_tokens=max_completion_tokens,
         )
 
     return generate_with_huggingface(
@@ -9087,6 +9110,15 @@ def _is_explicit_overview_request(question: str) -> bool:
         r"\b(?:overall|general)\s+(?:summary|overview)\b",
         normalized,
     ))
+
+
+def requires_async_chat_job(question: str) -> bool:
+    """Whether a question invokes the bounded whole-video map/reduce workflow."""
+    return bool(
+        isinstance(question, str)
+        and is_overview_question(question)
+        and _is_explicit_overview_request(question)
+    )
 
 
 def _should_use_overview_route(question: str, planner_intent: str) -> bool:
@@ -12497,8 +12529,13 @@ def _with_request_scoped_groq_retry_budget(function):
     def wrapped(*args, **kwargs):
         if LLM_PROVIDER != "groq":
             return function(*args, **kwargs)
+        configured_wait_budget = kwargs.get("max_retry_wait_seconds")
         budget_token = begin_groq_retry_budget(
-            max_wait_seconds=MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS
+            max_wait_seconds=(
+                configured_wait_budget
+                if configured_wait_budget is not None
+                else MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS
+            )
         )
         try:
             return function(*args, **kwargs)
@@ -12513,6 +12550,8 @@ def answer_question(
     video_reference: str,
     question: str,
     conversation_history: list[dict[str, str]] | None = None,
+    *,
+    max_retry_wait_seconds: float | None = None,
 ) -> dict:
     """
     Main application entry point.
@@ -12665,6 +12704,11 @@ def answer_question(
                     prompt_value=prompt_value,
                     response_format=(
                         overview_response_format_for_model(GROQ_MODEL_ID)
+                        if LLM_PROVIDER == "groq"
+                        else None
+                    ),
+                    max_completion_tokens=(
+                        GROQ_OVERVIEW_MAX_COMPLETION_TOKENS
                         if LLM_PROVIDER == "groq"
                         else None
                     ),
