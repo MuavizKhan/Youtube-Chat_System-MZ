@@ -219,3 +219,80 @@ def test_header_snapshot_does_not_discard_an_in_flight_reservation(tmp_path):
     assert now[0] >= 3060.0
     pacer.settle_reservation(next_reservation)
     pacer.settle_reservation(in_flight)
+
+
+
+def test_abandoned_in_flight_reservation_expires_after_its_lease(tmp_path):
+    now = [4000.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    db_path = tmp_path / "quota.sqlite3"
+    pacer = GroqTokenPacer(
+        db_path,
+        default_tpm=100,
+        safety_factor=1.0,
+        clock=lambda: now[0],
+        sleeper=sleep,
+    )
+    reservation = pacer.acquire("test-model", 90)
+
+    import sqlite3
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE groq_token_reservations SET lease_until = ? WHERE reservation_id = ?",
+            (now[0] - 1.0, reservation),
+        )
+
+    now[0] += 61.0
+    replacement = pacer.acquire("test-model", 90)
+
+    assert replacement != reservation
+    assert pacer.snapshot("test-model")["local_window_reserved_tokens"] == 90
+    pacer.settle_reservation(replacement)
+
+
+def test_existing_in_flight_rows_receive_a_lease_during_schema_migration(tmp_path):
+    import sqlite3
+
+    now = 5000.0
+    db_path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE groq_token_reservations (
+                reservation_id TEXT PRIMARY KEY,
+                model TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                reserved_tokens INTEGER NOT NULL,
+                completed_at REAL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO groq_token_reservations (
+                reservation_id, model, created_at, reserved_tokens, completed_at
+            )
+            VALUES ('legacy-reservation', 'test-model', ?, 40, NULL)
+            """,
+            (now,),
+        )
+
+    GroqTokenPacer(
+        db_path,
+        default_tpm=100,
+        safety_factor=1.0,
+        clock=lambda: now,
+        sleeper=lambda _seconds: None,
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT completed_at, lease_until FROM groq_token_reservations "
+            "WHERE reservation_id = 'legacy-reservation'"
+        ).fetchone()
+
+    assert row[0] is None
+    assert row[1] == pytest.approx(now + 300.0)
