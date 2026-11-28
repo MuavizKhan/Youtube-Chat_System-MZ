@@ -13258,3 +13258,185 @@ def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeyp
     assert [source["chunk_ids"] for source in result["sources"]] == [[2]]
     assert "verification_results" not in result
     assert "verification_chunk_ids" not in result["observability"]["generation"]["context_budget"]
+
+
+@pytest.mark.regression
+def test_overview_verifies_primary_points_before_spending_calls_on_reserves(monkeypatch):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        return {
+            "answer": "Verified primary answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for claim in claims
+                for chunk_id in claim["evidence_chunk_ids"]
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": claim["evidence_chunk_ids"],
+                }
+                for index, claim in enumerate(claims, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 12.0,
+            "assessment_input_chars_total": 100,
+            "assessment_input_tokens": 50,
+            "assessment_output_tokens": 20,
+            "assessment_output_chars": 80,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First primary point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Second primary point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Reserve alternative.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+    )
+
+    assert len(calls) == 1
+    assert [item["text"] for item in calls[0]["structured_claims"]] == [
+        "First primary point.",
+        "Second primary point.",
+    ]
+    assert result["overview_verification"]["reserve_verification_attempted"] is False
+    assert result["overview_verification"]["reserve_verification_reason"] == (
+        "all_primary_claims_supported"
+    )
+    assert result["candidate_claim_count"] == 3
+
+
+@pytest.mark.regression
+def test_overview_verifies_reserve_candidates_only_when_primary_claim_is_not_supported(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        statuses = ["supported", "missing"] if len(calls) == 1 else ["supported"]
+        evidence = [
+            {
+                "claim_index": index,
+                "status": status,
+                "supporting_chunk_ids": (
+                    claim["evidence_chunk_ids"] if status == "supported" else []
+                ),
+            }
+            for index, (claim, status) in enumerate(zip(claims, statuses), start=1)
+        ]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": statuses.count("supported"),
+            "partial_claim_count": statuses.count("partial"),
+            "removed_claim_count": len(claims) - statuses.count("supported") - statuses.count("partial"),
+            "supported_chunk_ids": [
+                chunk_id for item in evidence for chunk_id in item["supporting_chunk_ids"]
+            ],
+            "claim_evidence": evidence,
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 10.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "3"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First primary point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Unsupported primary point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Reserve replacement.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+    )
+
+    assert len(calls) == 2
+    assert len(calls[0]["structured_claims"]) == 2
+    assert len(calls[1]["structured_claims"]) == 1
+    assert result["claim_count"] == 3
+    assert [item["claim_index"] for item in result["claim_evidence"]] == [1, 2, 3]
+    assert [item["status"] for item in result["claim_evidence"]] == [
+        "supported",
+        "missing",
+        "supported",
+    ]
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["assessment_request_count"] == 2
+
+
+@pytest.mark.regression
+def test_overview_audit_provider_failure_is_not_returned_as_verified_success():
+    retrieval_trace = {"route": "video_wide_overview"}
+    verification = {
+        "performed": True,
+        "status": "provider_error",
+        "error_code": "provider_rate_limited",
+        "retry_after_seconds": 17.0,
+    }
+
+    with pytest.raises(
+        chain.ProviderRateLimitError,
+        match="Retry after about 17 seconds",
+    ):
+        chain._require_completed_overview_audit(retrieval_trace, verification)
+
+
+@pytest.mark.regression
+def test_non_overview_claim_audit_keeps_existing_provider_error_behavior():
+    verification = {
+        "performed": True,
+        "status": "provider_error",
+        "error_code": "provider_rate_limited",
+    }
+
+    chain._require_completed_overview_audit(
+        {"route": "question_aware"},
+        verification,
+    )
