@@ -168,6 +168,14 @@ class GroqTokenPacer:
                     ADD COLUMN lease_until REAL NOT NULL DEFAULT 0
                     """
                 )
+                connection.execute(
+                    """
+                    UPDATE groq_token_reservations
+                    SET lease_until = created_at + ?
+                    WHERE completed_at IS NULL AND lease_until = 0
+                    """,
+                    (RESERVATION_LEASE_SECONDS,),
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS groq_token_quota_state (
