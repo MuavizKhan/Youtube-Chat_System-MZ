@@ -13440,3 +13440,29 @@ def test_non_overview_claim_audit_keeps_existing_provider_error_behavior():
         {"route": "question_aware"},
         verification,
     )
+
+
+@pytest.mark.regression
+def test_groq_generation_honors_request_wide_retry_budget(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+    error = RuntimeError("429 rate limit")
+    error.status_code = 429
+    error.response = SimpleNamespace(headers={"retry-after": "20"})
+    fake, completions = client(error=error)
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+    sleeps = []
+    monkeypatch.setattr(chain.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    token = chain.begin_groq_retry_budget(max_wait_seconds=5.0)
+    try:
+        with pytest.raises(
+            chain.ProviderRateLimitError,
+            match="rate limit was reached",
+        ) as captured:
+            chain.generate_with_groq(fake, prompt)
+        assert captured.value.retry_after_seconds == 20.0
+        assert completions.call_count == 1
+        assert sleeps == []
+    finally:
+        chain.end_groq_retry_budget(token)
