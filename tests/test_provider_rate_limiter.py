@@ -317,9 +317,10 @@ def test_retry_after_only_response_headers_still_block_groq_requests(tmp_path):
         {"retry-after": "8s"},
     )
 
+    blocked_state = pacer.snapshot("test-model")["provider_state"]
+    assert blocked_state["limit_tokens"] == 100
+    assert blocked_state["remaining_tokens"] == 0
+
     pacer.acquire("test-model", 20)
 
     assert now[0] >= 6008.0
-    state = pacer.snapshot("test-model")["provider_state"]
-    assert state["limit_tokens"] == 100
-    assert state["remaining_tokens"] == 0
