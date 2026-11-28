@@ -589,7 +589,7 @@ GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS = _get_int(
 # contribute to the per-minute token allowance.
 GROQ_OVERVIEW_MAX_COMPLETION_TOKENS = _get_int(
     "GROQ_OVERVIEW_MAX_COMPLETION_TOKENS",
-    500,
+    900,
 )
 
 # Groq Free currently publishes 8K TPM for GPT-OSS 20B. Response headers
