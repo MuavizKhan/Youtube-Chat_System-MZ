@@ -2164,17 +2164,7 @@ function sendMessage() {
     // from modifying the current chat state.
     const requestId = ++activeRequestId;
 
-    try {
-        sendExtensionMessage(
-            {
-                type: "chat",
-                video_id: requestedVideoId,
-                question,
-                history: conversationHistory.slice(
-                    -MAX_CONVERSATION_HISTORY
-                )
-            },
-            (response, runtimeError) => {
+    const handleChatResponse = (response, runtimeError) => {
 
                 if (runtimeError) {
                     if (requestId === activeRequestId) {
@@ -2303,8 +2293,9 @@ function sendMessage() {
                     chatBody.scrollTop =
                         chatBody.scrollHeight;
                 }
-            },
-            (notice) => {
+    };
+
+    const handleChatJobUnavailable = (notice) => {
                 if (requestId !== activeRequestId) {
                     return;
                 }
@@ -2321,7 +2312,84 @@ function sendMessage() {
                 if (sendButton) {
                     sendButton.disabled = true;
                 }
+            };
+
+    const pollChatJob = (jobId, delayMs = 5000) => {
+        if (
+            requestId !== activeRequestId ||
+            requestedVideoId !== getVideoId()
+        ) {
+            return;
+        }
+
+        aiMessage.textContent = "Preparing a chronological summary from the full transcript...";
+        updateHeaderStatus("ready", "The full-video summary is being prepared.");
+
+        setTimeout(() => {
+            if (
+                requestId !== activeRequestId ||
+                requestedVideoId !== getVideoId()
+            ) {
+                return;
             }
+
+            sendExtensionMessage(
+                {
+                    type: "chat_job_status",
+                    video_id: requestedVideoId,
+                    job_id: jobId
+                },
+                (statusResponse, runtimeError) => {
+                    if (
+                        requestId !== activeRequestId ||
+                        requestedVideoId !== getVideoId()
+                    ) {
+                        return;
+                    }
+
+                    if (statusResponse?.success && statusResponse.pending) {
+                        aiMessage.textContent = statusResponse.status === "running"
+                            ? "Reading and verifying the full video chronologically..."
+                            : "Your video summary is queued and will start automatically...";
+                        pollChatJob(
+                            jobId,
+                            Math.min(10000, Math.ceil(delayMs * 1.4))
+                        );
+                        return;
+                    }
+
+                    handleChatResponse(statusResponse, runtimeError);
+                },
+                handleChatJobUnavailable
+            );
+        }, delayMs);
+    };
+
+    try {
+        sendExtensionMessage(
+            {
+                type: "chat",
+                video_id: requestedVideoId,
+                question,
+                history: conversationHistory.slice(
+                    -MAX_CONVERSATION_HISTORY
+                )
+            },
+            (response, runtimeError) => {
+                if (
+                    response?.success === true &&
+                    response.pending === true &&
+                    typeof response.job_id === "string" &&
+                    response.job_id
+                ) {
+                    pollChatJob(response.job_id);
+                    return;
+                }
+
+                handleChatResponse(response, runtimeError);
+            },
+            handleChatJobUnavailable
+        );
         );
     } catch (error) {
         if (requestId === activeRequestId) {
