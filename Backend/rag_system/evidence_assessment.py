@@ -17,6 +17,8 @@ import re
 import time
 from typing import Any, Sequence
 
+from .provider_retry_budget import reserve_groq_retry_wait
+
 from .evidence_contracts import (
     EvidenceAssessment,
     EvidenceCoverageSummary,
@@ -992,6 +994,14 @@ def assess_evidence_support(
                 and cumulative_retry_wait_seconds + retry_delay
                 <= MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS
             )
+            if can_retry and not reserve_groq_retry_wait(retry_delay):
+                can_retry = False
+                logger.warning(
+                    "Groq request-wide retry wait budget exhausted during evidence "
+                    "assessment retry_after_seconds=%s waited_seconds=%.2f",
+                    retry_after,
+                    cumulative_retry_wait_seconds,
+                )
             if can_retry:
                 cumulative_retry_wait_seconds += retry_delay
                 logger.warning(
