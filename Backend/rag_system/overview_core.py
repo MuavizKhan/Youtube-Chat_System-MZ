@@ -8,7 +8,7 @@ from typing import Any, Sequence
 # Keep ordinary long videos fully represented while retaining hard upper bounds.
 MAX_SOURCE_CHARS = 80_000
 MAX_DOCUMENTS = 100
-MAX_SECTION_CHARS = 9_000
+MAX_SECTION_CHARS = 12_000
 MAX_SECTIONS = 10
 
 
