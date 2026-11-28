@@ -12092,6 +12092,238 @@ def _build_overview_continuation_plan(
     }
 
 
+def _verify_video_overview_claims(
+    *,
+    answer: str,
+    question: str,
+    video_id: str,
+    retrieved_results: list,
+    included_chunk_ids: list | None,
+    prompt_visible_context: str | None,
+    client: Any,
+    fallback_answer: str,
+    structured_claims: list[dict] | None,
+) -> dict:
+    """Verify primary overview points first; verify reserves only when needed."""
+    claims = [
+        dict(item)
+        for item in (structured_claims or [])
+        if isinstance(item, dict) and isinstance(item.get("text"), str)
+    ]
+    primary_claims = [
+        item for item in claims if item.get("is_backup") is not True
+    ]
+    reserve_claims = [
+        item for item in claims if item.get("is_backup") is True
+    ]
+    if not primary_claims and reserve_claims:
+        primary_claims, reserve_claims = reserve_claims, []
+
+    def run_assessment(candidate_claims: list[dict], candidate_answer: str) -> dict:
+        return verify_answer_claims(
+            answer=candidate_answer,
+            question=question,
+            video_id=video_id,
+            retrieved_results=retrieved_results,
+            included_chunk_ids=included_chunk_ids,
+            prompt_visible_context=prompt_visible_context,
+            client=client,
+            fallback_answer=fallback_answer,
+            structured_claims=candidate_claims,
+        )
+
+    primary_result = run_assessment(primary_claims, answer)
+    primary_result["overview_verification"] = {
+        "primary_claim_count": len(primary_claims),
+        "reserve_claim_count": len(reserve_claims),
+        "reserve_verification_attempted": False,
+        "reserve_verification_reason": "primary_assessment_incomplete",
+    }
+    primary_result["candidate_claim_count"] = len(claims)
+
+    if primary_result.get("status") != "completed":
+        return primary_result
+
+    primary_evidence = [
+        item for item in primary_result.get("claim_evidence", [])
+        if isinstance(item, dict)
+    ]
+    primary_all_supported = (
+        len(primary_evidence) == len(primary_claims)
+        and all(item.get("status") == "supported" for item in primary_evidence)
+    )
+    if not reserve_claims or primary_all_supported:
+        primary_result["overview_verification"].update({
+            "reserve_verification_attempted": False,
+            "reserve_verification_reason": (
+                "all_primary_claims_supported"
+                if primary_all_supported
+                else "no_reserve_candidates"
+            ),
+        })
+        return primary_result
+
+    reserve_answer = "\n".join(
+        f"{index}. {item['text']}"
+        for index, item in enumerate(reserve_claims, start=1)
+    )
+    reserve_result = run_assessment(reserve_claims, reserve_answer)
+    reserve_result["overview_verification"] = {
+        "primary_claim_count": len(primary_claims),
+        "reserve_claim_count": len(reserve_claims),
+        "reserve_verification_attempted": True,
+        "reserve_verification_reason": "one_or_more_primary_claims_not_fully_supported",
+    }
+    reserve_result["candidate_claim_count"] = len(claims)
+
+    def number(value: Any) -> float:
+        return (
+            float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else 0.0
+        )
+
+    primary_request_count = int(primary_result.get("assessment_request_count", 0) or 0)
+    reserve_request_count = int(reserve_result.get("assessment_request_count", 0) or 0)
+    primary_elapsed_ms = number(primary_result.get("assessment_elapsed_ms"))
+    reserve_elapsed_ms = number(reserve_result.get("assessment_elapsed_ms"))
+    reserve_result["overview_verification"].update({
+        "primary_request_count": primary_request_count,
+        "reserve_request_count": reserve_request_count,
+        "primary_elapsed_ms": round(primary_elapsed_ms, 2),
+        "reserve_elapsed_ms": round(reserve_elapsed_ms, 2),
+    })
+    if reserve_result.get("status") != "completed":
+        reserve_result["assessment_request_count"] = (
+            primary_request_count + reserve_request_count
+        )
+        reserve_result["assessment_elapsed_ms"] = (
+            primary_elapsed_ms + reserve_elapsed_ms
+        )
+        reserve_result["assessment_batch_count"] = (
+            int(primary_result.get("assessment_batch_count", 0) or 0)
+            + int(reserve_result.get("assessment_batch_count", 0) or 0)
+        )
+        return reserve_result
+
+    reserve_evidence = [
+        {**item, "claim_index": len(primary_claims) + int(item["claim_index"])}
+        for item in reserve_result.get("claim_evidence", [])
+        if isinstance(item, dict) and isinstance(item.get("claim_index"), int)
+    ]
+    combined_evidence = sorted(
+        [*primary_evidence, *reserve_evidence],
+        key=lambda item: item.get("claim_index", 0),
+    )
+    statuses = [item.get("status") for item in combined_evidence]
+    primary_result["claim_evidence"] = combined_evidence
+    primary_result["claim_count"] = len(primary_claims) + len(reserve_claims)
+    primary_result["truncated_claim_count"] = (
+        int(primary_result.get("truncated_claim_count", 0) or 0)
+        + int(reserve_result.get("truncated_claim_count", 0) or 0)
+    )
+    primary_result["supported_claim_count"] = sum(
+        status == "supported" for status in statuses
+    )
+    primary_result["partial_claim_count"] = sum(
+        status == "partial" for status in statuses
+    )
+    primary_result["removed_claim_count"] = sum(
+        status not in {"supported", "partial"} for status in statuses
+    )
+    primary_result["supported_chunk_ids"] = list(dict.fromkeys(
+        [
+            *primary_result.get("supported_chunk_ids", []),
+            *reserve_result.get("supported_chunk_ids", []),
+        ]
+    ))
+    primary_result["assessment_batch_count"] = (
+        int(primary_result.get("assessment_batch_count", 0) or 0)
+        + int(reserve_result.get("assessment_batch_count", 0) or 0)
+    )
+    primary_result["assessment_request_count"] = (
+        primary_request_count + reserve_request_count
+    )
+    primary_result["assessment_elapsed_ms"] = (
+        primary_elapsed_ms + reserve_elapsed_ms
+    )
+    for key in (
+        "assessment_input_chars_total",
+        "assessment_input_tokens",
+        "assessment_output_tokens",
+        "assessment_output_chars",
+        "assessment_compaction_attempts",
+        "assessment_passage_total_count",
+        "assessment_aspect_count",
+        "assessment_assessed_claim_count",
+    ):
+        primary_result[key] = (
+            int(primary_result.get(key, 0) or 0)
+            + int(reserve_result.get(key, 0) or 0)
+        )
+    primary_result["assessment_selected_chunk_ids"] = list(dict.fromkeys(
+        [
+            *primary_result.get("assessment_selected_chunk_ids", []),
+            *reserve_result.get("assessment_selected_chunk_ids", []),
+        ]
+    ))
+    primary_batches = primary_result.get("assessment_batches", [])
+    reserve_batches = reserve_result.get("assessment_batches", [])
+    primary_result["assessment_batches"] = [
+        {"phase": "primary", **item}
+        for item in primary_batches if isinstance(item, dict)
+    ] + [
+        {"phase": "reserve", **item}
+        for item in reserve_batches if isinstance(item, dict)
+    ]
+    primary_result["assessment_finish_reason"] = reserve_result.get(
+        "assessment_finish_reason",
+        primary_result.get("assessment_finish_reason"),
+    )
+    primary_result["assessment_validation_error_code"] = (
+        primary_result.get("assessment_validation_error_code")
+        or reserve_result.get("assessment_validation_error_code")
+    )
+    primary_result["overview_verification"].update({
+        "reserve_verification_attempted": True,
+        "reserve_verification_reason": "one_or_more_primary_claims_not_fully_supported",
+        "primary_request_count": primary_request_count,
+        "reserve_request_count": reserve_request_count,
+        "primary_elapsed_ms": round(primary_elapsed_ms, 2),
+        "reserve_elapsed_ms": round(reserve_elapsed_ms, 2),
+    })
+    return primary_result
+
+
+def _require_completed_overview_audit(
+    retrieval_trace: dict,
+    verification: dict,
+) -> None:
+    """Never return a whole-video overview draft as a successful verified answer."""
+    if retrieval_trace.get("route") != "video_wide_overview":
+        return
+    if verification.get("status") == "completed":
+        return
+
+    status = str(verification.get("status") or "not_performed")
+    error_code = verification.get("error_code")
+    logger.error(
+        "Whole-video overview withheld because claim verification did not complete "
+        "status=%s error_code=%s",
+        status,
+        error_code,
+    )
+    if error_code == "provider_rate_limited":
+        raise ProviderRateLimitError(
+            retry_after_seconds=verification.get("retry_after_seconds")
+        )
+    raise RuntimeError(
+        "Whole-video overview was withheld because transcript-evidence "
+        f"verification did not complete (status={status}, "
+        f"error_code={error_code or 'unknown'})."
+    )
+
+
 # ============================================================
 # 11. PUBLIC RAG FUNCTION
 # ============================================================
@@ -12310,17 +12542,39 @@ def answer_question(
     if not isinstance(verification_chunk_ids, (list, tuple, set)):
         verification_chunk_ids = context_budget.get("included_chunk_ids")
 
-    verification = verify_answer_claims(
-        answer=result.get("answer", ""),
-        question=question,
-        video_id=video_id,
-        retrieved_results=verification_results,
-        included_chunk_ids=verification_chunk_ids,
-        prompt_visible_context=result.get("prompt_visible_context"),
-        client=generation_client,
-        fallback_answer=FALLBACK_ANSWER,
-        structured_claims=result.get("verification_claims"),
+    overview_retrieval_trace = result.get("retrieval_trace", {})
+    is_video_wide_overview = (
+        isinstance(overview_retrieval_trace, dict)
+        and overview_retrieval_trace.get("route") == "video_wide_overview"
     )
+    if is_video_wide_overview:
+        verification = _verify_video_overview_claims(
+            answer=result.get("answer", ""),
+            question=question,
+            video_id=video_id,
+            retrieved_results=verification_results,
+            included_chunk_ids=verification_chunk_ids,
+            prompt_visible_context=result.get("prompt_visible_context"),
+            client=generation_client,
+            fallback_answer=FALLBACK_ANSWER,
+            structured_claims=result.get("verification_claims"),
+        )
+        _require_completed_overview_audit(
+            overview_retrieval_trace,
+            verification,
+        )
+    else:
+        verification = verify_answer_claims(
+            answer=result.get("answer", ""),
+            question=question,
+            video_id=video_id,
+            retrieved_results=verification_results,
+            included_chunk_ids=verification_chunk_ids,
+            prompt_visible_context=result.get("prompt_visible_context"),
+            client=generation_client,
+            fallback_answer=FALLBACK_ANSWER,
+            structured_claims=result.get("verification_claims"),
+        )
     if verification.get("performed"):
         generation_trace["answer_evidence_verification"] = {
             key: value
