@@ -13554,3 +13554,43 @@ def test_verified_end_cap_finding_passes_acceptance_guard():
         {"status": "completed", "finding_count": 1},
         {"end_cap_eligible": True, "end_cap_covered": True},
     )
+
+
+@pytest.mark.regression
+def test_unavailable_end_cap_scan_returns_rate_limit_with_retry_after():
+    with pytest.raises(
+        chain.ProviderRateLimitError,
+        match="Retry after about 23 seconds",
+    ) as captured:
+        chain._require_verified_overview_end_cap(
+            {
+                "status": "skipped_terminal_scan_unavailable",
+                "finding_count": 0,
+            },
+            {
+                "end_cap_eligible": True,
+                "end_cap_covered": False,
+            },
+            terminal_scan={
+                "status": "unavailable",
+                "retry_after_seconds": 23.0,
+            },
+        )
+    assert captured.value.retry_after_seconds == 23.0
+
+
+@pytest.mark.regression
+def test_unavailable_end_cap_scan_without_retry_after_fails_closed():
+    with pytest.raises(RuntimeError, match="final transcript passages could not be inspected"):
+        chain._require_verified_overview_end_cap(
+            {"status": "unavailable", "finding_count": 0},
+            {"end_cap_eligible": True, "end_cap_covered": False},
+        )
+
+
+@pytest.mark.regression
+def test_completed_end_cap_scan_with_no_distinct_closing_finding_is_valid():
+    chain._require_verified_overview_end_cap(
+        {"status": "completed", "finding_count": 0},
+        {"end_cap_eligible": True, "end_cap_covered": False},
+    )
