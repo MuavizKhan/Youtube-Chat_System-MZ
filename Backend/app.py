@@ -1393,6 +1393,9 @@ def chat_job_status(
     response: Response,
 ):
     """Return the durable state/result for a queued whole-video answer."""
+    recovered_jobs = _CHAT_JOB_STORE.recover_expired()
+    if recovered_jobs:
+        _dispatch_available_chat_jobs()
     job = _CHAT_JOB_STORE.get(job_id)
     if job is None:
         raise HTTPException(
