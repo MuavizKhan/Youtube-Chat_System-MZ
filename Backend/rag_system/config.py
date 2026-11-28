@@ -194,7 +194,7 @@ if not PROVIDER_QUOTA_DB_PATH.is_absolute():
 
 CHAT_JOB_LEASE_SECONDS = _get_int(
     "CHAT_JOB_LEASE_SECONDS",
-    7200,
+    180,
 )
 
 CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS = _get_int(
