@@ -40,7 +40,7 @@ Processing is bounded:
   Sampling is time-based rather than based only on chunk order.
 - Selected source passages are grouped into chronological, equal-duration
   timeline sections (normally matching the requested point count), while each
-  section stays within the 9,000-character input bound. At most 10 map sections
+  section stays within the 12,000-character input bound. At most 10 map sections
   are processed.
 - Multi-section videos use map/reduce: each non-empty timeline section produces
   up to three source-ID-linked findings, followed by chronological synthesis.
@@ -55,10 +55,12 @@ Processing is bounded:
   If neither this scan nor the section findings cites the latest of the final
   two eligible closing passages, a focused end-cap scan inspects both exact
   passages and can add one further candidate within the same twenty-one-claim
-  budget. Its candidate is not trusted until claim-level transcript verification
-  succeeds. Diagnostics distinguish broad tail coverage from verified evidence
-  in the final two passages; an earlier point in the closing window alone does
-  not count as actual end-cap representation.
+  budget. Its candidate evidence IDs and resolved source-chunk IDs are recorded
+  separately from the passages that were merely inspected. A candidate is not
+  trusted until claim-level transcript verification succeeds. Diagnostics
+  distinguish broad tail coverage from verified evidence in the final two
+  passages; an earlier point in the closing window alone does not count as
+  actual end-cap representation.
   When long transcripts must be sampled, the latest twenty chunks are reserved
   first (subject to the source-character budget) so the terminal scan does not
   depend on a single endpoint chunk.
@@ -80,17 +82,22 @@ Processing is bounded:
   two eligible transcript passages, not a timestamp interval that could count
   an unrelated overlapping chunk. The terminal window is anchored to the full indexed
   transcript duration, never the latest selected evidence timestamp. If the supplementary
-  scan is rate-limited or malformed, the main verified overview is preserved
-  and the response discloses that the ending may need a focused follow-up.
+  scan is rate-limited or malformed, a successfully verified main overview is
+  preserved and the response discloses that the ending may need a focused
+  follow-up. A substantive end-cap finding that was generated but cannot be
+  retained as a fully verified final point causes the overview to be withheld.
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
   the vocabulary of the claims that cite them. Mapped alternatives are
   reserved across the timeline before primary points are audited. The reserve
   uses the remaining claim-audit budget, so primary points plus alternatives
-  never exceed twenty-one candidates, with up to two distinct reserve candidates per requested timeline bucket. This lets fully supported alternatives
-  replace partial or unsupported primary points even when the primary list
-  already fills the requested count.
+  never exceed twenty-one candidates, with up to two distinct reserve candidates
+  per requested timeline bucket. Primary output points are verified first;
+  reserve candidates are assessed only when a primary point is unsupported or
+  partial, the requested point count is short, or a substantive end-cap finding
+  lacks verified source coverage. This avoids spending provider calls on reserve
+  candidates when the primary answer already passes all acceptance checks.
 - The map candidate coverage, selected-point coverage, and final verified
   answer coverage are reported separately. Final coverage is calculated only
   from evidence IDs attached to claims that survive verification. Same-source
@@ -124,9 +131,12 @@ selected fraction are kept in diagnostics so coverage limitations are visible.
 Compound and fact-sensitive answers are audited after generation using the
 existing evidence-assessment contracts. Each assessment request is bounded to
 eight aspects, 12 evidence passages, and 8,000 input characters. Video overview
-answers support up to ten requested points plus up to two source-linked reserve
-candidates per requested timeline bucket, within a twenty-one-candidate verification
-ceiling and three bounded assessment batches. Ordinary unstructured answers
+answers retain up to ten requested points plus source-linked reserve candidates
+within a twenty-one-candidate ceiling. The audit verifies primary output points
+first and only assesses reserves when support, point-count, or end-cap coverage
+requires a replacement. With eight aspects per assessment request, this is at
+most three requests for a seven-point overview and four requests for a ten-point
+overview in the full reserve-replacement case. Ordinary unstructured answers
 retain the existing fourteen-claim verification ceiling. Trivial short
 non-overview answers avoid an additional model call.
 
@@ -139,12 +149,12 @@ The audit is restricted to:
 Overview points provide their own evidence chunk IDs. Those sources are
 prioritized under the passage ceiling, and each excerpt is selected against
 the claims that cite it. Other answer types retain bounded claim-aware source
-selection. Up to twenty-one overview candidates can be audited in three bounded
-assessment batches, with at most eight aspects per provider request. Reserve
-selection aims to retain two independent alternatives per requested timeline
-bucket, so one unsupported reserve does not exhaust that interval's fallback
-capacity. No requested point is silently dropped
-merely because it exceeds one request's aspect limit.
+selection. Each assessment request contains at most eight aspects. Reserve
+selection retains up to two independent alternatives per requested timeline
+bucket, but those alternatives are not sent to the provider unless a primary
+point needs replacement or the final acceptance coverage is incomplete. No
+requested point is silently dropped merely because it exceeds one request's
+aspect limit.
 
 A chunk selected for indexing but omitted from the relevant model prompt cannot
 verify an answer. Text outside a prompt-visible excerpt cannot verify a claim.
@@ -162,8 +172,14 @@ Supported chunk IDs determine which source links and timestamps are returned.
 Claim-to-chunk support is retained in diagnostics.
 
 A provider outage, quota error, or invalid assessment response is explicitly
-recorded as an unavailable verification status. It is not labelled as verified
-and does not trigger destructive answer rewriting.
+recorded as an unavailable verification status. A whole-video overview fails
+closed rather than returning its unverified draft as a successful answer. A
+provider rate limit returns HTTP 429 with the provider's Retry-After value;
+other incomplete overview verification returns an upstream service error.
+A request-scoped Groq retry budget caps cumulative Retry-After/backoff waiting
+across generation and evidence assessment at 60 seconds, rather than applying
+the same wait allowance independently to every model call. The ordinary
+question-answering route remains separate from this whole-video acceptance rule.
 
 This checks whether the transcript supports what the answer says. It does not
 authenticate a paper, independently fact-check a speaker, or establish that a
