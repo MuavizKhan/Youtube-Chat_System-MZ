@@ -8848,7 +8848,7 @@ def generate_with_groq(
                 "Groq generation may be truncated by completion limit "
                 "completion_tokens=%s completion_token_limit=%s",
                 completion_tokens,
-                GROQ_MAX_TOKENS,
+                completion_token_limit,
             )
 
         answer = extract_chat_completion_answer(response)
