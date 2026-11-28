@@ -12649,11 +12649,15 @@ def answer_question(
         if not isinstance(end_cap_scan_for_audit, dict):
             end_cap_scan_for_audit = {}
         required_end_cap_chunk_ids = (
-            [
-                str(value)
-                for value in end_cap_scan_for_audit.get("source_chunk_ids", [])
-                if value is not None
-            ]
+            list(dict.fromkeys(
+                str(chunk_id)
+                for finding_chunk_ids in end_cap_scan_for_audit.get(
+                    "finding_source_chunk_ids", []
+                )
+                if isinstance(finding_chunk_ids, (list, tuple, set))
+                for chunk_id in finding_chunk_ids
+                if chunk_id is not None
+            ))
             if end_cap_scan_for_audit.get("finding_count", 0) > 0
             else []
         )
