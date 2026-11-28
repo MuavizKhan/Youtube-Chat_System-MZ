@@ -12358,22 +12358,44 @@ def _verify_video_overview_claims(
 def _require_verified_overview_end_cap(
     end_cap_scan: dict,
     terminal_coverage: dict,
+    terminal_scan: dict | None = None,
 ) -> None:
-    """Reject a generated substantive ending that did not survive evidence verification."""
+    """Require a completed end-cap check and verified evidence for substantive findings."""
     if not isinstance(end_cap_scan, dict) or not isinstance(terminal_coverage, dict):
         return
     if (
-        end_cap_scan.get("status") != "completed"
-        or end_cap_scan.get("finding_count", 0) <= 0
-        or terminal_coverage.get("end_cap_eligible") is not True
+        terminal_coverage.get("end_cap_eligible") is not True
         or terminal_coverage.get("end_cap_covered") is True
     ):
         return
-    raise RuntimeError(
-        "Whole-video overview was withheld because a substantive end-cap finding "
-        "was generated but no fully verified point retained evidence from the "
-        "final transcript passages."
-    )
+
+    status = end_cap_scan.get("status")
+    finding_count = end_cap_scan.get("finding_count", 0)
+    if status == "completed" and finding_count == 0:
+        return
+
+    if status in {"unavailable", "skipped_terminal_scan_unavailable"}:
+        retry_after = end_cap_scan.get("retry_after_seconds")
+        if retry_after is None and isinstance(terminal_scan, dict):
+            retry_after = terminal_scan.get("retry_after_seconds")
+        if (
+            isinstance(retry_after, (int, float))
+            and not isinstance(retry_after, bool)
+            and math.isfinite(float(retry_after))
+            and retry_after >= 0
+        ):
+            raise ProviderRateLimitError(retry_after_seconds=float(retry_after))
+        raise RuntimeError(
+            "Whole-video overview was withheld because the final transcript "
+            "passages could not be inspected by the end-cap scan."
+        )
+
+    if status == "completed" and finding_count > 0:
+        raise RuntimeError(
+            "Whole-video overview was withheld because a substantive end-cap finding "
+            "was generated but no fully verified point retained evidence from the "
+            "final transcript passages."
+        )
 
 
 def _require_completed_overview_audit(
@@ -12947,10 +12969,11 @@ def answer_question(
                         and terminal_tail_coverage.get("end_cap_eligible") is True
                         and terminal_tail_coverage.get("end_cap_covered") is not True
                     )
-                    if end_cap_findings_unverified:
+                    if end_cap_findings_unverified or end_cap_scan_unavailable:
                         _require_verified_overview_end_cap(
                             end_cap_scan,
                             terminal_tail_coverage,
+                            terminal_scan=terminal_scan,
                         )
                     if (
                         terminal_scan_incomplete
