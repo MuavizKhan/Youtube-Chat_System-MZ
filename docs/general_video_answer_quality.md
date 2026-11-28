@@ -98,9 +98,11 @@ Processing is bounded:
   never exceed twenty-one candidates, with up to two distinct reserve candidates
   per requested timeline bucket. Primary output points are verified first;
   reserve candidates are assessed only when a primary point is unsupported or
-  partial, the requested point count is short, or a substantive end-cap finding
-  lacks verified source coverage. This avoids spending provider calls on reserve
-  candidates when the primary answer already passes all acceptance checks.
+  partial, the requested point count is short, distinct primary points do not
+  fill the requested timeline buckets after deduplication, or a substantive
+  end-cap finding lacks verified source coverage. This avoids spending provider
+  calls on reserve candidates when the primary answer already passes all
+  acceptance checks.
 - The map candidate coverage, selected-point coverage, and final verified
   answer coverage are reported separately. Final coverage is calculated only
   from evidence IDs attached to claims that survive verification. Same-source
