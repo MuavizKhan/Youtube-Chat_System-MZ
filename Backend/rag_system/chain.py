@@ -12121,8 +12121,11 @@ def _verify_video_overview_claims(
     structured_claims: list[dict] | None,
     requested_point_count: int | None = None,
     required_end_cap_chunk_ids: list[str] | None = None,
+    timeline_start: float | None = None,
+    timeline_end: float | None = None,
+    timeline_bucket_count: int | None = None,
 ) -> dict:
-    """Verify primary points first; verify reserves if support, count, or ending is incomplete."""
+    """Verify primary points first; verify reserves if support, count, distribution, or ending is incomplete."""
     claims = [
         dict(item)
         for item in (structured_claims or [])
@@ -12184,19 +12187,55 @@ def _verify_video_overview_claims(
         requested_point_count is None
         or len(primary_claims) >= requested_point_count
     )
+    primary_selected_point_count = len(primary_claims)
+    primary_selection_complete = requested_point_count is None
+    if requested_point_count is not None:
+        primary_documents = [
+            pair[0]
+            for pair in retrieved_results
+            if isinstance(pair, (tuple, list)) and pair
+        ]
+        primary_selected_points = (
+            select_verified_overview_points(
+                primary_claims,
+                primary_evidence,
+                primary_documents,
+                requested_count=requested_point_count,
+                timeline_start=timeline_start,
+                timeline_end=timeline_end,
+                bucket_count=timeline_bucket_count,
+            )
+            if (
+                isinstance(timeline_bucket_count, int)
+                and not isinstance(timeline_bucket_count, bool)
+                and timeline_bucket_count > 0
+                and isinstance(timeline_start, (int, float))
+                and isinstance(timeline_end, (int, float))
+            )
+            else []
+        )
+        primary_selected_point_count = len(primary_selected_points)
+        primary_selection_complete = (
+            primary_selected_point_count >= requested_point_count
+        )
     primary_all_supported = (
         len(primary_evidence) == len(primary_claims)
         and all(item.get("status") == "supported" for item in primary_evidence)
         and primary_point_count_satisfied
+        and primary_selection_complete
         and primary_end_cap_covered
     )
     primary_result["overview_verification"].update({
         "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_selected_point_count": primary_selected_point_count,
+        "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     })
     if not primary_point_count_satisfied:
         reserve_reason = "primary_candidate_count_below_requested"
+    elif not primary_selection_complete:
+        reserve_reason = "primary_verified_points_do_not_cover_requested_timeline"
     elif not primary_end_cap_covered:
         reserve_reason = "primary_end_cap_not_covered"
     elif not primary_all_supported:
@@ -12228,6 +12267,8 @@ def _verify_video_overview_claims(
         "reserve_verification_attempted": True,
         "reserve_verification_reason": reserve_reason,
         "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_selected_point_count": primary_selected_point_count,
+        "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     }
@@ -12345,6 +12386,8 @@ def _verify_video_overview_claims(
         "reserve_verification_attempted": True,
         "reserve_verification_reason": reserve_reason,
         "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_selected_point_count": primary_selected_point_count,
+        "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
         "primary_request_count": primary_request_count,
@@ -12703,6 +12746,21 @@ def answer_question(
             structured_claims=result.get("verification_claims"),
             requested_point_count=overview_stats_for_audit.get("requested_point_count"),
             required_end_cap_chunk_ids=required_end_cap_chunk_ids,
+            timeline_start=(
+                overview_stats_for_audit.get("timeline_coverage", {}).get("start_seconds")
+                if isinstance(overview_stats_for_audit.get("timeline_coverage"), dict)
+                else None
+            ),
+            timeline_end=(
+                overview_stats_for_audit.get("timeline_coverage", {}).get("end_seconds")
+                if isinstance(overview_stats_for_audit.get("timeline_coverage"), dict)
+                else None
+            ),
+            timeline_bucket_count=(
+                overview_stats_for_audit.get("timeline_coverage", {}).get("bucket_count")
+                if isinstance(overview_stats_for_audit.get("timeline_coverage"), dict)
+                else None
+            ),
         )
         _require_completed_overview_audit(
             overview_retrieval_trace,
