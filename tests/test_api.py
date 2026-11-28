@@ -858,6 +858,7 @@ def test_chat_job_status_returns_persisted_result(client, monkeypatch):
         app_module,
         "_CHAT_JOB_STORE",
         SimpleNamespace(
+            recover_expired=lambda: 0,
             get=lambda _job_id: SimpleNamespace(
                 job_id="b" * 32,
                 video_id=VALID_VIDEO_ID,
