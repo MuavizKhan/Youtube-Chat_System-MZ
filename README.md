@@ -177,6 +177,21 @@ Useful endpoints:
 - `http://127.0.0.1:8000/ready`
 - `http://127.0.0.1:8000/docs`
 
+### Phase 13 whole-video acceptance on Groq Free
+
+The quota-aware overview path is covered by a durable job endpoint. After the
+backend and extension are updated, run the checked-in acceptance script from
+the repository root:
+
+```powershell
+.\scripts\phase13_free_plan_overview_acceptance.ps1
+```
+
+It submits the seven-point whole-video request, polls the durable job until
+completion, and then checks claim-audit status, full timeline coverage,
+verified point count, and actual end-cap representation. It does not weaken
+the answer-quality gates if the job cannot complete.
+
 ### Chrome extension
 
 1. Open `chrome://extensions`.
