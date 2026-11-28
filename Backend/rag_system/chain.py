@@ -12512,6 +12512,11 @@ def _require_completed_overview_audit(
         raise ProviderRateLimitError(
             retry_after_seconds=verification.get("retry_after_seconds")
         )
+    if error_code == "ai_provider_daily_quota_exhausted":
+        raise RuntimeError(
+            "Groq daily token quota is exhausted for the configured model. "
+            "Wait until the daily quota resets before retrying this whole-video summary."
+        )
     raise RuntimeError(
         "Whole-video overview was withheld because transcript-evidence "
         f"verification did not complete (status={status}, "
