@@ -819,6 +819,7 @@ def test_groq_assessment_retry_wait_is_bounded(monkeypatch):
     assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
     assert result.diagnostics.error_code == "provider_rate_limited"
     assert result.diagnostics.request_count == 2
+    assert result.diagnostics.retry_after_seconds == 20.0
     assert len(completions.calls) == 2
     assert sleeps == [20.0]
     assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
