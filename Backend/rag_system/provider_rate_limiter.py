@@ -125,7 +125,8 @@ class GroqTokenPacer:
                     reservation_id TEXT PRIMARY KEY,
                     model TEXT NOT NULL,
                     created_at REAL NOT NULL,
-                    reserved_tokens INTEGER NOT NULL
+                    reserved_tokens INTEGER NOT NULL,
+                    completed_at REAL
                 )
                 """
             )
@@ -135,6 +136,16 @@ class GroqTokenPacer:
                 ON groq_token_reservations(model, created_at)
                 """
             )
+            reservation_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(groq_token_reservations)"
+                ).fetchall()
+            }
+            if "completed_at" not in reservation_columns:
+                connection.execute(
+                    "ALTER TABLE groq_token_reservations ADD COLUMN completed_at REAL"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS groq_token_quota_state (
@@ -194,7 +205,10 @@ class GroqTokenPacer:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
-                "DELETE FROM groq_token_reservations WHERE created_at <= ?",
+                """
+                DELETE FROM groq_token_reservations
+                WHERE created_at <= ? AND completed_at IS NOT NULL
+                """,
                 (now - 60.0,),
             )
             state = connection.execute(
@@ -203,9 +217,13 @@ class GroqTokenPacer:
             ).fetchone()
             rows = connection.execute(
                 """
-                SELECT created_at, reserved_tokens
+                SELECT created_at, reserved_tokens, completed_at
                 FROM groq_token_reservations
-                WHERE model = ? AND created_at > ?
+                WHERE model = ?
+                  AND (
+                    created_at > ?
+                    OR completed_at IS NULL
+                  )
                 ORDER BY created_at ASC
                 """,
                 (model, (state["observed_at"] if state is not None else now - 60.0)),
@@ -236,7 +254,19 @@ class GroqTokenPacer:
                     "SELECT * FROM groq_token_quota_state WHERE model = ?",
                     (model,),
                 ).fetchone()
-                rows = []
+                rows = connection.execute(
+                    """
+                    SELECT created_at, reserved_tokens, completed_at
+                    FROM groq_token_reservations
+                    WHERE model = ?
+                      AND (
+                        created_at > ?
+                        OR completed_at IS NULL
+                      )
+                    ORDER BY created_at ASC
+                    """,
+                    (model, now),
+                ).fetchall()
 
             limit_tokens = (
                 int(state["limit_tokens"])
@@ -260,9 +290,13 @@ class GroqTokenPacer:
                 # the first provider response and all subsequent header updates.
                 all_rows = connection.execute(
                     """
-                    SELECT created_at, reserved_tokens
+                    SELECT created_at, reserved_tokens, completed_at
                     FROM groq_token_reservations
-                    WHERE model = ? AND created_at > ?
+                    WHERE model = ?
+                      AND (
+                        created_at > ?
+                        OR completed_at IS NULL
+                      )
                     ORDER BY created_at ASC
                     """,
                     (model, now - 60.0),
@@ -283,12 +317,27 @@ class GroqTokenPacer:
                     wait_seconds = 60.0
                     for row in rows:
                         released += int(row["reserved_tokens"])
-                        wait_seconds = max(
-                            0.25,
-                            float(row["created_at"]) + 60.0 - now,
-                        )
+                        if row["completed_at"] is None:
+                            # An in-flight request may outlive its nominal
+                            # rolling-window expiry. Recheck periodically but
+                            # keep its reservation until a response is seen.
+                            row_wait = max(
+                                5.0,
+                                float(row["created_at"]) + 60.0 - now,
+                            )
+                        else:
+                            row_wait = max(
+                                0.25,
+                                float(row["created_at"]) + 60.0 - now,
+                            )
+                        wait_seconds = max(0.25, row_wait)
                         if released >= tokens_to_release:
                             break
+                elif state is not None and state["reset_at"] is None:
+                    wait_seconds = max(
+                        0.25,
+                        float(state["observed_at"]) + 60.0 - now,
+                    )
                 else:
                     wait_seconds = 60.0
                 connection.rollback()
@@ -297,14 +346,28 @@ class GroqTokenPacer:
             connection.execute(
                 """
                 INSERT INTO groq_token_reservations (
-                    reservation_id, model, created_at, reserved_tokens
+                    reservation_id, model, created_at, reserved_tokens, completed_at
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, NULL)
                 """,
                 (reservation_id, model, now, estimated_tokens),
             )
             connection.commit()
         return reservation_id, 0.0
+
+    def settle_reservation(self, reservation_id: str) -> None:
+        """Mark a provider request complete while retaining quota until its window expires."""
+        if not reservation_id or not isinstance(reservation_id, str):
+            return
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE groq_token_reservations
+                SET completed_at = ?
+                WHERE reservation_id = ? AND completed_at IS NULL
+                """,
+                (self.clock(), reservation_id),
+            )
 
     def acquire(
         self,
@@ -351,7 +414,11 @@ class GroqTokenPacer:
                 """
                 SELECT COUNT(*) AS count, COALESCE(SUM(reserved_tokens), 0) AS tokens
                 FROM groq_token_reservations
-                WHERE model = ? AND created_at > ?
+                WHERE model = ?
+                  AND (
+                    created_at > ?
+                    OR completed_at IS NULL
+                  )
                 """,
                 (model, self.clock() - 60.0),
             ).fetchone()
@@ -380,9 +447,10 @@ def groq_completion_create(
     messages = request_kwargs.get("messages") or []
     completion_ceiling = int(request_kwargs.get("max_completion_tokens") or 1)
 
+    reservation_id = None
     if APP_ENV != "test":
         estimated_tokens = estimate_request_tokens(messages, completion_ceiling)
-        _PACER.acquire(
+        reservation_id = _PACER.acquire(
             model,
             estimated_tokens,
             reserve_wait=reserve_wait,
@@ -412,3 +480,6 @@ def groq_completion_create(
             getattr(response, "headers", None),
         )
         raise
+    finally:
+        if reservation_id is not None:
+            _PACER.settle_reservation(reservation_id)
