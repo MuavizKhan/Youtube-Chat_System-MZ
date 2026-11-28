@@ -346,9 +346,26 @@ def understand_query(
         }
 
     try:
-        response = client.chat.completions.create(
-            **request_kwargs,
-        )
+        if LLM_PROVIDER == "groq":
+            from .provider_rate_limiter import (
+                ProviderQuotaWaitError,
+                groq_completion_create,
+            )
+            from .provider_retry_budget import reserve_groq_retry_wait
+
+            response = groq_completion_create(
+                client,
+                request_kwargs,
+                reserve_wait=reserve_groq_retry_wait,
+            )
+        else:
+            response = client.chat.completions.create(
+                **request_kwargs,
+            )
+    except ProviderQuotaWaitError:
+        # A whole-video background job may wait through a later quota window.
+        # Preserve the typed signal so the API can return/record a real 429.
+        raise
     except Exception as error:
         provider_label = (
             "Groq"
