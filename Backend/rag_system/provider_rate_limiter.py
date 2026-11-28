@@ -198,19 +198,39 @@ class GroqTokenPacer:
             limit_tokens = int(limit_value) if limit_value is not None else None
             remaining_tokens = int(remaining_value) if remaining_value is not None else None
         except (TypeError, ValueError, OverflowError):
-            return
+            limit_tokens = None
+            remaining_tokens = None
+
+        retry_after_seconds = parse_provider_duration(values.get("retry-after"))
         if (
             limit_tokens is None
             or remaining_tokens is None
             or limit_tokens <= 0
             or remaining_tokens < 0
         ):
-            return
+            if retry_after_seconds is None:
+                return
+            # Some 429 responses expose Retry-After but omit token-limit
+            # headers. Still block new calls until that provider window has
+            # elapsed, using the last known TPM or the configured Free-plan
+            # fallback instead of silently discarding the throttle signal.
+            with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT limit_tokens FROM groq_token_quota_state WHERE model = ?",
+                    (model,),
+                ).fetchone()
+            limit_tokens = (
+                int(existing["limit_tokens"])
+                if existing is not None
+                else self.default_tpm
+            )
+            remaining_tokens = 0
+
         reset_seconds = parse_provider_duration(reset_value)
         if reset_seconds is None:
             # A 429 response may omit the token-reset header while still
             # providing the authoritative Retry-After duration.
-            reset_seconds = parse_provider_duration(values.get("retry-after"))
+            reset_seconds = retry_after_seconds
         now = self.clock()
         reset_at = now + reset_seconds if reset_seconds is not None else None
         with self._connect() as connection:
