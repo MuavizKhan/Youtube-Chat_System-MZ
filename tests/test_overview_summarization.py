@@ -912,7 +912,9 @@ def test_overview_survives_unavailable_supplementary_terminal_scan():
             message.content for message in prompt.to_messages()
         )
         if "Inspect only the closing portion" in prompt_text:
-            raise RuntimeError("simulated provider throttle")
+            error = RuntimeError("simulated provider throttle")
+            error.retry_after_seconds = 19.0
+            raise error
         if "Synthesize the chronological section findings" in prompt_text:
             note_ids = re.findall(
                 r"\[evidence_ids: (P\d{5})\]",
@@ -942,6 +944,8 @@ def test_overview_survives_unavailable_supplementary_terminal_scan():
     scan = result["retrieval_trace"]["overview"]["terminal_tail_scan"]
     assert scan["status"] == "unavailable"
     assert scan["failure_type"] == "RuntimeError"
+    assert scan["retry_after_seconds"] == 19.0
+    assert scan["end_cap_scan"]["retry_after_seconds"] == 19.0
     assert result["retrieval_trace"]["route"] == "video_wide_overview"
     assert result["answer"]
 
