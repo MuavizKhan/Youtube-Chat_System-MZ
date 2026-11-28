@@ -9113,12 +9113,36 @@ def _is_explicit_overview_request(question: str) -> bool:
     ))
 
 
-def requires_async_chat_job(question: str) -> bool:
-    """Whether a question invokes the bounded whole-video map/reduce workflow."""
+def requires_async_chat_job(
+    question: str,
+    conversation_history: list[dict[str, str]] | None = None,
+) -> bool:
+    """Whether this turn invokes the bounded whole-video map/reduce workflow.
+
+    Explicit overview prompts, incomplete-overview continuations, and
+    presentation revisions of an earlier whole-video summary all stay on the
+    durable job path. This prevents follow-up wording from accidentally
+    returning to the synchronous provider retry budget.
+    """
+    if not isinstance(question, str):
+        return False
+    if is_overview_question(question) and _is_explicit_overview_request(question):
+        return True
+
+    if _build_overview_continuation_plan(
+        question,
+        conversation_history,
+    ) is not None:
+        return True
+
+    revision_plan = _build_answer_revision_plan(
+        question,
+        conversation_history,
+    )
     return bool(
-        isinstance(question, str)
-        and is_overview_question(question)
-        and _is_explicit_overview_request(question)
+        revision_plan is not None
+        and is_overview_question(revision_plan.get("question", ""))
+        and _is_explicit_overview_request(revision_plan.get("question", ""))
     )
 
 
