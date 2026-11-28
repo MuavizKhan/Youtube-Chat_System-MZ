@@ -12036,6 +12036,10 @@ def resolve_conversational_query_plan(
             "Follow-up resolution failed; using original question: %s",
             error,
         )
+    except ProviderQuotaWaitError as error:
+        raise ProviderRateLimitError(
+            retry_after_seconds=error.retry_after_seconds
+        ) from error
     except Exception:
         logger.exception("Unexpected follow-up resolution failure")
 
