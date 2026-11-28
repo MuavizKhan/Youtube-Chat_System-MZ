@@ -885,7 +885,14 @@ def test_chat_job_status_returns_404_for_unknown_job(client, monkeypatch):
     monkeypatch.setattr(
         app_module,
         "_CHAT_JOB_STORE",
-        type("EmptyStore", (), {"get": lambda self, _job_id: None})(),
+        type(
+            "EmptyStore",
+            (),
+            {
+                "recover_expired": lambda self: 0,
+                "get": lambda self, _job_id: None,
+            },
+        )(),
     )
 
     response = client.get(f"/chat/jobs/{'c' * 32}")
