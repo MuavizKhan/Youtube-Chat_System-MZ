@@ -22,8 +22,11 @@ Hugging Face
 Answer + Sources
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 import logging
+import socket
+import threading
 import time
 import uuid
 
@@ -35,7 +38,17 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Literal
 
-from Backend.rag_system.chain import ProviderRateLimitError, answer_question
+from Backend.rag_system.chain import (
+    ProviderRateLimitError,
+    answer_question,
+    requires_async_chat_job,
+)
+from Backend.rag_system.chat_jobs import (
+    COMPLETED as CHAT_JOB_COMPLETED,
+    FAILED as CHAT_JOB_FAILED,
+    ChatJob,
+    ChatJobStore,
+)
 from Backend.rag_system.retrieval import extract_video_id
 from Backend.rag_system.browser_transcripts import BrowserTranscriptSubmission
 from Backend.rag_system.feedback import (
@@ -55,6 +68,9 @@ from Backend.rag_system.index_service import (
 
 from Backend.rag_system.config import (
     CORS_ALLOW_ORIGINS,
+    CHAT_JOB_LEASE_SECONDS,
+    CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS,
+    INDEX_JOB_DB_PATH,
     GROQ_API_KEY,
     GROQ_MAX_RETRIES,
     GROQ_MAX_TOKENS,
@@ -128,9 +144,11 @@ async def lifespan(_app: FastAPI):
         )
 
     recover_index_jobs()
+    recover_chat_jobs()
     try:
         yield
     finally:
+        shutdown_chat_workers()
         shutdown_index_workers()
 
 
@@ -164,6 +182,177 @@ limiter = Limiter(
 app.state.limiter = limiter
 
 feedback_store = FeedbackStore()
+
+# Whole-video summaries may wait through several Groq token windows. Keep
+# their lifecycle outside the synchronous /chat request and serialize these
+# jobs so they do not compete with each other for the Free-plan TPM allowance.
+_CHAT_JOB_STORE = ChatJobStore(
+    INDEX_JOB_DB_PATH,
+    lease_seconds=CHAT_JOB_LEASE_SECONDS,
+)
+_CHAT_JOB_EXECUTOR: ThreadPoolExecutor | None = None
+_CHAT_JOB_EXECUTOR_LOCK = threading.Lock()
+_DISPATCHED_CHAT_JOBS: set[str] = set()
+_DISPATCHED_CHAT_JOBS_LOCK = threading.Lock()
+_CHAT_JOB_WORKER_ID = (
+    f"{socket.gethostname()}:{uuid.uuid4().hex[:12]}"
+)
+
+
+def _get_chat_job_executor() -> ThreadPoolExecutor:
+    global _CHAT_JOB_EXECUTOR
+    with _CHAT_JOB_EXECUTOR_LOCK:
+        if _CHAT_JOB_EXECUTOR is None:
+            _CHAT_JOB_EXECUTOR = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="whole-video-chat",
+            )
+        return _CHAT_JOB_EXECUTOR
+
+
+def _dispatch_chat_job(job_id: str) -> None:
+    with _DISPATCHED_CHAT_JOBS_LOCK:
+        if job_id in _DISPATCHED_CHAT_JOBS:
+            return
+        _DISPATCHED_CHAT_JOBS.add(job_id)
+    try:
+        _get_chat_job_executor().submit(_run_chat_job, job_id)
+    except Exception:
+        with _DISPATCHED_CHAT_JOBS_LOCK:
+            _DISPATCHED_CHAT_JOBS.discard(job_id)
+        logger.exception("Could not dispatch whole-video chat job job_id=%s", job_id)
+        raise
+
+
+def _dispatch_available_chat_jobs() -> None:
+    for job in _CHAT_JOB_STORE.list_queued(limit=32):
+        _dispatch_chat_job(job.job_id)
+
+
+def _on_chat_job_finished(job_id: str) -> None:
+    with _DISPATCHED_CHAT_JOBS_LOCK:
+        _DISPATCHED_CHAT_JOBS.discard(job_id)
+    try:
+        _dispatch_available_chat_jobs()
+    except Exception:
+        logger.exception("Could not dispatch queued whole-video chat jobs.")
+
+
+def _run_chat_job(job_id: str) -> None:
+    job = _CHAT_JOB_STORE.claim(job_id, worker_id=_CHAT_JOB_WORKER_ID)
+    if job is None:
+        _on_chat_job_finished(job_id)
+        return
+
+    heartbeat_stop = threading.Event()
+
+    def heartbeat() -> None:
+        while not heartbeat_stop.wait(30.0):
+            try:
+                if not _CHAT_JOB_STORE.renew_lease(
+                    job.job_id,
+                    worker_id=_CHAT_JOB_WORKER_ID,
+                ):
+                    logger.warning(
+                        "Whole-video chat job lease was lost job_id=%s",
+                        job.job_id,
+                    )
+                    return
+            except Exception:
+                logger.exception(
+                    "Whole-video chat job heartbeat failed job_id=%s",
+                    job.job_id,
+                )
+                return
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat,
+        name=f"chat-job-heartbeat-{job.job_id[:8]}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        result = answer_question(
+            video_reference=job.video_id,
+            question=job.question,
+            conversation_history=job.conversation_history,
+            max_retry_wait_seconds=CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS,
+        )
+        if not _CHAT_JOB_STORE.complete(
+            job.job_id,
+            worker_id=_CHAT_JOB_WORKER_ID,
+            result=result,
+        ):
+            logger.warning(
+                "Whole-video chat result was not persisted because its lease changed "
+                "job_id=%s",
+                job.job_id,
+            )
+        else:
+            logger.info(
+                "Whole-video chat job completed job_id=%s video_id=%s "
+                "elapsed_seconds=%.2f",
+                job.job_id,
+                job.video_id,
+                time.time() - job.created_at,
+            )
+    except ProviderRateLimitError as error:
+        retry_after = error.retry_after_seconds
+        _CHAT_JOB_STORE.fail(
+            job.job_id,
+            worker_id=_CHAT_JOB_WORKER_ID,
+            error_code="ai_provider_rate_limited",
+            error_message=(
+                "The provider quota window could not be reached within the "
+                "configured job wait budget. Submit the summary again to retry."
+            ),
+            retry_after_seconds=(
+                int(retry_after + 0.999)
+                if isinstance(retry_after, (int, float))
+                else None
+            ),
+        )
+        logger.warning(
+            "Whole-video chat job exhausted provider wait budget job_id=%s "
+            "retry_after_seconds=%s",
+            job.job_id,
+            retry_after,
+        )
+    except Exception:
+        _CHAT_JOB_STORE.fail(
+            job.job_id,
+            worker_id=_CHAT_JOB_WORKER_ID,
+            error_code="chat_job_failed",
+            error_message=(
+                "The whole-video answer could not be completed. "
+                "Check that the video index is ready and retry the request."
+            ),
+        )
+        logger.exception(
+            "Whole-video chat job failed job_id=%s video_id=%s",
+            job.job_id,
+            job.video_id,
+        )
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1.0)
+        _on_chat_job_finished(job_id)
+
+
+def recover_chat_jobs() -> None:
+    """Requeue expired job leases and resume queued work after backend startup."""
+    _CHAT_JOB_STORE.recover_expired()
+    _dispatch_available_chat_jobs()
+
+
+def shutdown_chat_workers() -> None:
+    """Stop local job dispatch without cancelling a persisted in-flight result."""
+    global _CHAT_JOB_EXECUTOR
+    with _CHAT_JOB_EXECUTOR_LOCK:
+        executor = _CHAT_JOB_EXECUTOR
+        _CHAT_JOB_EXECUTOR = None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=False)
 
 
 # ============================================================
@@ -604,6 +793,22 @@ class ChatResponse(BaseModel):
         ),
     )
 
+class ChatJobAcceptedResponse(BaseModel):
+    job_id: str
+    video_id: str
+    status: Literal["queued", "running"]
+    poll_url: str
+
+
+class ChatJobStatusResponse(BaseModel):
+    job_id: str
+    video_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    result: dict[str, Any] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    retry_after_seconds: int | None = None
+
 # ============================================================
 # ERROR RESPONSE MODEL
 # ============================================================
@@ -895,7 +1100,7 @@ def submit_feedback(
 
 @app.post(
     "/chat",
-    response_model=ChatResponse,
+    response_model=ChatResponse | ChatJobAcceptedResponse,
 )
 @limiter.limit(RATE_LIMIT)
 def chat(
@@ -948,6 +1153,29 @@ def chat(
                 ),
             },
         ) from error
+
+    if requires_async_chat_job(question):
+        job = _CHAT_JOB_STORE.enqueue(
+            video_id=canonical_video_id,
+            question=question,
+            conversation_history=conversation_history,
+        )
+        _dispatch_chat_job(job.job_id)
+        response.status_code = 202
+        logger.info(
+            "Whole-video chat job accepted request_id=%s job_id=%s "
+            "video_id=%s state=%s",
+            request.state.request_id,
+            job.job_id,
+            canonical_video_id,
+            job.status,
+        )
+        return ChatJobAcceptedResponse(
+            job_id=job.job_id,
+            video_id=canonical_video_id,
+            status=job.status,
+            poll_url=f"/chat/jobs/{job.job_id}",
+        )
 
     try:
 
@@ -1120,3 +1348,34 @@ def chat(
                 ),
             },
         ) from error
+
+
+@app.get(
+    "/chat/jobs/{job_id}",
+    response_model=ChatJobStatusResponse,
+)
+@limiter.limit(RATE_LIMIT)
+def chat_job_status(
+    job_id: str,
+    request: Request,
+    response: Response,
+):
+    """Return the durable state/result for a queued whole-video answer."""
+    job = _CHAT_JOB_STORE.get(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "chat_job_not_found",
+                "message": "The requested video-answer job was not found.",
+            },
+        )
+    return ChatJobStatusResponse(
+        job_id=job.job_id,
+        video_id=job.video_id,
+        status=job.status,
+        result=job.result,
+        error_code=job.error_code,
+        error_message=job.error_message,
+        retry_after_seconds=job.retry_after_seconds,
+    )
