@@ -1477,3 +1477,29 @@ def test_claim_verification_compacts_eight_claim_overview_below_live_budget(monk
     assert result["assessment_compaction_attempts"] == 9
     assert result["assessment_passage_excerpt_limit"] == 128
     assert len(result["supported_chunk_ids"]) == 8
+
+
+
+def test_whole_video_summary_follow_ups_stay_on_async_job_path():
+    original_question = "Summarize the entire video chronologically in 7 points."
+    partial_answer = (
+        "1. The video opens with the central question.\n"
+        "2. The speaker introduces the first argument."
+    )
+    history = [
+        {"role": "user", "content": original_question},
+        {"role": "assistant", "content": partial_answer},
+    ]
+
+    assert chain.requires_async_chat_job(
+        "Continue the summary with the remaining points.",
+        history,
+    )
+    assert chain.requires_async_chat_job(
+        "Make it simpler.",
+        history,
+    )
+    assert not chain.requires_async_chat_job(
+        "What is the central argument?",
+        history,
+    )
