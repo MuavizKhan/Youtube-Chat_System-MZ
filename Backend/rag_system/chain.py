@@ -12179,16 +12179,14 @@ def _verify_video_overview_claims(
         for value in (required_end_cap_chunk_ids or [])
         if value is not None
     }
-    primary_end_cap_covered = (
-        not required_end_cap_ids
-        or bool(primary_supported_chunk_ids.intersection(required_end_cap_ids))
-    )
     primary_point_count_satisfied = (
         requested_point_count is None
         or len(primary_claims) >= requested_point_count
     )
+    primary_selected_points = []
     primary_selected_point_count = len(primary_claims)
     primary_selection_complete = requested_point_count is None
+    primary_selected_chunk_ids = set(primary_supported_chunk_ids)
     if requested_point_count is not None:
         primary_documents = [
             pair[0]
@@ -12218,6 +12216,22 @@ def _verify_video_overview_claims(
         primary_selection_complete = (
             primary_selected_point_count >= requested_point_count
         )
+        # Ending coverage must be measured from points that the primary
+        # selector would actually return, not from supported candidates that
+        # may be omitted as duplicates or displaced during timeline balancing.
+        primary_selected_chunk_ids = {
+            str(chunk_id)
+            for item in primary_selected_points
+            if isinstance(item, dict)
+            for chunk_id in item.get("supporting_chunk_ids", [])
+            if chunk_id is not None
+        }
+    primary_selected_end_cap_chunk_ids = sorted(
+        primary_selected_chunk_ids.intersection(required_end_cap_ids)
+    )
+    primary_end_cap_covered = (
+        not required_end_cap_ids or bool(primary_selected_end_cap_chunk_ids)
+    )
     primary_all_supported = (
         len(primary_evidence) == len(primary_claims)
         and all(item.get("status") == "supported" for item in primary_evidence)
@@ -12230,6 +12244,7 @@ def _verify_video_overview_claims(
         "primary_selected_point_count": primary_selected_point_count,
         "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
+        "primary_selected_end_cap_chunk_ids": primary_selected_end_cap_chunk_ids,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     })
     if not primary_point_count_satisfied:
@@ -12270,6 +12285,7 @@ def _verify_video_overview_claims(
         "primary_selected_point_count": primary_selected_point_count,
         "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
+        "primary_selected_end_cap_chunk_ids": primary_selected_end_cap_chunk_ids,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     }
     reserve_result["candidate_claim_count"] = len(claims)
@@ -12389,6 +12405,7 @@ def _verify_video_overview_claims(
         "primary_selected_point_count": primary_selected_point_count,
         "primary_selection_complete": primary_selection_complete,
         "primary_end_cap_covered": primary_end_cap_covered,
+        "primary_selected_end_cap_chunk_ids": primary_selected_end_cap_chunk_ids,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
         "primary_request_count": primary_request_count,
         "reserve_request_count": reserve_request_count,
