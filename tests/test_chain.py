@@ -13594,3 +13594,89 @@ def test_completed_end_cap_scan_with_no_distinct_closing_finding_is_valid():
         {"status": "completed", "finding_count": 0},
         {"end_cap_eligible": True, "end_cap_covered": False},
     )
+
+
+@pytest.mark.regression
+def test_overview_verifies_reserves_when_supported_primary_points_share_one_timeline_bucket(
+    monkeypatch,
+):
+    calls = []
+    documents = [
+        doc("1", 0.0, 10.0, "Opening event."),
+        doc("2", 20.0, 30.0, "Another early event."),
+        doc("3", 80.0, 90.0, "Final interval event."),
+    ]
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        evidence_ids = (
+            [["1"], ["2"]]
+            if len(calls) == 1
+            else [["3"]]
+        )
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in evidence_ids for chunk_id in values
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": source_ids,
+                }
+                for index, source_ids in enumerate(evidence_ids, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "3"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First early point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Second early point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "A distinct development in the final timeline interval.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video in 2 points.",
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Opening event. Another early event. Final interval event.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        timeline_start=0.0,
+        timeline_end=100.0,
+        timeline_bucket_count=2,
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_selected_point_count"] == 1
+    assert result["overview_verification"]["primary_selection_complete"] is False
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert [item["status"] for item in result["claim_evidence"]] == [
+        "supported",
+        "supported",
+        "supported",
+    ]
