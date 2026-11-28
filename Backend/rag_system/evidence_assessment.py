@@ -40,7 +40,7 @@ DEFAULT_MAX_ASSESSMENT_ASPECTS = 8
 DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS = 1_800
 DEFAULT_MINIMUM_SUPPORT_SCORE = 0.75
 MAX_ASSESSMENT_SUMMARY_CHARS = 320
-MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 300.0
+MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 30.0
 logger = logging.getLogger(__name__)
 
 _LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
@@ -534,7 +534,11 @@ def _is_daily_token_quota_error(error: Exception) -> bool:
     """Daily token exhaustion cannot be resolved by retrying this request."""
     message = str(error).casefold()
     return (
-        ("tokens per day" in message or re.search(r"\btpd\b", message) is not None)
+        (
+            "tokens per day" in message
+            or "daily token" in message
+            or re.search(r"\btpd\b", message) is not None
+        )
         and (
             _provider_status_code(error) == 429
             or "rate limit" in message
