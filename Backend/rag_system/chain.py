@@ -12179,6 +12179,15 @@ def _verify_video_overview_claims(
         "primary_end_cap_covered": primary_end_cap_covered,
         "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     })
+    if not primary_point_count_satisfied:
+        reserve_reason = "primary_candidate_count_below_requested"
+    elif not primary_end_cap_covered:
+        reserve_reason = "primary_end_cap_not_covered"
+    elif not primary_all_supported:
+        reserve_reason = "primary_claims_not_fully_supported"
+    else:
+        reserve_reason = "all_primary_claims_supported"
+    primary_result["overview_verification"]["reserve_verification_reason"] = reserve_reason
     if not reserve_claims or primary_all_supported:
         primary_result["overview_verification"].update({
             "reserve_verification_attempted": False,
@@ -12320,6 +12329,27 @@ def _verify_video_overview_claims(
         "reserve_elapsed_ms": round(reserve_elapsed_ms, 2),
     })
     return primary_result
+
+
+def _require_verified_overview_end_cap(
+    end_cap_scan: dict,
+    terminal_coverage: dict,
+) -> None:
+    """Reject a generated substantive ending that did not survive evidence verification."""
+    if not isinstance(end_cap_scan, dict) or not isinstance(terminal_coverage, dict):
+        return
+    if (
+        end_cap_scan.get("status") != "completed"
+        or end_cap_scan.get("finding_count", 0) <= 0
+        or terminal_coverage.get("end_cap_eligible") is not True
+        or terminal_coverage.get("end_cap_covered") is True
+    ):
+        return
+    raise RuntimeError(
+        "Whole-video overview was withheld because a substantive end-cap finding "
+        "was generated but no fully verified point retained evidence from the "
+        "final transcript passages."
+    )
 
 
 def _require_completed_overview_audit(
@@ -12575,6 +12605,24 @@ def answer_question(
         and overview_retrieval_trace.get("route") == "video_wide_overview"
     )
     if is_video_wide_overview:
+        overview_stats_for_audit = overview_retrieval_trace.get("overview", {})
+        if not isinstance(overview_stats_for_audit, dict):
+            overview_stats_for_audit = {}
+        terminal_scan_for_audit = overview_stats_for_audit.get("terminal_tail_scan", {})
+        if not isinstance(terminal_scan_for_audit, dict):
+            terminal_scan_for_audit = {}
+        end_cap_scan_for_audit = terminal_scan_for_audit.get("end_cap_scan", {})
+        if not isinstance(end_cap_scan_for_audit, dict):
+            end_cap_scan_for_audit = {}
+        required_end_cap_chunk_ids = (
+            [
+                str(value)
+                for value in end_cap_scan_for_audit.get("source_chunk_ids", [])
+                if value is not None
+            ]
+            if end_cap_scan_for_audit.get("finding_count", 0) > 0
+            else []
+        )
         verification = _verify_video_overview_claims(
             answer=result.get("answer", ""),
             question=question,
@@ -12585,25 +12633,8 @@ def answer_question(
             client=generation_client,
             fallback_answer=FALLBACK_ANSWER,
             structured_claims=result.get("verification_claims"),
-            requested_point_count=(
-                overview_retrieval_trace.get("overview", {}).get("requested_point_count")
-                if isinstance(overview_retrieval_trace.get("overview"), dict)
-                else None
-            ),
-            required_end_cap_chunk_ids=(
-                overview_retrieval_trace.get("overview", {})
-                .get("terminal_tail_scan", {})
-                .get("end_cap_scan", {})
-                .get("source_chunk_ids", [])
-                if (
-                    isinstance(overview_retrieval_trace.get("overview"), dict)
-                    and overview_retrieval_trace["overview"]
-                    .get("terminal_tail_scan", {})
-                    .get("end_cap_scan", {})
-                    .get("finding_count", 0) > 0
-                )
-                else []
-            ),
+            requested_point_count=overview_stats_for_audit.get("requested_point_count"),
+            required_end_cap_chunk_ids=required_end_cap_chunk_ids,
         )
         _require_completed_overview_audit(
             overview_retrieval_trace,
@@ -12871,10 +12902,9 @@ def answer_question(
                         and terminal_tail_coverage.get("end_cap_covered") is not True
                     )
                     if end_cap_findings_unverified:
-                        raise RuntimeError(
-                            "Whole-video overview was withheld because a substantive "
-                            "end-cap finding was generated but no fully verified point "
-                            "retained evidence from the final transcript passages."
+                        _require_verified_overview_end_cap(
+                            end_cap_scan,
+                            terminal_tail_coverage,
                         )
                     if (
                         terminal_scan_incomplete
