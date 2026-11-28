@@ -18,6 +18,10 @@ import time
 from typing import Any, Sequence
 
 from .provider_retry_budget import reserve_groq_retry_wait
+from .provider_rate_limiter import (
+    ProviderQuotaWaitError,
+    groq_completion_create,
+)
 
 from .evidence_contracts import (
     EvidenceAssessment,
@@ -36,7 +40,7 @@ DEFAULT_MAX_ASSESSMENT_ASPECTS = 8
 DEFAULT_MAX_ASSESSMENT_OUTPUT_TOKENS = 1_800
 DEFAULT_MINIMUM_SUPPORT_SCORE = 0.75
 MAX_ASSESSMENT_SUMMARY_CHARS = 320
-MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 30.0
+MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS = 300.0
 logger = logging.getLogger(__name__)
 
 _LANGUAGE_TAG_PATTERN = re.compile(r"^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
@@ -973,16 +977,33 @@ def assess_evidence_support(
     while True:
         request_count += 1
         try:
-            response = client.chat.completions.create(**request_kwargs)
+            if provider_name == "groq":
+                response = groq_completion_create(
+                    client,
+                    request_kwargs,
+                    reserve_wait=reserve_groq_retry_wait,
+                )
+            else:
+                response = client.chat.completions.create(**request_kwargs)
             break
         except Exception as error:
-            status_code = _provider_status_code(error)
+            quota_wait_exhausted = isinstance(error, ProviderQuotaWaitError)
+            status_code = (
+                429 if quota_wait_exhausted else _provider_status_code(error)
+            )
             is_groq_rate_limit = (
                 provider_name == "groq"
-                and status_code == 429
+                and (
+                    status_code == 429
+                    or quota_wait_exhausted
+                )
                 and not _is_daily_token_quota_error(error)
             )
-            retry_after = _provider_retry_after_seconds(error)
+            retry_after = (
+                error.retry_after_seconds
+                if quota_wait_exhausted
+                else _provider_retry_after_seconds(error)
+            )
             configured_delay = config.GROQ_RETRY_DELAY_SECONDS * request_count
             retry_delay = max(
                 configured_delay,
@@ -990,6 +1011,7 @@ def assess_evidence_support(
             )
             can_retry = (
                 is_groq_rate_limit
+                and not quota_wait_exhausted
                 and request_count <= config.GROQ_MAX_RETRIES
                 and cumulative_retry_wait_seconds + retry_delay
                 <= MAX_GROQ_ASSESSMENT_RETRY_WAIT_SECONDS
@@ -1036,7 +1058,11 @@ def assess_evidence_support(
                 input_limit_chars=max_input_chars,
                 passage_count=len(passage_values),
                 aspect_count=len(analysis.aspects),
-                error_code=_error_code(error),
+                error_code=(
+                    "provider_rate_limited"
+                    if quota_wait_exhausted
+                    else _error_code(error)
+                ),
                 retry_after_seconds=(retry_after if is_groq_rate_limit else None),
             )
             assessments, notes = _unknown_assessments(
