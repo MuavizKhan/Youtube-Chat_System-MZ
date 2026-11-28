@@ -13551,6 +13551,130 @@ def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monk
 
 
 @pytest.mark.regression
+def test_overview_reserves_are_verified_when_supported_end_cap_candidate_is_not_selected(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        source_ids = (
+            [claim["evidence_chunk_ids"] for claim in claims]
+            if len(calls) == 1
+            else [["76"] for _claim in claims]
+        )
+        evidence = [
+            {
+                "claim_index": index,
+                "status": "supported",
+                "supporting_chunk_ids": values,
+            }
+            for index, values in enumerate(source_ids, start=1)
+        ]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in source_ids for chunk_id in values
+            ],
+            "claim_evidence": evidence,
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "76"],
+            "assessment_batches": [],
+        }
+
+    def fake_primary_selection(*_args, **_kwargs):
+        # The third primary candidate is supported by chunk 76, but the
+        # selector would not include it in the final two-point answer.
+        return [
+            {
+                "claim_index": 1,
+                "text": "Opening point.",
+                "status": "supported",
+                "supporting_chunk_ids": ["1"],
+                "is_backup": False,
+            },
+            {
+                "claim_index": 2,
+                "text": "Middle point.",
+                "status": "supported",
+                "supporting_chunk_ids": ["2"],
+                "is_backup": False,
+            },
+        ]
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    monkeypatch.setattr(
+        chain,
+        "select_verified_overview_points",
+        fake_primary_selection,
+    )
+    documents = [
+        doc("1", 0.0, 10.0, "Opening transcript passage."),
+        doc("2", 2500.0, 2510.0, "Middle transcript passage."),
+        doc("75", 5174.0, 5220.0, "Earlier closing passage."),
+        doc("76", 5238.0, 5287.0, "Final transcript passage."),
+    ]
+    claims = [
+        {"text": "Opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Middle point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {
+            "text": "A supported but unselected final candidate.",
+            "evidence_chunk_ids": ["76"],
+            "is_backup": False,
+        },
+        {
+            "text": "Reserved final exchange.",
+            "evidence_chunk_ids": ["76"],
+            "is_backup": True,
+        },
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video in 2 points.",
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
+        included_chunk_ids=["1", "2", "75", "76"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        required_end_cap_chunk_ids=["76"],
+        timeline_start=0.0,
+        timeline_end=5287.0,
+        timeline_bucket_count=2,
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_selected_point_count"] == 2
+    assert result["overview_verification"]["primary_selection_complete"] is True
+    assert result["overview_verification"]["primary_end_cap_covered"] is False
+    assert result["overview_verification"]["primary_selected_end_cap_chunk_ids"] == []
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["overview_verification"]["reserve_verification_reason"] == (
+        "primary_end_cap_not_covered"
+    )
+    assert result["claim_evidence"][-1]["supporting_chunk_ids"] == ["76"]
+
+
+@pytest.mark.regression
 def test_generated_end_cap_finding_is_rejected_without_verified_end_cap_coverage():
     with pytest.raises(RuntimeError, match="substantive end-cap finding was generated"):
         chain._require_verified_overview_end_cap(
