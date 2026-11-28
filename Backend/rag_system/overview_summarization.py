@@ -1286,6 +1286,9 @@ def summarize_video_overview(
                 "source_chunk_ids": end_cap_source_ids,
                 "latest_passage_id": latest_end_cap_passage_id,
                 "latest_source_chunk_id": latest_end_cap_source_chunk_id,
+                "finding_evidence_ids": [],
+                "finding_source_chunk_ids": [],
+                "latest_passage_cited": False,
                 "source": "none",
             }
             if end_cap_items:
@@ -1298,9 +1301,26 @@ def summarize_video_overview(
                     )
                 ]
                 if end_cap_candidates_already_found:
+                    end_cap_finding_evidence_ids = [
+                        list(point.get("evidence_ids", []))
+                        for point in end_cap_candidates_already_found
+                    ]
                     end_cap_scan.update({
                         "status": "completed",
                         "finding_count": len(end_cap_candidates_already_found),
+                        "finding_evidence_ids": end_cap_finding_evidence_ids,
+                        "finding_source_chunk_ids": [
+                            list(dict.fromkeys(
+                                str(lookup[evidence_id].metadata.get("chunk_id"))
+                                for evidence_id in evidence_ids
+                                if evidence_id in lookup
+                            ))
+                            for evidence_ids in end_cap_finding_evidence_ids
+                        ],
+                        "latest_passage_cited": any(
+                            latest_end_cap_passage_id in evidence_ids
+                            for evidence_ids in end_cap_finding_evidence_ids
+                        ),
                         "source": (
                             "terminal_tail_scan"
                             if any(
@@ -1341,17 +1361,34 @@ def summarize_video_overview(
                             "failure_type": type(error).__name__,
                         })
                     else:
-                        appended_end_cap_count = 0
+                        accepted_end_cap_candidates = []
                         for candidate in end_cap_candidates:
                             if _duplicate_point(
                                 candidate, [*map_findings, *terminal_points]
                             ):
                                 continue
                             terminal_points.append(candidate)
-                            appended_end_cap_count += 1
+                            accepted_end_cap_candidates.append(candidate)
+                        end_cap_finding_evidence_ids = [
+                            list(point.get("evidence_ids", []))
+                            for point in accepted_end_cap_candidates
+                        ]
                         end_cap_scan.update({
                             "status": "completed",
-                            "finding_count": appended_end_cap_count,
+                            "finding_count": len(accepted_end_cap_candidates),
+                            "finding_evidence_ids": end_cap_finding_evidence_ids,
+                            "finding_source_chunk_ids": [
+                                list(dict.fromkeys(
+                                    str(lookup[evidence_id].metadata.get("chunk_id"))
+                                    for evidence_id in evidence_ids
+                                    if evidence_id in lookup
+                                ))
+                                for evidence_ids in end_cap_finding_evidence_ids
+                            ],
+                            "latest_passage_cited": any(
+                                latest_end_cap_passage_id in evidence_ids
+                                for evidence_ids in end_cap_finding_evidence_ids
+                            ),
                             "source": "dedicated_end_cap_scan",
                         })
                 else:
@@ -1387,6 +1424,11 @@ def summarize_video_overview(
                     "end_seconds": round(timeline_end, 2),
                     "passage_ids": [],
                     "source_chunk_ids": [],
+                    "latest_passage_id": None,
+                    "latest_source_chunk_id": None,
+                    "finding_evidence_ids": [],
+                    "finding_source_chunk_ids": [],
+                    "latest_passage_cited": False,
                     "source": "none",
                 },
             }
