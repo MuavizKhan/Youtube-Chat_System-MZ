@@ -146,6 +146,17 @@ class GroqTokenPacer:
                 connection.execute(
                     "ALTER TABLE groq_token_reservations ADD COLUMN completed_at REAL"
                 )
+                # Rows created by the earlier pacer implementation represent
+                # completed calls; no live request survives an application
+                # restart. Preserve their 60-second window, not an infinite
+                # in-flight reservation.
+                connection.execute(
+                    """
+                    UPDATE groq_token_reservations
+                    SET completed_at = created_at
+                    WHERE completed_at IS NULL
+                    """
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS groq_token_quota_state (
