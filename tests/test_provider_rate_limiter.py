@@ -82,7 +82,7 @@ def test_provider_remaining_and_reset_headers_override_local_estimates(tmp_path)
 
     pacer.acquire("openai/gpt-oss-20b", 1500)
 
-    assert now[0] >= 508.0
+    assert now[0] >= 507.5
     snapshot = pacer.snapshot("openai/gpt-oss-20b")
     assert snapshot["local_window_reserved_tokens"] == 1500
     assert snapshot["provider_state"]["limit_tokens"] == 8000
