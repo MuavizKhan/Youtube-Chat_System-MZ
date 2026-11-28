@@ -1059,9 +1059,13 @@ def assess_evidence_support(
                 passage_count=len(passage_values),
                 aspect_count=len(analysis.aspects),
                 error_code=(
-                    "provider_rate_limited"
-                    if quota_wait_exhausted
-                    else _error_code(error)
+                    "ai_provider_daily_quota_exhausted"
+                    if _is_daily_token_quota_error(error)
+                    else (
+                        "provider_rate_limited"
+                        if quota_wait_exhausted
+                        else _error_code(error)
+                    )
                 ),
                 retry_after_seconds=(retry_after if is_groq_rate_limit else None),
             )
