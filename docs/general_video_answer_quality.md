@@ -81,11 +81,14 @@ Processing is bounded:
   verified. End-cap verification is tied to the exact chunk IDs of the final
   two eligible transcript passages, not a timestamp interval that could count
   an unrelated overlapping chunk. The terminal window is anchored to the full indexed
-  transcript duration, never the latest selected evidence timestamp. If the supplementary
-  scan is rate-limited or malformed, a successfully verified main overview is
-  preserved and the response discloses that the ending may need a focused
-  follow-up. A substantive end-cap finding that was generated but cannot be
-  retained as a fully verified final point causes the overview to be withheld.
+  transcript duration, never the latest selected evidence timestamp. If the
+  broad tail scan is unavailable but section-level findings independently cite
+  the final passage, that evidence can still be assessed. When the end-cap scan
+  is unavailable and no independent section finding establishes the ending,
+  the whole-video overview is withheld rather than returned with an unverified
+  ending; a provider Retry-After value is preserved when available. A
+  substantive end-cap finding that was generated but cannot be retained as a
+  fully verified final point also causes the overview to be withheld.
 - Every accepted summary point retains its own exact transcript chunk IDs.
   The verifier receives this point-to-source mapping rather than an
   unassociated global pool of candidate passages. Excerpts are selected using
