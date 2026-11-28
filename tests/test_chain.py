@@ -13513,6 +13513,11 @@ def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monk
         }
 
     monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    documents = [
+        doc("1", 0.0, 10.0, "Opening transcript passage."),
+        doc("2", 4000.0, 4010.0, "Middle transcript passage."),
+        doc("76", 5238.0, 5287.0, "Final transcript passage."),
+    ]
     claims = [
         {"text": "Opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
         {"text": "Middle point.", "evidence_chunk_ids": ["2"], "is_backup": False},
@@ -13522,8 +13527,8 @@ def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monk
     result = chain._verify_video_overview_claims(
         answer="Draft answer.",
         question="Summarize the entire video.",
-        video_id="video-1",
-        retrieved_results=[],
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
         included_chunk_ids=["1", "2", "76"],
         prompt_visible_context="Visible transcript context.",
         client=object(),
@@ -13531,9 +13536,15 @@ def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monk
         structured_claims=claims,
         requested_point_count=2,
         required_end_cap_chunk_ids=["76"],
+        timeline_start=4.0,
+        timeline_end=5287.0,
+        timeline_bucket_count=2,
     )
 
     assert len(calls) == 2
+    assert result["overview_verification"]["primary_point_count_satisfied"] is True
+    assert result["overview_verification"]["primary_selected_point_count"] == 2
+    assert result["overview_verification"]["primary_selection_complete"] is True
     assert result["overview_verification"]["primary_end_cap_covered"] is False
     assert result["overview_verification"]["reserve_verification_attempted"] is True
     assert result["claim_evidence"][-1]["supporting_chunk_ids"] == ["76"]
