@@ -582,6 +582,7 @@ def verify_answer_claims(
                 "removed_claim_count": 0,
                 "supported_chunk_ids": [],
                 "error_code": diagnostic.error_code,
+                "retry_after_seconds": getattr(diagnostic, "retry_after_seconds", None),
                 "assessment_batch_count": len(batch_diagnostics) + 1,
                 "assessment_request_count": (
                     sum(item["request_count"] for item in batch_diagnostics)
