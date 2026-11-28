@@ -901,3 +901,22 @@ def test_groq_assessment_honors_request_wide_retry_budget(monkeypatch):
     assert result.diagnostics.request_count == 1
     assert len(completions.calls) == 1
     assert sleeps == []
+
+
+
+@pytest.mark.unit
+def test_daily_provider_token_quota_has_a_distinct_failure_code():
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    client, _ = fake_client(error=RuntimeError("daily token quota exceeded"))
+
+    result = assess_evidence_support(
+        parsed,
+        (source,),
+        client,
+        provider="groq",
+    )
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "ai_provider_daily_quota_exhausted"
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
