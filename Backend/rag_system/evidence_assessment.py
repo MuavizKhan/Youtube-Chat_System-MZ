@@ -141,6 +141,7 @@ class EvidenceAssessmentDiagnostics:
     finish_reason: str | None = None
     output_chars: int | None = None
     validation_error_code: str | None = None
+    retry_after_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, AssessmentRunStatus):
@@ -161,6 +162,15 @@ class EvidenceAssessmentDiagnostics:
                 raise ValueError(f"{name} must be a non-negative integer.")
         if not math.isfinite(float(self.elapsed_ms)) or self.elapsed_ms < 0:
             raise ValueError("elapsed_ms must be finite and non-negative.")
+        if self.retry_after_seconds is not None:
+            if (
+                isinstance(self.retry_after_seconds, bool)
+                or not isinstance(self.retry_after_seconds, (int, float))
+                or not math.isfinite(float(self.retry_after_seconds))
+                or self.retry_after_seconds < 0
+            ):
+                raise ValueError("retry_after_seconds must be finite and non-negative.")
+            object.__setattr__(self, "retry_after_seconds", float(self.retry_after_seconds))
         for name in ("input_tokens", "output_tokens", "output_chars"):
             value = getattr(self, name)
             if value is not None and (
@@ -1017,6 +1027,7 @@ def assess_evidence_support(
                 passage_count=len(passage_values),
                 aspect_count=len(analysis.aspects),
                 error_code=_error_code(error),
+                retry_after_seconds=(retry_after if is_groq_rate_limit else None),
             )
             assessments, notes = _unknown_assessments(
                 analysis,
