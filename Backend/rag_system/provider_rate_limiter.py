@@ -25,6 +25,9 @@ from .config import (
 )
 
 
+RESERVATION_LEASE_SECONDS = 300.0
+
+
 class ProviderQuotaWaitError(RuntimeError):
     """Raised when the caller's wait budget cannot cover the next quota reset."""
 
@@ -126,7 +129,8 @@ class GroqTokenPacer:
                     model TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     reserved_tokens INTEGER NOT NULL,
-                    completed_at REAL
+                    completed_at REAL,
+                    lease_until REAL NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -155,6 +159,13 @@ class GroqTokenPacer:
                     UPDATE groq_token_reservations
                     SET completed_at = created_at
                     WHERE completed_at IS NULL
+                    """
+                )
+            if "lease_until" not in reservation_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE groq_token_reservations
+                    ADD COLUMN lease_until REAL NOT NULL DEFAULT 0
                     """
                 )
             connection.execute(
@@ -218,9 +229,13 @@ class GroqTokenPacer:
             connection.execute(
                 """
                 DELETE FROM groq_token_reservations
-                WHERE created_at <= ? AND completed_at IS NOT NULL
+                WHERE created_at <= ?
+                  AND (
+                    completed_at IS NOT NULL
+                    OR lease_until <= ?
+                  )
                 """,
-                (now - 60.0,),
+                (now - 60.0, now),
             )
             state = connection.execute(
                 "SELECT * FROM groq_token_quota_state WHERE model = ?",
@@ -233,11 +248,18 @@ class GroqTokenPacer:
                 WHERE model = ?
                   AND (
                     created_at > ?
-                    OR completed_at IS NULL
+                    OR (
+                        completed_at IS NULL
+                        AND lease_until > ?
+                    )
                   )
                 ORDER BY created_at ASC
                 """,
-                (model, (state["observed_at"] if state is not None else now - 60.0)),
+                (
+                    model,
+                    (state["observed_at"] if state is not None else now - 60.0),
+                    now,
+                ),
             ).fetchall()
 
             provider_reset_at = (
@@ -272,11 +294,14 @@ class GroqTokenPacer:
                     WHERE model = ?
                       AND (
                         created_at > ?
-                        OR completed_at IS NULL
+                        OR (
+                            completed_at IS NULL
+                            AND lease_until > ?
+                        )
                       )
                     ORDER BY created_at ASC
                     """,
-                    (model, now),
+                    (model, now, now),
                 ).fetchall()
 
             limit_tokens = (
@@ -306,11 +331,14 @@ class GroqTokenPacer:
                     WHERE model = ?
                       AND (
                         created_at > ?
-                        OR completed_at IS NULL
+                        OR (
+                            completed_at IS NULL
+                            AND lease_until > ?
+                        )
                       )
                     ORDER BY created_at ASC
                     """,
-                    (model, now - 60.0),
+                    (model, now - 60.0, now),
                 ).fetchall()
                 used_since_snapshot = sum(int(row["reserved_tokens"]) for row in all_rows)
                 available = max(0, safe_limit - used_since_snapshot)
@@ -357,11 +385,18 @@ class GroqTokenPacer:
             connection.execute(
                 """
                 INSERT INTO groq_token_reservations (
-                    reservation_id, model, created_at, reserved_tokens, completed_at
+                    reservation_id, model, created_at, reserved_tokens,
+                    completed_at, lease_until
                 )
-                VALUES (?, ?, ?, ?, NULL)
+                VALUES (?, ?, ?, ?, NULL, ?)
                 """,
-                (reservation_id, model, now, estimated_tokens),
+                (
+                    reservation_id,
+                    model,
+                    now,
+                    estimated_tokens,
+                    now + RESERVATION_LEASE_SECONDS,
+                ),
             )
             connection.commit()
         return reservation_id, 0.0
@@ -374,7 +409,7 @@ class GroqTokenPacer:
             connection.execute(
                 """
                 UPDATE groq_token_reservations
-                SET completed_at = ?
+                SET completed_at = ?, lease_until = 0
                 WHERE reservation_id = ? AND completed_at IS NULL
                 """,
                 (self.clock(), reservation_id),
@@ -428,10 +463,13 @@ class GroqTokenPacer:
                 WHERE model = ?
                   AND (
                     created_at > ?
-                    OR completed_at IS NULL
+                    OR (
+                        completed_at IS NULL
+                        AND lease_until > ?
+                    )
                   )
                 """,
-                (model, self.clock() - 60.0),
+                (model, self.clock() - 60.0, self.clock()),
             ).fetchone()
         return {
             "provider_state": dict(state) if state is not None else None,
