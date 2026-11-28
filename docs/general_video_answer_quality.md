@@ -182,9 +182,11 @@ closed rather than returning its unverified draft as a successful answer. A
 provider rate limit returns HTTP 429 with the provider's Retry-After value;
 other incomplete overview verification returns an upstream service error.
 A request-scoped Groq retry budget caps cumulative Retry-After/backoff waiting
-across generation and evidence assessment at 60 seconds, rather than applying
-the same wait allowance independently to every model call. The ordinary
-question-answering route remains separate from this whole-video acceptance rule.
+across generation and evidence assessment. Synchronous targeted questions retain
+a short 60-second wait budget. Whole-video summaries run as durable background
+jobs with a separately configurable wait budget, so they can pause across Free-plan
+token windows without holding the original chat request open. Neither route
+relaxes the evidence-verification requirements.
 
 This checks whether the transcript supports what the answer says. It does not
 authenticate a paper, independently fact-check a speaker, or establish that a
@@ -222,3 +224,44 @@ retention, strict semantic-gate behavior, full-video and complete-story wording,
 chronological map/reduce, explicit timeline sampling, empty sections, mixed
 video rejection, model-invented evidence IDs, prompt-visible excerpt boundaries,
 claim filtering, exact chunk provenance, and verifier/provider failure modes.
+
+
+## 7. Groq Free-plan quota pacing and whole-video jobs
+
+Groq rate limits are organization-level and apply across API keys. The backend
+therefore does not treat key rotation as additional capacity. For GPT-OSS 20B,
+the default local token budget is 8,000 tokens per minute with a 10 percent
+safety margin; the effective limit, remaining tokens, and reset time are
+reconciled from Groq response headers whenever available.
+
+Before each Groq completion, the backend estimates prompt tokens and reserves
+the requested completion ceiling in a SQLite ledger. The ledger is shared
+across RAG index namespaces so two local experiments cannot independently
+assume the same organization quota is unused. It coordinates this backend's
+requests; usage from other applications in the same Groq organization is
+reconciled from provider headers and 429 Retry-After responses.
+
+The following settings can be adjusted without changing retrieval or evidence
+contracts:
+
+- `GROQ_TPM_LIMIT` — conservative fallback token-per-minute limit (default 8000).
+- `GROQ_TPM_SAFETY_FACTOR` — reservation safety margin (default 0.90).
+- `GROQ_OVERVIEW_MAX_COMPLETION_TOKENS` — bounded overview-map/reduce output ceiling (default 500).
+- `GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS` — bounded evidence-audit output ceiling (default 900).
+- `GROQ_QUOTA_DB_PATH` — optional shared SQLite ledger path.
+- `CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS` — maximum cumulative provider pacing/retry wait for a whole-video job (default 3600).
+- `CHAT_JOB_LEASE_SECONDS` — worker lease used to recover interrupted jobs (default 180).
+
+Explicit whole-video summary requests now return HTTP `202` from `POST /chat`
+with a `job_id`. The extension polls `GET /chat/jobs/{job_id}` using short
+requests. The final response is persisted only after chronological generation,
+claim-level transcript verification, timeline coverage, and end-cap acceptance
+complete. A job that cannot complete those checks is marked failed; the
+unverified overview draft is never returned as a completed answer. Ordinary
+targeted questions continue to use the synchronous `200` response path.
+
+The job store and token ledger use SQLite in the local data directory. Keep
+these files on persistent local storage, and share the quota-ledger path across
+backend processes using the same Groq organization. Pacing can increase latency
+when the organization's quota is exhausted; it cannot create additional
+provider quota or bypass Groq's daily limits.
