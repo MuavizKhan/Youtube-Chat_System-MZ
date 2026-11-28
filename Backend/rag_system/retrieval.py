@@ -1579,6 +1579,9 @@ OVERVIEW_PATTERNS = (
     r"\bwhat's (?:in|inside) (?:this|the) video\b",
     r"\bwhat is (?:this|the) video about\b",
     r"\bwhat's (?:this|the) video about\b",
+    r"\bwhat is (?:the )?(?:context|background) of (?:this|the) video\b",
+    r"\bwhat is the context for (?:this|the) video\b",
+    r"\bexplain the context of (?:this|the) video\b",
     r"\bwhat is (?:he|she|the speaker|the presenter) talking about(?: in (?:this|the) video)?\b",
     r"\bwhat is (?:he|she|the speaker|the presenter) discussing(?: in (?:this|the) video)?\b",
     r"\bwhat (?:is|happens) in (?:this|the) video\b",
@@ -1605,6 +1608,17 @@ OVERVIEW_PATTERNS = (
     r"\bwhat is the main topic of (?:this|the) video\b",
     r"\bwhat is the primary topic of (?:this|the) video\b",
     r"\bwhat topics are covered\b",
+    r"\b(?:summarize|summarise|recap)\s+(?:(?:this|the)\s+)?(?:complete|full|entire)\s+(?:video|story)\b",
+    r"\bwhat are (?:the )?(?:most important|main|key) (?:claims|findings|arguments|developments)(?:\s+and\s+(?:claims|findings|arguments|developments))? (?:discussed|made|presented|raised|covered)(?: in (?:this|the) video)?\b",
+    r"\b(?:give|provide|show|list) me (?:the )?timestamps? (?:for|of) (?:the )?(?:important|key|main) (?:sections|moments|parts)\b",
+    r"\b(?:give|provide|show|list) (?:the )?timestamps? (?:for|of) (?:the )?(?:important|key|main) (?:sections|moments|parts)\b",
+    r"\b(?:complete|full|entire) (?:video )?(?:summary|recap|story)\b",
+    r"\b(?:summarize|summarise|recap) everything (?:in|from) (?:this|the) video\b",
+    r"\b(?:main|key) (?:takeaways|highlights|events|moments) (?:from|of) (?:this|the) video\b",
+    r"\b(?:summarize|summarise) (?:the )?(?:whole|entire) (?:thing|video|story)\b",
+    r"\b(?:give|provide) me (?:the )?(?:complete|full|overall) summary\b",
+    r"\b(?:in|using) \d{1,2} (?:useful )?(?:points|pointers|bullets|takeaways)\b",
+    r"\b(?:key points|useful points) (?:from|of) (?:this|the) video\b",
 )
 
 

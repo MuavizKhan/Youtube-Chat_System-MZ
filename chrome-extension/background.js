@@ -22,6 +22,9 @@ importScripts("config.js");
 const BACKEND_URL =
     `${BACKEND_BASE_URL}/chat`;
 
+const CHAT_JOB_STATUS_URL =
+    `${BACKEND_BASE_URL}/chat/jobs`;
+
 const INDEX_URL =
     `${BACKEND_BASE_URL}/index`;
 
@@ -37,10 +40,10 @@ const FEEDBACK_URL =
 const REQUEST_TIMEOUT_MS =
     15000;
 
-// Chat may include retrieval plus several model calls. Keep index requests
-// on the shorter timeout, but allow a normal slow generation to finish.
+// Targeted chat requests remain synchronous. Whole-video jobs return quickly
+// and are polled separately by the content script through short-lived messages.
 const CHAT_REQUEST_TIMEOUT_MS =
-    90000;
+    240000;
 
 const CONTENT_SCRIPT_MARKER =
     "data-youtube-ai-chat-content-version";
@@ -259,6 +262,29 @@ chrome.runtime.onMessage.addListener(
             }
 
             handleIndexStatus(videoId, sendResponse);
+            return true;
+        }
+
+        if (message.type === "chat_job_status") {
+            const videoId = normalizeString(message.video_id);
+            const jobId = normalizeString(message.job_id);
+            const senderUrl = sender?.tab?.url || "";
+            const pageVideoId = extractVideoIdFromUrl(senderUrl);
+
+            if (
+                !isYouTubeUrl(senderUrl) ||
+                !videoId ||
+                pageVideoId !== videoId ||
+                !/^[a-f0-9]{32}$/i.test(jobId)
+            ) {
+                sendResponse({
+                    success: false,
+                    error: "Video-summary status requests must originate from the matching YouTube video."
+                });
+                return;
+            }
+
+            handleChatJobStatus(jobId, videoId, sendResponse);
             return true;
         }
 
@@ -1296,6 +1322,66 @@ async function handleFeedbackSubmission(feedback, sendResponse) {
 // ============================================================
 
 
+async function handleChatJobStatus(jobId, videoId, sendResponse) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(
+            `${CHAT_JOB_STATUS_URL}/${encodeURIComponent(jobId)}`,
+            {
+                method: "GET",
+                headers: { "Accept": "application/json" },
+                signal: controller.signal
+            }
+        );
+        const data = await parseResponse(response);
+        if (!response.ok) {
+            throw new Error(
+                extractBackendError(data) ||
+                `Video-summary status returned HTTP ${response.status}.`
+            );
+        }
+
+        if (data?.status === "completed" && data.result && typeof data.result === "object") {
+            sendResponse({
+                success: true,
+                completed: true,
+                video_id: data.video_id || videoId,
+                ...data.result
+            });
+            return;
+        }
+        if (data?.status === "failed") {
+            throw new Error(
+                data.error_message ||
+                "The whole-video summary job could not be completed."
+            );
+        }
+        if (!["queued", "running"].includes(data?.status)) {
+            throw new Error("The backend returned an unknown video-summary job state.");
+        }
+        sendResponse({
+            success: true,
+            pending: true,
+            job_id: jobId,
+            video_id: data.video_id || videoId,
+            status: data.status
+        });
+    } catch (error) {
+        sendResponse({
+            success: false,
+            error: error?.name === "AbortError"
+                ? "Checking the video-summary job timed out."
+                : (error instanceof Error && error.message
+                    ? error.message
+                    : "Unable to check video-summary job status.")
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+
 async function handleChatRequest(
     {
         videoId,
@@ -1352,10 +1438,25 @@ async function handleChatRequest(
         // Parse response
         // ----------------------------------------------------
 
-        const data =
+        let data =
             await parseResponse(
                 response
             );
+
+        // ----------------------------------------------------
+        // Whole-video summary job acceptance
+        // ----------------------------------------------------
+
+        if (response.status === 202 && data?.job_id) {
+            sendResponse({
+                success: true,
+                pending: true,
+                job_id: normalizeString(data.job_id),
+                video_id: typeof data.video_id === "string" ? data.video_id : videoId,
+                status: typeof data.status === "string" ? data.status : "queued"
+            });
+            return;
+        }
 
         // ----------------------------------------------------
         // HTTP error

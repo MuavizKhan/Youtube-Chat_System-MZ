@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from Backend.rag_system import config
+from Backend.rag_system import config, evidence_assessment
 from Backend.rag_system.evidence_assessment import (
     AssessmentRunStatus,
     EvidenceAssessmentOutputError,
@@ -24,10 +24,11 @@ from Backend.rag_system.evidence_contracts import (
 
 
 class FakeCompletions:
-    def __init__(self, content=None, error=None, usage=None):
+    def __init__(self, content=None, error=None, usage=None, finish_reason="stop"):
         self.content = content
         self.error = error
         self.usage = usage
+        self.finish_reason = finish_reason
         self.calls = []
 
     def create(self, **kwargs):
@@ -35,15 +36,20 @@ class FakeCompletions:
         if self.error is not None:
             raise self.error
         message = SimpleNamespace(content=self.content)
-        choice = SimpleNamespace(message=message)
+        choice = SimpleNamespace(message=message, finish_reason=self.finish_reason)
         return SimpleNamespace(
             choices=[choice],
             usage=self.usage,
         )
 
 
-def fake_client(content=None, error=None, usage=None):
-    completions = FakeCompletions(content=content, error=error, usage=usage)
+def fake_client(content=None, error=None, usage=None, finish_reason="stop"):
+    completions = FakeCompletions(
+        content=content,
+        error=error,
+        usage=usage,
+        finish_reason=finish_reason,
+    )
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=completions)
     )
@@ -119,6 +125,51 @@ def force_huggingface_provider(monkeypatch):
     monkeypatch.setattr(config, "GROQ_MAX_TOKENS", 2048)
     monkeypatch.setattr(config, "GROQ_MODEL_ID", "openai/gpt-oss-20b")
     monkeypatch.setattr(config, "GROQ_REASONING_EFFORT", "low")
+
+
+@pytest.mark.unit
+def test_compact_prompt_reduces_assessment_payload_without_losing_provenance():
+    parsed = make_analysis(
+        EvidenceAspect("financial_crisis", "The speaker attributes the funding stoppage to the global financial crisis.")
+    )
+    source = make_passage(
+        "p1",
+        "The speaker says the global financial crisis caused money to stop flowing.",
+        "chunk-41",
+        start=120.0,
+        end=137.0,
+    )
+    content = output(output_item(
+        "financial_crisis",
+        "supported",
+        0.93,
+        support=("p1",),
+    ))
+
+    verbose_client, verbose_calls = fake_client(content)
+    compact_client, compact_calls = fake_client(content)
+    verbose = assess_evidence_support(parsed, (source,), verbose_client)
+    compact = assess_evidence_support(
+        parsed,
+        (source,),
+        compact_client,
+        compact_prompt=True,
+    )
+
+    assert compact.diagnostics.status is AssessmentRunStatus.COMPLETED
+    assert compact.assessments[0].supporting_evidence == source.references
+    assert compact.diagnostics.input_chars < verbose.diagnostics.input_chars
+    assert len(compact_calls.calls[0]["messages"][0]["content"]) < len(
+        verbose_calls.calls[0]["messages"][0]["content"]
+    )
+
+    compact_payload = json.loads(
+        compact_calls.calls[0]["messages"][1]["content"].split("\n", 1)[1]
+    )
+    assert compact_payload["video_id"] == "video-A"
+    assert compact_payload["passages"][0][0] == "p1"
+    assert compact_payload["passages"][0][2][0][0] == "chunk-41"
+    assert compact_payload["passages"][0][3] == source.text
 
 
 @pytest.mark.unit
@@ -347,6 +398,29 @@ def test_invalid_json_response_fails_closed(bad_content):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("finish_reason", "expected_error_code"),
+    [("stop", "invalid_json"), ("length", "invalid_json")],
+)
+def test_invalid_assessment_output_exposes_sanitized_response_diagnostics(
+    finish_reason,
+    expected_error_code,
+):
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    invalid_content = "{not valid json"
+    client, _ = fake_client(invalid_content, finish_reason=finish_reason)
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.INVALID_RESPONSE
+    assert result.diagnostics.error_code == "invalid_assessment_response"
+    assert result.diagnostics.validation_error_code == expected_error_code
+    assert result.diagnostics.finish_reason == finish_reason
+    assert result.diagnostics.output_chars == len(invalid_content)
+    assert result.diagnostics.output_tokens is None
+
+
+@pytest.mark.parametrize(
     "items",
     [
         [],
@@ -539,7 +613,7 @@ def test_assessment_limits_cannot_be_increased_above_hard_maxima():
     with pytest.raises(ValueError, match="hard maximum"):
         assess_evidence_support(
             parsed, (source,), client,
-            max_output_tokens=901,
+            max_output_tokens=1801,
         )
 
 
@@ -572,6 +646,8 @@ def test_evidence_passage_requires_references_and_single_video():
 @pytest.mark.unit
 def test_groq_provider_request_is_single_call_json_mode_and_temperature_zero(monkeypatch):
     monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_TOKENS", 800)
+    monkeypatch.setattr(config, "GROQ_ASSESSMENT_MAX_COMPLETION_TOKENS", 1800)
     parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
     source = make_passage("p1", "Transcript text.", "c1")
     client, completions = fake_client(output(output_item(
@@ -583,7 +659,7 @@ def test_groq_provider_request_is_single_call_json_mode_and_temperature_zero(mon
     kwargs = completions.calls[0]
     assert result.diagnostics.provider == "groq"
     assert result.diagnostics.model == "openai/gpt-oss-20b"
-    assert kwargs["max_completion_tokens"] == 900
+    assert kwargs["max_completion_tokens"] == 1800
     assert kwargs["temperature"] == 0.0
     assert kwargs["reasoning_effort"] == "low"
     assert kwargs["include_reasoning"] is False
@@ -604,7 +680,7 @@ def test_huggingface_provider_request_is_single_call_and_deterministic():
     kwargs = completions.calls[0]
     assert result.diagnostics.provider == "huggingface"
     assert kwargs["model"] == "test/hf-assessor"
-    assert kwargs["max_tokens"] == 900
+    assert kwargs["max_tokens"] == 1800
     assert kwargs["temperature"] == 0.0
     assert kwargs["extra_body"]["reasoning_effort"] == "low"
     assert "response_format" not in kwargs
@@ -652,4 +728,197 @@ def test_unknown_model_status_is_not_silently_normalized():
     result = assess_evidence_support(parsed, (source,), client)
 
     assert result.diagnostics.status is AssessmentRunStatus.INVALID_RESPONSE
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
+
+@pytest.mark.unit
+def test_groq_assessment_retries_rate_limit_after_retry_after_and_succeeds(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "The transcript supports aspect A.", "c1")
+    rate_limit_error = RuntimeError("429 rate limit")
+    rate_limit_error.status_code = 429
+    rate_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "2"}
+    )
+
+    class RetryCompletions:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise rate_limit_error
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=output(
+                            output_item("a", "supported", 0.91, support=("p1",))
+                        ))
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=120, completion_tokens=60),
+            )
+
+    completions = RetryCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.COMPLETED
+    assert result.diagnostics.request_count == 2
+    assert result.diagnostics.input_tokens == 120
+    assert result.diagnostics.output_tokens == 60
+    assert len(completions.calls) == 2
+    assert sleeps == [2.0]
+    assert result.assessments[0].status is EvidenceSupportStatus.SUPPORTED
+
+
+@pytest.mark.unit
+def test_groq_assessment_retry_wait_is_bounded(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    rate_limit_error = RuntimeError("429 rate limit")
+    rate_limit_error.status_code = 429
+    rate_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "20"}
+    )
+
+    class AlwaysLimitedCompletions:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise rate_limit_error
+
+    completions = AlwaysLimitedCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "provider_rate_limited"
+    assert result.diagnostics.request_count == 2
+    assert result.diagnostics.retry_after_seconds == 20.0
+    assert len(completions.calls) == 2
+    assert sleeps == [20.0]
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
+
+
+@pytest.mark.unit
+def test_groq_daily_token_quota_is_not_retried(monkeypatch):
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    daily_limit_error = RuntimeError("429 rate limit: tokens per day quota exhausted")
+    daily_limit_error.status_code = 429
+    daily_limit_error.response = SimpleNamespace(
+        headers={"retry-after": "10"}
+    )
+    client, completions = fake_client(error=daily_limit_error)
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = assess_evidence_support(parsed, (source,), client)
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "ai_provider_daily_quota_exhausted"
+    assert result.diagnostics.request_count == 1
+    assert len(completions.calls) == 1
+    assert sleeps == []
+    assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN
+
+
+@pytest.mark.regression
+def test_groq_assessment_honors_request_wide_retry_budget(monkeypatch):
+    from Backend.rag_system.provider_retry_budget import (
+        begin_groq_retry_budget,
+        end_groq_retry_budget,
+    )
+
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript evidence.", "c1")
+    rate_limit_error = RuntimeError("429 rate limit")
+    rate_limit_error.status_code = 429
+    rate_limit_error.response = SimpleNamespace(headers={"retry-after": "20"})
+
+    class AlwaysLimitedCompletions:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise rate_limit_error
+
+    completions = AlwaysLimitedCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    sleeps = []
+    monkeypatch.setattr(
+        evidence_assessment.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    token = begin_groq_retry_budget(max_wait_seconds=5.0)
+    try:
+        result = assess_evidence_support(parsed, (source,), client)
+    finally:
+        end_groq_retry_budget(token)
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "provider_rate_limited"
+    assert result.diagnostics.retry_after_seconds == 20.0
+    assert result.diagnostics.request_count == 1
+    assert len(completions.calls) == 1
+    assert sleeps == []
+
+
+
+@pytest.mark.unit
+def test_daily_provider_token_quota_has_a_distinct_failure_code():
+    parsed = make_analysis(EvidenceAspect("a", "Aspect A"))
+    source = make_passage("p1", "Transcript text.", "c1")
+    daily_error = RuntimeError("429 rate limit: daily token quota exceeded")
+    daily_error.status_code = 429
+    client, _ = fake_client(error=daily_error)
+
+    result = assess_evidence_support(
+        parsed,
+        (source,),
+        client,
+        provider="groq",
+    )
+
+    assert result.diagnostics.status is AssessmentRunStatus.PROVIDER_ERROR
+    assert result.diagnostics.error_code == "ai_provider_daily_quota_exhausted"
     assert result.assessments[0].status is EvidenceSupportStatus.UNKNOWN

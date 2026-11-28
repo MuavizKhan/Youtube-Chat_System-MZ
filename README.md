@@ -98,6 +98,31 @@ Request:
 }
 ```
 
+Targeted questions return the final answer synchronously. Explicit full-video
+summary requests are accepted as durable jobs and return HTTP `202`:
+
+```json
+{
+  "job_id": "32-character-job-id",
+  "video_id": "Gfr50f6ZBvo",
+  "status": "queued",
+  "poll_url": "/chat/jobs/32-character-job-id"
+}
+```
+
+Poll `GET /chat/jobs/{job_id}` until `status` is `completed` or `failed`.
+Completed jobs include the normal chat response in `result`. The Chrome
+extension performs these short status checks automatically; it does not hold
+one background message open for the entire summary.
+
+For Groq Free, the backend uses a persistent SQLite token-reservation ledger,
+reconciles it with Groq's token-limit and Retry-After response headers, and
+spaces model calls to stay within the configured TPM budget. Whole-video
+summaries run in a durable worker and may take longer while the organization's
+token window resets. The Free Plan daily token/request caps remain provider
+limits and are reported separately when exhausted. See
+[Phase 13 overview and quota orchestration](docs/general_video_answer_quality.md).
+
 Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation has failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes return `404 video_not_indexed` until `POST /index` is requested.
 
 ## Browser-assisted caption ingestion
@@ -153,6 +178,21 @@ Useful endpoints:
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/ready`
 - `http://127.0.0.1:8000/docs`
+
+### Phase 13 whole-video acceptance on Groq Free
+
+The quota-aware overview path is covered by a durable job endpoint. After the
+backend and extension are updated, run the checked-in acceptance script from
+the repository root:
+
+```powershell
+.\scripts\phase13_free_plan_overview_acceptance.ps1
+```
+
+It submits the seven-point whole-video request, polls the durable job until
+completion, and then checks claim-audit status, full timeline coverage,
+verified point count, and actual end-cap representation. It does not weaken
+the answer-quality gates if the job cannot complete.
 
 ### Chrome extension
 

@@ -792,3 +792,114 @@ def test_chat_rejects_too_many_history_messages(client, monkeypatch):
 
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
+
+
+@pytest.mark.api
+def test_full_video_overview_is_accepted_as_a_durable_chat_job(
+    client,
+    monkeypatch,
+):
+    import Backend.app as app_module
+    from types import SimpleNamespace
+
+    accepted = SimpleNamespace(
+        job_id="a" * 32,
+        video_id=VALID_VIDEO_ID,
+        status="queued",
+    )
+
+    class FakeChatJobStore:
+        def enqueue(self, *, video_id, question, conversation_history):
+            assert video_id == VALID_VIDEO_ID
+            assert "entire video" in question.lower()
+            assert conversation_history == []
+            return accepted
+
+    dispatched = []
+    monkeypatch.setattr(
+        app_module,
+        "requires_async_chat_job",
+        lambda _question, _history=None: True,
+    )
+    monkeypatch.setattr(app_module, "_CHAT_JOB_STORE", FakeChatJobStore())
+    monkeypatch.setattr(app_module, "_dispatch_chat_job", dispatched.append)
+
+    response = client.post(
+        "/chat",
+        json={
+            "video_id": VALID_VIDEO_ID,
+            "question": "Summarize the entire video chronologically.",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "job_id": "a" * 32,
+        "video_id": VALID_VIDEO_ID,
+        "status": "queued",
+        "poll_url": f"/chat/jobs/{'a' * 32}",
+    }
+    assert dispatched == ["a" * 32]
+
+
+@pytest.mark.api
+def test_chat_job_status_returns_persisted_result(client, monkeypatch):
+    import Backend.app as app_module
+    from types import SimpleNamespace
+
+    result_payload = {
+        "answer": "1. Beginning.\\n2. Ending.",
+        "video_id": VALID_VIDEO_ID,
+        "sources": [],
+        "retrieved_chunks": 2,
+        "source_segments": 2,
+        "model": "test-model",
+        "retrieval_method": "video_wide_overview",
+        "retrieval_config": {},
+        "observability": {},
+    }
+    monkeypatch.setattr(
+        app_module,
+        "_CHAT_JOB_STORE",
+        SimpleNamespace(
+            recover_expired=lambda: 0,
+            get=lambda _job_id: SimpleNamespace(
+                job_id="b" * 32,
+                video_id=VALID_VIDEO_ID,
+                status="completed",
+                result=result_payload,
+                error_code=None,
+                error_message=None,
+                retry_after_seconds=None,
+            )
+        ),
+    )
+
+    response = client.get(f"/chat/jobs/{'b' * 32}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["result"]["answer"] == result_payload["answer"]
+
+
+@pytest.mark.api
+def test_chat_job_status_returns_404_for_unknown_job(client, monkeypatch):
+    import Backend.app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "_CHAT_JOB_STORE",
+        type(
+            "EmptyStore",
+            (),
+            {
+                "recover_expired": lambda self: 0,
+                "get": lambda self, _job_id: None,
+            },
+        )(),
+    )
+
+    response = client.get(f"/chat/jobs/{'c' * 32}")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "chat_job_not_found"

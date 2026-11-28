@@ -3880,6 +3880,63 @@ def test_answer_question_uses_index_lifecycle(monkeypatch):
     assert captured_clients["generation"] is groq_generation_client
     assert groq_factory_kwargs == {"max_retries": 0}
 
+
+@pytest.mark.regression
+def test_answer_question_propagates_overview_provider_rate_limit_without_rag_fallback(
+    monkeypatch,
+):
+    vector_store = object()
+    generation_client = object()
+    fallback_calls = []
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: vector_store)
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(
+        chain,
+        "create_groq_client",
+        lambda **_kwargs: generation_client,
+    )
+
+    class FakeRagChain:
+        def invoke(self, _inputs):
+            fallback_calls.append("invoked")
+            raise AssertionError(
+                "Provider rate limits must not trigger a second RAG generation path."
+            )
+
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: FakeRagChain(),
+    )
+    monkeypatch.setattr(chain, "_build_overview_continuation_plan", lambda *_args: None)
+    monkeypatch.setattr(chain, "_build_answer_revision_plan", lambda *_args: None)
+    monkeypatch.setattr(
+        chain,
+        "resolve_conversational_query_plan",
+        lambda *, question, **_kwargs: (question, []),
+    )
+    monkeypatch.setattr(chain, "_is_explicit_overview_request", lambda _question: True)
+    monkeypatch.setattr(chain, "is_overview_question", lambda _question: True)
+    monkeypatch.setattr(chain, "get_all_documents", lambda _vector_store: [doc(
+        1, 0, 30, "A transcript passage."
+    )])
+
+    def rate_limited_overview(**_kwargs):
+        raise chain.ProviderRateLimitError(retry_after_seconds=11)
+
+    monkeypatch.setattr(chain, "summarize_video_overview", rate_limited_overview)
+
+    with pytest.raises(chain.ProviderRateLimitError, match="Retry after about 11 seconds"):
+        chain.answer_question(
+            video_reference="Gfr50f6ZBvo",
+            question="Summarize this entire video chronologically.",
+        )
+
+    assert fallback_calls == []
+
 @pytest.mark.regression
 def test_answer_question_formats_clickable_sources_from_anchors_only(monkeypatch):
     expanded_documents = [
@@ -13063,3 +13120,698 @@ def test_q02_context_truncation_uses_existing_relevance_scorer_when_claim_rows_d
     assert len(truncated) <= max_chars
     assert any(line in scored_lines for line in rows[:3])
     assert "Force India team claim" in truncated
+
+@pytest.mark.regression
+def test_answer_question_verifies_overview_against_all_map_cited_sources(monkeypatch):
+    reducer_document = doc(1, 0, 15, "The reducer's selected source.")
+    map_document_one = reducer_document
+    map_document_two = doc(2, 300, 315, "A map-cited source for a later claim.")
+    map_document_three = doc(3, 600, 615, "Another map-cited source.")
+    overview_result = {
+        "answer": "1. A claim about a later event.",
+        "retrieved_results": [(reducer_document, 0.0)],
+        "verification_results": [
+            (map_document_one, 0.0),
+            (map_document_two, 0.0),
+            (map_document_three, 0.0),
+        ],
+        "prompt_visible_context": (
+            reducer_document.page_content + "\n"
+            + map_document_two.page_content + "\n"
+            + map_document_three.page_content
+        ),
+        "source_groups": chain.merge_overlapping_results([(reducer_document, 0.0)]),
+        "verification_claims": [
+            {"text": "A claim about a later event.", "evidence_chunk_ids": ["1"]},
+        ],
+        "retrieval_trace": {
+            "route": "video_wide_overview",
+            "final_stage": "video_wide_map_reduce",
+            "final_chunk_ids": ["1"],
+            "citation_chunk_ids": ["1"],
+            "overview": {
+                "requested_point_count": 3,
+                "timeline_coverage": {
+                    "bucket_count": 3,
+                    "start_seconds": 0.0,
+                    "end_seconds": 615.0,
+                    "covered_buckets": [1],
+                    "missing_buckets": [2, 3],
+                    "coverage_fraction": 1 / 3,
+                },
+            },
+        },
+        "generation_trace": {
+            "generated": True,
+            "fallback_used": False,
+            "overview_summary": {
+                "requested_point_count": 3,
+                "timeline_coverage": {
+                    "bucket_count": 3,
+                    "start_seconds": 0.0,
+                    "end_seconds": 615.0,
+                    "covered_buckets": [1],
+                    "missing_buckets": [2, 3],
+                    "coverage_fraction": 1 / 3,
+                },
+            },
+            "context_budget": {
+                "included_chunk_ids": ["1"],
+                "verification_chunk_ids": ["1", "2", "3"],
+            },
+        },
+    }
+    observed = {}
+
+    monkeypatch.setattr(chain, "extract_video_id", lambda _reference: "Gfr50f6ZBvo")
+    monkeypatch.setattr(chain, "load_ready_index", lambda _video_id: object())
+    monkeypatch.setattr(chain, "create_llm_client", lambda: object())
+    monkeypatch.setattr(chain, "LLM_PROVIDER", "huggingface")
+    monkeypatch.setattr(chain, "EMBEDDING_MODEL", "test-embedding-model")
+    monkeypatch.setattr(chain, "RAG_INDEX_NAMESPACE", "test-namespace")
+    monkeypatch.setattr(chain, "RAG_CITATION_INCLUDE_CONTEXT_NEIGHBORS", False)
+    monkeypatch.setattr(chain, "_build_overview_continuation_plan", lambda *_args: None)
+    monkeypatch.setattr(chain, "_build_answer_revision_plan", lambda *_args: None)
+    monkeypatch.setattr(
+        chain,
+        "resolve_conversational_query_plan",
+        lambda *, question, **_kwargs: (question, []),
+    )
+    monkeypatch.setattr(chain, "_is_explicit_overview_request", lambda _question: True)
+    monkeypatch.setattr(chain, "is_overview_question", lambda _question: True)
+    monkeypatch.setattr(chain, "get_all_documents", lambda _vector_store: [])
+    monkeypatch.setattr(
+        chain,
+        "build_rag_chain",
+        lambda **_kwargs: SimpleNamespace(invoke=lambda _inputs: pytest.fail(
+            "The explicit overview route should not invoke standard RAG."
+        )),
+    )
+    monkeypatch.setattr(
+        chain,
+        "summarize_video_overview",
+        lambda **_kwargs: overview_result,
+    )
+
+    def fake_verification(**kwargs):
+        observed["chunk_ids"] = [
+            str(pair[0].metadata["chunk_id"])
+            for pair in kwargs["retrieved_results"]
+        ]
+        observed["included_chunk_ids"] = list(kwargs["included_chunk_ids"])
+        observed["structured_claims"] = list(kwargs["structured_claims"])
+        return {
+            "answer": "1. A claim about a later event.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": 1,
+            "truncated_claim_count": 0,
+            "supported_claim_count": 1,
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": ["2"],
+            "claim_evidence": [{
+                "claim_index": 1,
+                "status": "supported",
+                "supporting_chunk_ids": ["2"],
+            }],
+            "error_code": None,
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+
+    result = chain.answer_question(
+        video_reference="Gfr50f6ZBvo",
+        question="Summarize this entire video chronologically.",
+    )
+
+    assert observed["chunk_ids"] == ["1", "2", "3"]
+    assert observed["included_chunk_ids"] == ["1", "2", "3"]
+    assert observed["structured_claims"] == [
+        {"text": "A claim about a later event.", "evidence_chunk_ids": ["1"]}
+    ]
+    assert result["observability"]["retrieval"]["overview"]["verified_point_count"] == 1
+    assert result["observability"]["generation"]["answer_evidence_verification"]["supported_claim_count"] == 1
+    assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["covered_buckets"] == [2]
+    assert result["observability"]["retrieval"]["overview"]["verified_timeline_coverage"]["missing_buckets"] == [1, 3]
+    assert result["observability"]["retrieval"]["final_chunk_ids"] == ["2"]
+    assert [source["chunk_ids"] for source in result["sources"]] == [[2]]
+    assert "verification_results" not in result
+    assert "verification_chunk_ids" not in result["observability"]["generation"]["context_budget"]
+
+
+@pytest.mark.regression
+def test_overview_verifies_primary_points_before_spending_calls_on_reserves(monkeypatch):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        return {
+            "answer": "Verified primary answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for claim in claims
+                for chunk_id in claim["evidence_chunk_ids"]
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": claim["evidence_chunk_ids"],
+                }
+                for index, claim in enumerate(claims, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 12.0,
+            "assessment_input_chars_total": 100,
+            "assessment_input_tokens": 50,
+            "assessment_output_tokens": 20,
+            "assessment_output_chars": 80,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First primary point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Second primary point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Reserve alternative.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+    )
+
+    assert len(calls) == 1
+    assert [item["text"] for item in calls[0]["structured_claims"]] == [
+        "First primary point.",
+        "Second primary point.",
+    ]
+    assert result["overview_verification"]["reserve_verification_attempted"] is False
+    assert result["overview_verification"]["reserve_verification_reason"] == (
+        "all_primary_claims_supported"
+    )
+    assert result["candidate_claim_count"] == 3
+
+
+@pytest.mark.regression
+def test_overview_verifies_reserve_candidates_only_when_primary_claim_is_not_supported(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        statuses = ["supported", "missing"] if len(calls) == 1 else ["supported"]
+        evidence = [
+            {
+                "claim_index": index,
+                "status": status,
+                "supporting_chunk_ids": (
+                    claim["evidence_chunk_ids"] if status == "supported" else []
+                ),
+            }
+            for index, (claim, status) in enumerate(zip(claims, statuses), start=1)
+        ]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": statuses.count("supported"),
+            "partial_claim_count": statuses.count("partial"),
+            "removed_claim_count": len(claims) - statuses.count("supported") - statuses.count("partial"),
+            "supported_chunk_ids": [
+                chunk_id for item in evidence for chunk_id in item["supporting_chunk_ids"]
+            ],
+            "claim_evidence": evidence,
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 10.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "3"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First primary point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Unsupported primary point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Reserve replacement.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="video-1",
+        retrieved_results=[],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+    )
+
+    assert len(calls) == 2
+    assert len(calls[0]["structured_claims"]) == 2
+    assert len(calls[1]["structured_claims"]) == 1
+    assert result["claim_count"] == 3
+    assert [item["claim_index"] for item in result["claim_evidence"]] == [1, 2, 3]
+    assert [item["status"] for item in result["claim_evidence"]] == [
+        "supported",
+        "missing",
+        "supported",
+    ]
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["assessment_request_count"] == 2
+
+
+@pytest.mark.regression
+def test_overview_audit_provider_failure_is_not_returned_as_verified_success():
+    retrieval_trace = {"route": "video_wide_overview"}
+    verification = {
+        "performed": True,
+        "status": "provider_error",
+        "error_code": "provider_rate_limited",
+        "retry_after_seconds": 17.0,
+    }
+
+    with pytest.raises(
+        chain.ProviderRateLimitError,
+        match="Retry after about 17 seconds",
+    ):
+        chain._require_completed_overview_audit(retrieval_trace, verification)
+
+
+@pytest.mark.regression
+def test_non_overview_claim_audit_keeps_existing_provider_error_behavior():
+    verification = {
+        "performed": True,
+        "status": "provider_error",
+        "error_code": "provider_rate_limited",
+    }
+
+    chain._require_completed_overview_audit(
+        {"route": "question_aware"},
+        verification,
+    )
+
+
+@pytest.mark.regression
+def test_groq_generation_honors_request_wide_retry_budget(monkeypatch):
+    monkeypatch.setattr(chain, "GROQ_MAX_RETRIES", 2)
+    monkeypatch.setattr(chain, "GROQ_RETRY_DELAY_SECONDS", 1.0)
+    error = RuntimeError("429 rate limit")
+    error.status_code = 429
+    error.response = SimpleNamespace(headers={"retry-after": "20"})
+    fake, completions = client(error=error)
+    prompt = chain.RAG_PROMPT.invoke({"context": "X", "question": "Q"})
+    sleeps = []
+    monkeypatch.setattr(chain.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    token = chain.begin_groq_retry_budget(max_wait_seconds=5.0)
+    try:
+        with pytest.raises(
+            chain.ProviderRateLimitError,
+            match="rate limit was reached",
+        ) as captured:
+            chain.generate_with_groq(fake, prompt)
+        assert captured.value.retry_after_seconds == 20.0
+        assert completions.call_count == 1
+        assert sleeps == []
+    finally:
+        chain.end_groq_retry_budget(token)
+
+
+@pytest.mark.regression
+def test_overview_audits_reserve_when_supported_primary_points_miss_end_cap(monkeypatch):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        if len(calls) == 1:
+            source_ids = [["1"], ["2"]]
+        else:
+            source_ids = [["76"]]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in source_ids for chunk_id in values
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": values,
+                }
+                for index, values in enumerate(source_ids, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "76"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    documents = [
+        doc("1", 0.0, 10.0, "Opening transcript passage."),
+        doc("2", 4000.0, 4010.0, "Middle transcript passage."),
+        doc("76", 5238.0, 5287.0, "Final transcript passage."),
+    ]
+    claims = [
+        {"text": "Opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Middle point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "Final exchange about interview spontaneity.", "evidence_chunk_ids": ["76"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video.",
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
+        included_chunk_ids=["1", "2", "76"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        required_end_cap_chunk_ids=["76"],
+        timeline_start=4.0,
+        timeline_end=5287.0,
+        timeline_bucket_count=2,
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_point_count_satisfied"] is True
+    assert result["overview_verification"]["primary_selected_point_count"] == 2
+    assert result["overview_verification"]["primary_selection_complete"] is True
+    assert result["overview_verification"]["primary_end_cap_covered"] is False
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["claim_evidence"][-1]["supporting_chunk_ids"] == ["76"]
+
+
+@pytest.mark.regression
+def test_overview_reserves_are_verified_when_supported_end_cap_candidate_is_not_selected(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        source_ids = (
+            [claim["evidence_chunk_ids"] for claim in claims]
+            if len(calls) == 1
+            else [["76"] for _claim in claims]
+        )
+        evidence = [
+            {
+                "claim_index": index,
+                "status": "supported",
+                "supporting_chunk_ids": values,
+            }
+            for index, values in enumerate(source_ids, start=1)
+        ]
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in source_ids for chunk_id in values
+            ],
+            "claim_evidence": evidence,
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "76"],
+            "assessment_batches": [],
+        }
+
+    def fake_primary_selection(*_args, **_kwargs):
+        # The third primary candidate is supported by chunk 76, but the
+        # selector would not include it in the final two-point answer.
+        return [
+            {
+                "claim_index": 1,
+                "text": "Opening point.",
+                "status": "supported",
+                "supporting_chunk_ids": ["1"],
+                "is_backup": False,
+            },
+            {
+                "claim_index": 2,
+                "text": "Middle point.",
+                "status": "supported",
+                "supporting_chunk_ids": ["2"],
+                "is_backup": False,
+            },
+        ]
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    monkeypatch.setattr(
+        chain,
+        "select_verified_overview_points",
+        fake_primary_selection,
+    )
+    documents = [
+        doc("1", 0.0, 10.0, "Opening transcript passage."),
+        doc("2", 2500.0, 2510.0, "Middle transcript passage."),
+        doc("75", 5174.0, 5220.0, "Earlier closing passage."),
+        doc("76", 5238.0, 5287.0, "Final transcript passage."),
+    ]
+    claims = [
+        {"text": "Opening point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Middle point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {
+            "text": "A supported but unselected final candidate.",
+            "evidence_chunk_ids": ["76"],
+            "is_backup": False,
+        },
+        {
+            "text": "Reserved final exchange.",
+            "evidence_chunk_ids": ["76"],
+            "is_backup": True,
+        },
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video in 2 points.",
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
+        included_chunk_ids=["1", "2", "75", "76"],
+        prompt_visible_context="Visible transcript context.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        required_end_cap_chunk_ids=["76"],
+        timeline_start=0.0,
+        timeline_end=5287.0,
+        timeline_bucket_count=2,
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_selected_point_count"] == 2
+    assert result["overview_verification"]["primary_selection_complete"] is True
+    assert result["overview_verification"]["primary_end_cap_covered"] is False
+    assert result["overview_verification"]["primary_selected_end_cap_chunk_ids"] == []
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert result["overview_verification"]["reserve_verification_reason"] == (
+        "primary_end_cap_not_covered"
+    )
+    assert result["claim_evidence"][-1]["supporting_chunk_ids"] == ["76"]
+
+
+@pytest.mark.regression
+def test_generated_end_cap_finding_is_rejected_without_verified_end_cap_coverage():
+    with pytest.raises(RuntimeError, match="substantive end-cap finding was generated"):
+        chain._require_verified_overview_end_cap(
+            {"status": "completed", "finding_count": 1},
+            {"end_cap_eligible": True, "end_cap_covered": False},
+        )
+
+
+@pytest.mark.regression
+def test_verified_end_cap_finding_passes_acceptance_guard():
+    chain._require_verified_overview_end_cap(
+        {"status": "completed", "finding_count": 1},
+        {"end_cap_eligible": True, "end_cap_covered": True},
+    )
+
+
+@pytest.mark.regression
+def test_unavailable_end_cap_scan_returns_rate_limit_with_retry_after():
+    with pytest.raises(
+        chain.ProviderRateLimitError,
+        match="Retry after about 23 seconds",
+    ) as captured:
+        chain._require_verified_overview_end_cap(
+            {
+                "status": "skipped_terminal_scan_unavailable",
+                "finding_count": 0,
+            },
+            {
+                "end_cap_eligible": True,
+                "end_cap_covered": False,
+            },
+            terminal_scan={
+                "status": "unavailable",
+                "retry_after_seconds": 23.0,
+            },
+        )
+    assert captured.value.retry_after_seconds == 23.0
+
+
+@pytest.mark.regression
+def test_unavailable_end_cap_scan_without_retry_after_fails_closed():
+    with pytest.raises(RuntimeError, match="final transcript passages could not be inspected"):
+        chain._require_verified_overview_end_cap(
+            {"status": "unavailable", "finding_count": 0},
+            {"end_cap_eligible": True, "end_cap_covered": False},
+        )
+
+
+@pytest.mark.regression
+def test_completed_end_cap_scan_with_no_distinct_closing_finding_is_valid():
+    chain._require_verified_overview_end_cap(
+        {"status": "completed", "finding_count": 0},
+        {"end_cap_eligible": True, "end_cap_covered": False},
+    )
+
+
+@pytest.mark.regression
+def test_overview_verifies_reserves_when_supported_primary_points_share_one_timeline_bucket(
+    monkeypatch,
+):
+    calls = []
+    documents = [
+        doc("1", 0.0, 10.0, "Opening event."),
+        doc("2", 20.0, 30.0, "Another early event."),
+        doc("3", 80.0, 90.0, "Final interval event."),
+    ]
+
+    def fake_verification(**kwargs):
+        calls.append(kwargs)
+        claims = kwargs["structured_claims"]
+        evidence_ids = (
+            [["1"], ["2"]]
+            if len(calls) == 1
+            else [["3"]]
+        )
+        return {
+            "answer": "Verified stage answer.",
+            "performed": True,
+            "status": "completed",
+            "claim_count": len(claims),
+            "truncated_claim_count": 0,
+            "supported_claim_count": len(claims),
+            "partial_claim_count": 0,
+            "removed_claim_count": 0,
+            "supported_chunk_ids": [
+                chunk_id for values in evidence_ids for chunk_id in values
+            ],
+            "claim_evidence": [
+                {
+                    "claim_index": index,
+                    "status": "supported",
+                    "supporting_chunk_ids": source_ids,
+                }
+                for index, source_ids in enumerate(evidence_ids, start=1)
+            ],
+            "error_code": None,
+            "assessment_batch_count": 1,
+            "assessment_request_count": 1,
+            "assessment_elapsed_ms": 8.0,
+            "assessment_input_chars_total": 90,
+            "assessment_input_tokens": 40,
+            "assessment_output_tokens": 15,
+            "assessment_output_chars": 60,
+            "assessment_compaction_attempts": 1,
+            "assessment_selected_chunk_ids": ["1", "2", "3"],
+            "assessment_batches": [],
+        }
+
+    monkeypatch.setattr(chain, "verify_answer_claims", fake_verification)
+    claims = [
+        {"text": "First early point.", "evidence_chunk_ids": ["1"], "is_backup": False},
+        {"text": "Second early point.", "evidence_chunk_ids": ["2"], "is_backup": False},
+        {"text": "A distinct development in the final timeline interval.", "evidence_chunk_ids": ["3"], "is_backup": True},
+    ]
+
+    result = chain._verify_video_overview_claims(
+        answer="Draft answer.",
+        question="Summarize the entire video in 2 points.",
+        video_id="Gfr50f6ZBvo",
+        retrieved_results=[(item, 0.0) for item in documents],
+        included_chunk_ids=["1", "2", "3"],
+        prompt_visible_context="Opening event. Another early event. Final interval event.",
+        client=object(),
+        fallback_answer=chain.FALLBACK_ANSWER,
+        structured_claims=claims,
+        requested_point_count=2,
+        timeline_start=0.0,
+        timeline_end=100.0,
+        timeline_bucket_count=2,
+    )
+
+    assert len(calls) == 2
+    assert result["overview_verification"]["primary_selected_point_count"] == 1
+    assert result["overview_verification"]["primary_selection_complete"] is False
+    assert result["overview_verification"]["reserve_verification_attempted"] is True
+    assert [item["status"] for item in result["claim_evidence"]] == [
+        "supported",
+        "supported",
+        "supported",
+    ]

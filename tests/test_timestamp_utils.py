@@ -216,3 +216,21 @@ def test_unverified_timestamp_sanitizer_removes_mixed_point_and_range_claims():
     assert strip_unverified_timestamp_claims(answer) == (
         "A grounded answer. The event occurs, and the discussion continues."
     )
+
+
+
+def test_timestamp_sanitizer_preserves_semicolon_in_sampling_disclaimer():
+    answer = (
+        "The transcript is long, so this overview samples sections across "
+        "the full timeline; some fine details may be omitted."
+    )
+
+    assert strip_unverified_timestamp_claims(answer) == answer
+
+
+def test_timestamp_sanitizer_removes_timecode_glued_to_closing_quote():
+    answer = "She ends by choosing the word “peace”00:52."
+
+    assert strip_unverified_timestamp_claims(answer) == (
+        "She ends by choosing the word “peace”."
+    )

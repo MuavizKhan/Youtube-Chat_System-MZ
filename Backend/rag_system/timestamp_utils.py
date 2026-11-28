@@ -43,7 +43,7 @@ _TIMESTAMP_LOCATION_CUE_WORD_PATTERN = re.compile(
     r"\b(?:timestamp(?:s)?|timecode|time\s*stamp|mark)\b",
     re.IGNORECASE,
 )
-_TIMESTAMP_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?؟؛;])\s+")
+_TIMESTAMP_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?؟])\s+")
 _TIMESTAMP_STRIP_EDGE_CHARS = " \t,;:—–-()[]{}•*"
 
 
@@ -138,10 +138,18 @@ def _has_single_point_location_cue(fragment: str, match: re.Match[str]) -> bool:
     """Detect a single timestamp used as a location rather than a duration."""
     prefix = fragment[:match.start()]
     bare_value = fragment.strip(" \t-*•()[]{}")
+    # Some overview completions glue a timecode directly to the closing
+    # quotation mark of a sentence (for example, '"peace"00:52'). Treat that
+    # as an untrusted inline timestamp rather than leaving it in the prose.
+    quote_glued_timecode = (
+        match.start() > 0
+        and fragment[match.start() - 1] in "\"'”’»)]}"
+    )
     return bool(
         _TIMESTAMP_LOCATION_CUE_SUFFIX_PATTERN.search(prefix)
         or _TIMESTAMP_LOCATION_CUE_WORD_PATTERN.search(fragment)
         or bare_value == match.group(0)
+        or quote_glued_timecode
     )
 
 
