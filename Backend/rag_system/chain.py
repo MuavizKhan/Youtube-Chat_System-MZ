@@ -12204,14 +12204,16 @@ def _verify_video_overview_claims(
     else:
         reserve_reason = "all_primary_claims_supported"
     primary_result["overview_verification"]["reserve_verification_reason"] = reserve_reason
-    if not reserve_claims or primary_all_supported:
+    if primary_all_supported:
         primary_result["overview_verification"].update({
             "reserve_verification_attempted": False,
-            "reserve_verification_reason": (
-                "all_primary_claims_supported"
-                if primary_all_supported
-                else "no_reserve_candidates"
-            ),
+            "reserve_verification_reason": "all_primary_claims_supported",
+        })
+        return primary_result
+    if not reserve_claims:
+        primary_result["overview_verification"].update({
+            "reserve_verification_attempted": False,
+            "reserve_verification_reason": f"{reserve_reason}_no_reserve_candidates",
         })
         return primary_result
 
@@ -12224,7 +12226,10 @@ def _verify_video_overview_claims(
         "primary_claim_count": len(primary_claims),
         "reserve_claim_count": len(reserve_claims),
         "reserve_verification_attempted": True,
-        "reserve_verification_reason": "one_or_more_primary_claims_not_fully_supported",
+        "reserve_verification_reason": reserve_reason,
+        "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_end_cap_covered": primary_end_cap_covered,
+        "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
     }
     reserve_result["candidate_claim_count"] = len(claims)
 
@@ -12338,7 +12343,10 @@ def _verify_video_overview_claims(
     )
     primary_result["overview_verification"].update({
         "reserve_verification_attempted": True,
-        "reserve_verification_reason": "one_or_more_primary_claims_not_fully_supported",
+        "reserve_verification_reason": reserve_reason,
+        "primary_point_count_satisfied": primary_point_count_satisfied,
+        "primary_end_cap_covered": primary_end_cap_covered,
+        "required_end_cap_chunk_ids": sorted(required_end_cap_ids),
         "primary_request_count": primary_request_count,
         "reserve_request_count": reserve_request_count,
         "primary_elapsed_ms": round(primary_elapsed_ms, 2),
