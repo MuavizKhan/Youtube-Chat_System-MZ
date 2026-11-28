@@ -197,6 +197,11 @@ CHAT_JOB_LEASE_SECONDS = _get_int(
     7200,
 )
 
+CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS = _get_int(
+    "CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS",
+    3600,
+)
+
 INDEX_JOB_WORKERS = _get_int(
     "INDEX_JOB_WORKERS",
     2,
@@ -653,6 +658,9 @@ if GROQ_OVERVIEW_MAX_COMPLETION_TOKENS <= 0:
 
 if CHAT_JOB_LEASE_SECONDS < 60:
     raise RuntimeError("CHAT_JOB_LEASE_SECONDS must be at least 60.")
+
+if CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS < 60:
+    raise RuntimeError("CHAT_JOB_MAX_PROVIDER_WAIT_SECONDS must be at least 60.")
 
 if GROQ_MAX_TOKENS <= 0:
 
