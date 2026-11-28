@@ -816,7 +816,11 @@ def test_full_video_overview_is_accepted_as_a_durable_chat_job(
             return accepted
 
     dispatched = []
-    monkeypatch.setattr(app_module, "requires_async_chat_job", lambda _question: True)
+    monkeypatch.setattr(
+        app_module,
+        "requires_async_chat_job",
+        lambda _question, _history=None: True,
+    )
     monkeypatch.setattr(app_module, "_CHAT_JOB_STORE", FakeChatJobStore())
     monkeypatch.setattr(app_module, "_dispatch_chat_job", dispatched.append)
 
