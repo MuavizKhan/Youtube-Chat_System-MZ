@@ -862,6 +862,7 @@ def test_claim_audit_exposes_sanitized_assessment_response_diagnostics(monkeypat
         finish_reason="length",
         output_chars=3600,
         validation_error_code="invalid_json",
+        retry_after_seconds=17.0,
     )
 
     def fake_assessment(*args, **kwargs):
@@ -885,6 +886,7 @@ def test_claim_audit_exposes_sanitized_assessment_response_diagnostics(monkeypat
     assert result["assessment_output_chars"] == 3600
     assert result["assessment_output_tokens"] == 900
     assert result["assessment_elapsed_ms"] == 18432.5
+    assert result["retry_after_seconds"] == 17.0
     assert result["answer"] == "The speaker describes an event. The event had three stages."
 
 
