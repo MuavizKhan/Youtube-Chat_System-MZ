@@ -166,6 +166,10 @@ class GroqTokenPacer:
         ):
             return
         reset_seconds = parse_provider_duration(reset_value)
+        if reset_seconds is None:
+            # A 429 response may omit the token-reset header while still
+            # providing the authoritative Retry-After duration.
+            reset_seconds = parse_provider_duration(values.get("retry-after"))
         now = self.clock()
         reset_at = now + reset_seconds if reset_seconds is not None else None
         with self._connect() as connection:
