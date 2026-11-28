@@ -264,4 +264,9 @@ The job store and token ledger use SQLite in the local data directory. Keep
 these files on persistent local storage, and share the quota-ledger path across
 backend processes using the same Groq organization. Pacing can increase latency
 when the organization's quota is exhausted; it cannot create additional
-provider quota or bypass Groq's daily limits.
+provider quota or bypass Groq's daily limits. The published GPT-OSS 20B Free
+Plan also has a 200,000-token daily limit and a 1,000-request daily limit.
+The TPM pacer does not reserve daily quota; when Groq reports that the daily
+token quota is exhausted, the job is marked with the distinct
+`ai_provider_daily_quota_exhausted` status so the UI does not mistake it for
+a transient per-minute throttle.
