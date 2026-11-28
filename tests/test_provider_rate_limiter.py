@@ -42,8 +42,10 @@ def test_sqlite_pacer_reserves_tokens_and_waits_for_rolling_window(tmp_path):
         sleeper=sleep,
     )
 
-    pacer.acquire("test-model", 60)
-    pacer.acquire("test-model", 30)
+    first_reservation = pacer.acquire("test-model", 60)
+    second_reservation = pacer.acquire("test-model", 30)
+    pacer.settle_reservation(first_reservation)
+    pacer.settle_reservation(second_reservation)
 
     before = pacer.snapshot("test-model")
     assert before["local_window_reservation_count"] == 2
@@ -177,3 +179,43 @@ def test_pacer_uses_rolling_sixty_second_fallback_without_reset_headers(tmp_path
 
     assert now[0] >= 2060.0
     assert pacer.snapshot("test-model")["local_window_reserved_tokens"] == 20
+
+
+
+def test_header_snapshot_does_not_discard_an_in_flight_reservation(tmp_path):
+    now = [3000.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    pacer = GroqTokenPacer(
+        tmp_path / "quota.sqlite3",
+        default_tpm=100,
+        safety_factor=1.0,
+        clock=lambda: now[0],
+        sleeper=sleep,
+    )
+
+    in_flight = pacer.acquire("test-model", 60)
+    now[0] += 0.1
+    completed_request = pacer.acquire("test-model", 20)
+    now[0] += 0.1
+
+    # The second request's response reports 80 tokens remaining. The first
+    # reservation is still in flight and is not represented by this snapshot.
+    pacer.record_headers(
+        "test-model",
+        {
+            "x-ratelimit-limit-tokens": "100",
+            "x-ratelimit-remaining-tokens": "80",
+            "x-ratelimit-reset-tokens": "60s",
+        },
+    )
+    pacer.settle_reservation(completed_request)
+
+    # A new 30-token request must not consume the 60 tokens reserved by the
+    # first in-flight request merely because it started before observed_at.
+    next_reservation = pacer.acquire("test-model", 30)
+    assert now[0] >= 3060.0
+    pacer.settle_reservation(next_reservation)
+    pacer.settle_reservation(in_flight)
