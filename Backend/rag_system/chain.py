@@ -27,6 +27,7 @@ import time
 import argparse
 import hashlib
 import logging
+from functools import wraps
 import math
 import re
 import unicodedata
@@ -137,6 +138,11 @@ from .overview_summarization import (
 from .claim_verification import verify_answer_claims
 
 from .index_service import load_ready_index
+from .provider_retry_budget import (
+    begin_groq_retry_budget,
+    end_groq_retry_budget,
+    reserve_groq_retry_wait,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -174,6 +180,7 @@ class ProviderRateLimitError(RuntimeError):
 # single Retry-After interval (including 30 seconds) is honored, but a second
 # long wait is returned to the caller instead of stranding chat for another minute.
 MAX_GROQ_RETRY_WAIT_SECONDS = 30.0
+MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS = 60.0
 
 
 # ============================================================
@@ -8751,6 +8758,15 @@ def generate_with_groq(
                         ) from error
 
                     if is_rate_limit:
+                        if not reserve_groq_retry_wait(retry_delay):
+                            logger.warning(
+                                "Groq request-wide retry wait budget exhausted; "
+                                "returning a rate-limit response retry_after_seconds=%s",
+                                retry_after,
+                            )
+                            raise ProviderRateLimitError(
+                                retry_after_seconds=retry_after or retry_delay
+                            ) from error
                         total_retry_wait_seconds += retry_delay
 
                     logger.warning(
@@ -12385,6 +12401,24 @@ def _require_completed_overview_audit(
 # 11. PUBLIC RAG FUNCTION
 # ============================================================
 
+def _with_request_scoped_groq_retry_budget(function):
+    """Bound cumulative Groq retry waits across every stage of one chat request."""
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        if LLM_PROVIDER != "groq":
+            return function(*args, **kwargs)
+        budget_token = begin_groq_retry_budget(
+            max_wait_seconds=MAX_GROQ_REQUEST_RETRY_WAIT_SECONDS
+        )
+        try:
+            return function(*args, **kwargs)
+        finally:
+            end_groq_retry_budget(budget_token)
+
+    return wrapped
+
+
+@_with_request_scoped_groq_retry_budget
 def answer_question(
     video_reference: str,
     question: str,
