@@ -116,10 +116,12 @@ extension performs these short status checks automatically; it does not hold
 one background message open for the entire summary.
 
 For Groq Free, the backend uses a persistent SQLite token-reservation ledger,
-reconciles it with Groq's token-limit response headers, and spaces model calls
-to stay within the configured TPM budget. Whole-video summaries run in a
-durable worker and may take longer while the organization's token window resets.
-See [Phase 13 overview and quota orchestration](docs/general_video_answer_quality.md).
+reconciles it with Groq's token-limit and Retry-After response headers, and
+spaces model calls to stay within the configured TPM budget. Whole-video
+summaries run in a durable worker and may take longer while the organization's
+token window resets. The Free Plan daily token/request caps remain provider
+limits and are reported separately when exhausted. See
+[Phase 13 overview and quota orchestration](docs/general_video_answer_quality.md).
 
 Chat requires the index to be ready. If preparation is queued or running, the API returns `409 index_not_ready`; if preparation has failed, it returns `503 index_preparation_failed`; missing/invalid/stale indexes return `404 video_not_indexed` until `POST /index` is requested.
 
