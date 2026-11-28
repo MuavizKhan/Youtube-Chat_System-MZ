@@ -22,6 +22,9 @@ importScripts("config.js");
 const BACKEND_URL =
     `${BACKEND_BASE_URL}/chat`;
 
+const CHAT_JOB_STATUS_URL =
+    `${BACKEND_BASE_URL}/chat/jobs`;
+
 const INDEX_URL =
     `${BACKEND_BASE_URL}/index`;
 
@@ -37,11 +40,11 @@ const FEEDBACK_URL =
 const REQUEST_TIMEOUT_MS =
     15000;
 
-// A whole-video overview can make multiple sequential Groq calls and may
-// need to wait through TPM retry windows. A 90-second abort left the synchronous
-// backend running after the UI had already offered the user another retry.
+// Whole-video summaries run as durable backend jobs and can wait through
+// multiple Free-plan token windows. Keep the message open while the content
+// script polls the persisted job state; the job itself survives this timeout.
 const CHAT_REQUEST_TIMEOUT_MS =
-    240000;
+    1800000;
 
 const CONTENT_SCRIPT_MARKER =
     "data-youtube-ai-chat-content-version";
@@ -1353,10 +1356,67 @@ async function handleChatRequest(
         // Parse response
         // ----------------------------------------------------
 
-        const data =
+        let data =
             await parseResponse(
                 response
             );
+
+        // ----------------------------------------------------
+        // Whole-video summary job polling
+        // ----------------------------------------------------
+
+        if (response.status === 202 && data?.job_id) {
+            const jobId = normalizeString(data.job_id);
+            if (!jobId) {
+                throw new Error("The backend accepted a video-summary job without an ID.");
+            }
+
+            const pollUrl = `${CHAT_JOB_STATUS_URL}/${encodeURIComponent(jobId)}`;
+            const pollDeadline = Date.now() + CHAT_REQUEST_TIMEOUT_MS;
+            let pollDelayMs = 4000;
+
+            while (Date.now() < pollDeadline) {
+                await new Promise((resolve) => setTimeout(resolve, pollDelayMs));
+
+                const statusResponse = await fetch(pollUrl, {
+                    method: "GET",
+                    headers: { "Accept": "application/json" },
+                    signal: controller.signal
+                });
+                const statusData = await parseResponse(statusResponse);
+
+                if (!statusResponse.ok) {
+                    throw new Error(
+                        extractBackendError(statusData) ||
+                        `Video-summary status returned HTTP ${statusResponse.status}.`
+                    );
+                }
+
+                if (statusData?.status === "completed") {
+                    data = statusData.result;
+                    break;
+                }
+
+                if (statusData?.status === "failed") {
+                    throw new Error(
+                        statusData.error_message ||
+                        "The whole-video summary job could not be completed."
+                    );
+                }
+
+                if (!["queued", "running"].includes(statusData?.status)) {
+                    throw new Error("The backend returned an unknown video-summary job state.");
+                }
+
+                pollDelayMs = Math.min(10000, Math.ceil(pollDelayMs * 1.35));
+            }
+
+            if (Date.now() >= pollDeadline) {
+                throw new Error(
+                    "The video-summary job is still running. Reopen the chat and submit the same summary request to resume it."
+                );
+            }
+        }
 
         // ----------------------------------------------------
         // HTTP error
